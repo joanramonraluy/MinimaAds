@@ -16,6 +16,34 @@ Never start a task before all previous tasks are marked **Done**.
 
 ---
 
+## Git Workflow
+
+**Commits**: one commit per task, after logs are clean and the task is closed. Message format:
+```
+T[n] — [short description]
+
+[one line of context if needed]
+```
+
+**Tags**: created at the end of each milestone block, after all tasks in the block are verified on a real Minima node:
+
+| Tag | Tasks | Milestone |
+|---|---|---|
+| `v0.1.0` | T1–T7 | Service Worker functional: DB, Core, Maxima handlers |
+| `v0.2.0` | T8–T9 | SDK functional |
+| `v0.3.0` | T10–T11 | Full MiniDapp UI — deployable |
+| `v1.0.0` | — | First stable public release |
+
+Tag command (run by maintainer after milestone verification):
+```bash
+git tag v0.x.0 -m "[milestone description]"
+git push origin v0.x.0
+```
+
+Tags are created by the **maintainer**, not the agent. The agent's job is to note in the handoff when a milestone tag is due.
+
+---
+
 ## Task List
 
 ### T1 — DB Schema

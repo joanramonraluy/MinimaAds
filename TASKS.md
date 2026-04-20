@@ -18,7 +18,7 @@ Never start a task before all previous tasks are marked **Done**.
 
 ## Git Workflow
 
-**Commits**: one commit per task, after logs are clean and the task is closed. Message format:
+**Commits**: one commit per task, made by the **maintainer** after logs are clean and the task is closed. The agent does NOT commit or push — it only writes files. Message format:
 ```
 T[n] — [short description]
 

@@ -124,6 +124,7 @@ You MUST NOT do any of the following, under any circumstances:
 - ❌ Allow a creator to earn rewards from their own campaigns
 
 ### Process
+- ❌ Run `git commit`, `git push`, or any git command — commits are made by the maintainer only, after node verification
 - ❌ Run `npm run build`, `npm run minima:*`, or any release command
 - ❌ Invent new system flows not defined in MinimaAds.md §6
 - ❌ Modify files unrelated to the current task

@@ -25,7 +25,7 @@
 | **`AGENTS.md`** | Engineering guide — H2 quirks, Rhino constraints, Maxima patterns, DB schema, protocol matrix, fragility points | Writing any code; resolving platform doubts |
 | **`CLAUDE.md`** | Operational guide for Claude agents — task workflow, forbidden actions, lookup table | Agent sessions; before writing a single line |
 | **`PROJECT_INDEX.md`** | This file — navigation, folder map, entry points, pending tasks, playbooks | Project orientation; planning next steps |
-| **`PrimerPrompt.md`** | First prompt for a new implementation agent session | Starting a new implementation session |
+| **`PromptBase.md`** | First prompt for a new implementation agent session | Starting a new implementation session |
 | **`TASKS.md`** | Ordered implementation task list (T1–T11) with definitions of done | Picking the next task to implement |
 | **`refs/`** | Reference material — Minima source code and official docs | Resolving doubts about platform behaviour |
 
@@ -106,7 +106,7 @@ All pre-implementation tasks are complete. Implementation task list is in **`TAS
 
 | # | Task | Status |
 |---|---|---|
-| 1 | Write `PrimerPrompt.md` | ✅ Done |
+| 1 | Write `PromptBase.md` | ✅ Done |
 | 2 | Create folder/file skeleton | ✅ Done |
 | 3 | Break implementation into ordered tasks (`TASKS.md`) | ✅ Done |
 | 4 | Read `minimask-main` SW | ✅ Done — Chrome extension, not applicable |

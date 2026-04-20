@@ -2,7 +2,7 @@
 
 > Ordered task list for agent sessions.
 > Tasks must be implemented in sequence — each task depends on the previous one.
-> One task per agent session. Fill in PrimerPrompt.md §6 with the task before sending.
+> One task per agent session. Fill in PromptBase.md §6 with the task before sending.
 
 ---
 

@@ -84,30 +84,9 @@ Entry points: `public/service-workers/main.js` (SW) · `dapp/app.js` (FE) · `sd
 
 ## 6) Current Task
 
-**Task**: T1 — DB Schema. Implement `initDB()` in `public/service-workers/db-init.js`. This function creates all H2 tables on first run and is called from the SW `inited` event. It must also call `signalFE("DB_READY", {})` at the end.
+Read `TASKS.md` and find the task indicated by the maintainer. That task entry is your complete specification: files to modify, relevant spec sections, constraints, and definition of done.
 
-**Files to modify**:
-- [ ] `public/service-workers/db-init.js`
-
-**Relevant spec sections**:
-- MinimaAds.md §3.5 — table schemas (CAMPAIGNS, ADS, REWARD_EVENTS, USER_PROFILE, DEDUP_LOG)
-- AGENTS.md §3 — H2 rules (MERGE INTO, UPPERCASE columns, escapeSql, ADD COLUMN IF NOT EXISTS)
-- AGENTS.md §5 — SW→FE signals (`signalFE` / `MDS.comms.solo`)
-- AGENTS.md §12 fragility #10 — schema must work standalone (SW initializes DB independently)
-
-**Known constraints or risks**:
-- `sqlQuery()` and `signalFE()` are defined in `core/minima.js` — they will exist at runtime (loaded before `db-init.js`) but are NOT in this file. Do not redefine them, just call them.
-- All SQL must be H2-compatible: `CREATE TABLE IF NOT EXISTS`, `VARCHAR`, `BOOLEAN` — no PostgreSQL syntax.
-- No `let`, `const`, arrow functions, or template literals — Rhino SW runtime.
-- Column names in CREATE TABLE must be UPPERCASE to match how H2 returns them on SELECT.
-
-**Definition of done**:
-- [ ] `initDB()` function exported (accessible by `main.js` via `load()`)
-- [ ] All 5 tables created: `CAMPAIGNS`, `ADS`, `REWARD_EVENTS`, `USER_PROFILE`, `DEDUP_LOG`
-- [ ] Column names and types match MinimaAds.md §3.5 exactly
-- [ ] Each `CREATE TABLE` call goes through `sqlQuery()`, not bare `MDS.sql`
-- [ ] `signalFE("DB_READY", {})` called after all tables are created
-- [ ] No Rhino-incompatible syntax
+Do not start implementing until you have read the full task entry in `TASKS.md`.
 
 ---
 

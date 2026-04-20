@@ -113,6 +113,8 @@ Entry points: `public/service-workers/main.js` (SW) · `dapp/app.js` (FE) · `sd
 
 ## 7) When You Are Done
 
+Before closing the session, review `TASKS.md` and assess whether anything discovered during this task affects future tasks. If yes, note it explicitly in the handoff — the maintainer will decide whether to update `TASKS.md`.
+
 End every session with this handoff note (required):
 
 ```
@@ -122,4 +124,5 @@ AGENTS.md updated: yes | no | N/A — [reason if N/A]
 Sections updated: [e.g. §8 DB Schema, §9 Protocol Matrix]
 Verification: [exact command or check the maintainer should run]
 Open issues: [anything discovered but out-of-scope → add to AGENTS.md §14]
+Impact on future tasks: [any discovered constraints that affect T[n+1]... → note here]
 ```

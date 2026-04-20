@@ -68,6 +68,8 @@ At the end of `initDB()` call `signalFE("DB_READY", {})`.
 - [ ] No `ON CONFLICT` clauses — H2 uses `MERGE INTO`
 - [ ] `signalFE("DB_READY", {})` called at end
 
+> **Note**: `DEDUP_LOG` added here (T1) after analysis. T5 `isDuplicate()` must query `DEDUP_LOG`. T6 `createRewardEvent()` must INSERT into `DEDUP_LOG` on each accepted event. See MinimaAds.md §3.5.
+
 ---
 
 ### T2 — Core: minima.js
@@ -211,14 +213,14 @@ Implement the SW bootstrap:
 
 Load order inside `inited` handler:
 ```
-load("core/minima.js");
-load("core/campaigns.js");
-load("core/selection.js");
-load("core/validation.js");
-load("core/rewards.js");
-load("public/service-workers/db-init.js");
-load("public/service-workers/handlers/maxima.handler.js");
-load("public/service-workers/handlers/campaign.handler.js");
+MDS.load("core/minima.js");
+MDS.load("core/campaigns.js");
+MDS.load("core/selection.js");
+MDS.load("core/validation.js");
+MDS.load("core/rewards.js");
+MDS.load("public/service-workers/db-init.js");
+MDS.load("public/service-workers/handlers/maxima.handler.js");
+MDS.load("public/service-workers/handlers/campaign.handler.js");
 initDB();
 ```
 
@@ -309,7 +311,7 @@ MinimaAds.trackClick(campaignId, userAddress, cb)
 
 ### T11 — Renderer + MiniDapp config
 **Layer**: UI  
-**Files**: `renderer/renderAd.js`, `public/index.html`, `public/dapp.conf`  
+**Files**: `renderer/renderAd.js`, `public/index.html`, `dapp.conf` (project root)  
 **Spec**: MinimaAds.md §12.3, §14  
 
 `renderAd.js`: Takes an ad object and a container element ID, injects HTML.  
@@ -327,7 +329,7 @@ MinimaAds.trackClick(campaignId, userAddress, cb)
 
 | Task | Layer | File(s) | Status |
 |---|---|---|---|
-| T1 | DB Schema | `public/service-workers/db-init.js` | Not started |
+| T1 | DB Schema | `public/service-workers/db-init.js` | Done |
 | T2 | Core | `core/minima.js` | Not started |
 | T3 | Core | `core/campaigns.js` | Not started |
 | T4 | Core | `core/selection.js` | Not started |

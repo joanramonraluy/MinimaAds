@@ -1,6 +1,3 @@
-// T7 stub — minimal bootstrap for T1 verification
-// Full implementation in T7.
-
 var APP_NAME = 'minima-ads';
 
 var LIMITS = {
@@ -13,8 +10,8 @@ var LIMITS = {
 
 MDS.init(function(msg) {
   if (msg.event === "inited") {
-    load("core/minima.js");
-    load("public/service-workers/db-init.js");
+    MDS.load("core/minima.js");
+    MDS.load("public/service-workers/db-init.js");
     initDB();
   }
 });

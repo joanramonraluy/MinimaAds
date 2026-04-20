@@ -777,6 +777,12 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 | `TOTAL_EARNED` | DECIMAL(20,6) DEFAULT 0 | cumulative rewards |
 | `LAST_REWARD_AT` | BIGINT DEFAULT NULL | unix ms; used for cooldown check |
 
+### DEDUP_LOG
+| Column | Type | Notes |
+|---|---|---|
+| `ID` | VARCHAR(256) PK | RewardEvent UUID — checked by `isDuplicate()` |
+| `LOGGED_AT` | BIGINT NOT NULL | unix ms — reserved for future pruning |
+
 **Schema parity rule**: Any new table or column must be added in **both** SW `db-init.js` and FE DB init in the same patch. Use `ADD COLUMN IF NOT EXISTS` for non-breaking migrations.
 
 ---
@@ -883,6 +889,8 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 19. **`MDS.keypair`** — persistent key-value store for MiniDapp config (survives restarts). Use it to store `ESCROW_ADDRESS` after the first `newscript` call, so the script doesn't need to be re-registered on every startup. API: `MDS.keypair.set(key, value, cb)` and `MDS.keypair.get(key, cb)`. Response: `res.response.value`.
 
 20. **Transaction shortcut commands**: `txninput scriptmmr:true` adds the MMR proof for the input coin at input time (avoids a separate `txnbasics` call). `txnpost id:... auto:true` adds MMR proofs and scripts automatically at post time. `txnsign id:... publickey:auto` signs with the matching key automatically — but for custom script coins (like the escrow), specify the wallet public key explicitly: `txnsign id:... publickey:<wallet_pubkey>`.
+
+22. **`service.js` must be at the zip root — the `"service"` field in `dapp.conf` is ignored by Minima**. Use `MDS.load("path/to/file.js")` to load other JS files from the SW — the global `load()` function is **not defined** in the Minima Rhino runtime and throws `ReferenceError` at startup. All TASKS.md references to `load(...)` must be read as `MDS.load(...)`. Verified on Minima 1.0.45. Minima automatically looks for a file named exactly `service.js` at the root of the extracted MiniDapp zip. Any other name or path causes the SW to silently not start — no error is logged, Minima simply does not execute it. `dapp.conf` must also be at the zip root. For MinimaAds, both `service.js` and `dapp.conf` live at the project root; the zip is built from the project root (not from `public/`). `load()` paths inside `service.js` are relative to the zip root (e.g. `load("core/minima.js")`, `load("public/service-workers/db-init.js")`). Verified on Minima 1.0.45.
 
 21. **Sanitize Maxima payloads before rendering (DOMPurify)**. Ad content (title, body, imageUrl) comes from third-party advertisers via Maxima. Before injecting any field into the DOM, run it through `DOMPurify.sanitize()`. The recommended pattern (from MinimaDEX) is to sanitize the entire JSON object at once: `var safe = JSON.parse(DOMPurify.sanitize(JSON.stringify(payload)))`. Apply this in `renderer/renderAd.js` (T11) and any place that renders campaign or ad data into HTML. `DOMPurify` must be included in `public/index.html` before `dapp/app.js`.
 

@@ -205,6 +205,11 @@ CREATE TABLE IF NOT EXISTS USER_PROFILE (
   TOTAL_EARNED   DECIMAL(20,6) NOT NULL DEFAULT 0,
   LAST_REWARD_AT BIGINT        DEFAULT NULL
 );
+
+CREATE TABLE IF NOT EXISTS DEDUP_LOG (
+  ID        VARCHAR(256) PRIMARY KEY,  -- RewardEvent UUID; used by isDuplicate()
+  LOGGED_AT BIGINT       NOT NULL      -- unix ms; reserved for future pruning
+);
 ```
 
 **H2 SQL rules** (mandatory — see AGENTS.md §3):
@@ -699,12 +704,13 @@ MDS.init(function(msg) {
 /renderer
   renderAd.js         # Renders one ad unit into a DOM container element
 
+dapp.conf             # Minima MiniDapp manifest — must be at zip root
+service.js            # SW entry point — must be named service.js at zip root
+
 /public
   index.html
-  dapp.conf           # Minima MiniDapp manifest
-  service.js          # Compiled SW entry (output — do not edit directly)
   /service-workers
-    main.js           # SW source: LIMITS, APP_NAME, MDS.init handler
+    main.js           # SW source (kept for reference — service.js is the actual entry)
     db-init.js        # H2 schema init — called from onInited()
     /handlers
       maxima.handler.js    # Routes inbound Maxima by payload.type

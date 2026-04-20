@@ -1,0 +1,1 @@
+Sonnet** és suficient per a T1–T6 (codi mecànic, seguir spec). **Opus** per a T7–T8 (SW handlers, lògica de routing Maxima) i T10–T11 (UI, més criteri). Però si vols anar sobre segur des del principi, Opus a totes.

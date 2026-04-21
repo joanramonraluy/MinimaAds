@@ -1,6 +1,6 @@
 # AGENTS.md — MinimaAds Engineering Guide
 
-Last reviewed against codebase: 2026-04-21 (Rev 6: T4 — selection.js implemented; open issue #2 added — AD_INTERESTS field gap between getCampaigns and selectAd)
+Last reviewed against codebase: 2026-04-21 (Rev 7: T5 — validation.js implemented)
 Scope: `/home/joanramon/Minima/MinimaAds`
 
 > **Origin note**: This file was bootstrapped from lessons learned building MetaChain (a Minima MiniDapp). Sections 1–5 are generic to any Minima MiniDapp. Sections 6+ are project-specific and must be filled in as the project evolves.

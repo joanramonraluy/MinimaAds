@@ -1,6 +1,6 @@
 # AGENTS.md — MinimaAds Engineering Guide
 
-Last reviewed against codebase: 2026-04-21 (Rev 7: T5 — validation.js implemented)
+Last reviewed against codebase: 2026-04-21 (Rev 8: T6 — rewards.js implemented)
 Scope: `/home/joanramon/Minima/MinimaAds`
 
 > **Origin note**: This file was bootstrapped from lessons learned building MetaChain (a Minima MiniDapp). Sections 1–5 are generic to any Minima MiniDapp. Sections 6+ are project-specific and must be filled in as the project evolves.
@@ -943,6 +943,7 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 | ~~1~~ | ~~`public/service-workers/main.js` (T7 stub)~~ | ~~Uses `load(...)` instead of `MDS.load(...)`. Fixed in T2 verification patch.~~ | ~~High~~ |
 | 2 | `core/selection.js` + `core/campaigns.js` | `selectAd()` filters by `c.AD_INTERESTS` (field from ADS table) but `getCampaigns()` queries only CAMPAIGNS — no JOIN with ADS. Interest-based matching always falls back to interest-agnostic selection. Must be resolved in T9 (`getAd` in SDK) by using a JOIN query or enriching the campaigns array with ADS fields before calling `selectAd`. | Medium |
 | 3 | Rhino cross-file closures | A closure defined in `service.js` and passed as `cb` to a function loaded via `MDS.load()` (e.g. `initDB(cb)`) silently fails to execute when called from inside a nested `MDS.sql` callback chain in the loaded file. No error is thrown — the closure is simply never called. Workaround: never pass closures from `service.js` into `MDS.load`-ed functions. Keep all callback logic self-contained within the file where it is defined. Verified on Minima 1.0.45, Rhino. | High |
+| 4 | `core/validation.js` + `core/campaigns.js` | `validateView/Click` calls `getCampaign(id, function(campaign) {...})` using a single-arg callback, but `campaigns.js` `getCampaign` uses err-first `cb(null, campaign)`. This means `campaign` always receives `null` (the err slot) and the actual campaign object is dropped. The `!campaign` guard fires on every call, making validation always return `campaign not found`. Must be fixed when T7/T8 wires these together — update `validateView/Click` to use `cb(err, campaign)` signature matching `getCampaign`. | High |
 
 ### Closed / Fixed
 | ID | Component | Description |

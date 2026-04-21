@@ -334,7 +334,7 @@ MinimaAds.trackClick(campaignId, userAddress, cb)
 | T3 | Core | `core/campaigns.js` | Done |
 | T4 | Core | `core/selection.js` | Done |
 | T5 | Core | `core/validation.js` | Done |
-| T6 | Core | `core/rewards.js` | Not started |
+| T6 | Core | `core/rewards.js` | Done |
 | T7 | SW | `public/service-workers/main.js` | Not started |
 | T8 | SW | `public/service-workers/handlers/*.js` | Not started |
 | T9 | SDK | `sdk/index.js` | Not started |

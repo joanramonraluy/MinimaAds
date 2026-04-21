@@ -314,7 +314,23 @@ if (row.IS_ACTIVE) { ... }
 if (row.IS_ACTIVE === true || row.IS_ACTIVE === 1 || row.IS_ACTIVE === "true" || row.IS_ACTIVE === "1") { ... }
 ```
 
-### 3.4 Schema Migrations — Both Runtimes
+### 3.4 NULL Columns Are Omitted from Row Objects
+
+**Verified on real H2/MDS node (2026-04-21).** When a column contains NULL, H2/MDS omits the field entirely from the returned row object — it is `undefined`, not `null`.
+
+```javascript
+// EXPIRES_AT BIGINT DEFAULT NULL — inserted as NULL
+var row = result.rows[0];
+row.EXPIRES_AT          // → undefined  (field absent)
+row.EXPIRES_AT === null // → false  ← WRONG assumption
+
+// ✅ Correct guard:
+var expiresAt = (row.EXPIRES_AT !== null && row.EXPIRES_AT !== undefined) ? row.EXPIRES_AT : "NULL";
+```
+
+This affects any column with `DEFAULT NULL` (EXPIRES_AT, INTERESTS, LAST_REWARD_AT, PUBLISHER_ID).
+
+### 3.5 Schema Migrations — Both Runtimes
 Both SW and FE initialize the DB schema independently. Any schema change must be mirrored in both:
 - SW: `public/service-workers/db-init.js` (or equivalent)
 - FE: `src/services/database.service.ts` (or equivalent)
@@ -858,7 +874,9 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 
 6. **H2 BOOLEAN columns return strings `"true"`/`"false"`, not JS booleans**. Always check all four variants: `value === true || value === 1 || value === "true" || value === "1"`. See section 3.3.
 
-7. **`MERGE INTO ... KEY(...)` for upserts, not PostgreSQL `ON CONFLICT`**. H2 throws `JdbcSQLSyntaxErrorException` on PostgreSQL syntax. See section 3.2.
+7. **H2 NULL columns are omitted from row objects entirely — they are `undefined`, not `null`**. Verified on real node (2026-04-21). Affects: EXPIRES_AT, INTERESTS, LAST_REWARD_AT, PUBLISHER_ID. Guard with `!== null && !== undefined`. See section 3.4.
+
+8. **`MERGE INTO ... KEY(...)` for upserts, not PostgreSQL `ON CONFLICT`**. H2 throws `JdbcSQLSyntaxErrorException` on PostgreSQL syntax. See section 3.2.
 
 8. **`MDS.cmd("timer X", cb)` fires immediately in Rhino**. Use `MDS_TIMER_10SECONDS` + `Date.now()` timestamps for real elapsed-time logic. See section 5.3.
 

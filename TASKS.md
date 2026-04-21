@@ -18,7 +18,7 @@ Never start a task before all previous tasks are marked **Done**.
 
 ## Git Workflow
 
-**Commits**: one commit per task, made by the **maintainer** after logs are clean and the task is closed. The agent does NOT commit or push — it only writes files. Message format:
+**Commits**: one commit per task, after logs are clean and the task is closed. The agent commits and pushes **when the maintainer explicitly requests it**. Message format:
 ```
 T[n] — [short description]
 
@@ -331,8 +331,8 @@ MinimaAds.trackClick(campaignId, userAddress, cb)
 |---|---|---|---|
 | T1 | DB Schema | `public/service-workers/db-init.js` | Done |
 | T2 | Core | `core/minima.js` | Done |
-| T3 | Core | `core/campaigns.js` | Not started |
-| T4 | Core | `core/selection.js` | Not started |
+| T3 | Core | `core/campaigns.js` | Done |
+| T4 | Core | `core/selection.js` | Done |
 | T5 | Core | `core/validation.js` | Not started |
 | T6 | Core | `core/rewards.js` | Not started |
 | T7 | SW | `public/service-workers/main.js` | Not started |

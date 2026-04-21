@@ -1,6 +1,6 @@
 # AGENTS.md — MinimaAds Engineering Guide
 
-Last reviewed against codebase: 2026-04-21 (Rev 5: T2 — fragility #23 added — APP_NAME global dependency in broadcastMaxima; fragility #24 added — signalFE spreads data at root level, T1 stub nesting fixed)
+Last reviewed against codebase: 2026-04-21 (Rev 6: T4 — selection.js implemented; open issue #2 added — AD_INTERESTS field gap between getCampaigns and selectAd)
 Scope: `/home/joanramon/Minima/MinimaAds`
 
 > **Origin note**: This file was bootstrapped from lessons learned building MetaChain (a Minima MiniDapp). Sections 1–5 are generic to any Minima MiniDapp. Sections 6+ are project-specific and must be filled in as the project evolves.
@@ -941,6 +941,8 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 | # | Component | Description | Severity |
 |---|---|---|---|
 | ~~1~~ | ~~`public/service-workers/main.js` (T7 stub)~~ | ~~Uses `load(...)` instead of `MDS.load(...)`. Fixed in T2 verification patch.~~ | ~~High~~ |
+| 2 | `core/selection.js` + `core/campaigns.js` | `selectAd()` filters by `c.AD_INTERESTS` (field from ADS table) but `getCampaigns()` queries only CAMPAIGNS — no JOIN with ADS. Interest-based matching always falls back to interest-agnostic selection. Must be resolved in T9 (`getAd` in SDK) by using a JOIN query or enriching the campaigns array with ADS fields before calling `selectAd`. | Medium |
+| 3 | Rhino cross-file closures | A closure defined in `service.js` and passed as `cb` to a function loaded via `MDS.load()` (e.g. `initDB(cb)`) silently fails to execute when called from inside a nested `MDS.sql` callback chain in the loaded file. No error is thrown — the closure is simply never called. Workaround: never pass closures from `service.js` into `MDS.load`-ed functions. Keep all callback logic self-contained within the file where it is defined. Verified on Minima 1.0.45, Rhino. | High |
 
 ### Closed / Fixed
 | ID | Component | Description |

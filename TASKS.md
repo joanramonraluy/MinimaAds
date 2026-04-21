@@ -245,10 +245,10 @@ initDB();
   - `"CAMPAIGN_FINISH"` → `onCampaignFinish(payload)`
 - Unknown type → `MDS.log("[MAXIMA] unknown type: " + payload.type)`
 
-`campaign.handler.js` — implement the three handlers:
-- `onCampaignAnnounce(payload)`: calls `saveCampaign(payload.campaign, payload.ad, cb)`, signals FE
-- `onCampaignPause(payload)`: calls `setCampaignStatus(id, 'paused', cb)`, signals FE
-- `onCampaignFinish(payload)`: calls `setCampaignStatus(id, 'finished', cb)`, signals FE
+`campaign.handler.js` — implement the three handlers (names per MinimaAds.md §11.3):
+- `handleCampaignAnnounce(payload)`: calls `saveCampaign(payload.campaign, payload.ad, cb)`, signals FE
+- `handleCampaignPause(payload)`: calls `setCampaignStatus(id, 'paused', cb)`, signals FE
+- `handleCampaignFinish(payload)`: calls `setCampaignStatus(id, 'finished', cb)`, signals FE
 
 Payload schemas: MinimaAds.md §8.1–§8.3
 
@@ -336,7 +336,7 @@ MinimaAds.trackClick(campaignId, userAddress, cb)
 | T5 | Core | `core/validation.js` | Done |
 | T6 | Core | `core/rewards.js` | Done |
 | T7 | SW | `public/service-workers/main.js` | Done |
-| T8 | SW | `public/service-workers/handlers/*.js` | Not started |
+| T8 | SW | `public/service-workers/handlers/*.js` | Done |
 | T9 | SDK | `sdk/index.js` | Not started |
 | T10 | UI | `dapp/app.js`, `dapp/views/*.js` | Not started |
 | T11 | UI | `renderer/renderAd.js`, `public/index.html`, `public/dapp.conf` | Not started |

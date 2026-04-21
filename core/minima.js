@@ -4,10 +4,11 @@
 // broadcastMaxima depends on APP_NAME defined in main.js (SW global scope).
 
 function hexToUtf8(s) {
-  return decodeURIComponent(
-    s.replace(/\s+/g, '')
-     .replace(/[0-9A-F]{2}/gi, '%$&')
-  );
+  var hex = s.replace(/\s+/g, '');
+  if (hex.length >= 2 && hex.charAt(0) === '0' && (hex.charAt(1) === 'x' || hex.charAt(1) === 'X')) {
+    hex = hex.substring(2);
+  }
+  return decodeURIComponent(hex.replace(/[0-9A-F]{2}/gi, '%$&'));
 }
 
 function utf8ToHex(str) {

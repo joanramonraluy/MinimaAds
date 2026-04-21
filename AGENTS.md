@@ -1,6 +1,6 @@
 # AGENTS.md — MinimaAds Engineering Guide
 
-Last reviewed against codebase: 2026-04-21 (Rev 9: T7 — SW bootstrap wired)
+Last reviewed against codebase: 2026-04-21 (Rev 10: T8 — SW Maxima + campaign handlers)
 Scope: `/home/joanramon/Minima/MinimaAds`
 
 > **Origin note**: This file was bootstrapped from lessons learned building MetaChain (a Minima MiniDapp). Sections 1–5 are generic to any Minima MiniDapp. Sections 6+ are project-specific and must be filled in as the project evolves.
@@ -588,12 +588,15 @@ MinimaAds is a **decentralized advertising infrastructure** running on the Minim
 These implementations are required in `public/service-workers/main.js` (SW context). Do NOT use browser APIs (`TextEncoder`, `crypto.randomUUID`) — they are unavailable in Rhino.
 
 ```javascript
-// Hex → UTF-8 string (Rhino-compatible)
+// Hex → UTF-8 string (Rhino-compatible).
+// Strips an optional leading "0x"/"0X" prefix — Maxima msg.data.data
+// arrives with the prefix and JSON.parse would fail at char 1 otherwise.
 function hexToUtf8(s) {
-  return decodeURIComponent(
-    s.replace(/\s+/g, '')
-     .replace(/[0-9A-F]{2}/gi, '%$&')
-  );
+  var hex = s.replace(/\s+/g, '');
+  if (hex.length >= 2 && hex.charAt(0) === '0' && (hex.charAt(1) === 'x' || hex.charAt(1) === 'X')) {
+    hex = hex.substring(2);
+  }
+  return decodeURIComponent(hex.replace(/[0-9A-F]{2}/gi, '%$&'));
 }
 
 // UTF-8 string → hex (pure JS, no TextEncoder)
@@ -946,6 +949,8 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 | 4 | `core/validation.js` + `core/campaigns.js` | `validateView/Click` calls `getCampaign(id, function(campaign) {...})` using a single-arg callback, but `campaigns.js` `getCampaign` uses err-first `cb(null, campaign)`. This means `campaign` always receives `null` (the err slot) and the actual campaign object is dropped. The `!campaign` guard fires on every call, making validation always return `campaign not found`. Must be fixed when T7/T8 wires these together — update `validateView/Click` to use `cb(err, campaign)` signature matching `getCampaign`. | High |
 | 5 | TASKS.md T7 description | Lists `MDS_PENDING` → `onPending(msg)` as the third SW event, but MinimaAds.md §11.1/§11.2 and AGENTS.md §7.2 specify `MDS_TIMER_10SECONDS` → `onTimer()`. `MDS_PENDING` is an FE-only event (user-approved on-chain tx confirmation — fragility #18). T7 was implemented per MinimaAds.md (TIMER). TASKS.md should be corrected to match the spec. | Low |
 | 6 | TASKS.md T7 description | Lists `onMaxima(msg)` but MinimaAds.md §11.1 shows `onMaxima(msg.data)`. T8's handler spec accesses `msg.data.data`, which matches passing the full `msg`. T7 was implemented as `onMaxima(msg)` to align with T8. MinimaAds.md §11.1 snippet is inconsistent with its own §11.3 handler flow; consider clarifying. | Low |
+| 7 | TASKS.md T8 description (resolved during T8 implementation) | TASKS.md T8 listed handler names as `onCampaignAnnounce/Pause/Finish`; MinimaAds.md §11.3 uses `handleCampaignAnnounce/Pause/Finish`. Resolved: implemented per MinimaAds.md (source of truth wins), TASKS.md T8 updated to match. Convention moving forward: `on*` = MDS event entry points; `handle*` = Maxima sub-handlers dispatched inside `onMaxima`. | Resolved |
+| 8 | `core/minima.js` `hexToUtf8` (resolved during T8 verification) | The canonical `hexToUtf8` did not strip the `0x`/`0X` prefix. Maxima delivers `msg.data.data` with the prefix (e.g. `"0x7B..."`), so the decoded string started with literal `0x{…}`. `JSON.parse` parsed `0` as a valid number and then threw `SyntaxError: Expected end of stream at char 1`. Fixed: `hexToUtf8` now strips an optional `0x`/`0X` prefix before hex-to-UTF8 conversion. AGENTS.md §6 canonical snippet updated to match. Confirmed via two-node Maxima send test (21-Apr-2026). | Resolved |
 
 ### Closed / Fixed
 | ID | Component | Description |

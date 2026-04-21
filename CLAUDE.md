@@ -25,7 +25,7 @@ Read the sections relevant to the task. Do not skip this step.
 | **AGENTS.md** | MDS API usage, H2 syntax rules, Rhino constraints, SW↔FE patterns, pre-merge checklist | Derives from MinimaAds.md |
 | **CLAUDE.md** | Your operational guide as an agent | Derives from both |
 
-**If any conflict exists → MinimaAds.md is correct. Do not override it.**
+**If any conflict exists between documents → do NOT resolve it unilaterally. Stop, report the conflict explicitly in the handoff note, and wait for maintainer instruction. Either document could be correct — only the maintainer can decide.**
 
 ---
 

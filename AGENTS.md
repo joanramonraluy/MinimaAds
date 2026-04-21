@@ -1,6 +1,6 @@
 # AGENTS.md — MinimaAds Engineering Guide
 
-Last reviewed against codebase: 2026-04-19 (Rev 4: fragility #21 added — DOMPurify sanitization of Maxima payloads before DOM render; MinimaDEX reviewed and ruled out as reference — different architecture)
+Last reviewed against codebase: 2026-04-21 (Rev 5: T2 — fragility #23 added — APP_NAME global dependency in broadcastMaxima; fragility #24 added — signalFE spreads data at root level, T1 stub nesting fixed)
 Scope: `/home/joanramon/Minima/MinimaAds`
 
 > **Origin note**: This file was bootstrapped from lessons learned building MetaChain (a Minima MiniDapp). Sections 1–5 are generic to any Minima MiniDapp. Sections 6+ are project-specific and must be filled in as the project evolves.
@@ -894,6 +894,10 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 
 21. **Sanitize Maxima payloads before rendering (DOMPurify)**. Ad content (title, body, imageUrl) comes from third-party advertisers via Maxima. Before injecting any field into the DOM, run it through `DOMPurify.sanitize()`. The recommended pattern (from MinimaDEX) is to sanitize the entire JSON object at once: `var safe = JSON.parse(DOMPurify.sanitize(JSON.stringify(payload)))`. Apply this in `renderer/renderAd.js` (T11) and any place that renders campaign or ad data into HTML. `DOMPurify` must be included in `public/index.html` before `dapp/app.js`.
 
+23. **`broadcastMaxima` in `core/minima.js` depends on `APP_NAME` being a global**. The function references `APP_NAME` directly (no import). In the SW, `APP_NAME` is defined at the top of `main.js` before `MDS.load("core/minima.js")` — so it is in scope. In the FE, any module that calls `broadcastMaxima` must ensure `APP_NAME` is defined in the same or outer scope before calling it. Do not refactor `broadcastMaxima` to accept `appName` as a parameter without updating MinimaAds.md §7.5.
+
+24. **`signalFE` spreads `data` fields at root level of the payload object** — NOT nested under a `data` key. The FE MDSCOMMS handler must read fields directly from `parsed.*`, not from `parsed.data.*`. Example: `signalFE("REWARD_CONFIRMED", { event_id: "x", amount: 0.1 })` → `{ type: "REWARD_CONFIRMED", event_id: "x", amount: 0.1 }`. The T1 stub incorrectly nested data — this was fixed in T2.
+
 ---
 
 ## 13) Pre-merge Checklist
@@ -918,7 +922,7 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 
 | # | Component | Description | Severity |
 |---|---|---|---|
-| — | — | *None yet* | — |
+| ~~1~~ | ~~`public/service-workers/main.js` (T7 stub)~~ | ~~Uses `load(...)` instead of `MDS.load(...)`. Fixed in T2 verification patch.~~ | ~~High~~ |
 
 ### Closed / Fixed
 | ID | Component | Description |

@@ -330,7 +330,7 @@ MinimaAds.trackClick(campaignId, userAddress, cb)
 | Task | Layer | File(s) | Status |
 |---|---|---|---|
 | T1 | DB Schema | `public/service-workers/db-init.js` | Done |
-| T2 | Core | `core/minima.js` | Not started |
+| T2 | Core | `core/minima.js` | Done |
 | T3 | Core | `core/campaigns.js` | Not started |
 | T4 | Core | `core/selection.js` | Not started |
 | T5 | Core | `core/validation.js` | Not started |

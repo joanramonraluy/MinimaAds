@@ -533,6 +533,7 @@ Reward processing (view and click events) is handled entirely within the FE runt
 
 | Signal type | Payload | Fired by | Trigger |
 |---|---|---|---|
+| `DB_READY` | `{}` | `db-init.js` (SW) | All tables created — FE may begin DB access |
 | `REWARD_CONFIRMED` | `{ event_id, amount, type }` | `core/rewards.js` (FE) | Successful reward persisted in callback chain |
 | `CAMPAIGN_UPDATED` | `{ campaign_id, status, budget_remaining }` | `campaign.handler.js` (SW) | Budget changed or status changed via Maxima |
 | `NEW_CAMPAIGN` | `{ campaign_id }` | `campaign.handler.js` (SW) | CAMPAIGN_ANNOUNCE received and persisted |

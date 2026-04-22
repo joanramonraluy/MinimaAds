@@ -832,6 +832,7 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 
 | Signal Type | Payload | Fired By | FE Reaction |
 |---|---|---|---|
+| `DB_READY` | `{}` | `db-init.js` (SW) | Unlock FE routing — only render DB-backed views once seen |
 | `REWARD_CONFIRMED` | `{ event_id, amount, type }` | `core/rewards.js` (FE) | Update reward display, balance indicator |
 | `CAMPAIGN_UPDATED` | `{ campaign_id, status, budget_remaining }` | `campaign.handler.js` (SW) | Refresh campaign card status |
 | `NEW_CAMPAIGN` | `{ campaign_id }` | `campaign.handler.js` (SW) | Reload available campaigns list |

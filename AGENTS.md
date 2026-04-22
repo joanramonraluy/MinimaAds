@@ -753,7 +753,7 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 | Column | Type | Notes |
 |---|---|---|
 | `ID` | VARCHAR(256) PK | UUID |
-| `CREATOR_ADDRESS` | VARCHAR(256) NOT NULL | Maxima public key (0x...) — NOT wallet PK |
+| `CREATOR_ADDRESS` | VARCHAR(512) NOT NULL | Maxima public key (0x...) — RSA DER hex, ~326 chars — NOT wallet PK |
 | `TITLE` | VARCHAR(512) NOT NULL | |
 | `BUDGET_TOTAL` | DECIMAL(20,6) NOT NULL | |
 | `BUDGET_REMAINING` | DECIMAL(20,6) NOT NULL | Decremented on each reward |
@@ -782,7 +782,7 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 | `ID` | VARCHAR(256) PK | UUID — used for dedup via `isDuplicate()` |
 | `CAMPAIGN_ID` | VARCHAR(256) NOT NULL | |
 | `AD_ID` | VARCHAR(256) NOT NULL | |
-| `USER_ADDRESS` | VARCHAR(256) NOT NULL | |
+| `USER_ADDRESS` | VARCHAR(512) NOT NULL | Maxima public key — same RSA DER hex format, ~326 chars |
 | `TYPE` | VARCHAR(16) NOT NULL | `view\|click` |
 | `AMOUNT` | DECIMAL(20,6) NOT NULL | |
 | `TIMESTAMP` | BIGINT NOT NULL | unix ms |
@@ -791,7 +791,7 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 ### USER_PROFILE
 | Column | Type | Notes |
 |---|---|---|
-| `ADDRESS` | VARCHAR(256) PK | Maxima public key (0x...) |
+| `ADDRESS` | VARCHAR(512) PK | Maxima public key (0x...) — RSA DER hex, ~326 chars |
 | `INTERESTS` | VARCHAR(1024) DEFAULT NULL | comma-separated tags |
 | `TOTAL_EARNED` | DECIMAL(20,6) DEFAULT 0 | cumulative rewards |
 | `LAST_REWARD_AT` | BIGINT DEFAULT NULL | unix ms; used for cooldown check |
@@ -952,6 +952,10 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 | 6 | TASKS.md T7 description | Lists `onMaxima(msg)` but MinimaAds.md §11.1 shows `onMaxima(msg.data)`. T8's handler spec accesses `msg.data.data`, which matches passing the full `msg`. T7 was implemented as `onMaxima(msg)` to align with T8. MinimaAds.md §11.1 snippet is inconsistent with its own §11.3 handler flow; consider clarifying. | Low |
 | 7 | TASKS.md T8 description (resolved during T8 implementation) | TASKS.md T8 listed handler names as `onCampaignAnnounce/Pause/Finish`; MinimaAds.md §11.3 uses `handleCampaignAnnounce/Pause/Finish`. Resolved: implemented per MinimaAds.md (source of truth wins), TASKS.md T8 updated to match. Convention moving forward: `on*` = MDS event entry points; `handle*` = Maxima sub-handlers dispatched inside `onMaxima`. | Resolved |
 | 8 | `core/minima.js` `hexToUtf8` (resolved during T8 verification) | The canonical `hexToUtf8` did not strip the `0x`/`0X` prefix. Maxima delivers `msg.data.data` with the prefix (e.g. `"0x7B..."`), so the decoded string started with literal `0x{…}`. `JSON.parse` parsed `0` as a valid number and then threw `SyntaxError: Expected end of stream at char 1`. Fixed: `hexToUtf8` now strips an optional `0x`/`0X` prefix before hex-to-UTF8 conversion. AGENTS.md §6 canonical snippet updated to match. Confirmed via two-node Maxima send test (21-Apr-2026). | Resolved |
+
+### Dev Workflow Rule — No schema migrations during development
+
+During development, **never add `ALTER TABLE` migration statements** to `db-init.js`. The DB is reset with each MiniDapp reinstall. If a column type or size is wrong, fix the `CREATE TABLE` statement and reinstall — that is all that is needed. Migrations are a post-MVP concern for production upgrades.
 
 ### Closed / Fixed
 | ID | Component | Description |

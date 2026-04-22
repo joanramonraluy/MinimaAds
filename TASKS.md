@@ -339,4 +339,4 @@ MinimaAds.trackClick(campaignId, userAddress, cb)
 | T8 | SW | `public/service-workers/handlers/*.js` | Done |
 | T9 | SDK | `sdk/index.js` | Done |
 | T10 | UI | `dapp/app.js`, `dapp/views/*.js` | Done |
-| T11 | UI | `renderer/renderAd.js`, `public/index.html`, `public/dapp.conf` | Not started |
+| T11 | UI | `renderer/renderAd.js`, `public/index.html`, `public/dapp.conf` | Done |

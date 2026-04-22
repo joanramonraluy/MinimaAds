@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MinimaAds</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <style>
+    body { max-width: 960px; margin: 0 auto; padding: 0 1rem; }
+    nav ul { list-style: none; display: flex; gap: 1.5rem; padding: 0; }
+    nav a { text-decoration: none; }
+    nav a[aria-current] { font-weight: bold; border-bottom: 2px solid currentColor; }
+    .ma-ad-banner { background: var(--pico-card-background-color, #fff); border: 1px solid var(--pico-muted-border-color, #ddd); border-radius: 0.5rem; width: 100%; }
+    #app { min-height: 12rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <nav>
+      <strong>MinimaAds</strong>
+      <ul>
+        <li><a href="#viewer">View Ads</a></li>
+        <li><a href="#creator">Create</a></li>
+        <li><a href="#stats">Stats</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main>
+    <div id="app"><p aria-busy="true">Loading…</p></div>
+  </main>
+
+  <!-- Minima platform bridge — must be first -->
+  <script type="text/javascript" src="mds.js"></script>
+
+  <!-- XSS sanitizer — before renderAd.js -->
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+
+  <!-- Chart.js — before stats.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+
+  <!-- Core layer -->
+  <script src="core/minima.js"></script>
+  <script src="core/campaigns.js"></script>
+  <script src="core/selection.js"></script>
+  <script src="core/validation.js"></script>
+  <script src="core/rewards.js"></script>
+
+  <!-- Renderer -->
+  <script src="renderer/renderAd.js"></script>
+
+  <!-- SDK -->
+  <script src="sdk/index.js"></script>
+
+  <!-- Views -->
+  <script src="dapp/views/creator.js"></script>
+  <script src="dapp/views/viewer.js"></script>
+  <script src="dapp/views/stats.js"></script>
+
+  <!-- Dev SQL console (Ctrl+Shift+D) -->
+  <script src="dapp/views/devtools.js"></script>
+
+  <!-- FE entry point — last -->
+  <script src="dapp/app.js"></script>
+</body>
+</html>

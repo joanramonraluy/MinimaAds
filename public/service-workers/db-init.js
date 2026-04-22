@@ -5,7 +5,7 @@
 function initDB(cb) {
   var sql_campaigns = "CREATE TABLE IF NOT EXISTS CAMPAIGNS ("
     + "ID               VARCHAR(256)  PRIMARY KEY,"
-    + "CREATOR_ADDRESS  VARCHAR(256)  NOT NULL,"
+    + "CREATOR_ADDRESS  VARCHAR(512)  NOT NULL,"
     + "TITLE            VARCHAR(512)  NOT NULL,"
     + "BUDGET_TOTAL     DECIMAL(20,6) NOT NULL,"
     + "BUDGET_REMAINING DECIMAL(20,6) NOT NULL,"
@@ -32,7 +32,7 @@ function initDB(cb) {
     + "ID           VARCHAR(256)  PRIMARY KEY,"
     + "CAMPAIGN_ID  VARCHAR(256)  NOT NULL,"
     + "AD_ID        VARCHAR(256)  NOT NULL,"
-    + "USER_ADDRESS VARCHAR(256)  NOT NULL,"
+    + "USER_ADDRESS VARCHAR(512)  NOT NULL,"
     + "TYPE         VARCHAR(16)   NOT NULL,"
     + "AMOUNT       DECIMAL(20,6) NOT NULL,"
     + "TIMESTAMP    BIGINT        NOT NULL,"
@@ -40,7 +40,7 @@ function initDB(cb) {
     + ")";
 
   var sql_user_profile = "CREATE TABLE IF NOT EXISTS USER_PROFILE ("
-    + "ADDRESS        VARCHAR(256)  PRIMARY KEY,"
+    + "ADDRESS        VARCHAR(512)  PRIMARY KEY,"
     + "INTERESTS      VARCHAR(1024) DEFAULT NULL,"
     + "TOTAL_EARNED   DECIMAL(20,6) NOT NULL DEFAULT 0,"
     + "LAST_REWARD_AT BIGINT        DEFAULT NULL"

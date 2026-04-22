@@ -737,49 +737,56 @@ A developer integrates MinimaAds in under 10 minutes:
 ```html
 <div id="ad-slot"></div>
 
-<script type="module">
-  import MinimaAds from './sdk/index.js';
-
-  MinimaAds.init({ wallet: 'Mx...' });
-
-  const ad = await MinimaAds.getAd('slot-1');
-  if (ad) {
-    MinimaAds.render(ad, document.getElementById('ad-slot'));
-  }
+<script src="./sdk/index.js"></script>
+<script>
+  MinimaAds.init({ wallet: '0x...', publisher_id: 'my-dapp' }, function(err) {
+    if (err) return;
+    MinimaAds.getAd(userAddress, userInterests, function(err2, ad) {
+      if (err2 || !ad) return;
+      MinimaAds.render(ad, 'ad-slot');
+    });
+  });
 </script>
 ```
 
 ### 13.2 SDK API Reference
 
+All SDK functions are callback-based, matching the Core API pattern (§7.5). This keeps the SDK usable from any runtime — including Rhino — without polyfills.
+
 ```javascript
-MinimaAds.init(config)
-// config: { wallet: string, interests?: string }
-// Must be called once before any other method.
+MinimaAds.init(config, cb)
+// config:   { wallet: string, interests?: string, publisher_id?: string }
+// cb:       function(err, ok)
+// Stores config and calls MDS.init if not already inited.
 
-MinimaAds.getAd(slotId)
-// Returns: Promise<Campaign | null>
-// Applies selection algorithm, respects MAX_CAMPAIGNS_PER_SESSION.
+MinimaAds.getAd(userAddress, interests, cb)
+// userAddress: string (Maxima public key, 0x…)
+// interests:   string (comma-separated tags) | null
+// cb:          function(err, ad | null)
+// Loads active campaigns, enriches with ad fields, runs selectAd.
+// Respects MAX_CAMPAIGNS_PER_SESSION.
 
-MinimaAds.render(campaign, container)
-// Renders ad HTML into container element.
-// Automatically starts MIN_VIEW_DURATION_MS timer.
-// Emits view event on timer completion.
+MinimaAds.render(ad, containerId)
+// ad:          object returned by getAd
+// containerId: string — id of DOM element to inject into
+// Delegates to renderer/renderAd.js; sanitises via DOMPurify.
 
-MinimaAds.trackView(campaignId)
-// Manual view event emission (alternative to render()).
-// Returns: Promise<boolean>
+MinimaAds.trackView(campaignId, userAddress, cb)
+// cb: function(err, { confirmed: boolean, reason?: string, event?: RewardEvent })
+// Calls validateView → createRewardEvent. Creator-is-viewer check applied.
 
-MinimaAds.trackClick(campaignId)
-// Emits click event. Caller handles navigation.
-// Returns: Promise<boolean>
+MinimaAds.trackClick(campaignId, userAddress, cb)
+// cb: function(err, { confirmed: boolean, reason?: string, event?: RewardEvent })
+// Calls validateClick → createRewardEvent. Caller handles navigation after cb.
 ```
 
 ### 13.3 Publisher Responsibilities
 
 The publisher must only:
-1. Call `MinimaAds.init({ wallet })`
+1. Call `MinimaAds.init({ wallet }, cb)`
 2. Define an HTML element for the ad slot
-3. Call `MinimaAds.getAd()` and `MinimaAds.render(ad, el)`
+3. Call `MinimaAds.getAd(userAddress, interests, cb)` then `MinimaAds.render(ad, containerId)`
+4. Wire a view timer (≥ `MIN_VIEW_DURATION_MS`) before calling `trackView`
 
 The publisher must **not**:
 - Calculate or distribute rewards

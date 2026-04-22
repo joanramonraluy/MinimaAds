@@ -5,7 +5,11 @@
 // All DB access via sqlQuery(). Creator self-reward check present in both validators.
 
 function validateView(campaignId, userAddress, cb) {
-  getCampaign(campaignId, function(campaign) {
+  getCampaign(campaignId, function(err, campaign) {
+    if (err) {
+      cb({ valid: false, reason: 'db error' });
+      return;
+    }
     if (!campaign) {
       cb({ valid: false, reason: 'campaign not found' });
       return;
@@ -66,7 +70,11 @@ function validateView(campaignId, userAddress, cb) {
 }
 
 function validateClick(campaignId, userAddress, cb) {
-  getCampaign(campaignId, function(campaign) {
+  getCampaign(campaignId, function(err, campaign) {
+    if (err) {
+      cb({ valid: false, reason: 'db error' });
+      return;
+    }
     if (!campaign) {
       cb({ valid: false, reason: 'campaign not found' });
       return;

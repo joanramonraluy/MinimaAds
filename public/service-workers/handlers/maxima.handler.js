@@ -31,6 +31,10 @@ function onMaxima(msg) {
     handleCampaignPause(payload);
   } else if (payload.type === "CAMPAIGN_FINISH") {
     handleCampaignFinish(payload);
+  } else if (payload.type === "REQUEST_CAMPAIGN_DATA") {
+    handleRequestCampaignData(payload);
+  } else if (payload.type === "CAMPAIGN_DATA_RESPONSE") {
+    handleCampaignDataResponse(payload);
   } else {
     MDS.log("[MAXIMA] unknown type: " + payload.type);
   }

@@ -69,12 +69,25 @@ function handleMdsComms(parsed) {
     doRender();
     return;
   }
+  if (parsed.type === 'CAMPAIGN_PENDING_DENIED') {
+    var msgEl = document.getElementById('ma-creator-msg');
+    if (msgEl) { msgEl.textContent = 'Transaction denied — escrow was not funded.'; }
+    return;
+  }
   if (parsed.type === 'NEW_CAMPAIGN' || parsed.type === 'CAMPAIGN_UPDATED') {
     if (currentRoute() === 'stats' && typeof renderStats === 'function') {
       renderStats(document.getElementById('app'));
     }
     if (currentRoute() === 'viewer' && typeof onCampaignsChanged === 'function') {
       onCampaignsChanged();
+    }
+    if (parsed.type === 'NEW_CAMPAIGN' && currentRoute() === 'creator') {
+      var msgEl2 = document.getElementById('ma-creator-msg');
+      if (msgEl2 && msgEl2.textContent.indexOf('Awaiting approval') !== -1) {
+        msgEl2.textContent = 'Campaign published. ID: ' + (parsed.campaign_id || '');
+        var form2 = document.getElementById('ma-creator-form');
+        if (form2) { form2.reset(); }
+      }
     }
     return;
   }

@@ -9,7 +9,7 @@
 ## Sequence Rule
 
 ```
-T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9 → T10 → T11
+T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9 → T10 → T11 → T12
 ```
 
 Never start a task before all previous tasks are marked **Done**.
@@ -325,6 +325,34 @@ MinimaAds.trackClick(campaignId, userAddress, cb)
 
 ---
 
+### T12 — Remove CAMPAIGN_ANNOUNCE broadcast to contacts
+**Layer**: Service Worker + UI
+**Files**: `dapp/views/creator.js`, `public/service-workers/main.js`
+**Spec**: MinimaAds.md §8.1
+
+With on-chain discovery (NEWBLOCK → escrow coins → REQUEST/RESPONSE) as the primary distribution mechanism, the `sendall` broadcast via Maxima contacts is redundant. All nodes with the DApp installed discover campaigns independently via the escrow coin.
+
+Remove:
+- `broadcastMaxima(payload, ...)` call in `dapp/views/creator.js` after `saveCampaign`
+- `rebroadcastActiveCampaigns()` stub and `_timerTicks` / `REBROADCAST_EVERY_TICKS` logic in `main.js`
+- `onTimer()` re-broadcast block (keep the function stub if needed for future use)
+
+Update:
+- MinimaAds.md §8.1 — remove "Maxima broadcast" section, on-chain discovery is the only mechanism
+- MinimaAds.md §6.3 step 7 — remove "SW broadcasts CAMPAIGN_ANNOUNCE" step
+- AGENTS.md §9 — remove CAMPAIGN_ANNOUNCE, CAMPAIGN_PAUSE, CAMPAIGN_FINISH from protocol matrix (those types are no longer sent proactively; only REQUEST/RESPONSE remain)
+- AGENTS.md §7.2 — remove MDS_TIMER_10SECONDS handler if timer no longer needed
+
+**Note**: `CAMPAIGN_PAUSE` and `CAMPAIGN_FINISH` should also be evaluated — if creators no longer broadcast to contacts, those signals won't propagate. Either implement a pull model for status changes (poll the escrow coin state: if coin is spent/gone, campaign is finished) or keep a minimal broadcast for status changes only.
+
+**Definition of done**:
+- [ ] No `sendall` calls in creator flow
+- [ ] No re-broadcast timer logic
+- [ ] MinimaAds.md §8.1 updated
+- [ ] On-chain discovery is the sole campaign distribution mechanism
+
+---
+
 ## Status
 
 | Task | Layer | File(s) | Status |
@@ -340,3 +368,4 @@ MinimaAds.trackClick(campaignId, userAddress, cb)
 | T9 | SDK | `sdk/index.js` | Done |
 | T10 | UI | `dapp/app.js`, `dapp/views/*.js` | Done |
 | T11 | UI | `renderer/renderAd.js`, `public/index.html`, `public/dapp.conf` | Done |
+| T12 | SW + UI | `creator.js`, `main.js` | Pending |

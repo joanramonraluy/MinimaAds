@@ -339,7 +339,8 @@ var LIMITS = {
        → save returned address as ESCROW_ADDRESS constant
     c. Send budget to escrow:
        send amount:<budget_total> address:<ESCROW_ADDRESS>
-            state:{"1":"<wallet_pubkey>","2":"<expiry_block>","3":"<campaign_id_hex>"}
+            state:{"1":"<wallet_pubkey>","2":"<expiry_block>","3":"<campaign_id_hex>","4":"<creator_mx_address>"}
+       Note: STATE(4) = creator Mx address (Mx...) — enables on-chain campaign discovery by all viewer nodes
     d. Save returned coinid in CAMPAIGNS.ESCROW_COINID (new DB column)
     Note: fee collection is off-chain only for MVP (no platform wallet address defined)
 5.  Campaign created locally: status = 'active', budget_remaining = budget_total
@@ -461,10 +462,22 @@ signalFE(type, data)
 
 ### 8.1 Distribution Model
 
-**Push broadcast**: the creator node pushes campaigns to all Maxima contacts. No central discovery server.
+**Dual mechanism**: on-chain discovery (primary) + Maxima push broadcast (secondary).
 
-- On campaign creation → SW broadcasts `CAMPAIGN_ANNOUNCE` to all contacts
-- Every ~10 min → SW re-broadcasts all active campaigns (new-node discovery)
+#### On-chain discovery (reaches all DApp nodes)
+
+Every node with the DApp installed registers the ESCROW_SCRIPT with `trackall:true` at startup. This means every DApp node independently tracks all coins at `ESCROW_ADDRESS`.
+
+- On `NEWBLOCK` → SW queries `coins address:<ESCROW_ADDRESS>` → finds coins from all creators
+- Each coin has STATE(3)=campaign_id_hex and STATE(4)=creator_mx_address
+- If campaign is unknown → SW sends `REQUEST_CAMPAIGN_DATA` to creator via `to:<creator_mx_address>`
+- Creator responds with `CAMPAIGN_DATA_RESPONSE` containing full campaign + ad JSON
+- Receiving node persists via `MERGE INTO CAMPAIGNS` + `MERGE INTO ADS`
+
+#### Maxima broadcast (reaches contacts only)
+
+- On campaign creation → SW broadcasts `CAMPAIGN_ANNOUNCE` to all contacts via `sendall`
+- Every ~10 min → SW re-broadcasts all active campaigns
 - Receiving nodes persist via `MERGE INTO CAMPAIGNS` and `MERGE INTO ADS`
 - Once cached, campaigns are fully operational offline
 
@@ -529,7 +542,35 @@ Reward processing (view and click events) is handled entirely within the FE runt
 { "type": "CAMPAIGN_FINISH", "campaign_id": "uuid" }
 ```
 
-### 8.6 SW → FE Signal Contract
+### 8.6 REQUEST_CAMPAIGN_DATA
+
+**Direction**: Viewer SW → Creator SW (unicast via `to:<creator_mx_address>`)
+
+Sent when a viewer's node detects a new escrow coin but does not have the campaign data locally.
+
+```json
+{
+  "type": "REQUEST_CAMPAIGN_DATA",
+  "campaign_id": "uuid",
+  "requester_mx": "Mx..."
+}
+```
+
+### 8.7 CAMPAIGN_DATA_RESPONSE
+
+**Direction**: Creator SW → Viewer SW (unicast via `to:<requester_mx>`)
+
+Response to a `REQUEST_CAMPAIGN_DATA` message. Payload schema is identical to `CAMPAIGN_ANNOUNCE` (same handler on receiver side).
+
+```json
+{
+  "type": "CAMPAIGN_DATA_RESPONSE",
+  "campaign": { "...": "same as CAMPAIGN_ANNOUNCE §8.3" },
+  "ad":      { "...": "same as CAMPAIGN_ANNOUNCE §8.3" }
+}
+```
+
+### 8.8 SW → FE Signal Contract
 
 | Signal type | Payload | Fired by | Trigger |
 |---|---|---|---|
@@ -854,6 +895,7 @@ The script is constant. All MinimaAds campaigns share the same script address �
 | 1 | `PREVSTATE(1)` | Creator wallet public key | `0x` hex (64 chars) | Required signer — frozen at coin creation |
 | 2 | `PREVSTATE(2)` | Campaign expiry block | integer string | UI reference; not enforced by script |
 | 3 | `PREVSTATE(3)` | Campaign ID (hex-encoded UTF-8) | `0x` hex | Links on-chain coin to H2 campaign record |
+| 4 | `PREVSTATE(4)` | Creator Mx address | `Mx...` string | Enables on-chain discovery: viewer nodes send REQUEST_CAMPAIGN_DATA to this address |
 | 10 | `STATE(10)` | Payout amount (set in spending tx) | number string | Used by script to compute required change |
 
 `PREVSTATE(port)` reads state frozen at coin creation. `STATE(port)` reads state provided by the spending transaction. Port 10 is the only one provided by the spender — it must match the actual payout output amount or the script will fail to validate correctly.
@@ -887,14 +929,17 @@ MDS.keypair.get("ESCROW_ADDRESS", function(addrRes) {
     MDS.cmd("block", function(blockRes) {
       var expiryBlock = parseInt(blockRes.response.block) + CAMPAIGN_DURATION_BLOCKS;
       var campaignIdHex = "0x" + utf8ToHex(campaignId).toUpperCase();
-      var state = '{"1":"' + walletPK + '","2":"' + expiryBlock + '","3":"' + campaignIdHex + '"}';
-      MDS.cmd(
-        "send amount:" + budgetTotal + " address:" + escrowAddress + " state:" + state,
-        function(sendRes) {
-          var coinId = sendRes.response.txpow.body.txn.outputs[0].coinid;
-          // Save coinId as CAMPAIGNS.ESCROW_COINID
-        }
-      );
+      MDS.cmd("maxima action:info", function(mxRes) {
+        var creatorMxAddr = mxRes.response.address;
+        var state = '{"1":"' + walletPK + '","2":"' + expiryBlock + '","3":"' + campaignIdHex + '","4":"' + creatorMxAddr + '"}';
+        MDS.cmd(
+          "send amount:" + budgetTotal + " address:" + escrowAddress + " state:" + state,
+          function(sendRes) {
+            var coinId = sendRes.response.txpow.body.txn.outputs[0].coinid;
+            // Save coinId as CAMPAIGNS.ESCROW_COINID
+          }
+        );
+      });
     });
   });
 });
@@ -912,6 +957,7 @@ txnoutput id:<txnid> storestate:true  amount:<remaining> address:<ESCROW_ADDRESS
 txnstate  id:<txnid> port:1  value:<wallet_pubkey>
 txnstate  id:<txnid> port:2  value:<expiry_block>
 txnstate  id:<txnid> port:3  value:<campaign_id_hex>
+txnstate  id:<txnid> port:4  value:<creator_mx_address>
 txnstate  id:<txnid> port:10 value:<payout>
 txnsign   id:<txnid> publickey:<wallet_pubkey>
 txnpost   id:<txnid> mine:true auto:true

@@ -1,6 +1,6 @@
 # AGENTS.md — MinimaAds Engineering Guide
 
-Last reviewed against codebase: 2026-04-22 (Rev 11: T9 — SDK public API)
+Last reviewed against codebase: 2026-04-23 (Rev 12: pending flow bugfixes)
 Scope: `/home/joanramon/Minima/MinimaAds`
 
 > **Origin note**: This file was bootstrapped from lessons learned building MetaChain (a Minima MiniDapp). Sections 1–5 are generic to any Minima MiniDapp. Sections 6+ are project-specific and must be filled in as the project evolves.
@@ -731,9 +731,11 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 
 | MDS event | Handler | Action |
 |---|---|---|
-| `inited` | `onInited()` | Init DB schema, register node in USER_PROFILE, start re-broadcast |
+| `inited` | `onInited()` | Init DB schema, get Maxima identity, register escrow script, initial coin scan |
 | `MAXIMA` | `onMaxima(data)` | Hex-decode payload, route by `payload.type` |
 | `MDS_TIMER_10SECONDS` | `onTimer()` | Re-broadcast active campaigns, check expirations |
+| `NEWBLOCK` | `scanEscrowCoins()` | Query `coins address:<ESCROW_ADDRESS>` and request data for unknown campaigns |
+| `MDS_PENDING` | `onPending(msg)` | Fired when user accepts/denies a pending send via Minima Hub. Reads `msg.data.{uid,accept,status,result}`. On accept: extracts coinId from `msg.data.result.response.body.txn.outputs[0].coinid` and campaignId from `msg.data.result.response.body.txn.state[port=3]`; reads campaign+ad from keypair (`PENDING_CAMPAIGN_<campaignId>`); calls `saveCampaign`; signals `NEW_CAMPAIGN` to FE. |
 
 ---
 
@@ -816,6 +818,8 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 | `CAMPAIGN_ANNOUNCE` | Creator SW → all contacts | `campaign.handler.js` | `MERGE INTO CAMPAIGNS` + `MERGE INTO ADS` | `NEW_CAMPAIGN` |
 | `CAMPAIGN_PAUSE` | Creator SW → all contacts | `campaign.handler.js` | `UPDATE CAMPAIGNS SET STATUS='paused'` | `CAMPAIGN_UPDATED` |
 | `CAMPAIGN_FINISH` | Creator SW → all contacts | `campaign.handler.js` | `UPDATE CAMPAIGNS SET STATUS='finished'` | `CAMPAIGN_UPDATED` |
+| `REQUEST_CAMPAIGN_DATA` | Viewer SW → Creator SW (unicast `to:Mx...`) | `campaign.handler.js` | None (read-only lookup) | None |
+| `CAMPAIGN_DATA_RESPONSE` | Creator SW → Viewer SW (unicast `to:Mx...`) | `campaign.handler.js` | `MERGE INTO CAMPAIGNS` + `MERGE INTO ADS` | `NEW_CAMPAIGN` |
 
 > **Reward processing is FE-owned** — not a Maxima message. `core/rewards.js` writes directly to REWARD_EVENTS, CAMPAIGNS, and USER_PROFILE via `sqlQuery()`. See MinimaAds.md §8.4.
 
@@ -827,8 +831,8 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 
 ## 10) FE ↔ SW Signal Contract
 
-> Authoritative signal contract: MinimaAds.md §8.6. This section mirrors it for agent reference.
-> Update BOTH this section AND MinimaAds.md §8.6 whenever a new signal is added.
+> Authoritative signal contract: MinimaAds.md §8.8. This section mirrors it for agent reference.
+> Update BOTH this section AND MinimaAds.md §8.8 whenever a new signal is added.
 
 | Signal Type | Payload | Fired By | FE Reaction |
 |---|---|---|---|
@@ -836,6 +840,7 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 | `REWARD_CONFIRMED` | `{ event_id, amount, type }` | `core/rewards.js` (FE) | Update reward display, balance indicator |
 | `CAMPAIGN_UPDATED` | `{ campaign_id, status, budget_remaining }` | `campaign.handler.js` (SW) | Refresh campaign card status |
 | `NEW_CAMPAIGN` | `{ campaign_id }` | `campaign.handler.js` (SW) | Reload available campaigns list |
+| `CAMPAIGN_PENDING_DENIED` | `{ uid }` | `campaign.handler.js` (SW) | Show "Transaction denied" in creator form |
 
 **Rule**: Every new signal type fired by SW must be registered in the FE `MDSCOMMS` handler (`dapp/app.js`). Missing registrations cause silent UI failures. The payload is at `event.data.message` (not `event.data`) — see section 5.1.
 
@@ -902,13 +907,15 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 
 17. **FE/SW race condition on Maxima-triggered UI reloads**: When a `MAXIMA` event arrives, both the SW (persistence) and FE (UI) react. If the FE reloads from DB immediately on the MAXIMA event, the SW may not have finished writing yet. Add a ~200ms delay before DB reads triggered by MAXIMA events in the FE. Signals from SW via `MDS.comms.solo` (`MDSCOMMS`) are deterministic — the SW fires them only after writing — so no delay is needed for `MDSCOMMS`-triggered reloads.
 
-16. **FE also receives `MAXIMA` events via polling** (every ~2.5 s via `PollListener`). The FE `MDS.init` callback will fire for `CAMPAIGN_ANNOUNCE`, `CAMPAIGN_PAUSE`, and `CAMPAIGN_FINISH` messages — the same types handled by the SW. The FE handler **must silently ignore** these types to prevent duplicate DB writes. Handle only `MDSCOMMS` (SW signals) and UI-specific events in the FE `MDS.init` callback.
+16. **FE also receives `MAXIMA` events via polling** (every ~2.5 s via `PollListener`). The FE `MDS.init` callback will fire for ALL Maxima message types handled by the SW: `CAMPAIGN_ANNOUNCE`, `CAMPAIGN_PAUSE`, `CAMPAIGN_FINISH`, `REQUEST_CAMPAIGN_DATA`, `CAMPAIGN_DATA_RESPONSE`. The FE handler **must silently ignore** all of these types to prevent duplicate DB writes. Handle only `MDSCOMMS` (SW signals) and UI-specific events in the FE `MDS.init` callback.
+
+18. **`newscript` removes and re-adds the script on every call** (verified in `newscript.java`). This means calling it on every SW restart is safe (address is deterministic), but the script's `trackall` setting is briefly reset during re-registration. The `scanEscrowCoins()` call immediately after `registerEscrowScript()` re-indexes all currently tracked coins, so no data is lost in practice.
 
 17. **`VERIFYOUT` has 5 parameters** (not 4 as in older Minima docs). The 5th is a BOOL for `keepstate`. Always use the 5-param form: `VERIFYOUT(output_index address amount tokenid keepstate_bool)`. In MinimaAds escrow, the change output uses `TRUE` (keepstate). The payout output uses `FALSE` (no state needed for recipient's regular wallet). Example: `VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE)`.
 
-18. **`MDS_PENDING` event** — fired when the user approves a transaction from the Pending MiniDapp (i.e., a transaction that required user confirmation before posting). If MinimaAds uses on-chain escrow transactions, they may trigger `MDS_PENDING`. The FE handler must handle this event if waiting for on-chain confirmation of a batch payout or campaign creation.
+18. **`MDS_PENDING` event** — fired in the **SW** (not FE) when the user approves or denies a pending transaction via Minima Hub. The `send` command returns `{pending:true, pendinguid:"0x..."}` immediately; the original callback is **never called again** after approval. Recovery is via `MDS_PENDING`. The approved result arrives as `msg.data.result` with shape `{command, status, response: {txpowid, body: {txn: {inputs, outputs, state}}, ...}}` — **no `.txpow` wrapper** between `response` and `body`. CoinId: `msg.data.result.response.body.txn.outputs[0].coinid`. State variables: `msg.data.result.response.body.txn.state` (array of `{port, type, data}`). Verified on Minima 1.0.45.
 
-19. **`MDS.keypair`** — persistent key-value store for MiniDapp config (survives restarts). Use it to store `ESCROW_ADDRESS` after the first `newscript` call, so the script doesn't need to be re-registered on every startup. API: `MDS.keypair.set(key, value, cb)` and `MDS.keypair.get(key, cb)`. Response: `res.response.value`.
+19. **`MDS.keypair`** — persistent key-value store for MiniDapp config (survives restarts). Use it to store `ESCROW_ADDRESS` after the first `newscript` call, and to pass pending campaign data from FE to SW. **Critical: response shape differs between FE and SW contexts.** FE (HTTP API): `res.response.value`. SW (Rhino Java binding, `KEYPAIRService`): `res.value` (flat — no `response` wrapper). Always use `res.value` in SW code and `res.response.value` in FE code. Key not found → SW returns `{status:false}`, FE returns `{status:false}`. FE and SW share the same underlying store (scoped per DApp UID). Verified on Minima 1.0.45.
 
 20. **Transaction shortcut commands**: `txninput scriptmmr:true` adds the MMR proof for the input coin at input time (avoids a separate `txnbasics` call). `txnpost id:... auto:true` adds MMR proofs and scripts automatically at post time. `txnsign id:... publickey:auto` signs with the matching key automatically — but for custom script coins (like the escrow), specify the wallet public key explicitly: `txnsign id:... publickey:<wallet_pubkey>`.
 
@@ -948,7 +955,7 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 | ~~2~~ | ~~`core/selection.js` + `core/campaigns.js`~~ | ~~`selectAd()` filters by `c.AD_INTERESTS` but `getCampaigns()` queries only CAMPAIGNS.~~ Resolved in T9: `sdk/index.js` `_enrichWithAds()` fetches ADS and merges `AD_INTERESTS` (plus `AD_ID/TITLE/BODY/CTA_*`) onto each campaign before `selectAd` runs. | ~~Medium~~ |
 | 3 | Rhino cross-file closures | A closure defined in `service.js` and passed as `cb` to a function loaded via `MDS.load()` (e.g. `initDB(cb)`) silently fails to execute when called from inside a nested `MDS.sql` callback chain in the loaded file. No error is thrown — the closure is simply never called. Workaround: never pass closures from `service.js` into `MDS.load`-ed functions. Keep all callback logic self-contained within the file where it is defined. Verified on Minima 1.0.45, Rhino. | High |
 | ~~4~~ | ~~`core/validation.js` + `core/campaigns.js`~~ | ~~`validateView/Click` used single-arg callback where `getCampaign` uses err-first `cb(null, campaign)`.~~ Resolved in T9: `validateView` and `validateClick` now use `function(err, campaign)` and short-circuit to `{ valid:false, reason:'db error' }` on err. | ~~High~~ |
-| 5 | TASKS.md T7 description | Lists `MDS_PENDING` → `onPending(msg)` as the third SW event, but MinimaAds.md §11.1/§11.2 and AGENTS.md §7.2 specify `MDS_TIMER_10SECONDS` → `onTimer()`. `MDS_PENDING` is an FE-only event (user-approved on-chain tx confirmation — fragility #18). T7 was implemented per MinimaAds.md (TIMER). TASKS.md should be corrected to match the spec. | Low |
+| ~~5~~ | ~~TASKS.md T7 description~~ | ~~`MDS_PENDING` listed incorrectly as FE-only.~~ Resolved: `MDS_PENDING` fires in the **SW**, not the FE. `onPending(msg)` is implemented in `campaign.handler.js` and handles campaign creation after user approves the escrow `send`. SW event table and fragility #18 updated. | Resolved |
 | 6 | TASKS.md T7 description | Lists `onMaxima(msg)` but MinimaAds.md §11.1 shows `onMaxima(msg.data)`. T8's handler spec accesses `msg.data.data`, which matches passing the full `msg`. T7 was implemented as `onMaxima(msg)` to align with T8. MinimaAds.md §11.1 snippet is inconsistent with its own §11.3 handler flow; consider clarifying. | Low |
 | 7 | TASKS.md T8 description (resolved during T8 implementation) | TASKS.md T8 listed handler names as `onCampaignAnnounce/Pause/Finish`; MinimaAds.md §11.3 uses `handleCampaignAnnounce/Pause/Finish`. Resolved: implemented per MinimaAds.md (source of truth wins), TASKS.md T8 updated to match. Convention moving forward: `on*` = MDS event entry points; `handle*` = Maxima sub-handlers dispatched inside `onMaxima`. | Resolved |
 | 8 | `core/minima.js` `hexToUtf8` (resolved during T8 verification) | The canonical `hexToUtf8` did not strip the `0x`/`0X` prefix. Maxima delivers `msg.data.data` with the prefix (e.g. `"0x7B..."`), so the decoded string started with literal `0x{…}`. `JSON.parse` parsed `0` as a valid number and then threw `SyntaxError: Expected end of stream at char 1`. Fixed: `hexToUtf8` now strips an optional `0x`/`0X` prefix before hex-to-UTF8 conversion. AGENTS.md §6 canonical snippet updated to match. Confirmed via two-node Maxima send test (21-Apr-2026). | Resolved |

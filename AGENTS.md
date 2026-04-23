@@ -683,6 +683,7 @@ Use consistent prefixed tags in all `MDS.log()` calls so traces are searchable a
 | `[MAXIMA]` | `maxima.handler.js` — inbound routing |
 | `[REWARD]` | `core/rewards.js` |
 | `[VALIDATION]` | `core/validation.js` |
+| `[CHANNEL]` | `core/channels.js` — channel lifecycle errors |
 | `[DB]` | `core/minima.js` — sqlQuery errors |
 | `[TIMER]` | `onTimer()` — re-broadcast and expiry checks |
 
@@ -713,6 +714,7 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 | `core/validation.js` | `validateView/Click()`, `isDuplicate()`, LIMITS enforcement |
 | `core/rewards.js` | `createRewardEvent()`, `getUserProfile()` |
 | `core/minima.js` | MDS.sql wrapper, Maxima sender, FE signaller |
+| `core/channels.js` | CHANNEL_STATE CRUD, channel lifecycle (`openChannel` → `settleChannel`) |
 
 **Layer constraint**: Core must not import from MiniDapp, SDK, or Renderer. Data flows downward only.
 

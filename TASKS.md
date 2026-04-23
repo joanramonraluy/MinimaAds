@@ -370,7 +370,7 @@ Update:
 | T11 | UI | `renderer/renderAd.js`, `public/index.html`, `public/dapp.conf` | Done |
 | T12 | SW + UI | `creator.js`, `main.js` | Pending |
 | **T-CH1** | **DB** | `db-init.js` (×2 runtimes) | Done |
-| **T-CH2** | **Core** | `core/channels.js` (nou) | ⬜ |
+| **T-CH2** | **Core** | `core/channels.js` (nou) | Done |
 | **T-CH3** | **SW** | `handlers/channel.handler.js` (nou) + `maxima.handler.js` | ⬜ |
 | **T-CH4** | **FE** | `dapp/views/creator.js`, `dapp/app.js` | ⬜ |
 | **T-CH5** | **SDK** | `sdk/index.js` | ⬜ |
@@ -423,7 +423,7 @@ Provide the standard handoff note (CLAUDE.md §10) when done.
 
 | Camp | Valor |
 |---|---|
-| **Status** | ⬜ |
+| **Status** | Done ✅ |
 | **Agent** | Sonnet |
 | **Fitxers** | `core/channels.js` (nou fitxer) |
 | **Spec** | MinimaAds.md §7.6, §3.5 |

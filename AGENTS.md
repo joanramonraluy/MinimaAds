@@ -764,8 +764,8 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 | `STATUS` | VARCHAR(32) DEFAULT 'active' | `draft\|active\|paused\|finished` |
 | `CREATED_AT` | BIGINT NOT NULL | unix ms |
 | `EXPIRES_AT` | BIGINT DEFAULT NULL | unix ms or null |
-| `ESCROW_COINID` | VARCHAR(66) DEFAULT '' | On-chain escrow coinid (set at campaign creation; updated after each batch payout) |
-| `ESCROW_WALLET_PK` | VARCHAR(66) DEFAULT '' | Creator wallet signing key used in escrow PREVSTATE(1) — NOT the Maxima PK |
+| `ESCROW_COINID` | VARCHAR(66) DEFAULT '' | On-chain escrow coinid (updated each time a channel is opened from the escrow) |
+| `ESCROW_WALLET_PK` | VARCHAR(66) DEFAULT '' | Per-campaign key generated via `keys action:new` — used in escrow PREVSTATE(1) — NOT the Maxima PK and NOT the main wallet key |
 
 ### ADS
 | Column | Type | Notes |
@@ -804,6 +804,24 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 | `ID` | VARCHAR(256) PK | RewardEvent UUID — checked by `isDuplicate()` |
 | `LOGGED_AT` | BIGINT NOT NULL | unix ms — reserved for future pruning |
 
+### CHANNEL_STATE
+| Column | Type | Notes |
+|---|---|---|
+| `CAMPAIGN_ID` | VARCHAR(256) NOT NULL | FK → CAMPAIGNS.ID |
+| `VIEWER_KEY` | VARCHAR(66) NOT NULL | Per-channel viewer wallet key (`keys action:new`) |
+| `CREATOR_MX` | VARCHAR(512) NOT NULL | Creator Mx contact string from escrow STATE(4) |
+| `CHANNEL_COINID` | VARCHAR(66) DEFAULT '' | Set after creator opens channel on-chain |
+| `MAX_AMOUNT` | DECIMAL(20,6) NOT NULL | `(REWARD_VIEW + REWARD_CLICK) × campaign_days` |
+| `CUMULATIVE_EARNED` | DECIMAL(20,6) DEFAULT 0 | Total committed by creator (creator) / total earned (viewer) |
+| `LATEST_TX_HEX` | TEXT DEFAULT '' | Last partially-signed tx (viewer holds for settlement) |
+| `STATUS` | VARCHAR(16) DEFAULT 'pending' | `pending\|open\|settled\|expired` |
+| `CREATED_AT` | BIGINT NOT NULL | unix ms |
+
+PRIMARY KEY: `(CAMPAIGN_ID, VIEWER_KEY)` — one channel per viewer-campaign pair.
+
+> Creator node writes: `CHANNEL_COINID`, `CUMULATIVE_EARNED`, `LATEST_TX_HEX` (what it has signed).
+> Viewer node writes: all fields; `LATEST_TX_HEX` is the voucher received from creator.
+
 **Schema parity rule**: Any new table or column must be added in **both** SW `db-init.js` and FE DB init in the same patch. Use `ADD COLUMN IF NOT EXISTS` for non-breaking migrations.
 
 ---
@@ -820,8 +838,14 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 | `CAMPAIGN_FINISH` | Creator SW → all contacts | `campaign.handler.js` | `UPDATE CAMPAIGNS SET STATUS='finished'` | `CAMPAIGN_UPDATED` |
 | `REQUEST_CAMPAIGN_DATA` | Viewer SW → Creator SW (unicast `to:Mx...`) | `campaign.handler.js` | None (read-only lookup) | None |
 | `CAMPAIGN_DATA_RESPONSE` | Creator SW → Viewer SW (unicast `to:Mx...`) | `campaign.handler.js` | `MERGE INTO CAMPAIGNS` + `MERGE INTO ADS` | `NEW_CAMPAIGN` |
+| `CHANNEL_OPEN_REQUEST` | Viewer FE → Creator FE (unicast, `poll:true`) | `channel.handler.js` | `MERGE INTO CHANNEL_STATE` (creator) | — (triggers coin creation in FE) |
+| `CHANNEL_OPEN` | Creator FE → Viewer FE (unicast, `poll:true`) | `channel.handler.js` | `UPDATE CHANNEL_STATE status='open'` | `CHANNEL_OPENED` |
+| `REWARD_REQUEST` | Viewer FE → Creator FE (unicast, `poll:true`) | `channel.handler.js` | `UPDATE CHANNEL_STATE` (cumulative, tx_hex) | — (sends REWARD_VOUCHER) |
+| `REWARD_VOUCHER` | Creator FE → Viewer FE (unicast, `poll:true`) | `channel.handler.js` | `UPDATE CHANNEL_STATE` (tx_hex, cumulative) | `VOUCHER_RECEIVED` |
+| `VOUCHER_SYNC_REQUEST` | Viewer FE → Creator FE (unicast, `poll:true`) | `channel.handler.js` | None (read-only) | — (sends REWARD_VOUCHER or CHANNEL_OPEN) |
 
-> **Reward processing is FE-owned** — not a Maxima message. `core/rewards.js` writes directly to REWARD_EVENTS, CAMPAIGNS, and USER_PROFILE via `sqlQuery()`. See MinimaAds.md §8.4.
+> **Reward accounting is FE-owned** — `core/rewards.js` writes REWARD_EVENTS, CAMPAIGNS, USER_PROFILE. See MinimaAds.md §8.4.
+> **Channel coin creation and settlement tx signing are FE-owned** — require pending approval flow; cannot run in SW.
 
 **Application name**: `application:minima-ads` — defined as `APP_NAME` constant in `main.js`. Never hardcode the literal string in `MDS.cmd` calls.
 
@@ -831,8 +855,8 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 
 ## 10) FE ↔ SW Signal Contract
 
-> Authoritative signal contract: MinimaAds.md §8.8. This section mirrors it for agent reference.
-> Update BOTH this section AND MinimaAds.md §8.8 whenever a new signal is added.
+> Authoritative signal contract: MinimaAds.md §8.13. This section mirrors it for agent reference.
+> Update BOTH this section AND MinimaAds.md §8.13 whenever a new signal is added.
 
 | Signal Type | Payload | Fired By | FE Reaction |
 |---|---|---|---|
@@ -841,6 +865,10 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 | `CAMPAIGN_UPDATED` | `{ campaign_id, status, budget_remaining }` | `campaign.handler.js` (SW) | Refresh campaign card status |
 | `NEW_CAMPAIGN` | `{ campaign_id }` | `campaign.handler.js` (SW) | Reload available campaigns list |
 | `CAMPAIGN_PENDING_DENIED` | `{ uid }` | `campaign.handler.js` (SW) | Show "Transaction denied" in creator form |
+| `CHANNEL_OPENED` | `{ campaign_id, channel_coinid, max_amount }` | `channel.handler.js` (FE) | Clear "Opening channel…" message; flush pending rewards |
+| `VOUCHER_RECEIVED` | `{ campaign_id, cumulative }` | `channel.handler.js` (FE) | Update viewer earned balance display |
+| `AUTO_SETTLE` | `{ campaign_id, viewer_key, tx_hex }` | `channel.handler.js` (FE) | Prompt viewer to settle or auto-settle (txnimport → txnsign → txnpost) |
+| `SETTLE_CONFIRMED` | `{ campaign_id, amount }` | `channel.handler.js` (FE) | Show settlement confirmation; update channel status |
 
 **Rule**: Every new signal type fired by SW must be registered in the FE `MDSCOMMS` handler (`dapp/app.js`). Missing registrations cause silent UI failures. The payload is at `event.data.message` (not `event.data`) — see section 5.1.
 

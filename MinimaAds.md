@@ -210,7 +210,26 @@ CREATE TABLE IF NOT EXISTS DEDUP_LOG (
   ID        VARCHAR(256) PRIMARY KEY,  -- RewardEvent UUID; used by isDuplicate()
   LOGGED_AT BIGINT       NOT NULL      -- unix ms; reserved for future pruning
 );
+
+CREATE TABLE IF NOT EXISTS CHANNEL_STATE (
+  CAMPAIGN_ID       VARCHAR(256)   NOT NULL,
+  VIEWER_KEY        VARCHAR(66)    NOT NULL,   -- per-channel wallet key (keys action:new on viewer)
+  CREATOR_MX        VARCHAR(512)   NOT NULL,   -- creator Mx contact string (from escrow STATE(4))
+  CHANNEL_COINID    VARCHAR(66)    DEFAULT '',  -- set after creator opens channel on-chain
+  MAX_AMOUNT        DECIMAL(20,6)  NOT NULL,   -- (REWARD_VIEW + REWARD_CLICK) × campaign_days
+  CUMULATIVE_EARNED DECIMAL(20,6)  NOT NULL DEFAULT 0,
+  LATEST_TX_HEX     TEXT           DEFAULT '',  -- last partially-signed tx received from creator
+  STATUS            VARCHAR(16)    NOT NULL DEFAULT 'pending', -- pending|open|settled|expired
+  CREATED_AT        BIGINT         NOT NULL,
+  PRIMARY KEY (CAMPAIGN_ID, VIEWER_KEY)
+);
 ```
+
+> `CHANNEL_STATE` exists on both creator and viewer nodes with different semantics:
+> - **Creator node**: `LATEST_TX_HEX` = last tx it signed and sent; `CUMULATIVE_EARNED` = total it has committed
+> - **Viewer node**: `LATEST_TX_HEX` = last tx received from creator (ready to post); `CUMULATIVE_EARNED` = total earned
+
+**Note on `CAMPAIGNS.ESCROW_WALLET_PK`**: this field stores a **per-campaign generated key** (`keys action:new`), not the node's main wallet key. This provides on-chain isolation between campaigns — a spend on one campaign's escrow does not expose the creator's main wallet key.
 
 **H2 SQL rules** (mandatory — see AGENTS.md §3):
 - Upserts via `MERGE INTO ... KEY(id)` — never `ON CONFLICT`
@@ -244,10 +263,30 @@ CREATE TABLE IF NOT EXISTS DEDUP_LOG (
 - Campaign auto-transitions to `finished` when `budget_remaining <= 0`
 - If budget is insufficient: event rejected silently, no state change
 
-### 4.4 On-chain Batching
+### 4.4 Unidirectional Payment Channels
 
-Per-event on-chain transactions would saturate the Minima network.
-**Decision**: token payments are batched and sent on-chain only when a user reaches a minimum accumulated threshold, or when the campaign closes. The escrow balance is held in the KissVM contract until payout.
+Per-event on-chain transactions would saturate the Minima network and are economically unviable for micropayments (0.01 MINIMA per view).
+
+**Decision**: reward payments use **unidirectional payment channels** (Layer 2). For each viewer-campaign pair, the creator opens a dedicated channel coin on-chain. All intermediate reward updates travel off-chain via Maxima. Only two on-chain transactions occur per viewer: channel opening and final settlement.
+
+#### Channel amount per viewer
+
+```
+campaign_days   = ceil(CAMPAIGN_DURATION_BLOCKS / 1728)
+max_per_viewer  = (REWARD_VIEW + REWARD_CLICK) × campaign_days
+```
+
+This is deterministic — no estimation of viewer count required. The creator reserves exactly this amount per channel. Unspent amounts return to the creator via timelock.
+
+#### Channel coin funding
+
+Each channel coin is funded by **spending the global campaign escrow coin** (Appendix B). The spending tx produces:
+- **output[0]**: new channel coin at `CHANNEL_SCRIPT_ADDRESS` with `max_per_viewer` MINIMA
+- **output[1]**: change back to `ESCROW_ADDRESS` with remaining budget (keepstate:true)
+
+The global escrow script permits this because `STATE(10)` = `max_per_viewer` and `VERIFYOUT` only constrains the change output — the payout output is unrestricted.
+
+`CAMPAIGNS.BUDGET_REMAINING` is decremented by `max_per_viewer` on the creator's node when a channel is opened, giving the creator accurate local budget tracking.
 
 ---
 
@@ -333,7 +372,8 @@ var LIMITS = {
 2.  System computes fee: fee = budget_total × 0.06
 3.  Creator reviews and approves total: budget_total + fee
 4.  Budget locked in KissVM escrow (see Appendix B):
-    a. Fetch creator wallet public key:  keys action:list  → publickey[0]
+    a. Generate a per-campaign wallet key:  keys action:new  → publickey
+       → save as CAMPAIGNS.ESCROW_WALLET_PK  (isolates this campaign on-chain)
     b. Register escrow script (once per install):
        newscript script:"LET creatorkey=PREVSTATE(1) ASSERT SIGNEDBY(creatorkey) LET payout=STATE(10) LET change=@AMOUNT-payout IF change GT 0 THEN ASSERT VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE) ENDIF RETURN TRUE" trackall:true
        → save returned address as ESCROW_ADDRESS constant
@@ -347,6 +387,119 @@ var LIMITS = {
 6.  Ad object created and linked to campaign
 7.  SW broadcasts CAMPAIGN_ANNOUNCE via Maxima to all contacts (poll:false)
 8.  SW schedules periodic re-broadcast every ~10 min via MDS_TIMER_10SECONDS
+```
+
+### 6.5 Channel Open Flow
+
+Triggered the first time a viewer wants to earn rewards from a campaign. The viewer's SDK checks for an existing `CHANNEL_STATE` record for `(campaign_id, viewer_key)`. If none exists, this flow runs before the first reward.
+
+```
+1.  SDK calls MDS.cmd('keys action:new') → generates per-channel viewer key (viewerKey)
+2.  SDK writes CHANNEL_STATE locally:
+      status = 'pending', viewer_key = viewerKey, campaign_id, creator_mx (from campaign)
+      max_amount = (REWARD_VIEW + REWARD_CLICK) × campaign_days
+3.  SDK stores pending rewards in keypair (rewards earned while channel is opening)
+4.  FE shows status message: "Opening reward channel (first interaction)…"
+5.  SDK sends CHANNEL_OPEN_REQUEST to creator via Maxima (poll:true):
+      { type, campaign_id, viewer_key: viewerKey, viewer_mx: MY_MX_ADDRESS, max_amount }
+
+--- Creator node ---
+6.  SW receives CHANNEL_OPEN_REQUEST → handler runs in FE context (not SW) to allow pending approval:
+    a. Verify campaign exists locally and is active
+    b. Verify max_amount <= CAMPAIGNS.BUDGET_REMAINING
+    c. Spend global escrow coin → create channel coin + change back to escrow
+       (requires creator pending approval if MDS write-mode pending is enabled)
+    d. On coin confirmed: write CHANNEL_STATE locally
+         status = 'open', channel_coinid = new coinId, viewer_key, cumulative_earned = 0
+    e. Decrement CAMPAIGNS.BUDGET_REMAINING by max_amount locally
+    f. Send CHANNEL_OPEN to viewer via Maxima (poll:true):
+         { type, campaign_id, viewer_key, channel_coinid, max_amount }
+
+--- Viewer node ---
+7.  FE receives CHANNEL_OPEN signal → update CHANNEL_STATE: status = 'open', channel_coinid
+8.  signalFE('CHANNEL_OPENED', { campaign_id, channel_coinid, max_amount })
+9.  SDK flushes pending rewards: sends accumulated REWARD_REQUESTs to creator
+```
+
+**Failure handling**: if creator does not respond within a configurable timeout (default: 5 min), viewer stores pending rewards in keypair and retries on next app open.
+
+### 6.6 Channel Reward Flow
+
+Runs after every successful `createRewardEvent` call for a campaign with an open channel.
+
+```
+1.  createRewardEvent() succeeds → H2 updated locally (as before)
+2.  SDK reads CHANNEL_STATE for (campaign_id, viewer_key)
+    ├─ status = 'pending' → store REWARD_REQUEST in keypair; show "Channel opening…"
+    └─ status = 'open'   → continue
+3.  SDK sends REWARD_REQUEST to creator via Maxima (poll:true):
+      { type, campaign_id, viewer_key, event_id, cumulative: CUMULATIVE_EARNED + amount }
+    SDK writes pending marker to keypair: PENDING_REWARD_<campaign_id>_<event_id> = '1'
+
+--- Creator node ---
+4.  SW receives REWARD_REQUEST → validates:
+    a. CHANNEL_STATE exists for (campaign_id, viewer_key) and status = 'open'
+    b. cumulative <= MAX_AMOUNT  (no over-claim)
+    c. Idempotency: check if event_id already processed (DEDUP_LOG)
+5.  Creator constructs partial tx (off-chain):
+      txncreate → txninput(channel_coinid) → txnoutput(viewer_address, cumulative)
+      → txnoutput(creator_change_address, MAX_AMOUNT - cumulative)
+      → txnsign(ESCROW_WALLET_PK) → txnexport → hexTx
+    Updates CHANNEL_STATE: cumulative_earned = cumulative, latest_tx_hex = hexTx
+    Adds event_id to DEDUP_LOG
+6.  Sends REWARD_VOUCHER to viewer via Maxima (poll:true):
+      { type, campaign_id, viewer_key, event_id, cumulative, tx_hex: hexTx }
+
+--- Viewer node ---
+7.  FE receives REWARD_VOUCHER:
+    a. Verify event_id matches a pending reward
+    b. Update CHANNEL_STATE: cumulative_earned = cumulative, latest_tx_hex = hexTx
+    c. Remove pending marker from keypair: PENDING_REWARD_<campaign_id>_<event_id>
+    d. signalFE('VOUCHER_RECEIVED', { campaign_id, cumulative })
+```
+
+### 6.7 Channel Settlement Flow
+
+Settlement turns the off-chain accumulated `LATEST_TX_HEX` into an on-chain transaction. Runs automatically when a campaign finishes and optionally on manual user request.
+
+```
+Automatic trigger:
+  SW detects campaign STATUS = 'finished' (via CAMPAIGN_FINISH Maxima or NEWBLOCK expiry check)
+  → for each CHANNEL_STATE WHERE campaign_id = X AND status = 'open' AND latest_tx_hex != ''
+  → signalFE('AUTO_SETTLE', { campaign_id, viewer_key, tx_hex })
+
+Manual trigger:
+  Viewer clicks "Settle rewards" button in UI
+  → reads CHANNEL_STATE.LATEST_TX_HEX for selected campaign
+
+Settlement steps (FE):
+1.  FE calls MDS.cmd('txnimport data:' + tx_hex) → imports partial tx
+2.  FE calls MDS.cmd('txnsign txnid:X key:' + viewer_key) → viewer co-signs
+3.  FE calls MDS.cmd('txnpost txnid:X') → broadcasts to Minima network
+4.  On success: UPDATE CHANNEL_STATE SET STATUS = 'settled'
+5.  signalFE('SETTLE_CONFIRMED', { campaign_id, amount: cumulative_earned })
+```
+
+**Creator reclaim**: after `40 × 1728` blocks from channel coin creation, the creator can reclaim any unsettled channel coin unilaterally via `SIGNEDBY(creatorkey)` branch (see Appendix C).
+
+### 6.8 Reconnection & Sync Flow
+
+Handles the case where either party was offline when messages were sent.
+
+```
+Viewer reconnects (app opens):
+1.  SDK reads all keypair entries matching PENDING_REWARD_<campaign_id>_<event_id>
+2.  For each: check CHANNEL_STATE.STATUS
+    ├─ 'pending' → channel not yet open; keep in keypair, wait for CHANNEL_OPEN
+    └─ 'open'   → resend REWARD_REQUEST (idempotent — creator deduplicates by event_id)
+3.  If CHANNEL_STATE.STATUS = 'open' but LATEST_TX_HEX is stale or missing:
+    → send VOUCHER_SYNC_REQUEST to creator:
+      { type, campaign_id, viewer_key }
+
+Creator receives VOUCHER_SYNC_REQUEST:
+4.  Read CHANNEL_STATE for (campaign_id, viewer_key)
+5.  If latest_tx_hex exists → resend REWARD_VOUCHER with stored tx_hex
+    If no tx yet → respond with CHANNEL_OPEN (re-confirm channel is open)
 ```
 
 ### 6.4 Ad Selection Algorithm
@@ -439,6 +592,32 @@ getUserRewards(userAddress, callback)
 
 getUserProfile(userAddress, callback)
 // Returns: callback(UserProfile | null)
+```
+
+### 7.6 channels.js
+
+```javascript
+openChannel(campaignId, viewerKey, creatorMx, maxAmount, cb)
+// Inserts CHANNEL_STATE (status='pending') and calls updateBudget(deduct maxAmount).
+// Returns: callback(err, boolean)
+
+activateChannel(campaignId, viewerKey, channelCoinId, cb)
+// Updates CHANNEL_STATE: status='open', channel_coinid=channelCoinId.
+// Returns: callback(err, boolean)
+
+getChannelState(campaignId, viewerKey, cb)
+// Returns: callback(err, ChannelState | null)
+
+updateChannelVoucher(campaignId, viewerKey, cumulativeEarned, latestTxHex, cb)
+// Updates CUMULATIVE_EARNED and LATEST_TX_HEX.
+// Returns: callback(err, boolean)
+
+getLatestVoucher(campaignId, viewerKey, cb)
+// Returns: callback(err, { latest_tx_hex, cumulative_earned } | null)
+
+settleChannel(campaignId, viewerKey, cb)
+// Updates CHANNEL_STATE: status='settled'.
+// Returns: callback(err, boolean)
 ```
 
 ### 7.5 minima.js
@@ -570,14 +749,99 @@ Response to a `REQUEST_CAMPAIGN_DATA` message. Payload schema is identical to `C
 }
 ```
 
-### 8.8 SW → FE Signal Contract
+### 8.8 CHANNEL_OPEN_REQUEST
+
+**Direction**: Viewer FE → Creator FE (unicast via `to:<creator_mx_address>`, `poll:true`)
+
+Sent by the viewer SDK the first time it wants to earn rewards from a campaign. Triggers channel coin creation on the creator's node.
+
+```json
+{
+  "type": "CHANNEL_OPEN_REQUEST",
+  "campaign_id": "uuid",
+  "viewer_key": "0x...",
+  "viewer_mx": "Mx...",
+  "max_amount": 0.66
+}
+```
+
+### 8.9 CHANNEL_OPEN
+
+**Direction**: Creator FE → Viewer FE (unicast via `to:<viewer_mx>`, `poll:true`)
+
+Sent after the creator has successfully opened the channel coin on-chain.
+
+```json
+{
+  "type": "CHANNEL_OPEN",
+  "campaign_id": "uuid",
+  "viewer_key": "0x...",
+  "channel_coinid": "0x...",
+  "max_amount": 0.66
+}
+```
+
+### 8.10 REWARD_REQUEST
+
+**Direction**: Viewer FE → Creator FE (unicast via `to:<creator_mx_address>`, `poll:true`)
+
+Sent after each successful `createRewardEvent`. The `cumulative` field is the total earned so far including this event. Idempotent: creator deduplicates by `event_id`.
+
+```json
+{
+  "type": "REWARD_REQUEST",
+  "campaign_id": "uuid",
+  "viewer_key": "0x...",
+  "event_id": "uuid",
+  "cumulative": 0.12
+}
+```
+
+### 8.11 REWARD_VOUCHER
+
+**Direction**: Creator FE → Viewer FE (unicast via `to:<viewer_mx>`, `poll:true`)
+
+Sent in response to a `REWARD_REQUEST`. Contains the partially-signed transaction (creator's signature). The viewer co-signs and stores it; posts to chain when settling.
+
+```json
+{
+  "type": "REWARD_VOUCHER",
+  "campaign_id": "uuid",
+  "viewer_key": "0x...",
+  "event_id": "uuid",
+  "cumulative": 0.12,
+  "tx_hex": "0x..."
+}
+```
+
+### 8.12 VOUCHER_SYNC_REQUEST
+
+**Direction**: Viewer FE → Creator FE (unicast via `to:<creator_mx_address>`, `poll:true`)
+
+Sent on reconnection when the viewer has a channel open but is missing or unsure of the latest voucher.
+
+```json
+{
+  "type": "VOUCHER_SYNC_REQUEST",
+  "campaign_id": "uuid",
+  "viewer_key": "0x..."
+}
+```
+
+Creator responds with the latest `REWARD_VOUCHER` it has for this pair, or with `CHANNEL_OPEN` if no voucher has been issued yet.
+
+### 8.13 SW → FE Signal Contract
 
 | Signal type | Payload | Fired by | Trigger |
 |---|---|---|---|
 | `DB_READY` | `{}` | `db-init.js` (SW) | All tables created — FE may begin DB access |
 | `REWARD_CONFIRMED` | `{ event_id, amount, type }` | `core/rewards.js` (FE) | Successful reward persisted in callback chain |
-| `CAMPAIGN_UPDATED` | `{ campaign_id, status, budget_remaining }` | `campaign.handler.js` (SW) | Budget changed or status changed via Maxima |
+| `CAMPAIGN_UPDATED` | `{ campaign_id, status, budget_remaining }` | `campaign.handler.js` (SW) | Status changed via Maxima |
 | `NEW_CAMPAIGN` | `{ campaign_id }` | `campaign.handler.js` (SW) | CAMPAIGN_ANNOUNCE received and persisted |
+| `CHANNEL_OPENED` | `{ campaign_id, channel_coinid, max_amount }` | `channel.handler.js` (FE) | Channel coin confirmed on-chain, viewer can earn |
+| `VOUCHER_RECEIVED` | `{ campaign_id, cumulative }` | `channel.handler.js` (FE) | New REWARD_VOUCHER stored; viewer balance updated |
+| `AUTO_SETTLE` | `{ campaign_id, viewer_key, tx_hex }` | `channel.handler.js` (FE) | Campaign finished — viewer should post settlement tx |
+| `SETTLE_CONFIRMED` | `{ campaign_id, amount }` | `channel.handler.js` (FE) | Settlement tx posted successfully |
 
 ---
 
@@ -600,17 +864,19 @@ The client is **semi-trusted**. A malicious publisher can bypass SDK-level check
 
 ### 9.2 On-chain Validation (authoritative)
 
-| Check | Enforcement | MVP status |
+| Check | Enforcement | Status |
 |---|---|---|
-| Funds committed by creator | KissVM locked funds | ✅ enforced |
-| Creator signature required to spend | KissVM SIGNEDBY | ✅ enforced |
-| Budget >= batch payout amount | Creator constructs valid tx amounts | ✅ at settlement time |
-| Budget never negative (per-reward) | H2 DB pre-check only | ⚠️ off-chain only |
-| Automatic per-reward deduction | Not implemented | ❌ post-MVP |
+| Funds committed by creator | Global escrow KissVM coin | ✅ enforced |
+| Only creator can open channels | `SIGNEDBY(creatorkey)` on global escrow | ✅ enforced |
+| Channel amount bounded | `max_per_viewer` enforced at channel creation | ✅ enforced |
+| Viewer cannot over-claim | Channel coin amount is fixed at open time | ✅ enforced |
+| Both parties must agree on payout | `MULTISIG(2 creatorkey viewerkey)` on channel coin | ✅ enforced |
+| Creator can reclaim unsettled channels | `@COINAGE GT (40*1728) AND SIGNEDBY(creatorkey)` | ✅ enforced |
+| Budget never negative (per-reward) | H2 DB pre-check + channel MAX_AMOUNT cap | ⚠️ H2 + channel cap |
 
-**MVP note**: The escrow script (`SIGNEDBY(creatorkey)`) enforces that only the creator can move funds. Budget-floor enforcement is off-chain (H2 DB). The on-chain guarantee is commitment + auditability, not automatic deduction. See Appendix B for the full escrow contract spec.
+**Note**: Per-reward on-chain deduction is not enforced — rewards accumulate off-chain and are settled in one transaction per channel. The channel coin's fixed `MAX_AMOUNT` is the on-chain cap. See Appendix B (global escrow) and Appendix C (channel contract).
 
-The Minima blockchain is the **source of truth** for fund custody. Client-side H2 is authoritative for reward accounting within a session.
+The Minima blockchain is the **source of truth** for fund custody. Client-side H2 is authoritative for reward accounting between settlements.
 
 ---
 
@@ -694,17 +960,26 @@ MDS.init(function(msg) {
 |---|---|---|
 | `inited` | `onInited()` | Init DB schema, register node in USER_PROFILE, start re-broadcast |
 | `MAXIMA` | `onMaxima(data)` | Decode hex payload, route by `payload.type` |
-| `MDS_TIMER_10SECONDS` | `onTimer()` | Re-broadcast active campaigns, check expirations |
+| `MDS_TIMER_10SECONDS` | `onTimer()` | Re-broadcast active campaigns, check expirations, scan escrow coins |
+| `NEWBLOCK` | `onNewBlock()` | Check campaign expiry; trigger AUTO_SETTLE signal for expired campaigns with open channels |
 
 ### 11.3 Maxima Message Handlers
 
-| Message type | Handler | DB impact | FE signal |
+| Message type | Handler file | DB impact | FE signal |
 |---|---|---|---|
-| `CAMPAIGN_ANNOUNCE` | `handleCampaignAnnounce(p)` | MERGE CAMPAIGNS + ADS | `NEW_CAMPAIGN` |
-| `CAMPAIGN_PAUSE` | `handleCampaignPause(p)` | UPDATE CAMPAIGNS SET STATUS='paused' | `CAMPAIGN_UPDATED` |
-| `CAMPAIGN_FINISH` | `handleCampaignFinish(p)` | UPDATE CAMPAIGNS SET STATUS='finished' | `CAMPAIGN_UPDATED` |
+| `CAMPAIGN_ANNOUNCE` | `campaign.handler.js` | MERGE CAMPAIGNS + ADS | `NEW_CAMPAIGN` |
+| `CAMPAIGN_PAUSE` | `campaign.handler.js` | UPDATE CAMPAIGNS STATUS='paused' | `CAMPAIGN_UPDATED` |
+| `CAMPAIGN_FINISH` | `campaign.handler.js` | UPDATE CAMPAIGNS STATUS='finished' | `CAMPAIGN_UPDATED` |
+| `REQUEST_CAMPAIGN_DATA` | `campaign.handler.js` | read only | — (sends CAMPAIGN_DATA_RESPONSE) |
+| `CAMPAIGN_DATA_RESPONSE` | `campaign.handler.js` | MERGE CAMPAIGNS + ADS | `NEW_CAMPAIGN` |
+| `CHANNEL_OPEN_REQUEST` | `channel.handler.js` | MERGE CHANNEL_STATE (creator) | — (sends CHANNEL_OPEN; FE handles coin creation) |
+| `CHANNEL_OPEN` | `channel.handler.js` | UPDATE CHANNEL_STATE status='open' | `CHANNEL_OPENED` |
+| `REWARD_REQUEST` | `channel.handler.js` | UPDATE CHANNEL_STATE (cumulative, tx_hex) | — (sends REWARD_VOUCHER) |
+| `REWARD_VOUCHER` | `channel.handler.js` | UPDATE CHANNEL_STATE (tx_hex, cumulative) | `VOUCHER_RECEIVED` |
+| `VOUCHER_SYNC_REQUEST` | `channel.handler.js` | read only | — (sends REWARD_VOUCHER or CHANNEL_OPEN) |
 
-> Reward processing (`REWARD_EVENTS`, budget deduction, `USER_PROFILE` updates) is FE-owned. See §8.4.
+> Reward accounting (`REWARD_EVENTS`, `USER_PROFILE`) is FE-owned. See §8.4.
+> Channel coin creation and settlement tx signing are FE-owned (require pending approval flow).
 
 ### 11.4 Rhino Runtime Constraints
 
@@ -738,6 +1013,7 @@ MDS.init(function(msg) {
   selection.js        # Ad selection algorithm (selectAd)
   validation.js       # View/click validation, LIMITS enforcement, dedup
   rewards.js          # RewardEvent creation, USER_PROFILE updates
+  channels.js         # CHANNEL_STATE CRUD, channel lifecycle management
   minima.js           # MDS.sql wrapper, Maxima sender, FE signaller
 
 /sdk
@@ -756,7 +1032,8 @@ service.js            # SW entry point — must be named service.js at zip root
     db-init.js        # H2 schema init — called from onInited()
     /handlers
       maxima.handler.js    # Routes inbound Maxima by payload.type
-      campaign.handler.js  # CAMPAIGN_ANNOUNCE / PAUSE / FINISH: persist + signal FE
+      campaign.handler.js  # CAMPAIGN_ANNOUNCE / PAUSE / FINISH / REQUEST / RESPONSE
+      channel.handler.js   # CHANNEL_OPEN_REQUEST/OPEN, REWARD_REQUEST/VOUCHER, VOUCHER_SYNC
 ```
 
 ### 12.2 Module Rules
@@ -841,10 +1118,10 @@ The publisher must **not**:
 
 | Item | Status | Notes |
 |---|---|---|
-| KissVM escrow contract spec | **Defined — see Appendix B** | Simple SIGNEDBY; auto-deduction is post-MVP |
+| KissVM global escrow contract | **Defined — see Appendix B** | SIGNEDBY(creatorkey); funds campaign channel opens |
+| KissVM channel contract | **Defined — see Appendix C** | MULTISIG(2 creatorkey viewerkey) + timelock |
 | Platform fee collection wallet | Not defined in MVP | Fee tracked off-chain only for now |
-| Batch payout threshold | Not defined in MVP | Needs tuning based on network cost |
-| Automatic per-reward on-chain deduction | Post-MVP | Requires more complex multi-party KissVM |
+| Per-reward on-chain deduction | Not applicable | Channels solve this at settlement granularity |
 | Cryptographic event signing | Future | Eliminates malicious publisher risk |
 | Campaign gossip (multi-hop) | Future | MVP: direct Maxima contacts only |
 | Advanced interest segmentation | Out of scope | |
@@ -924,8 +1201,9 @@ MDS.cmd("newscript script:\"" + ESCROW_SCRIPT + "\" trackall:true", function(res
 // On campaign creation — get wallet key, then send to escrow
 MDS.keypair.get("ESCROW_ADDRESS", function(addrRes) {
   var escrowAddress = addrRes.response.value;
-  MDS.cmd("keys action:list", function(keysRes) {
-    var walletPK = keysRes.response.keys[0].publickey;
+  MDS.cmd("keys action:new", function(keysRes) {
+    // Per-campaign key — isolates this campaign on-chain from other campaigns and the main wallet
+    var walletPK = keysRes.response.key.publickey;
     MDS.cmd("block", function(blockRes) {
       var expiryBlock = parseInt(blockRes.response.block) + CAMPAIGN_DURATION_BLOCKS;
       var campaignIdHex = "0x" + utf8ToHex(campaignId).toUpperCase();
@@ -945,30 +1223,29 @@ MDS.keypair.get("ESCROW_ADDRESS", function(addrRes) {
 });
 ```
 
-#### Batch Reward Settlement
+#### Channel Open (funding a viewer channel from the escrow)
 
-When accumulated user rewards reach `BATCH_THRESHOLD_MIN`:
+When a viewer requests a channel (`CHANNEL_OPEN_REQUEST`), the creator spends the global escrow to create a channel coin:
 
 ```
 txncreate id:<txnid>
 txninput  id:<txnid> coinid:<ESCROW_COINID> scriptmmr:true
-txnoutput id:<txnid> storestate:false amount:<payout>    address:<user_minima_address>
-txnoutput id:<txnid> storestate:true  amount:<remaining> address:<ESCROW_ADDRESS>
-txnstate  id:<txnid> port:1  value:<wallet_pubkey>
+txnoutput id:<txnid> storestate:false amount:<max_per_viewer> address:<CHANNEL_SCRIPT_ADDRESS>
+txnoutput id:<txnid> storestate:true  amount:<remaining>     address:<ESCROW_ADDRESS>
+txnstate  id:<txnid> port:1  value:<creator_wallet_pk>
 txnstate  id:<txnid> port:2  value:<expiry_block>
 txnstate  id:<txnid> port:3  value:<campaign_id_hex>
 txnstate  id:<txnid> port:4  value:<creator_mx_address>
-txnstate  id:<txnid> port:10 value:<payout>
-txnsign   id:<txnid> publickey:<wallet_pubkey>
+txnstate  id:<txnid> port:10 value:<max_per_viewer>
+txnsign   id:<txnid> publickey:<creator_wallet_pk>
 txnpost   id:<txnid> mine:true auto:true
 txndelete id:<txnid>
 ```
 
 Notes:
-- `scriptmmr:true` on `txninput` adds MMR proof automatically at input time
-- Output order matters: payout output is at index `@INPUT` (0), change is at `INC(@INPUT)` (1) — must match the script's `VERIFYOUT(INC(@INPUT) ...)` check
-- `storestate:true` on change output preserves state for the next spend; `PREVSTATE` at next spend reads port 1/2/3 from this transaction's state
-- After posting, update `CAMPAIGNS.ESCROW_COINID` to the new change output coinid
+- `STATE(10)` = `max_per_viewer` → script sees `change = @AMOUNT - max_per_viewer` → verifies output[1] returns to `@ADDRESS`
+- Output[0] goes to `CHANNEL_SCRIPT_ADDRESS` — the script does not constrain this output
+- After posting: update `CAMPAIGNS.ESCROW_COINID` to new change coinid; save channel coinid in `CHANNEL_STATE.CHANNEL_COINID`
 
 #### Campaign Close / Refund
 
@@ -991,7 +1268,7 @@ When `change = @AMOUNT - payout = 0`, the `IF change GT 0` branch is skipped —
 | Key type | Minima command | Role in MinimaAds |
 |---|---|---|
 | **Maxima public key** | `maxima action:info → publickey` | Node identity — used in `CREATOR_ADDRESS`, `USER_PROFILE.ADDRESS` |
-| **Wallet signing key** | `keys action:list → publickey` | KissVM SIGNEDBY — used in escrow PREVSTATE(1) |
+| **Per-campaign wallet key** | `keys action:new → publickey` | KissVM SIGNEDBY — used in escrow PREVSTATE(1) and channel MULTISIG |
 
 These are **different keys**. Do not substitute one for the other.
 
@@ -1002,10 +1279,76 @@ These are **different keys**. Do not substitute one for the other.
 | Funds locked on-chain | ✅ | Visible to all Minima nodes |
 | Requires creator signature to spend | ✅ | SIGNEDBY enforced by network |
 | Prevents silent fund redirection | ✅ | Any spend is an auditable on-chain tx |
-| Automatic per-reward budget deduction | ❌ | Off-chain only — post-MVP |
-| Trustless payout without creator online | ❌ | Requires creator to sign each batch — post-MVP |
-| Budget floor per individual payout | ❌ | Not script-enforced — post-MVP |
+| Automatic per-reward budget deduction | ⚠️ | Off-chain only; channel MAX_AMOUNT is on-chain cap |
+| Trustless payout without creator online | ✅ | Viewer holds signed voucher; settles independently |
+| Budget floor per individual payout | ❌ | Not script-enforced; channel cap is the boundary |
 
+---
+
+## Appendix C: KissVM Channel Contract Spec
+
+### C.1 Purpose
+
+The channel contract enables trustless off-chain reward accumulation between a specific creator-viewer pair. It enforces:
+
+- Viewer can only receive up to `MAX_AMOUNT` (set at channel creation)
+- Both parties must co-sign any spending during the active period
+- Creator can reclaim unsettled funds after the timelock expires
+
+### C.2 Script
+
+```
+IF @COINAGE GT (40*1728) AND SIGNEDBY(creatorkey) THEN RETURN TRUE
+ENDIF
+RETURN MULTISIG(2 creatorkey viewerkey)
+```
+
+- `40*1728` blocks ≈ 40 days — creator reclaim window after campaign ends (~6 days)
+- `MULTISIG(2 creatorkey viewerkey)` — both signatures required during active period
+
+### C.3 State Variables (frozen at channel coin creation)
+
+| Port | Read by | Value | Purpose |
+|---|---|---|---|
+| 1 | `PREVSTATE(1)` | Creator per-campaign wallet key | Required for SIGNEDBY and MULTISIG |
+| 2 | `PREVSTATE(2)` | Viewer per-channel wallet key | Required for MULTISIG |
+| 3 | `PREVSTATE(3)` | Campaign ID (hex-encoded UTF-8) | Links channel to campaign |
+
+### C.4 Partial Transaction Format (REWARD_VOUCHER)
+
+Creator constructs and signs; viewer co-signs at settlement:
+
+```
+txncreate id:<txnid>
+txninput  id:<txnid> coinid:<CHANNEL_COINID> scriptmmr:true
+txnoutput id:<txnid> storestate:false amount:<cumulative>            address:<viewer_wallet_address>
+txnoutput id:<txnid> storestate:false amount:<max_amount-cumulative> address:<creator_wallet_address>
+txnsign   id:<txnid> publickey:<creator_wallet_pk>
+txnexport id:<txnid>
+→ hexTx sent to viewer via REWARD_VOUCHER
+```
+
+Viewer settles:
+```
+txnimport data:<hexTx>
+txnsign   id:<txnid> publickey:<viewer_wallet_pk>
+txnpost   id:<txnid> mine:true auto:true
+txndelete id:<txnid>
+```
+
+Each new reward creates a **new tx** with a higher `cumulative`. The viewer discards the previous voucher and stores the latest one. Only the last voucher is ever posted.
+
+### C.5 Script Registration
+
+```javascript
+var CHANNEL_SCRIPT = "IF @COINAGE GT (40*1728) AND SIGNEDBY(PREVSTATE(1)) THEN RETURN TRUE ENDIF RETURN MULTISIG(2 PREVSTATE(1) PREVSTATE(2))";
+
+MDS.cmd("newscript script:\"" + CHANNEL_SCRIPT + "\" trackall:true", function(res) {
+  MDS.keypair.set("CHANNEL_SCRIPT_ADDRESS", res.response.address, function() {});
+});
+```
+
+`CHANNEL_SCRIPT_ADDRESS` is shared across all channels — coins are differentiated by their PREVSTATE(1) (creator key) and PREVSTATE(2) (viewer key).
 
 ---
 

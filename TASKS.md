@@ -369,3 +369,344 @@ Update:
 | T10 | UI | `dapp/app.js`, `dapp/views/*.js` | Done |
 | T11 | UI | `renderer/renderAd.js`, `public/index.html`, `public/dapp.conf` | Done |
 | T12 | SW + UI | `creator.js`, `main.js` | Pending |
+| **T-CH1** | **DB** | `db-init.js` (×2 runtimes) | ⬜ |
+| **T-CH2** | **Core** | `core/channels.js` (nou) | ⬜ |
+| **T-CH3** | **SW** | `handlers/channel.handler.js` (nou) + `maxima.handler.js` | ⬜ |
+| **T-CH4** | **FE** | `dapp/views/creator.js`, `dapp/app.js` | ⬜ |
+| **T-CH5** | **SDK** | `sdk/index.js` | ⬜ |
+| **T-CH6** | **UI** | `dapp/views/viewer.js` | ⬜ |
+
+---
+
+## Canal unidireccional — Payment Channels (T-CH1 → T-CH6)
+
+> Implementació dels canals de recompensa (MinimaAds.md §4.4, §6.5–6.8, §7.6, §8.8–8.12, Appendix C).
+> Ordre obligatori: T-CH1 → T-CH2 → T-CH3 → T-CH4 → T-CH5 → T-CH6.
+> Llegir MinimaAds.md §6.5–6.8 complet abans de qualsevol tasca d'aquest bloc.
+
+---
+
+### T-CH1 — DB: taula CHANNEL_STATE
+
+| Camp | Valor |
+|---|---|
+| **Status** | ⬜ |
+| **Agent** | Sonnet |
+| **Fitxers** | `public/service-workers/db-init.js`, FE DB init |
+| **Spec** | MinimaAds.md §3.5, AGENTS.md §8 |
+
+**Prompt:**
+```
+You are implementing T-CH1 for MinimaAds. Read CLAUDE.md, MinimaAds.md §3.5, and AGENTS.md §8 before writing any code.
+
+Task: Add the CHANNEL_STATE table to BOTH runtimes (SW and FE).
+
+The exact schema is in MinimaAds.md §3.5. Key points:
+- PRIMARY KEY is (CAMPAIGN_ID, VIEWER_KEY) — composite, not single column
+- Use CREATE TABLE IF NOT EXISTS
+- SW runtime: Rhino-safe syntax (var, function(), string concat, no trailing commas, MDS.log not console.log)
+- Both runtimes must initialize exactly the same table
+- Add the CREATE TABLE call in the same place as the other tables in each file
+
+Files to modify:
+1. public/service-workers/db-init.js (SW)
+2. Find the FE DB init location (check dapp/app.js — search for CREATE TABLE)
+
+Do NOT modify any other file. Do NOT change existing tables.
+
+Provide the standard handoff note (CLAUDE.md §10) when done.
+```
+
+---
+
+### T-CH2 — Core: channels.js
+
+| Camp | Valor |
+|---|---|
+| **Status** | ⬜ |
+| **Agent** | Sonnet |
+| **Fitxers** | `core/channels.js` (nou fitxer) |
+| **Spec** | MinimaAds.md §7.6, §3.5 |
+
+**Prompt:**
+```
+You are implementing T-CH2 for MinimaAds. Read CLAUDE.md, MinimaAds.md §7.6 and §3.5, and AGENTS.md §8 before writing any code.
+
+Task: Create core/channels.js with these 6 functions (signatures are contracts — do not alter):
+
+  openChannel(campaignId, viewerKey, creatorMx, maxAmount, cb)
+    → MERGE INTO CHANNEL_STATE (status='pending')
+    → then calls updateBudget(campaignId, maxAmount, cb) to deduct from BUDGET_REMAINING
+    → cb(err, boolean)
+
+  activateChannel(campaignId, viewerKey, channelCoinId, cb)
+    → UPDATE CHANNEL_STATE SET STATUS='open', CHANNEL_COINID=channelCoinId
+    → cb(err, boolean)
+
+  getChannelState(campaignId, viewerKey, cb)
+    → SELECT * FROM CHANNEL_STATE WHERE UPPER(CAMPAIGN_ID)=... AND UPPER(VIEWER_KEY)=...
+    → cb(err, row | null)
+
+  updateChannelVoucher(campaignId, viewerKey, cumulativeEarned, latestTxHex, cb)
+    → MERGE INTO CHANNEL_STATE updating CUMULATIVE_EARNED and LATEST_TX_HEX
+    → cb(err, boolean)
+
+  getLatestVoucher(campaignId, viewerKey, cb)
+    → returns { latest_tx_hex, cumulative_earned } or null
+    → cb(err, object | null)
+
+  settleChannel(campaignId, viewerKey, cb)
+    → UPDATE CHANNEL_STATE SET STATUS='settled'
+    → cb(err, boolean)
+
+Rules:
+- All DB access via sqlQuery() from core/minima.js — no bare MDS.sql
+- All H2 column reads use UPPERCASE keys (row.CAMPAIGN_ID, row.STATUS, etc.)
+- All user strings through escapeSql()
+- String comparisons via UPPER() on both sides
+- Rhino-safe: var, function(), string concatenation, no trailing commas
+- MERGE INTO ... KEY(CAMPAIGN_ID, VIEWER_KEY) for upserts
+
+Provide the standard handoff note (CLAUDE.md §10) when done.
+```
+
+---
+
+### T-CH3 — SW: channel.handler.js + maxima.handler.js
+
+| Camp | Valor |
+|---|---|
+| **Status** | ⬜ |
+| **Agent** | Sonnet |
+| **Fitxers** | `public/service-workers/handlers/channel.handler.js` (nou), `maxima.handler.js` |
+| **Spec** | MinimaAds.md §6.5–6.8, §8.8–8.12, §11.3 |
+
+**Prompt:**
+```
+You are implementing T-CH3 for MinimaAds. Read CLAUDE.md, MinimaAds.md §6.5–6.8 §8.8–8.12 §11.3, and AGENTS.md §9 §10 before writing any code.
+
+Task: Create handlers/channel.handler.js and update maxima.handler.js.
+
+CRITICAL ARCHITECTURE NOTE: Channel coin creation (CHANNEL_OPEN_REQUEST handler) and partial tx signing (REWARD_REQUEST handler) CANNOT run in the SW — they require MDS.cmd('send'/'txncreate'/'txnsign') which may trigger pending approval and must run in the FE. The SW handlers must signal the FE to perform these operations via signalFE().
+
+channel.handler.js — implement these 5 functions:
+
+handleChannelOpenRequest(payload):
+  - payload: { campaign_id, viewer_key, viewer_mx, max_amount }
+  - Creator side: validate campaign active + budget sufficient via getCampaign()
+  - Write CHANNEL_STATE via openChannel() (status='pending')
+  - signalFE('DO_CHANNEL_OPEN', { campaign_id, viewer_key, viewer_mx, max_amount })
+  - The FE (dapp/app.js) will do the actual coin creation and send CHANNEL_OPEN
+
+handleChannelOpen(payload):
+  - payload: { campaign_id, viewer_key, channel_coinid, max_amount }
+  - Viewer side: call activateChannel(campaign_id, viewer_key, channel_coinid, cb)
+  - signalFE('CHANNEL_OPENED', { campaign_id, channel_coinid, max_amount })
+
+handleRewardRequest(payload):
+  - payload: { campaign_id, viewer_key, event_id, cumulative }
+  - Creator side: validate via getChannelState() — channel open, cumulative <= MAX_AMOUNT
+  - Idempotency: check DEDUP_LOG for event_id via isDuplicate()
+  - signalFE('DO_REWARD_VOUCHER', { campaign_id, viewer_key, viewer_mx, event_id, cumulative })
+  - The FE will build the partial tx and send REWARD_VOUCHER
+
+handleRewardVoucher(payload):
+  - payload: { campaign_id, viewer_key, event_id, cumulative, tx_hex }
+  - Viewer side: call updateChannelVoucher(campaign_id, viewer_key, cumulative, tx_hex, cb)
+  - Remove event_id from DEDUP_LOG pending (add to DEDUP_LOG if not present)
+  - signalFE('VOUCHER_RECEIVED', { campaign_id, cumulative })
+
+handleVoucherSyncRequest(payload):
+  - payload: { campaign_id, viewer_key }
+  - Creator side: getLatestVoucher() → if exists: signalFE('DO_SEND_VOUCHER', {...})
+  - The FE re-sends the REWARD_VOUCHER Maxima message
+
+maxima.handler.js: add 5 new else-if branches routing to the channel handlers above.
+All Rhino constraints apply. No console.log, no let/const, no arrow functions, no template literals.
+
+Provide the standard handoff note (CLAUDE.md §10) when done.
+```
+
+---
+
+### T-CH4 — FE: creator.js + app.js (canal open + tx signing)
+
+| Camp | Valor |
+|---|---|
+| **Status** | ⬜ |
+| **Agent** | **Opus** |
+| **Fitxers** | `dapp/views/creator.js`, `dapp/app.js` |
+| **Spec** | MinimaAds.md §6.3, §6.5, §8.8–8.9, §8.13, Appendix B §B.5, Appendix C §C.5 |
+
+> **Opus** perquè inclou construcció de txs parcials (txncreate/txninput/txnoutput/txnsign/txnexport) i el flux de pending approval del canal.
+
+**Prompt:**
+```
+You are implementing T-CH4 for MinimaAds. Read CLAUDE.md, MinimaAds.md §6.3 §6.5 §8.8 §8.9 §8.13 Appendix B §B.5 Appendix C §C.5, and AGENTS.md before writing any code.
+
+Task: Update creator.js and app.js for channel support.
+
+PART 1 — creator.js changes:
+1. Replace the `keys action:list → keys[0].publickey` call with `keys action:new → key.publickey`
+   The response shape for `keys action:new` is res.response.key.publickey (not keys[0]).
+   Verify this against refs/Minima-1.0.45/src/org/minima/system/mds/runnable/MDSJS.java before assuming.
+2. After resolveEscrowAddress(), also resolve CHANNEL_SCRIPT_ADDRESS:
+   - Check keypair 'CHANNEL_SCRIPT_ADDRESS'
+   - If missing: run newscript with the channel script (MinimaAds.md Appendix C §C.5)
+   - Store result in keypair 'CHANNEL_SCRIPT_ADDRESS'
+
+PART 2 — app.js new MDSCOMMS handlers (creator side):
+
+Handler for signal 'DO_CHANNEL_OPEN' (from channel.handler.js SW):
+  data: { campaign_id, viewer_key, viewer_mx, max_amount }
+  1. Get ESCROW_COINID for campaign from DB (getCampaign())
+  2. Get CHANNEL_SCRIPT_ADDRESS from keypair
+  3. Get creator wallet pk (ESCROW_WALLET_PK from campaign record)
+  4. Construct tx (Appendix B §B.5 "Channel Open"):
+     MDS.cmd('txncreate id:ch_<uid>')
+     MDS.cmd('txninput id:ch_<uid> coinid:<ESCROW_COINID> scriptmmr:true')
+     MDS.cmd('txnoutput id:ch_<uid> storestate:false amount:<max_amount> address:<CHANNEL_SCRIPT_ADDRESS>')
+     MDS.cmd('txnoutput id:ch_<uid> storestate:true amount:<remaining> address:<ESCROW_ADDRESS>')
+     MDS.cmd('txnstate id:ch_<uid> port:1 value:<creator_wallet_pk>')
+     MDS.cmd('txnstate id:ch_<uid> port:2 value:<expiry_block>')
+     MDS.cmd('txnstate id:ch_<uid> port:3 value:<campaign_id_hex>')
+     MDS.cmd('txnstate id:ch_<uid> port:4 value:<creator_mx_address>')
+     MDS.cmd('txnstate id:ch_<uid> port:10 value:<max_amount>')
+     MDS.cmd('txnsign id:ch_<uid> publickey:<creator_wallet_pk>')
+     MDS.cmd('txnpost id:ch_<uid> mine:true auto:true')
+  5. On sendRes.pending: store in keypair and show "Awaiting approval…"
+  6. On success: extract new escrow change coinid → update CAMPAIGNS.ESCROW_COINID
+     Extract channel coinid (output[0].coinid) → send CHANNEL_OPEN Maxima to viewer_mx (poll:true)
+
+Handler for signal 'DO_REWARD_VOUCHER' (from channel.handler.js SW):
+  data: { campaign_id, viewer_key, viewer_mx, event_id, cumulative }
+  1. Get channel state from DB (CHANNEL_COINID, MAX_AMOUNT, ESCROW_WALLET_PK)
+  2. Get viewer wallet address (derived from viewer_key: MDS.cmd('getaddress publickey:<viewer_key>'))
+  3. Get creator change address (MDS.cmd('getaddress publickey:<creator_wallet_pk>'))
+  4. Construct partial tx (Appendix C §C.4):
+     txncreate → txninput(CHANNEL_COINID) → txnoutput(viewer_address, cumulative)
+     → txnoutput(creator_address, MAX_AMOUNT-cumulative) → txnsign(creator_wallet_pk) → txnexport
+  5. Send REWARD_VOUCHER to viewer_mx (poll:true) with tx_hex: MinimaAds.md §8.11
+
+Handler for signal 'DO_SEND_VOUCHER':
+  Re-sends last REWARD_VOUCHER for (campaign_id, viewer_key) from CHANNEL_STATE.LATEST_TX_HEX
+
+Register new MDSCOMMS handlers in app.js for incoming viewer-side signals:
+  CHANNEL_OPENED, VOUCHER_RECEIVED, AUTO_SETTLE, SETTLE_CONFIRMED → delegate to viewer.js handlers
+
+Provide the standard handoff note (CLAUDE.md §10) when done.
+```
+
+---
+
+### T-CH5 — SDK: channel open request + reward request
+
+| Camp | Valor |
+|---|---|
+| **Status** | ⬜ |
+| **Agent** | Sonnet |
+| **Fitxers** | `sdk/index.js` |
+| **Spec** | MinimaAds.md §6.5, §6.6, §6.8, §8.8–8.12 |
+
+**Prompt:**
+```
+You are implementing T-CH5 for MinimaAds. Read CLAUDE.md, MinimaAds.md §6.5 §6.6 §6.8 §8.8–8.12, and AGENTS.md before writing any code.
+
+Task: Update sdk/index.js to integrate the payment channel flow after createRewardEvent().
+
+In _trackEvent(), after createRewardEvent() succeeds, add:
+
+1. getChannelState(campaignId, viewerKey, function(err, channel) {
+     if (!channel) {
+       // First interaction — open a channel
+       MDS.cmd('keys action:new', function(res) {
+         var viewerKey = res.response.key.publickey;
+         var maxAmount = ...; // compute: (REWARD_VIEW + REWARD_CLICK) * campaign_days
+         openChannel(campaignId, viewerKey, creatorMx, maxAmount, function() {
+           // Store pending reward in keypair
+           MDS.keypair.set('PENDING_REWARD_' + campaignId + '_' + eventId, JSON.stringify({ cumulative, viewerKey }), function() {});
+           // Send CHANNEL_OPEN_REQUEST to creator
+           sendMaxima(creatorMx, { type: 'CHANNEL_OPEN_REQUEST', campaign_id, viewer_key: viewerKey, viewer_mx: MY_MX_ADDRESS, max_amount: maxAmount });
+           // Show status message to user
+         });
+       });
+     } else if (channel.STATUS === 'pending') {
+       // Channel opening — accumulate pending reward
+       MDS.keypair.set('PENDING_REWARD_' + campaignId + '_' + eventId, JSON.stringify({ cumulative, viewerKey: channel.VIEWER_KEY }), function() {});
+     } else if (channel.STATUS === 'open') {
+       // Send reward request
+       var newCumulative = parseFloat(channel.CUMULATIVE_EARNED) + amount;
+       MDS.keypair.set('PENDING_REWARD_' + campaignId + '_' + eventId, '1', function() {});
+       sendMaxima(channel.CREATOR_MX, { type: 'REWARD_REQUEST', campaign_id, viewer_key: channel.VIEWER_KEY, event_id: eventId, cumulative: newCumulative });
+     }
+   });
+
+On CHANNEL_OPENED signal received (via MDS.comms or from app.js):
+  - activateChannel(campaign_id, channel_coinid)
+  - Flush pending: read keypair entries PENDING_REWARD_<campaignId>_*, send REWARD_REQUEST for each
+
+On VOUCHER_RECEIVED signal:
+  - MDS.keypair.set('PENDING_REWARD_' + campaign_id + '_' + event_id, '', function() {})
+
+On app reconnect (init time):
+  - Scan keypair for PENDING_REWARD_* entries
+  - For each with open channel: resend REWARD_REQUEST
+  - If LATEST_TX_HEX missing for open channel: send VOUCHER_SYNC_REQUEST
+
+MY_MX_ADDRESS and MY_ADDRESS are globals defined in dapp/app.js. Use them directly.
+sendMaxima() helper: use broadcastMaxima or direct MDS.cmd with poll:true to specific Mx address.
+campaign_days = Math.ceil(CAMPAIGN_DURATION_BLOCKS / 1728).
+
+Provide the standard handoff note (CLAUDE.md §10) when done.
+```
+
+---
+
+### T-CH6 — UI: viewer settlement
+
+| Camp | Valor |
+|---|---|
+| **Status** | ⬜ |
+| **Agent** | Sonnet |
+| **Fitxers** | `dapp/views/viewer.js` |
+| **Spec** | MinimaAds.md §6.7, §8.13 |
+
+**Prompt:**
+```
+You are implementing T-CH6 for MinimaAds. Read CLAUDE.md, MinimaAds.md §6.7 §8.13, and AGENTS.md before writing any code.
+
+Task: Update dapp/views/viewer.js to support channel settlement.
+
+Add to the viewer UI (below the existing earned balance):
+
+1. A per-campaign pending rewards section that shows CUMULATIVE_EARNED for each open channel.
+   Read from CHANNEL_STATE WHERE STATUS='open' AND LATEST_TX_HEX != '' for the current viewer.
+
+2. "Settle rewards" button per campaign:
+   On click — runs settlement flow:
+     MDS.cmd('txnimport data:' + tx_hex, function(res) {
+       var txnId = res.response.txnid;
+       MDS.cmd('txnsign txnid:' + txnId + ' publickey:' + viewer_key, function() {
+         MDS.cmd('txnpost txnid:' + txnId + ' mine:true auto:true', function(postRes) {
+           if (postRes.status) {
+             settleChannel(campaign_id, viewer_key, function() {
+               // Update UI: show "Settled X MINIMA"
+             });
+           }
+         });
+       });
+     });
+
+3. AUTO_SETTLE signal handler (called from app.js when campaign finishes):
+   Receives { campaign_id, viewer_key, tx_hex }
+   Runs the same txnimport → txnsign → txnpost flow automatically without user interaction.
+   Shows a notification: "Reward channel settled automatically".
+
+4. onRewardConfirmed() already handles session balance — no change needed.
+   VOUCHER_RECEIVED signal should refresh the pending rewards section display.
+
+VIEWER_KEY for a channel is stored in CHANNEL_STATE.VIEWER_KEY.
+Use getLatestVoucher() and getChannelState() from core/channels.js to read data.
+
+Provide the standard handoff note (CLAUDE.md §10) when done.
+```

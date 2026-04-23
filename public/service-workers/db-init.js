@@ -51,6 +51,19 @@ function initDB(cb) {
     + "LOGGED_AT BIGINT       NOT NULL"
     + ")";
 
+  var sql_channel_state = "CREATE TABLE IF NOT EXISTS CHANNEL_STATE ("
+    + "CAMPAIGN_ID       VARCHAR(256)   NOT NULL,"
+    + "VIEWER_KEY        VARCHAR(66)    NOT NULL,"
+    + "CREATOR_MX        VARCHAR(512)   NOT NULL,"
+    + "CHANNEL_COINID    VARCHAR(66)    DEFAULT '',"
+    + "MAX_AMOUNT        DECIMAL(20,6)  NOT NULL,"
+    + "CUMULATIVE_EARNED DECIMAL(20,6)  NOT NULL DEFAULT 0,"
+    + "LATEST_TX_HEX     TEXT           DEFAULT '',"
+    + "STATUS            VARCHAR(16)    NOT NULL DEFAULT 'pending',"
+    + "CREATED_AT        BIGINT         NOT NULL,"
+    + "PRIMARY KEY (CAMPAIGN_ID, VIEWER_KEY)"
+    + ")";
+
   sqlQuery(sql_campaigns, function(err) {
     if (err) {
       MDS.log("[DB] initDB: failed to create CAMPAIGNS — " + err);
@@ -76,9 +89,15 @@ function initDB(cb) {
               MDS.log("[DB] initDB: failed to create DEDUP_LOG — " + err5);
               return;
             }
-            MDS.log("[DB] initDB: all tables ready");
-            signalFE("DB_READY", {});
-            if (cb) { cb(); }
+            sqlQuery(sql_channel_state, function(err6) {
+              if (err6) {
+                MDS.log("[DB] initDB: failed to create CHANNEL_STATE — " + err6);
+                return;
+              }
+              MDS.log("[DB] initDB: all tables ready");
+              signalFE("DB_READY", {});
+              if (cb) { cb(); }
+            });
           });
         });
       });

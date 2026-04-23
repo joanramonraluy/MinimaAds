@@ -750,6 +750,8 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 | `ADS` | Stores ad units linked to campaigns | `ID` |
 | `REWARD_EVENTS` | Audit log of all view/click events; used for dedup and limit checks | `ID` |
 | `USER_PROFILE` | Stores local user address, interests, earned totals | `ADDRESS` |
+| `DEDUP_LOG` | Deduplication log for reward events; checked by `isDuplicate()` | `ID` |
+| `CHANNEL_STATE` | Per-channel payment state (viewer-campaign pair) | `(CAMPAIGN_ID, VIEWER_KEY)` |
 
 ### CAMPAIGNS
 | Column | Type | Notes |

@@ -108,13 +108,31 @@ function probeDb() {
   });
 }
 
+function initFEChannelState(cb) {
+  var sql = "CREATE TABLE IF NOT EXISTS CHANNEL_STATE ("
+    + "CAMPAIGN_ID       VARCHAR(256)  NOT NULL,"
+    + "VIEWER_KEY        VARCHAR(66)   NOT NULL,"
+    + "CREATOR_MX        VARCHAR(512)  NOT NULL,"
+    + "CHANNEL_COINID    VARCHAR(66)   DEFAULT '',"
+    + "MAX_AMOUNT        DECIMAL(20,6) NOT NULL,"
+    + "CUMULATIVE_EARNED DECIMAL(20,6) NOT NULL DEFAULT 0,"
+    + "LATEST_TX_HEX     TEXT          DEFAULT '',"
+    + "STATUS            VARCHAR(16)   NOT NULL DEFAULT 'pending',"
+    + "CREATED_AT        BIGINT        NOT NULL,"
+    + "PRIMARY KEY (CAMPAIGN_ID, VIEWER_KEY)"
+    + ")";
+  sqlQuery(sql, function() { if (cb) { cb(); } });
+}
+
 function onInited() {
   MDS.cmd('maxima action:info', function(res) {
     if (res && res.status && res.response && res.response.publickey) {
       MY_ADDRESS = res.response.publickey.toUpperCase();
     }
-    probeDb();
-    doRender();
+    initFEChannelState(function() {
+      probeDb();
+      doRender();
+    });
   });
 }
 

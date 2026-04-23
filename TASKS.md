@@ -369,7 +369,7 @@ Update:
 | T10 | UI | `dapp/app.js`, `dapp/views/*.js` | Done |
 | T11 | UI | `renderer/renderAd.js`, `public/index.html`, `public/dapp.conf` | Done |
 | T12 | SW + UI | `creator.js`, `main.js` | Pending |
-| **T-CH1** | **DB** | `db-init.js` (×2 runtimes) | ⬜ |
+| **T-CH1** | **DB** | `db-init.js` (×2 runtimes) | Done |
 | **T-CH2** | **Core** | `core/channels.js` (nou) | ⬜ |
 | **T-CH3** | **SW** | `handlers/channel.handler.js` (nou) + `maxima.handler.js` | ⬜ |
 | **T-CH4** | **FE** | `dapp/views/creator.js`, `dapp/app.js` | ⬜ |
@@ -390,7 +390,7 @@ Update:
 
 | Camp | Valor |
 |---|---|
-| **Status** | ⬜ |
+| **Status** | Done ✅ |
 | **Agent** | Sonnet |
 | **Fitxers** | `public/service-workers/db-init.js`, FE DB init |
 | **Spec** | MinimaAds.md §3.5, AGENTS.md §8 |

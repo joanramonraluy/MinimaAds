@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MinimaAds</title>
+
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
   <style>
     body { max-width: 960px; margin: 0 auto; padding: 0 1rem; }
@@ -17,7 +18,13 @@
 <body>
   <header>
     <nav>
-      <strong>MinimaAds</strong>
+      <ul>
+        <li>
+          <a href="./" class="contrast" style="text-decoration: none;">
+            <strong style="font-size: 1.25rem;">MinimaAds</strong>
+          </a>
+        </li>
+      </ul>
       <ul>
         <li><a href="#viewer">View Ads</a></li>
         <li><a href="#creator">Create</a></li>
@@ -45,6 +52,7 @@
   <script src="core/selection.js"></script>
   <script src="core/validation.js"></script>
   <script src="core/rewards.js"></script>
+  <script src="core/channels.js"></script>
 
   <!-- Renderer -->
   <script src="renderer/renderAd.js"></script>

@@ -1,6 +1,6 @@
 # AGENTS.md — MinimaAds Engineering Guide
 
-Last reviewed against codebase: 2026-04-23 (Rev 12: pending flow bugfixes)
+Last reviewed against codebase: 2026-04-24 (Rev 13: icon implementation)
 Scope: `/home/joanramon/Minima/MinimaAds`
 
 > **Origin note**: This file was bootstrapped from lessons learned building MetaChain (a Minima MiniDapp). Sections 1–5 are generic to any Minima MiniDapp. Sections 6+ are project-specific and must be filled in as the project evolves.
@@ -1022,6 +1022,8 @@ During development, **never add `ALTER TABLE` migration statements** to `db-init
 | 2026-04-17 | Antigravity | **Agent governance**: added sections 0.5 (Source of Truth — document hierarchy with priority rules), 0.6 (Development Workflow — 5-step mandatory process), 0.7 (Contract Enforcement — stable Core API reference), 0.8 (Forbidden Actions — 14 explicit prohibitions), 0.9 (Role of Agents — implementer vs architect boundary). Completed all [TO BE FILLED IN] project sections: 6 (Project Intent), 7 (Runtime Topology with file table), 8 (DB Schema with full column detail), 9 (Protocol Matrix with all 4 message types), 10 (SW→FE Signal Contract with 3 signals), 11 (Source of Truth Rules — runtime state ownership table). Updated §15 Maintenance Rules to cross-reference MinimaAds.md in parallel with AGENTS.md updates. |
 | 2026-04-17 | Antigravity | **CLAUDE.md created**: new file at project root. 10-section operational guide for Claude agents. Includes: document priority table, 4-step task workflow with layer mapping, stable Core API signature reference, forbidden actions (architecture/Maxima/data model/process), Minima runtime constraints quick-reference (Rhino, H2, MDS API, Maxima encoding), multi-agent safety rules, output standards, and mandatory handoff note format. Derived entirely from MinimaAds.md and AGENTS.md — no new decisions introduced. |
 | 2026-04-22 | Claude (T9) | **§13 SDK reference aligned to TASKS.md T9 signatures** — all 5 functions now callback-based with explicit `userAddress`/`interests` params (was Promise-based in §13.2). Resolves conflict between TASKS.md T9 and MinimaAds.md §13.2 flagged during T9 implementation. Consistent with §7.5 "all functions are callback-based". No data-model or protocol changes. |
+| 2026-04-24 | Antigravity | **Visual Assets**: Implemented DApp icon for `dapp.conf` (cropped 1:1, transparent corners). Removed logo and favicon from `index.html` UI as per user request to simplify and avoid pathing issues. |
+
 
 ---
 

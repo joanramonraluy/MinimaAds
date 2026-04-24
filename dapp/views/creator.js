@@ -124,7 +124,8 @@ function onCreatorSubmit(e) {
   fundEscrowAndPublish(campaign, ad, form, submitBtn, msgEl);
 }
 
-var ESCROW_SCRIPT_FE = 'LET creatorkey=PREVSTATE(1) ASSERT SIGNEDBY(creatorkey) LET payout=STATE(10) LET change=@AMOUNT-payout IF change GT 0 THEN ASSERT VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE) ENDIF RETURN TRUE';
+var ESCROW_SCRIPT_FE  = 'LET creatorkey=PREVSTATE(1) ASSERT SIGNEDBY(creatorkey) LET payout=STATE(10) LET change=@AMOUNT-payout IF change GT 0 THEN ASSERT VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE) ENDIF RETURN TRUE';
+var CHANNEL_SCRIPT_FE = 'IF @COINAGE GT (40*1728) AND SIGNEDBY(PREVSTATE(1)) THEN RETURN TRUE ENDIF RETURN MULTISIG(2 PREVSTATE(1) PREVSTATE(2))';
 
 function resolveEscrowAddress(cb) {
   MDS.keypair.get('ESCROW_ADDRESS', function(addrRes) {
@@ -149,6 +150,29 @@ function resolveEscrowAddress(cb) {
   });
 }
 
+function resolveChannelScriptAddress(cb) {
+  MDS.keypair.get('CHANNEL_SCRIPT_ADDRESS', function(addrRes) {
+    var cached = addrRes && addrRes.response ? addrRes.response.value : '';
+    if (cached) {
+      console.log('[CREATOR] CHANNEL_SCRIPT_ADDRESS from keypair:', cached);
+      cb(cached);
+      return;
+    }
+    console.log('[CREATOR] CHANNEL_SCRIPT_ADDRESS not in keypair — deriving via newscript');
+    MDS.cmd('newscript script:"' + CHANNEL_SCRIPT_FE + '" trackall:true', function(res) {
+      if (!res.status) {
+        console.error('[CREATOR] newscript channel failed:', res.error);
+        cb('');
+        return;
+      }
+      var addr = res.response.address;
+      console.log('[CREATOR] CHANNEL_SCRIPT_ADDRESS derived:', addr);
+      MDS.keypair.set('CHANNEL_SCRIPT_ADDRESS', addr, function() {});
+      cb(addr);
+    });
+  });
+}
+
 function fundEscrowAndPublish(campaign, ad, form, submitBtn, msgEl) {
   function fail(reason) {
     console.error('[CREATOR] fail:', reason);
@@ -162,77 +186,86 @@ function fundEscrowAndPublish(campaign, ad, form, submitBtn, msgEl) {
       return;
     }
 
-    MDS.cmd('keys action:list', function(keysRes) {
-      if (!keysRes.status || !keysRes.response || !keysRes.response.keys || !keysRes.response.keys.length) {
-        fail('Could not fetch wallet keys.');
+    resolveChannelScriptAddress(function(channelScriptAddress) {
+      if (!channelScriptAddress) {
+        fail('Could not resolve channel script address. Check node logs.');
         return;
       }
-      var walletPK = keysRes.response.keys[0].publickey;
-      console.log('[CREATOR] walletPK:', walletPK);
 
-      MDS.cmd('block', function(blockRes) {
-        if (!blockRes.status) {
-          fail('Could not fetch current block.');
+      // Per-campaign wallet key — isolates this campaign on-chain from other campaigns and the main wallet.
+      // KeyRow.toJSON returns { publickey, ... } directly under response — see refs/Minima-1.0.45/src/.../search/keys.java action:new.
+      MDS.cmd('keys action:new', function(keysRes) {
+        if (!keysRes.status || !keysRes.response || !keysRes.response.publickey) {
+          fail('Could not generate per-campaign wallet key.');
           return;
         }
-        var expiryBlock = parseInt(blockRes.response.block) + CAMPAIGN_DURATION_BLOCKS;
-        console.log('[CREATOR] expiryBlock:', expiryBlock);
+        var walletPK = keysRes.response.publickey;
+        console.log('[CREATOR] per-campaign walletPK:', walletPK);
 
-        MDS.cmd('maxima action:info', function(mxRes) {
-          if (!mxRes.status) {
-            fail('Could not fetch Maxima identity.');
+        MDS.cmd('block', function(blockRes) {
+          if (!blockRes.status) {
+            fail('Could not fetch current block.');
             return;
           }
-          var creatorContact    = mxRes.response.contact;
-          var campaignIdHex     = '0x' + utf8ToHex(campaign.id).toUpperCase();
-          var creatorContactHex = '0x' + utf8ToHex(creatorContact).toUpperCase();
-          var stateJson         = '{"1":"' + walletPK
-                                + '","2":"' + expiryBlock
-                                + '","3":"' + campaignIdHex
-                                + '","4":"' + creatorContactHex + '"}';
-          console.log('[CREATOR] sending to escrow:', escrowAddress, 'state:', stateJson);
+          var expiryBlock = parseInt(blockRes.response.block) + CAMPAIGN_DURATION_BLOCKS;
+          console.log('[CREATOR] expiryBlock:', expiryBlock);
 
-          MDS.cmd(
-            'send amount:' + campaign.budget_total
-              + ' address:' + escrowAddress
-              + ' state:' + stateJson,
-            function(sendRes) {
-              console.log('[CREATOR] send response:', JSON.stringify(sendRes));
-
-              if (sendRes.pending) {
-                console.log('[CREATOR] send is pending approval, uid:', sendRes.pendinguid, 'campaignId:', campaign.id);
-                campaign.escrow_wallet_pk = walletPK;
-                var pendingData = JSON.stringify({ campaign: campaign, ad: ad });
-                MDS.keypair.set('PENDING_CAMPAIGN_' + campaign.id, pendingData, function() {
-                  console.log('[CREATOR] pending data stored in keypair for campaign:', campaign.id);
-                });
-                msgEl.textContent = 'Awaiting approval — please approve in Minima Hub pending queue.';
-                if (submitBtn) { submitBtn.removeAttribute('disabled'); }
-                return;
-              }
-
-              if (!sendRes.status) {
-                fail('Escrow send failed: ' + (sendRes.error || 'unknown error'));
-                return;
-              }
-
-              var coinId = '';
-              try {
-                coinId = sendRes.response.txpow.body.txn.outputs[0].coinid;
-              } catch (ex) {
-                console.error('[CREATOR] coinId extraction failed. Full response:', JSON.stringify(sendRes));
-                fail('Could not read escrow coinId from send response.');
-                return;
-              }
-
-              console.log('[CREATOR] escrow coinId:', coinId);
-              campaign.escrow_coinid    = coinId;
-              campaign.escrow_wallet_pk = walletPK;
-              msgEl.textContent = 'Escrow funded. Saving campaign…';
-
-              saveCampaignAndBroadcast(campaign, ad, form, submitBtn, msgEl);
+          MDS.cmd('maxima action:info', function(mxRes) {
+            if (!mxRes.status) {
+              fail('Could not fetch Maxima identity.');
+              return;
             }
-          );
+            var creatorContact    = mxRes.response.contact;
+            var campaignIdHex     = '0x' + utf8ToHex(campaign.id).toUpperCase();
+            var creatorContactHex = '0x' + utf8ToHex(creatorContact).toUpperCase();
+            var stateJson         = '{"1":"' + walletPK
+                                  + '","2":"' + expiryBlock
+                                  + '","3":"' + campaignIdHex
+                                  + '","4":"' + creatorContactHex + '"}';
+            console.log('[CREATOR] sending to escrow:', escrowAddress, 'state:', stateJson);
+
+            MDS.cmd(
+              'send amount:' + campaign.budget_total
+                + ' address:' + escrowAddress
+                + ' state:' + stateJson,
+              function(sendRes) {
+                console.log('[CREATOR] send response:', JSON.stringify(sendRes));
+
+                if (sendRes.pending) {
+                  console.log('[CREATOR] send is pending approval, uid:', sendRes.pendinguid, 'campaignId:', campaign.id);
+                  campaign.escrow_wallet_pk = walletPK;
+                  var pendingData = JSON.stringify({ campaign: campaign, ad: ad });
+                  MDS.keypair.set('PENDING_CAMPAIGN_' + campaign.id, pendingData, function() {
+                    console.log('[CREATOR] pending data stored in keypair for campaign:', campaign.id);
+                  });
+                  msgEl.textContent = 'Awaiting approval — please approve in Minima Hub pending queue.';
+                  if (submitBtn) { submitBtn.removeAttribute('disabled'); }
+                  return;
+                }
+
+                if (!sendRes.status) {
+                  fail('Escrow send failed: ' + (sendRes.error || 'unknown error'));
+                  return;
+                }
+
+                var coinId = '';
+                try {
+                  coinId = sendRes.response.txpow.body.txn.outputs[0].coinid;
+                } catch (ex) {
+                  console.error('[CREATOR] coinId extraction failed. Full response:', JSON.stringify(sendRes));
+                  fail('Could not read escrow coinId from send response.');
+                  return;
+                }
+
+                console.log('[CREATOR] escrow coinId:', coinId);
+                campaign.escrow_coinid    = coinId;
+                campaign.escrow_wallet_pk = walletPK;
+                msgEl.textContent = 'Escrow funded. Saving campaign…';
+
+                saveCampaignAndBroadcast(campaign, ad, form, submitBtn, msgEl);
+              }
+            );
+          });
         });
       });
     });

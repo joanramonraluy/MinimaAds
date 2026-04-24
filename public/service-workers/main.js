@@ -41,6 +41,7 @@ function onInited() {
   MDS.load("public/service-workers/db-init.js");
   MDS.load("public/service-workers/handlers/maxima.handler.js");
   MDS.load("public/service-workers/handlers/campaign.handler.js");
+  MDS.load("public/service-workers/handlers/channel.handler.js");
   initDB(function() {
     MDS.cmd("maxima action:info", function(resp) {
       if (!resp.status || !resp.response) {

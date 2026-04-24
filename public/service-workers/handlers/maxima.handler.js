@@ -35,6 +35,16 @@ function onMaxima(msg) {
     handleRequestCampaignData(payload);
   } else if (payload.type === "CAMPAIGN_DATA_RESPONSE") {
     handleCampaignDataResponse(payload);
+  } else if (payload.type === "CHANNEL_OPEN_REQUEST") {
+    handleChannelOpenRequest(payload);
+  } else if (payload.type === "CHANNEL_OPEN") {
+    handleChannelOpen(payload);
+  } else if (payload.type === "REWARD_REQUEST") {
+    handleRewardRequest(payload);
+  } else if (payload.type === "REWARD_VOUCHER") {
+    handleRewardVoucher(payload);
+  } else if (payload.type === "VOUCHER_SYNC_REQUEST") {
+    handleVoucherSyncRequest(payload);
   } else {
     MDS.log("[MAXIMA] unknown type: " + payload.type);
   }

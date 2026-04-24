@@ -869,10 +869,14 @@ PRIMARY KEY: `(CAMPAIGN_ID, VIEWER_KEY)` — one channel per viewer-campaign pai
 | `CAMPAIGN_UPDATED` | `{ campaign_id, status, budget_remaining }` | `campaign.handler.js` (SW) | Refresh campaign card status |
 | `NEW_CAMPAIGN` | `{ campaign_id }` | `campaign.handler.js` (SW) | Reload available campaigns list |
 | `CAMPAIGN_PENDING_DENIED` | `{ uid }` | `campaign.handler.js` (SW) | Show "Transaction denied" in creator form |
-| `CHANNEL_OPENED` | `{ campaign_id, channel_coinid, max_amount }` | `channel.handler.js` (FE) | Clear "Opening channel…" message; flush pending rewards |
-| `VOUCHER_RECEIVED` | `{ campaign_id, cumulative }` | `channel.handler.js` (FE) | Update viewer earned balance display |
-| `AUTO_SETTLE` | `{ campaign_id, viewer_key, tx_hex }` | `channel.handler.js` (FE) | Prompt viewer to settle or auto-settle (txnimport → txnsign → txnpost) |
+| `CHANNEL_OPENED` | `{ campaign_id, channel_coinid, max_amount }` | `channel.handler.js` (SW) | Clear "Opening channel…" message; flush pending rewards |
+| `VOUCHER_RECEIVED` | `{ campaign_id, cumulative }` | `channel.handler.js` (SW) | Update viewer earned balance display |
+| `AUTO_SETTLE` | `{ campaign_id, viewer_key, tx_hex }` | `channel.handler.js` (SW) | Prompt viewer to settle or auto-settle (txnimport → txnsign → txnpost) |
 | `SETTLE_CONFIRMED` | `{ campaign_id, amount }` | `channel.handler.js` (FE) | Show settlement confirmation; update channel status |
+| `DO_CHANNEL_OPEN` | `{ campaign_id, viewer_key, viewer_mx, max_amount }` | `channel.handler.js` (SW) | Creator FE creates channel coin (txncreate/txninput/txnoutput/txnpost) |
+| `DO_REWARD_VOUCHER` | `{ campaign_id, viewer_key, viewer_mx, event_id, cumulative }` | `channel.handler.js` (SW) | Creator FE builds partial tx and sends REWARD_VOUCHER to viewer |
+| `DO_SEND_VOUCHER` | `{ campaign_id, viewer_key, viewer_mx, cumulative, tx_hex }` | `channel.handler.js` (SW) | Creator FE re-sends REWARD_VOUCHER with stored tx_hex (reconnect sync) |
+| `DO_RESEND_CHANNEL_OPEN` | `{ campaign_id, viewer_key, viewer_mx, channel_coinid, max_amount }` | `channel.handler.js` (SW) | Creator FE re-sends CHANNEL_OPEN when viewer syncs but no voucher exists yet |
 
 **Rule**: Every new signal type fired by SW must be registered in the FE `MDSCOMMS` handler (`dapp/app.js`). Missing registrations cause silent UI failures. The payload is at `event.data.message` (not `event.data`) — see section 5.1.
 
@@ -1018,6 +1022,67 @@ During development, **never add `ALTER TABLE` migration statements** to `db-init
 | 2026-04-17 | Antigravity | **Agent governance**: added sections 0.5 (Source of Truth — document hierarchy with priority rules), 0.6 (Development Workflow — 5-step mandatory process), 0.7 (Contract Enforcement — stable Core API reference), 0.8 (Forbidden Actions — 14 explicit prohibitions), 0.9 (Role of Agents — implementer vs architect boundary). Completed all [TO BE FILLED IN] project sections: 6 (Project Intent), 7 (Runtime Topology with file table), 8 (DB Schema with full column detail), 9 (Protocol Matrix with all 4 message types), 10 (SW→FE Signal Contract with 3 signals), 11 (Source of Truth Rules — runtime state ownership table). Updated §15 Maintenance Rules to cross-reference MinimaAds.md in parallel with AGENTS.md updates. |
 | 2026-04-17 | Antigravity | **CLAUDE.md created**: new file at project root. 10-section operational guide for Claude agents. Includes: document priority table, 4-step task workflow with layer mapping, stable Core API signature reference, forbidden actions (architecture/Maxima/data model/process), Minima runtime constraints quick-reference (Rhino, H2, MDS API, Maxima encoding), multi-agent safety rules, output standards, and mandatory handoff note format. Derived entirely from MinimaAds.md and AGENTS.md — no new decisions introduced. |
 | 2026-04-22 | Claude (T9) | **§13 SDK reference aligned to TASKS.md T9 signatures** — all 5 functions now callback-based with explicit `userAddress`/`interests` params (was Promise-based in §13.2). Resolves conflict between TASKS.md T9 and MinimaAds.md §13.2 flagged during T9 implementation. Consistent with §7.5 "all functions are callback-based". No data-model or protocol changes. |
+
+---
+
+## 17) Node Verification Workflow
+
+The maintainer has access to one or more active Minima nodes at any time. Any number of nodes can run simultaneously — typically one as **creator** and one or more as **viewer** nodes.
+
+### How verification works
+
+The agent cannot access the nodes directly. The workflow is:
+
+1. **Agent implements** a feature and provides the handoff note with verification steps.
+2. **Maintainer installs / reloads** the MiniDapp on the relevant nodes (reinstall clears the H2 DB; reload without reinstall preserves it).
+3. **Maintainer triggers** the action described in the verification step (e.g. creates a campaign, sends a Maxima message, clicks an ad).
+4. **Maintainer copies** the relevant `MDS.log` output from the node debug panel and pastes it into the conversation.
+5. **Agent reads the logs** and confirms the expected log lines are present, or diagnoses any errors.
+
+### What to look for in logs
+
+Each module uses a bracketed prefix in `MDS.log` calls. Use these to filter:
+
+| Prefix | Module |
+|---|---|
+| `[ADS]` | `main.js` — bootstrap, Maxima PK, escrow registration |
+| `[DB]` | `db-init.js` — table creation |
+| `[SQL]` | `core/minima.js` — sqlQuery errors |
+| `[MAXIMA]` | `maxima.handler.js` — inbound Maxima routing |
+| `[CAMPAIGN]` | `campaign.handler.js` — campaign persist, status change, discovery |
+| `[CHANNEL]` | `channel.handler.js` — channel open, reward request, voucher |
+| `[DISCOVERY]` | `campaign.handler.js` — escrow coin scan |
+| `[PENDING]` | `campaign.handler.js` — MDS_PENDING approval flow |
+| `[TIMER]` | `main.js` — timer ticks |
+| `[VALIDATION]` | `core/validation.js` — isDuplicate errors |
+
+### Verification steps for T-CH3 (channel.handler.js)
+
+To verify `handleChannelOpenRequest`:
+- Node A (creator) must have an active campaign in DB.
+- Send a `CHANNEL_OPEN_REQUEST` Maxima message from Node B to Node A.
+- Expected in Node A logs: `[CHANNEL] CHANNEL_OPEN_REQUEST: channel pending. campaign: <id>`
+- If budget insufficient: `[CHANNEL] CHANNEL_OPEN_REQUEST: insufficient budget`
+- If campaign inactive: `[CHANNEL] CHANNEL_OPEN_REQUEST: campaign not active`
+
+To verify `handleRewardRequest` duplicate rejection:
+- Send the same `REWARD_REQUEST` twice (same `event_id`).
+- Second time: `[CHANNEL] REWARD_REQUEST: duplicate event_id: <id>`
+
+To verify `handleRewardVoucher` DEDUP_LOG write:
+- After receiving a `REWARD_VOUCHER`, query `SELECT * FROM DEDUP_LOG` from the node SQL console.
+- The `event_id` from the voucher should appear as a row.
+
+### T-CH3 Verification Result (2026-04-24)
+
+Two-node test (creator = node1 `10.0.0.11:9001`, viewer = node2):
+
+- ✅ Both nodes boot without Rhino errors — `channel.handler.js` loads cleanly
+- ✅ Both nodes reach `[DB] initDB: all tables ready` (CHANNEL_STATE table present)
+- ✅ Maxima messaging functional: viewer discovers escrow coin on-chain → sends `REQUEST_CAMPAIGN_DATA` → creator replies → viewer persists campaign `19dbe586589-e7bfa9c1`
+- ⏳ `[CHANNEL]` handler functions not yet triggered — expected, as `CHANNEL_OPEN_REQUEST` is only sent by T-CH5 (SDK), not yet implemented
+
+Full per-handler verification (handleChannelOpenRequest, handleRewardRequest, handleRewardVoucher) pending T-CH4 + T-CH5.
 
 ---
 

@@ -214,8 +214,14 @@ function _refreshChannelRewards() {
           + " FROM CHANNEL_STATE WHERE STATUS = 'open' AND LATEST_TX_HEX != ''";
   sqlQuery(sql, function(err, rows) {
     if (err) { console.error('[CH6] _refreshChannelRewards query error:', err); return; }
-    console.log('[CH6] setteable channels:', (rows || []).length);
-    _renderChannelRewardRows(rows || [], container);
+    var found = rows || [];
+    console.log('[CH6] settleable channels:', found.length);
+    for (var i = 0; i < found.length; i++) {
+      var vk = found[i].VIEWER_KEY ? found[i].VIEWER_KEY.substring(0, 12) + '…' : '?';
+      console.log('[CH6] pending — campaign:', found[i].CAMPAIGN_ID,
+        'cumulative:', found[i].CUMULATIVE_EARNED, 'viewer:', vk);
+    }
+    _renderChannelRewardRows(found, container);
   });
 }
 

@@ -107,6 +107,9 @@ function onTimer() {
 
 function rebroadcastActiveCampaigns() {
   MDS.log("[TIMER] Re-broadcast active campaigns (not yet fully implemented)");
+  if (typeof logPendingChannelState === "function") {
+    logPendingChannelState();
+  }
 }
 
 MDS.init(function(msg) {

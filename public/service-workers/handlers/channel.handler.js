@@ -40,17 +40,24 @@ function handleChannelOpenRequest(payload) {
       return;
     }
 
-    openChannel(campaignId, viewerKey, viewerMx, maxAmount, function(openErr) {
-      if (openErr) {
-        MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: openChannel failed: " + openErr);
+    getChannelState(campaignId, viewerKey, function(chErr, existing) {
+      if (!chErr && existing && (existing.STATUS === 'pending' || existing.STATUS === 'open')) {
+        MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: channel already " + existing.STATUS + ", skipping. campaign: " + campaignId);
         return;
       }
-      MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: channel pending. campaign: " + campaignId + " viewer_key: " + viewerKey);
-      signalFE("DO_CHANNEL_OPEN", {
-        campaign_id: campaignId,
-        viewer_key: viewerKey,
-        viewer_mx: viewerMx,
-        max_amount: maxAmount
+
+      openChannel(campaignId, viewerKey, viewerMx, maxAmount, function(openErr) {
+        if (openErr) {
+          MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: openChannel failed: " + openErr);
+          return;
+        }
+        MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: channel pending. campaign: " + campaignId + " viewer_key: " + viewerKey);
+        signalFE("DO_CHANNEL_OPEN", {
+          campaign_id: campaignId,
+          viewer_key: viewerKey,
+          viewer_mx: viewerMx,
+          max_amount: maxAmount
+        });
       });
     });
   });

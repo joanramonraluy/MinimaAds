@@ -95,6 +95,9 @@ function processEscrowCoin(coin) {
         return;
       }
 
+      // Persist creator Mx so viewer SDK can send CHANNEL_OPEN_REQUEST via to: routing.
+      MDS.keypair.set("CREATOR_MX_" + campaignId, creatorMxAddr, function() {});
+
       var payload = {
         type: "REQUEST_CAMPAIGN_DATA",
         campaign_id: campaignId,
@@ -190,6 +193,9 @@ function onPending(msg) {
   var campaignId = "";
   try {
     var body = msg.data.result.response.body;
+    if (!body || !body.txn || !body.txn.outputs) {
+      return;
+    }
     coinId = body.txn.outputs[0].coinid;
     var txnState = body.txn.state || [];
     for (var si = 0; si < txnState.length; si++) {

@@ -692,8 +692,20 @@ function handleFePending(msg) {
       return;
     }
     if (!accepted || !status) {
-      console.log('[CHANNEL] pending denied/failed, uid:', uid);
-      if (ctx.txId) { MDS.cmd('txndelete id:' + ctx.txId, function() {}); }
+      console.log('[CHANNEL] pending denied/failed, uid:', uid, 'kind:', ctx.kind);
+      if (ctx.kind === 'settlement') {
+        MDS.cmd('txndelete id:' + ctx.settleId, function() {});
+      } else if (ctx.txId) {
+        MDS.cmd('txndelete id:' + ctx.txId, function() {});
+      }
+      clearPendingChannelOp(uid);
+      return;
+    }
+    if (ctx.kind === 'settlement') {
+      console.log('[CHANNEL] settlement txnsign approved, posting campaign:', ctx.campaignId);
+      if (typeof _postSettleTx === 'function') {
+        _postSettleTx(ctx.settleId, ctx.campaignId, ctx.viewerKey);
+      }
       clearPendingChannelOp(uid);
       return;
     }

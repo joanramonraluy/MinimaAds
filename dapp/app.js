@@ -28,7 +28,7 @@ function generateUID() {
 
 function currentRoute() {
   var h = (window.location.hash || '').replace(/^#/, '');
-  if (h === 'creator' || h === 'stats' || h === 'viewer') { return h; }
+  if (h === 'creator' || h === 'stats' || h === 'viewer' || h === 'earnings') { return h; }
   return 'viewer';
 }
 
@@ -57,6 +57,8 @@ function doRender() {
   var route = currentRoute();
   if (route === 'creator' && typeof renderCreator === 'function') {
     renderCreator(root);
+  } else if (route === 'earnings' && typeof renderEarnings === 'function') {
+    renderEarnings(root);
   } else if (route === 'stats' && typeof renderStats === 'function') {
     renderStats(root);
   } else if (typeof renderViewer === 'function') {

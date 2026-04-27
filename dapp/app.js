@@ -827,15 +827,44 @@ function initFEChannelState(cb) {
   sqlQuery(sql, function() { if (cb) { cb(); } });
 }
 
+function _showWriteModeRequired() {
+  var root = document.getElementById('app');
+  if (!root) { return; }
+  root.innerHTML = '';
+  var box = document.createElement('div');
+  box.style.cssText = 'max-width:480px;margin:4rem auto;padding:1.5rem;border:2px solid #c00;border-radius:6px;text-align:center;';
+  var title = document.createElement('h2');
+  title.textContent = 'Write mode required';
+  var msg = document.createElement('p');
+  msg.textContent = 'MinimaAds needs WRITE permissions to sign and post transactions.';
+  var steps = document.createElement('ol');
+  steps.style.cssText = 'text-align:left;margin:.75rem auto;max-width:320px;';
+  ['Open the Minima Hub', 'Go to MiniDapps → MinimaAds', 'Tap WRITE', 'Reload this page'].forEach(function(s) {
+    var li = document.createElement('li');
+    li.textContent = s;
+    steps.appendChild(li);
+  });
+  box.appendChild(title);
+  box.appendChild(msg);
+  box.appendChild(steps);
+  root.appendChild(box);
+}
+
 function onInited() {
-  MDS.cmd('maxima action:info', function(res) {
-    if (res && res.status && res.response) {
-      if (res.response.publickey) { MY_ADDRESS    = res.response.publickey.toUpperCase(); }
-      if (res.response.contact)   { MY_MX_ADDRESS = res.response.contact; }
+  MDS.cmd('checkmode', function(cm) {
+    if (cm && cm.response && cm.response.writemode === false) {
+      _showWriteModeRequired();
+      return;
     }
-    initFEChannelState(function() {
-      probeDb();
-      doRender();
+    MDS.cmd('maxima action:info', function(res) {
+      if (res && res.status && res.response) {
+        if (res.response.publickey) { MY_ADDRESS    = res.response.publickey.toUpperCase(); }
+        if (res.response.contact)   { MY_MX_ADDRESS = res.response.contact; }
+      }
+      initFEChannelState(function() {
+        probeDb();
+        doRender();
+      });
     });
   });
 }

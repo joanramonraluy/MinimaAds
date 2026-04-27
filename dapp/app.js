@@ -163,7 +163,7 @@ function sendChannelMaxima(mxAddress, payload, cb) {
 // the address string to direct the voucher's first output).
 function deriveScriptAddress(pubkey, trackall, cacheKey, cb) {
   MDS.keypair.get(cacheKey, function(kpRes) {
-    var cached = kpRes && kpRes.response ? kpRes.response.value : '';
+    var cached = kpRes && kpRes.status ? kpRes.value : '';
     if (cached) { cb(cached); return; }
     var script = 'RETURN SIGNEDBY(' + pubkey + ')';
     var cmd = 'newscript script:"' + script + '" trackall:' + (trackall ? 'true' : 'false');
@@ -190,7 +190,7 @@ function savePendingChannelOp(uid, ctx) {
 function loadPendingChannelOp(uid, cb) {
   if (_pendingChannelOps[uid]) { cb(_pendingChannelOps[uid]); return; }
   MDS.keypair.get('PENDING_CHANNEL_' + uid, function(kpRes) {
-    var raw = kpRes && kpRes.response ? kpRes.response.value : '';
+    var raw = kpRes && kpRes.status ? kpRes.value : '';
     if (!raw) { cb(null); return; }
     var ctx = null;
     try { ctx = JSON.parse(raw); } catch (e) { cb(null); return; }
@@ -260,9 +260,9 @@ function handleDoChannelOpen(data) {
     }
 
     MDS.keypair.get('CHANNEL_SCRIPT_ADDRESS', function(chRes) {
-      var channelAddr = chRes && chRes.response ? chRes.response.value : '';
+      var channelAddr = chRes && chRes.status ? chRes.value : '';
       MDS.keypair.get('ESCROW_ADDRESS', function(esRes) {
-        var escrowAddr = esRes && esRes.response ? esRes.response.value : '';
+        var escrowAddr = esRes && esRes.status ? esRes.value : '';
         if (!channelAddr || !escrowAddr) {
           console.error('[CHANNEL] DO_CHANNEL_OPEN: missing script addresses',
             'channel:', channelAddr, 'escrow:', escrowAddr);
@@ -286,7 +286,6 @@ function handleDoChannelOpen(data) {
 
 function buildAndPostChannelTx(ctx) {
   var txId    = 'ch_' + generateUID();
-  var change  = ctx.budgetLeft - ctx.maxAmount;
   var campaignIdHex = '0x' + utf8ToHex(ctx.campaignId).toUpperCase();
   var viewerMxHex   = '0x' + utf8ToHex(ctx.viewerMx).toUpperCase();
 
@@ -300,6 +299,12 @@ function buildAndPostChannelTx(ctx) {
 
     MDS.cmd('txninput id:' + txId + ' coinid:' + ctx.escrowCoinId + ' scriptmmr:true', function(r2) {
       if (!r2.status) { fail('txninput', r2); return; }
+
+      // Use actual on-chain coin amount to match escrow script's @AMOUNT — avoids VERIFYOUT
+      // mismatch caused by stale BUDGET_REMAINING after a previously-failed txnpost.
+      var actualAmount = parseFloat(r2.response.transaction.inputs[0].amount);
+      var change = actualAmount - ctx.maxAmount;
+      console.log('[CHANNEL] escrow actualAmount:', actualAmount, 'maxAmount:', ctx.maxAmount, 'change:', change);
 
       // output[0] — channel coin (max_amount → CHANNEL_SCRIPT_ADDRESS)
       MDS.cmd('txnoutput id:' + txId
@@ -328,9 +333,26 @@ function buildAndPostChannelTx(ctx) {
             if (!stateOk) { fail('txnstate', null); return; }
 
             MDS.cmd('txnsign id:' + txId + ' publickey:' + ctx.walletPK, function(r5) {
+              if (r5 && r5.pending) {
+                var signCtx = {
+                  kind:         'channel_open_postsign',
+                  txId:         txId,
+                  campaignId:   ctx.campaignId,
+                  viewerKey:    ctx.viewerKey,
+                  viewerMx:     ctx.viewerMx,
+                  maxAmount:    ctx.maxAmount,
+                  escrowCoinId: ctx.escrowCoinId,
+                  channelAddr:  ctx.channelAddr,
+                  escrowAddr:   ctx.escrowAddr,
+                  walletPK:     ctx.walletPK
+                };
+                savePendingChannelOp(r5.pendinguid, signCtx);
+                console.log('[CHANNEL] txnsign pending, uid:', r5.pendinguid);
+                return;
+              }
               if (!r5.status) { fail('txnsign', r5); return; }
 
-              MDS.cmd('txnpost id:' + txId + ' mine:true auto:true', function(r6) {
+              MDS.cmd('txnpost id:' + txId + ' mine:true', function(r6) {
                 console.log('[CHANNEL] txnpost response:', JSON.stringify(r6));
 
                 if (r6 && r6.pending) {
@@ -510,7 +532,8 @@ function handleDoRewardVoucher(data) {
   });
 }
 
-function buildAndExportVoucherTx(ctx) {
+function buildAndExportVoucherTx(ctx, _retries) {
+  var retries = (_retries === undefined) ? 0 : _retries;
   var txId   = 'rv_' + generateUID();
   var refund = ctx.maxAmount - ctx.cumulative;
 
@@ -523,7 +546,25 @@ function buildAndExportVoucherTx(ctx) {
     if (!r1.status) { fail('txncreate', r1); return; }
 
     MDS.cmd('txninput id:' + txId + ' coinid:' + ctx.channelCoinId + ' scriptmmr:true', function(r2) {
-      if (!r2.status) { fail('txninput', r2); return; }
+      if (!r2.status) {
+        MDS.cmd('txndelete id:' + txId, function() {});
+        // Channel coin may not be indexed yet (just mined). Retry up to 5x with 3s delay.
+        if (retries < 5 && r2.error && r2.error.indexOf('not found') !== -1) {
+          console.log('[CHANNEL] txninput coin not found, retry', retries + 1, 'in 3s');
+          setTimeout(function() { buildAndExportVoucherTx(ctx, retries + 1); }, 3000);
+          return;
+        }
+        // Coin permanently missing — delete channel state so the viewer can re-open it.
+        if (r2.error && r2.error.indexOf('not found') !== -1 && typeof sqlQuery === 'function') {
+          console.error('[CHANNEL] channel coin missing after max retries, clearing channel state: ' + ctx.campaignId);
+          var clearSql = "DELETE FROM CHANNEL_STATE WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(ctx.campaignId) + "') AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(ctx.viewerKey) + "')";
+          sqlQuery(clearSql, function() {
+            console.log('[CHANNEL] channel state cleared, viewer can re-open: ' + ctx.campaignId);
+          });
+          return;
+        }
+        fail('txninput', r2); return;
+      }
 
       MDS.cmd('txnoutput id:' + txId
             + ' storestate:false'
@@ -535,6 +576,21 @@ function buildAndExportVoucherTx(ctx) {
           if (r4 && !r4.status) { fail('txnoutput[creator]', r4); return; }
 
           MDS.cmd('txnsign id:' + txId + ' publickey:' + ctx.creatorWalletPK, function(r5) {
+            if (r5 && r5.pending) {
+              var voucherCtx = {
+                kind:            'voucher_sign',
+                txId:            txId,
+                campaignId:      ctx.campaignId,
+                viewerKey:       ctx.viewerKey,
+                viewerMx:        ctx.viewerMx,
+                cumulative:      ctx.cumulative,
+                eventId:         ctx.eventId,
+                creatorWalletPK: ctx.creatorWalletPK
+              };
+              savePendingChannelOp(r5.pendinguid, voucherCtx);
+              console.log('[CHANNEL] voucher txnsign pending, uid:', r5.pendinguid);
+              return;
+            }
             if (!r5.status) { fail('txnsign', r5); return; }
 
             MDS.cmd('txnexport id:' + txId, function(r6) {
@@ -637,6 +693,7 @@ function handleFePending(msg) {
     }
     if (!accepted || !status) {
       console.log('[CHANNEL] pending denied/failed, uid:', uid);
+      if (ctx.txId) { MDS.cmd('txndelete id:' + ctx.txId, function() {}); }
       clearPendingChannelOp(uid);
       return;
     }
@@ -647,6 +704,45 @@ function handleFePending(msg) {
       clearPendingChannelOp(uid);
       return;
     }
+    if (ctx.kind === 'channel_open_postsign') {
+      MDS.cmd('txnpost id:' + ctx.txId + ' mine:true', function(r6) {
+        console.log('[CHANNEL] txnpost (after sign approval) response:', JSON.stringify(r6));
+        if (r6 && r6.pending) {
+          var postCtx = {
+            kind:         'channel_open',
+            txId:         ctx.txId,
+            campaignId:   ctx.campaignId,
+            viewerKey:    ctx.viewerKey,
+            viewerMx:     ctx.viewerMx,
+            maxAmount:    ctx.maxAmount,
+            escrowCoinId: ctx.escrowCoinId,
+            channelAddr:  ctx.channelAddr,
+            escrowAddr:   ctx.escrowAddr,
+            walletPK:     ctx.walletPK
+          };
+          savePendingChannelOp(r6.pendinguid, postCtx);
+          console.log('[CHANNEL] txnpost pending after sign, uid:', r6.pendinguid);
+          clearPendingChannelOp(uid);
+          return;
+        }
+        if (!r6.status) {
+          console.error('[CHANNEL] txnpost failed after sign approval:', r6 && r6.error);
+          MDS.cmd('txndelete id:' + ctx.txId, function() {});
+          clearPendingChannelOp(uid);
+          return;
+        }
+        MDS.cmd('txndelete id:' + ctx.txId, function() {});
+        finalizeChannelOpen(r6.response, {
+          campaignId: ctx.campaignId,
+          viewerKey:  ctx.viewerKey,
+          viewerMx:   ctx.viewerMx,
+          maxAmount:  ctx.maxAmount,
+          escrowAddr: ctx.escrowAddr
+        });
+        clearPendingChannelOp(uid);
+      });
+      return;
+    }
     if (ctx.kind === 'channel_open') {
       finalizeChannelOpen(resp, {
         campaignId: ctx.campaignId,
@@ -655,6 +751,40 @@ function handleFePending(msg) {
         maxAmount:  ctx.maxAmount,
         escrowAddr: ctx.escrowAddr
       });
+    }
+    if (ctx.kind === 'voucher_sign') {
+      MDS.cmd('txnexport id:' + ctx.txId, function(r6) {
+        MDS.cmd('txndelete id:' + ctx.txId, function() {});
+        if (!r6.status || !r6.response) {
+          console.error('[CHANNEL] voucher txnexport failed after sign:', r6 && r6.error);
+          clearPendingChannelOp(uid);
+          return;
+        }
+        var txHex = r6.response.data || r6.response.transaction || r6.response;
+        if (typeof txHex !== 'string') {
+          console.error('[CHANNEL] voucher txnexport unexpected shape:', JSON.stringify(r6));
+          clearPendingChannelOp(uid);
+          return;
+        }
+        if (typeof updateChannelVoucher === 'function') {
+          updateChannelVoucher(ctx.campaignId, ctx.viewerKey, ctx.cumulative, txHex, function(err) {
+            if (err) { console.error('[CHANNEL] updateChannelVoucher failed:', err); }
+          });
+        }
+        sendChannelMaxima(ctx.viewerMx, {
+          type:        'REWARD_VOUCHER',
+          campaign_id: ctx.campaignId,
+          viewer_key:  ctx.viewerKey,
+          event_id:    ctx.eventId,
+          cumulative:  ctx.cumulative,
+          tx_hex:      txHex
+        }, function(ok) {
+          console.log('[CHANNEL] REWARD_VOUCHER sent (pending resume) to', ctx.viewerMx,
+            'cumulative:', ctx.cumulative, 'ok:', ok);
+        });
+        clearPendingChannelOp(uid);
+      });
+      return;
     }
     clearPendingChannelOp(uid);
   });

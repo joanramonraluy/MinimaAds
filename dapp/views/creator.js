@@ -18,22 +18,22 @@ function renderCreator(root) {
   form.id = 'ma-creator-form';
   form.innerHTML = ''
     + '<label>Campaign title'
-    + '  <input name="title" required maxlength="256">'
+    + '  <input name="title" value="Campanya " required maxlength="256">'
     + '</label>'
     + '<label>Ad description'
-    + '  <textarea name="body" required maxlength="1024"></textarea>'
+    + '  <textarea name="body" required maxlength="1024">Descripció de la campanya de prova</textarea>'
     + '</label>'
     + '<label>Interests (comma-separated)'
-    + '  <input name="interests" placeholder="tech, web3, minima">'
+    + '  <input name="interests" value="tech, web3, minima" placeholder="tech, web3, minima">'
     + '</label>'
     + '<label>CTA label'
     + '  <input name="cta_label" value="Visit" required maxlength="64">'
     + '</label>'
     + '<label>CTA URL'
-    + '  <input name="cta_url" type="url" required>'
+    + '  <input name="cta_url" type="url" value="https://minima.global" required>'
     + '</label>'
     + '<label>Total budget (MINIMA)'
-    + '  <input name="budget" type="number" step="0.000001" min="0.000001" required>'
+    + '  <input name="budget" type="number" step="0.000001" min="0.000001" value="10" required>'
     + '</label>'
     + '<label>Reward per view'
     + '  <input name="reward_view" type="number" step="0.000001" min="0" value="0.01" required>'
@@ -129,7 +129,7 @@ var CHANNEL_SCRIPT_FE = 'IF @COINAGE GT (40*1728) AND SIGNEDBY(PREVSTATE(1)) THE
 
 function resolveEscrowAddress(cb) {
   MDS.keypair.get('ESCROW_ADDRESS', function(addrRes) {
-    var cached = addrRes && addrRes.response ? addrRes.response.value : '';
+    var cached = addrRes && addrRes.status ? addrRes.value : '';
     if (cached) {
       console.log('[CREATOR] ESCROW_ADDRESS from keypair:', cached);
       cb(cached);
@@ -152,7 +152,7 @@ function resolveEscrowAddress(cb) {
 
 function resolveChannelScriptAddress(cb) {
   MDS.keypair.get('CHANNEL_SCRIPT_ADDRESS', function(addrRes) {
-    var cached = addrRes && addrRes.response ? addrRes.response.value : '';
+    var cached = addrRes && addrRes.status ? addrRes.value : '';
     if (cached) {
       console.log('[CREATOR] CHANNEL_SCRIPT_ADDRESS from keypair:', cached);
       cb(cached);

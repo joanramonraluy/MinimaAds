@@ -374,7 +374,7 @@ Update:
 | **T-CH3** | **SW** | `handlers/channel.handler.js` (nou) + `maxima.handler.js` | Done |
 | **T-CH4** | **FE** | `dapp/views/creator.js`, `dapp/app.js` | Done |
 | **T-CH5** | **SDK** | `sdk/index.js` | Done |
-| **T-CH6** | **UI** | `dapp/views/viewer.js` | ⬜ |
+| **T-CH6** | **UI** | `dapp/views/viewer.js` | Done |
 
 ---
 

@@ -1,18 +1,39 @@
-// T9 — SDK: sdk/index.js
-// Public publisher API: MinimaAds.{init, getAd, render, trackView, trackClick}
+// T-CH5 — SDK: sdk/index.js
+// Public publisher API: MinimaAds.{init, getAd, render, trackView, trackClick}.
 // Callback-based to match Core API pattern (MinimaAds.md §7.5).
+//
 // Depends on (loaded before this file):
 //   core/minima.js, core/campaigns.js, core/selection.js,
-//   core/validation.js, core/rewards.js, renderer/renderAd.js
+//   core/validation.js, core/rewards.js, core/channels.js, renderer/renderAd.js
+//
+// Channel integration (MinimaAds.md §6.5–6.8, §8.8–8.12):
+//   After createRewardEvent() succeeds, _trackEvent runs the channel flow:
+//     - no CHANNEL_STATE row   → open channel (keys action:new, openChannel,
+//                                  store pending marker, send CHANNEL_OPEN_REQUEST)
+//     - status = 'pending'     → accumulate pending marker, wait for CHANNEL_OPEN
+//     - status = 'open'        → send REWARD_REQUEST with new cumulative
+//
+// Pending rewards are mirrored to keypair for survival across reloads. Since
+// MDS.keypair has no list API, we keep a per-campaign index of pending event_ids
+// (MA_PENDING_EVENTS_<campaign_id>) alongside per-event markers
+// (MA_PENDING_REWARD_<campaign_id>_<event_id>).
+//
+// CREATOR_MX on the viewer node stores CAMPAIGNS.CREATOR_ADDRESS (Maxima
+// public key). We reach the creator via `maxima action:send publickey:<pk>`
+// rather than `to:<Mx>` because the Mx contact string is not carried by the
+// CAMPAIGN_ANNOUNCE schema (MinimaAds.md §8.3). Both routes are valid under
+// Maxima; pk is what we already have in CAMPAIGNS.
 
 (function() {
   var _config = null;
   var _inited = false;
+  var _reconnectDone = false;
 
   function init(config, cb) {
     _config = config || {};
     if (_inited) {
       if (cb) { cb(null, true); }
+      _ensureReconnect();
       return;
     }
     if (typeof MDS === 'undefined' || typeof MDS.init !== 'function') {
@@ -23,6 +44,7 @@
       if (event && event.event === 'inited' && !_inited) {
         _inited = true;
         if (cb) { cb(null, true); }
+        _ensureReconnect();
       }
     });
   }
@@ -94,7 +116,367 @@
     );
   }
 
+  // --- Channel helpers --------------------------------------------------
+
+  function _campaignDays() {
+    // Spec §4.4: campaign_days = ceil(CAMPAIGN_DURATION_BLOCKS / 1728).
+    // CAMPAIGN_DURATION_BLOCKS is a global defined in dapp/views/creator.js
+    // (same page, same runtime); fall back to 10000 if absent.
+    var blocks = (typeof CAMPAIGN_DURATION_BLOCKS !== 'undefined') ? CAMPAIGN_DURATION_BLOCKS : 10000;
+    return Math.ceil(blocks / 1728);
+  }
+
+  function _computeMaxAmount(campaign) {
+    var rv = parseFloat(campaign.REWARD_VIEW) || 0;
+    var rc = parseFloat(campaign.REWARD_CLICK) || 0;
+    return (rv + rc) * _campaignDays();
+  }
+
+  function _myMxAddress() {
+    return (typeof MY_MX_ADDRESS !== 'undefined') ? MY_MX_ADDRESS : '';
+  }
+
+  // Unicast Maxima send with poll:true.
+  // creatorRoute may be an Mx contact string (starts with "Mx" or "MX") or a
+  // Maxima public key (starts with "0x"). Mx uses `to:` routing; pk uses
+  // `publickey:` routing (requires the peer to be in the contacts list).
+  // campaign.handler.js stores the Mx in keypair CREATOR_MX_<campaignId>
+  // during on-chain discovery — that value is preferred; pk is the fallback.
+  function _sendToCreator(creatorRoute, payload, cb) {
+    if (!creatorRoute) { if (cb) { cb(false); } return; }
+    var hex = '0x' + utf8ToHex(JSON.stringify(payload)).toUpperCase();
+    var isMx = (creatorRoute.substring(0, 2).toUpperCase() === 'MX');
+    var routeParam = isMx ? ('to:' + creatorRoute) : ('publickey:' + creatorRoute);
+    var cmd = 'maxima action:send ' + routeParam
+            + ' application:' + APP_NAME
+            + ' data:' + hex
+            + ' poll:true';
+    MDS.cmd(cmd, function(res) {
+      var ok = !!(res && res.status);
+      console.log('[SDK] sendToCreator type:' + payload.type + ' route:' + (isMx ? 'Mx' : 'pk') + ' ok:' + ok + (ok ? '' : ' err:' + (res && res.error)));
+      if (cb) { cb(ok); }
+    });
+  }
+
+  // Reads the creator Mx contact string stored by campaign.handler.js during
+  // on-chain discovery. Falls back to CREATOR_ADDRESS (pk) if not found.
+  function _resolveCreatorRoute(campaign, cb) {
+    MDS.keypair.get('CREATOR_MX_' + campaign.ID, function(res) {
+      var mx = (res && res.status && res.value) ? res.value : '';
+      cb(mx || campaign.CREATOR_ADDRESS);
+    });
+  }
+
+  // On the viewer node the SDK is always the only consumer of CHANNEL_STATE
+  // for a given campaign (creator-is-viewer trackEvent is blocked upstream),
+  // so a campaign_id lookup is unambiguous.
+  function _getMyChannel(campaignId, cb) {
+    sqlQuery(
+      "SELECT * FROM CHANNEL_STATE WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')",
+      function(err, rows) {
+        if (err) { cb(err, null); return; }
+        cb(null, (rows && rows.length > 0) ? rows[0] : null);
+      }
+    );
+  }
+
+  // --- Pending reward bookkeeping --------------------------------------
+  // MDS.keypair has no list API (refs/Minima-1.0.45/mds/mds.js only exposes
+  // get/set), so we maintain a per-campaign index of event_ids.
+
+  function _pendingIndexKey(campaignId)         { return 'MA_PENDING_EVENTS_' + campaignId; }
+  function _pendingInfoKey(campaignId, eventId) { return 'MA_PENDING_REWARD_' + campaignId + '_' + eventId; }
+
+  function _loadPendingIndex(campaignId, cb) {
+    MDS.keypair.get(_pendingIndexKey(campaignId), function(res) {
+      var raw = (res && res.status && res.value) ? res.value : '';
+      if (!raw) { cb([]); return; }
+      var parsed = null;
+      try { parsed = JSON.parse(raw); } catch (e) { parsed = null; }
+      cb(Array.isArray(parsed) ? parsed : []);
+    });
+  }
+
+  function _savePendingIndex(campaignId, list, cb) {
+    MDS.keypair.set(_pendingIndexKey(campaignId), JSON.stringify(list || []), function() {
+      if (cb) { cb(); }
+    });
+  }
+
+  function _savePendingInfo(campaignId, eventId, info, cb) {
+    MDS.keypair.set(_pendingInfoKey(campaignId, eventId), JSON.stringify(info), function() {
+      if (cb) { cb(); }
+    });
+  }
+
+  function _readPendingInfo(campaignId, eventId, cb) {
+    MDS.keypair.get(_pendingInfoKey(campaignId, eventId), function(res) {
+      var raw = (res && res.status && res.value) ? res.value : '';
+      if (!raw) { cb(null); return; }
+      var info = null;
+      try { info = JSON.parse(raw); } catch (e) { info = null; }
+      cb(info);
+    });
+  }
+
+  function _addPending(campaignId, eventId, info, cb) {
+    _loadPendingIndex(campaignId, function(list) {
+      if (list.indexOf(eventId) === -1) { list.push(eventId); }
+      _savePendingInfo(campaignId, eventId, info, function() {
+        _savePendingIndex(campaignId, list, cb);
+      });
+    });
+  }
+
+  // Clear pending markers whose stored cumulative is <= the vouched cumulative.
+  // Creator emits REWARD_VOUCHER monotonically so any pending reward below the
+  // incoming cumulative has been absorbed by the creator's signed tx.
+  function _clearPendingByCumulative(campaignId, vouchedCum, cb) {
+    _loadPendingIndex(campaignId, function(list) {
+      if (!list || list.length === 0) { if (cb) { cb(); } return; }
+      var remaining = [];
+      var done = 0;
+      var total = list.length;
+
+      function step() {
+        done++;
+        if (done === total) { _savePendingIndex(campaignId, remaining, cb); }
+      }
+
+      for (var i = 0; i < list.length; i++) {
+        (function(eventId) {
+          _readPendingInfo(campaignId, eventId, function(info) {
+            if (info && parseFloat(info.cumulative) <= vouchedCum) {
+              MDS.keypair.set(_pendingInfoKey(campaignId, eventId), '', function() { step(); });
+            } else {
+              if (info) { remaining.push(eventId); }
+              step();
+            }
+          });
+        })(list[i]);
+      }
+    });
+  }
+
+  // --- Channel flow orchestration --------------------------------------
+
+  function _openNewChannel(campaign, eventId, amount, cb) {
+    // Per-channel viewer wallet key (§6.5 step 1). Response shape matches
+    // creator.js T-CH4 usage: res.response.publickey.
+    MDS.cmd('keys action:new', function(res) {
+      if (!res || !res.status || !res.response || !res.response.publickey) {
+        if (typeof MDS !== 'undefined' && MDS.log) {
+          MDS.log('[SDK] keys action:new failed for channel open');
+        }
+        if (cb) { cb(); }
+        return;
+      }
+      var viewerKey = res.response.publickey;
+      var maxAmount = _computeMaxAmount(campaign);
+
+      // Prefer Mx contact string (to: routing) stored by campaign.handler.js
+      // during on-chain discovery. Fall back to pk (publickey: routing) if not found.
+      _resolveCreatorRoute(campaign, function(creatorRoute) {
+        // Write local CHANNEL_STATE (status='pending') — activateChannel() on
+        // CHANNEL_OPEN requires a pre-existing row to UPDATE (channels.js).
+        console.log('[SDK] opening new channel campaign:' + campaign.ID + ' viewerKey:' + viewerKey + ' maxAmount:' + maxAmount + ' route:' + creatorRoute.substring(0, 8) + '...');
+        openChannel(campaign.ID, viewerKey, creatorRoute, maxAmount, function(err) {
+          if (err) {
+            console.log('[SDK] openChannel error:', err);
+            if (cb) { cb(); }
+            return;
+          }
+          console.log('[SDK] CHANNEL_STATE(pending) written, storing pending event:' + eventId);
+          var info = { cumulative: amount, viewer_key: viewerKey, amount: amount };
+          _addPending(campaign.ID, eventId, info, function() {
+            _sendToCreator(creatorRoute, {
+              type: 'CHANNEL_OPEN_REQUEST',
+              campaign_id: campaign.ID,
+              viewer_key: viewerKey,
+              viewer_mx: _myMxAddress(),
+              max_amount: maxAmount
+            }, function() { if (cb) { cb(); } });
+          });
+        });
+      });
+    });
+  }
+
+  // Channel is still 'pending' on our side. Accumulate the event under the
+  // highest running cumulative we've already queued so the flush on
+  // CHANNEL_OPENED replays REWARD_REQUESTs with monotonic cumulatives.
+  function _accumulatePending(campaignId, viewerKey, eventId, amount, cb) {
+    _loadPendingIndex(campaignId, function(list) {
+      if (list.length === 0) {
+        _addPending(campaignId, eventId, { cumulative: amount, viewer_key: viewerKey, amount: amount }, cb);
+        return;
+      }
+      var maxCum = 0;
+      var got = 0;
+      for (var i = 0; i < list.length; i++) {
+        (function(eid) {
+          _readPendingInfo(campaignId, eid, function(info) {
+            if (info) {
+              var c = parseFloat(info.cumulative);
+              if (c > maxCum) { maxCum = c; }
+            }
+            got++;
+            if (got === list.length) {
+              var newCum = maxCum + amount;
+              _addPending(campaignId, eventId, { cumulative: newCum, viewer_key: viewerKey, amount: amount }, cb);
+            }
+          });
+        })(list[i]);
+      }
+    });
+  }
+
+  function _sendRewardRequest(campaign, channel, eventId, amount, cb) {
+    var newCum = (parseFloat(channel.CUMULATIVE_EARNED) || 0) + amount;
+    console.log('[SDK] REWARD_REQUEST campaign:' + campaign.ID + ' event:' + eventId + ' cumulative:' + newCum);
+    var info = { cumulative: newCum, viewer_key: channel.VIEWER_KEY, amount: amount };
+    _addPending(campaign.ID, eventId, info, function() {
+      _sendToCreator(channel.CREATOR_MX, {
+        type: 'REWARD_REQUEST',
+        campaign_id: campaign.ID,
+        viewer_key: channel.VIEWER_KEY,
+        event_id: eventId,
+        cumulative: newCum
+      }, function() { if (cb) { cb(); } });
+    });
+  }
+
+  function _channelFlow(campaign, eventId, amount, finalCb) {
+    _getMyChannel(campaign.ID, function(err, channel) {
+      if (err) {
+        console.log('[SDK] _getMyChannel error:', err);
+        finalCb();
+        return;
+      }
+      if (!channel) {
+        console.log('[SDK] no channel yet for campaign:' + campaign.ID + ' → opening');
+        _openNewChannel(campaign, eventId, amount, finalCb);
+        return;
+      }
+      console.log('[SDK] channel status:' + channel.STATUS + ' campaign:' + campaign.ID + ' event:' + eventId + ' amount:' + amount);
+      if (channel.STATUS === 'pending') {
+        _accumulatePending(campaign.ID, channel.VIEWER_KEY, eventId, amount, finalCb);
+        return;
+      }
+      if (channel.STATUS === 'open') {
+        _sendRewardRequest(campaign, channel, eventId, amount, finalCb);
+        return;
+      }
+      // settled/expired — nothing to do; the reward is recorded locally only.
+      finalCb();
+    });
+  }
+
+  // --- Signal handlers (exposed as MinimaAds.* and as window globals) ---
+
+  // On CHANNEL_OPENED, flush the pending markers that piled up while the
+  // channel was 'pending'. activateChannel() was already called by the SW
+  // handler, so we only need to replay REWARD_REQUESTs.
+  function _flushPending(campaignId) {
+    _getMyChannel(campaignId, function(err, channel) {
+      if (err || !channel || channel.STATUS !== 'open') { return; }
+      _loadPendingIndex(campaignId, function(list) {
+        if (!list || list.length === 0) {
+          console.log('[SDK] flushPending campaign:' + campaignId + ' — nothing pending');
+          return;
+        }
+        console.log('[SDK] flushPending campaign:' + campaignId + ' events:' + list.length);
+        for (var i = 0; i < list.length; i++) {
+          (function(eid) {
+            _readPendingInfo(campaignId, eid, function(info) {
+              if (!info) { return; }
+              _sendToCreator(channel.CREATOR_MX, {
+                type: 'REWARD_REQUEST',
+                campaign_id: campaignId,
+                viewer_key: channel.VIEWER_KEY,
+                event_id: eid,
+                cumulative: parseFloat(info.cumulative)
+              }, function() {});
+            });
+          })(list[i]);
+        }
+      });
+    });
+  }
+
+  // Called on first use / app init. For each open channel with pending
+  // rewards, resend REWARD_REQUESTs; if no voucher has been received yet,
+  // send VOUCHER_SYNC_REQUEST so the creator re-emits the last voucher
+  // (§6.8).
+  function _onReconnect() {
+    sqlQuery(
+      "SELECT CAMPAIGN_ID, VIEWER_KEY, STATUS, LATEST_TX_HEX, CREATOR_MX FROM CHANNEL_STATE WHERE STATUS = 'open'",
+      function(err, rows) {
+        if (err || !rows) { return; }
+        console.log('[SDK] reconnect: open channels found:' + rows.length);
+        for (var i = 0; i < rows.length; i++) {
+          (function(row) {
+            _flushPending(row.CAMPAIGN_ID);
+            if (!row.LATEST_TX_HEX || row.LATEST_TX_HEX === '') {
+              console.log('[SDK] reconnect: no voucher yet for campaign:' + row.CAMPAIGN_ID + ' → VOUCHER_SYNC_REQUEST');
+              _sendToCreator(row.CREATOR_MX, {
+                type: 'VOUCHER_SYNC_REQUEST',
+                campaign_id: row.CAMPAIGN_ID,
+                viewer_key: row.VIEWER_KEY
+              }, function() {});
+            }
+          })(rows[i]);
+        }
+      }
+    );
+    // Resend CHANNEL_OPEN_REQUEST for channels stuck in 'pending' (e.g. after
+    // a routing failure in a prior session). The creator is idempotent on this
+    // message (channel.handler.js checks for an existing row).
+    sqlQuery(
+      "SELECT CAMPAIGN_ID, VIEWER_KEY, CREATOR_MX, MAX_AMOUNT FROM CHANNEL_STATE WHERE STATUS = 'pending'",
+      function(err2, pending) {
+        if (err2 || !pending || pending.length === 0) { return; }
+        console.log('[SDK] reconnect: pending channels found:' + pending.length + ' → resending CHANNEL_OPEN_REQUEST');
+        for (var j = 0; j < pending.length; j++) {
+          (function(row) {
+            console.log('[SDK] reconnect: resending CHANNEL_OPEN_REQUEST campaign:' + row.CAMPAIGN_ID);
+            _sendToCreator(row.CREATOR_MX, {
+              type: 'CHANNEL_OPEN_REQUEST',
+              campaign_id: row.CAMPAIGN_ID,
+              viewer_key: row.VIEWER_KEY,
+              viewer_mx: _myMxAddress(),
+              max_amount: parseFloat(row.MAX_AMOUNT) || 0
+            }, function() {});
+          })(pending[j]);
+        }
+      }
+    );
+  }
+
+  function _ensureReconnect() {
+    if (_reconnectDone) { return; }
+    _reconnectDone = true;
+    _onReconnect();
+  }
+
+  function _onChannelOpenedCore(parsed) {
+    if (!parsed || !parsed.campaign_id) { return; }
+    console.log('[SDK] CHANNEL_OPENED campaign:' + parsed.campaign_id + ' coinid:' + parsed.channel_coinid + ' → flushing pending');
+    _flushPending(parsed.campaign_id);
+  }
+
+  function _onVoucherReceivedCore(parsed) {
+    if (!parsed || !parsed.campaign_id || parsed.cumulative === undefined) { return; }
+    console.log('[SDK] VOUCHER_RECEIVED campaign:' + parsed.campaign_id + ' cumulative:' + parsed.cumulative + ' → clearing pending ≤' + parsed.cumulative);
+    _clearPendingByCumulative(parsed.campaign_id, parseFloat(parsed.cumulative), function() {
+      console.log('[SDK] pending cleared for campaign:' + parsed.campaign_id);
+    });
+  }
+
+  // --- Public API ------------------------------------------------------
+
   function _trackEvent(type, campaignId, userAddress, cb) {
+    _ensureReconnect();
     var validate = (type === 'view') ? validateView : validateClick;
     validate(campaignId, userAddress, function(result) {
       if (!result.valid) {
@@ -126,7 +508,11 @@
           };
           createRewardEvent(params, function(err3, evt) {
             if (err3) { cb(err3, null); return; }
-            cb(null, { confirmed: !!evt, event: evt });
+            if (!evt) { cb(null, { confirmed: false }); return; }
+            // Fire-and-forget the channel flow — reward persistence is already
+            // done; channel coordination should not block the publisher callback.
+            _channelFlow(campaign, evt.id, amount, function() {});
+            cb(null, { confirmed: true, event: evt });
           });
         });
       });
@@ -147,7 +533,23 @@
       getAd: getAd,
       render: render,
       trackView: trackView,
-      trackClick: trackClick
+      trackClick: trackClick,
+      // Exposed so viewer.js (T-CH6) can compose UI updates on top of the
+      // channel bookkeeping without re-implementing it.
+      onChannelOpened:  _onChannelOpenedCore,
+      onVoucherReceived: _onVoucherReceivedCore
     };
+
+    // app.js dispatches MDSCOMMS signals to global onChannelOpened /
+    // onVoucherReceived. Install the SDK's core handlers as defaults so the
+    // channel bookkeeping always runs. viewer.js (T-CH6) may override either
+    // to add UI refresh — it should call MinimaAds.on* first to preserve
+    // this behaviour.
+    if (typeof window.onChannelOpened !== 'function') {
+      window.onChannelOpened = _onChannelOpenedCore;
+    }
+    if (typeof window.onVoucherReceived !== 'function') {
+      window.onVoucherReceived = _onVoucherReceivedCore;
+    }
   }
 })();

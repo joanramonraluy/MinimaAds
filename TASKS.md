@@ -372,8 +372,8 @@ Update:
 | **T-CH1** | **DB** | `db-init.js` (×2 runtimes) | Done |
 | **T-CH2** | **Core** | `core/channels.js` (nou) | Done |
 | **T-CH3** | **SW** | `handlers/channel.handler.js` (nou) + `maxima.handler.js` | Done |
-| **T-CH4** | **FE** | `dapp/views/creator.js`, `dapp/app.js` | ⬜ |
-| **T-CH5** | **SDK** | `sdk/index.js` | ⬜ |
+| **T-CH4** | **FE** | `dapp/views/creator.js`, `dapp/app.js` | Done |
+| **T-CH5** | **SDK** | `sdk/index.js` | Done |
 | **T-CH6** | **UI** | `dapp/views/viewer.js` | ⬜ |
 
 ---
@@ -533,7 +533,7 @@ Provide the standard handoff note (CLAUDE.md §10) when done.
 
 | Camp | Valor |
 |---|---|
-| **Status** | ⬜ |
+| **Status** | Done ✅ |
 | **Agent** | **Opus** |
 | **Fitxers** | `dapp/views/creator.js`, `dapp/app.js` |
 | **Spec** | MinimaAds.md §6.3, §6.5, §8.8–8.9, §8.13, Appendix B §B.5, Appendix C §C.5 |
@@ -603,8 +603,8 @@ Provide the standard handoff note (CLAUDE.md §10) when done.
 
 | Camp | Valor |
 |---|---|
-| **Status** | ⬜ |
-| **Agent** | Sonnet |
+| **Status** | Done ✅ |
+| **Agent** | Opus |
 | **Fitxers** | `sdk/index.js` |
 | **Spec** | MinimaAds.md §6.5, §6.6, §6.8, §8.8–8.12 |
 

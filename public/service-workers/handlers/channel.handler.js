@@ -202,3 +202,23 @@ function handleVoucherSyncRequest(payload) {
     }
   });
 }
+
+function logPendingChannelState() {
+  var sql = "SELECT CAMPAIGN_ID, SUM(CUMULATIVE_EARNED) AS TOTAL_PENDING, COUNT(*) AS CHANNELS"
+          + " FROM CHANNEL_STATE WHERE STATUS = 'open' GROUP BY CAMPAIGN_ID";
+  sqlQuery(sql, function(err, rows) {
+    if (err) {
+      MDS.log("[CHANNEL] logPendingChannelState error: " + err);
+      return;
+    }
+    if (!rows || rows.length === 0) {
+      MDS.log("[CHANNEL] Pending rewards: none");
+      return;
+    }
+    for (var i = 0; i < rows.length; i++) {
+      MDS.log("[CHANNEL] Pending — campaign: " + rows[i].CAMPAIGN_ID
+        + " total: " + rows[i].TOTAL_PENDING
+        + " channels: " + rows[i].CHANNELS);
+    }
+  });
+}

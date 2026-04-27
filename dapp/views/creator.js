@@ -250,7 +250,7 @@ function fundEscrowAndPublish(campaign, ad, form, submitBtn, msgEl) {
 
                 var coinId = '';
                 try {
-                  coinId = sendRes.response.txpow.body.txn.outputs[0].coinid;
+                  coinId = sendRes.response.body.txn.outputs[0].coinid;
                 } catch (ex) {
                   console.error('[CREATOR] coinId extraction failed. Full response:', JSON.stringify(sendRes));
                   fail('Could not read escrow coinId from send response.');

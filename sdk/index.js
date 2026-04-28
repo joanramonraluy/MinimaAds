@@ -127,6 +127,8 @@
   }
 
   function _computeMaxAmount(campaign) {
+    var explicit = parseFloat(campaign.MAX_VIEWER_REWARD);
+    if (explicit > 0) { return explicit; }
     var rv = parseFloat(campaign.REWARD_VIEW) || 0;
     var rc = parseFloat(campaign.REWARD_CLICK) || 0;
     return (rv + rc) * _campaignDays();

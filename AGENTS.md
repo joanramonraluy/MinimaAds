@@ -1,6 +1,6 @@
 # AGENTS.md — MinimaAds Engineering Guide
 
-Last reviewed against codebase: 2026-04-27 (Rev 15: T-CH6 viewer settlement)
+Last reviewed against codebase: 2026-04-28 (Rev 16: T-CH7 MAX_VIEWER_REWARD campaign field)
 Scope: `/home/joanramon/Minima/MinimaAds`
 
 > **Origin note**: This file was bootstrapped from lessons learned building MetaChain (a Minima MiniDapp). Sections 1–5 are generic to any Minima MiniDapp. Sections 6+ are project-specific and must be filled in as the project evolves.
@@ -770,6 +770,7 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 | `EXPIRES_AT` | BIGINT DEFAULT NULL | unix ms or null |
 | `ESCROW_COINID` | VARCHAR(66) DEFAULT '' | On-chain escrow coinid (updated each time a channel is opened from the escrow) |
 | `ESCROW_WALLET_PK` | VARCHAR(66) DEFAULT '' | Per-campaign key generated via `keys action:new` — used in escrow PREVSTATE(1) — NOT the Maxima PK and NOT the main wallet key |
+| `MAX_VIEWER_REWARD` | DECIMAL(20,6) DEFAULT NULL | Optional per-viewer channel cap set by creator. If > 0, overrides the `(REWARD_VIEW + REWARD_CLICK) × campaign_days` formula in `_computeMaxAmount()`. NULL → formula applies. |
 
 ### ADS
 | Column | Type | Notes |
@@ -838,7 +839,7 @@ PRIMARY KEY: `(CAMPAIGN_ID, VIEWER_KEY)` — one channel per viewer-campaign pai
 
 | Maxima Type | Direction | Handler | DB Impact | FE Signal |
 |---|---|---|---|---|
-| `CAMPAIGN_ANNOUNCE` | Creator SW → all contacts | `campaign.handler.js` | `MERGE INTO CAMPAIGNS` + `MERGE INTO ADS` | `NEW_CAMPAIGN` |
+| `CAMPAIGN_ANNOUNCE` | Creator SW → all contacts | `campaign.handler.js` | `MERGE INTO CAMPAIGNS` + `MERGE INTO ADS` | `NEW_CAMPAIGN` | Optional top-level field `max_viewer_reward` (number\|null) — stored in `CAMPAIGNS.MAX_VIEWER_REWARD`; absent = NULL = formula |
 | `CAMPAIGN_PAUSE` | Creator SW → all contacts | `campaign.handler.js` | `UPDATE CAMPAIGNS SET STATUS='paused'` | `CAMPAIGN_UPDATED` |
 | `CAMPAIGN_FINISH` | Creator SW → all contacts | `campaign.handler.js` | `UPDATE CAMPAIGNS SET STATUS='finished'` | `CAMPAIGN_UPDATED` |
 | `REQUEST_CAMPAIGN_DATA` | Viewer SW → Creator SW (unicast `to:Mx...`) | `campaign.handler.js` | None (read-only lookup) | None |
@@ -1007,6 +1008,8 @@ PRIMARY KEY: `(CAMPAIGN_ID, VIEWER_KEY)` — one channel per viewer-campaign pai
 | 11 | **`getaddress` does not accept a `publickey` parameter** (verified in `getaddress.java` 1.0.45) | TASKS.md T-CH4 prompt and MinimaAds.md Appendix C suggest `MDS.cmd('getaddress publickey:<viewer_key>')` to derive a wallet address from a public key. The actual command ignores all parameters and returns only the node's default address. **Workaround (implemented in T-CH4):** derive the address via `newscript script:"RETURN SIGNEDBY(<pk>)" trackall:false` — the resulting script address is deterministic and identical across all nodes for the same key. Cache the result in keypair under `VIEWER_ADDR_<pk>` / `WALLET_ADDR_<pk>`. Maintainer must correct the spec and TASKS.md prompt. | Open — spec |
 | 12 | **`keys action:new` response shape: `res.response.publickey`, not `res.response.key.publickey`** (verified in `keys.java` + `KeyRow.toJSON` 1.0.45) | TASKS.md T-CH4 prompt and MinimaAds.md Appendix B example use `keysRes.response.key.publickey`. The actual Java source does `ret.put("response", krow.toJSON())` and `KeyRow.toJSON` puts `"publickey"` directly under the response object — no `.key` wrapper. **T-CH4 implementation uses `res.response.publickey` directly.** Maintainer must correct TASKS.md and Appendix B. | Open — spec |
 | 13 | **`txnpost` also fires `MDS_PENDING`** — same shape as `send` | When a custom tx is posted via `txnpost` and the node is in write-protection mode, `txnpost` returns `{pending:true, pendinguid:"0x..."}` exactly like `send`. The pending approval event fires in both SW and FE. T-CH4 handles this in `handleFePending` (FE) using `PENDING_CHANNEL_<uid>` keypair namespace. The SW `onPending` in `campaign.handler.js` parses `port:3` for campaign ID and looks up `PENDING_CHANNEL_<campaign_id>` — it will find nothing for channel-open txns (different namespace) and harmlessly log+return. No collision. | Documented |
+| 14 | **`CAMPAIGN_DATA_RESPONSE` spam — creator sends 9+ responses per campaign** | Observed in T-CH7 verification (2026-04-28): within a few seconds of a new escrow coin appearing, the creator SW sends 9+ `CAMPAIGN_DATA_RESPONSE` messages for the same campaign. Root cause unclear — likely Maxima re-delivering the same `REQUEST_CAMPAIGN_DATA` from multiple contacts or poll retries, OR multiple nodes discovered the same escrow coin simultaneously. Not related to T-CH7. Benign (receiver deduplicates via `_knownEscrowCoins`), but wastes bandwidth. Investigate deduplication in `handleRequestCampaignData` (add a seen-set or cooldown per campaign_id+requester pair). | Low |
+| 15 | **Channel coin indexing delay can exceed 5×3s retry window** | Observed in T-CH7 verification (2026-04-28): channel-open coin posted at block 112 (15:38:57) was not findable by `txninput` until 15:39:59 (+62s), but the retry window is only 5×3s=15s. The existing CH-2 fix deletes CHANNEL_STATE after max retries (so viewer can re-open). However, under normal node load the coin is simply slow to index — not a phantom coin (the block was valid). Consider increasing the retry window to 10×5s=50s or 15×5s=75s to cover slow-indexing nodes. This is a tuning issue on top of fragility #26. | Low |
 
 ### Dev Workflow Rule — No schema migrations during development
 

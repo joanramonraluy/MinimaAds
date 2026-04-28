@@ -15,7 +15,8 @@ function initDB(cb) {
     + "CREATED_AT       BIGINT        NOT NULL,"
     + "EXPIRES_AT       BIGINT        DEFAULT NULL,"
     + "ESCROW_COINID    VARCHAR(66)   DEFAULT '',"
-    + "ESCROW_WALLET_PK VARCHAR(66)   DEFAULT ''"
+    + "ESCROW_WALLET_PK  VARCHAR(66)   DEFAULT '',"
+    + "MAX_VIEWER_REWARD DECIMAL(20,6) DEFAULT NULL"
     + ")";
 
   var sql_ads = "CREATE TABLE IF NOT EXISTS ADS ("

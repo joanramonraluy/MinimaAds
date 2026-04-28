@@ -174,8 +174,9 @@ CREATE TABLE IF NOT EXISTS CAMPAIGNS (
   STATUS           VARCHAR(32)   NOT NULL DEFAULT 'active',
   CREATED_AT       BIGINT        NOT NULL,
   EXPIRES_AT       BIGINT        DEFAULT NULL,
-  ESCROW_COINID    VARCHAR(66)   DEFAULT '',  -- on-chain escrow coin; updated after each batch payout
-  ESCROW_WALLET_PK VARCHAR(66)   DEFAULT ''   -- wallet signing key in escrow PREVSTATE(1)
+  ESCROW_COINID     VARCHAR(66)   DEFAULT '',  -- on-chain escrow coin; updated after each batch payout
+  ESCROW_WALLET_PK  VARCHAR(66)   DEFAULT '',  -- wallet signing key in escrow PREVSTATE(1)
+  MAX_VIEWER_REWARD DECIMAL(20,6) DEFAULT NULL -- optional per-viewer channel cap; if set overrides (view+click)×days formula
 );
 
 CREATE TABLE IF NOT EXISTS ADS (
@@ -695,9 +696,12 @@ All `MDS.cmd("maxima action:send ... application:" + APP_NAME + " ...")` calls m
     "cta_label": "See more",
     "cta_url": "https://example.com",
     "interests": "tech,minima,web3"
-  }
+  },
+  "max_viewer_reward": 0.50
 }
 ```
+
+> `max_viewer_reward` is **optional**. When present and > 0, receiving nodes store it in `CAMPAIGNS.MAX_VIEWER_REWARD` and the SDK uses it as the channel `max_amount` instead of the `(REWARD_VIEW + REWARD_CLICK) × campaign_days` formula. When absent or null, the formula applies (backward-compatible).
 
 ### 8.4 Reward Processing — FE-internal (not a Maxima message)
 

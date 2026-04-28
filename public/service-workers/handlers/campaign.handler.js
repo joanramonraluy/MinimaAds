@@ -11,6 +11,9 @@ function handleCampaignAnnounce(payload) {
     MDS.log("[CAMPAIGN] ANNOUNCE missing campaign or ad");
     return;
   }
+  var maxViewerReward = (payload.max_viewer_reward !== undefined && payload.max_viewer_reward !== null)
+    ? parseFloat(payload.max_viewer_reward) : null;
+  payload.campaign.max_viewer_reward = maxViewerReward;
   var campaignId = payload.campaign.id;
   saveCampaign(payload.campaign, payload.ad, function(err) {
     if (err) {
@@ -153,12 +156,14 @@ function handleRequestCampaignData(payload) {
           reward_click: parseFloat(c.REWARD_CLICK),
           status: c.STATUS,
           created_at: parseInt(c.CREATED_AT),
-          expires_at: (c.EXPIRES_AT !== null && c.EXPIRES_AT !== undefined) ? parseInt(c.EXPIRES_AT) : null
+          expires_at: (c.EXPIRES_AT !== null && c.EXPIRES_AT !== undefined) ? parseInt(c.EXPIRES_AT) : null,
+          max_viewer_reward: (c.MAX_VIEWER_REWARD !== null && c.MAX_VIEWER_REWARD !== undefined) ? parseFloat(c.MAX_VIEWER_REWARD) : null
         };
         var response = {
           type: "CAMPAIGN_DATA_RESPONSE",
           campaign: campaignObj,
-          ad: ad
+          ad: ad,
+          max_viewer_reward: campaignObj.max_viewer_reward
         };
         sendMaxima(null, requesterMx, response, function(ok) {
           MDS.log("[CAMPAIGN] CAMPAIGN_DATA_RESPONSE sent for: " + campaignId + " ok: " + ok);

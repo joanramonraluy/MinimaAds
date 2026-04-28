@@ -21,10 +21,11 @@ function getCampaign(id, cb) {
 }
 
 function saveCampaign(campaign, ad, cb) {
+  var mvr = campaign.max_viewer_reward !== undefined ? campaign.max_viewer_reward : campaign.MAX_VIEWER_REWARD;
   var cSql = "MERGE INTO CAMPAIGNS " +
     "(ID, CREATOR_ADDRESS, TITLE, BUDGET_TOTAL, BUDGET_REMAINING, " +
     "REWARD_VIEW, REWARD_CLICK, STATUS, CREATED_AT, EXPIRES_AT, " +
-    "ESCROW_COINID, ESCROW_WALLET_PK) KEY (ID) VALUES (" +
+    "ESCROW_COINID, ESCROW_WALLET_PK, MAX_VIEWER_REWARD) KEY (ID) VALUES (" +
     "'" + escapeSql(campaign.id) + "'," +
     "'" + escapeSql(campaign.creator_address) + "'," +
     "'" + escapeSql(campaign.title) + "'," +
@@ -36,7 +37,8 @@ function saveCampaign(campaign, ad, cb) {
     campaign.created_at + "," +
     (campaign.expires_at !== null && campaign.expires_at !== undefined ? campaign.expires_at : "NULL") + "," +
     "'" + escapeSql(campaign.escrow_coinid || '') + "'," +
-    "'" + escapeSql(campaign.escrow_wallet_pk || '') + "'" +
+    "'" + escapeSql(campaign.escrow_wallet_pk || '') + "'," +
+    (mvr !== null && mvr !== undefined ? parseFloat(mvr) : "NULL") +
     ")";
 
   sqlQuery(cSql, function(err) {
@@ -72,7 +74,7 @@ function updateBudget(campaignId, deductAmount, cb) {
     var sql = "MERGE INTO CAMPAIGNS " +
       "(ID, CREATOR_ADDRESS, TITLE, BUDGET_TOTAL, BUDGET_REMAINING, " +
       "REWARD_VIEW, REWARD_CLICK, STATUS, CREATED_AT, EXPIRES_AT, " +
-      "ESCROW_COINID, ESCROW_WALLET_PK) KEY (ID) VALUES (" +
+      "ESCROW_COINID, ESCROW_WALLET_PK, MAX_VIEWER_REWARD) KEY (ID) VALUES (" +
       "'" + escapeSql(campaign.ID) + "'," +
       "'" + escapeSql(campaign.CREATOR_ADDRESS) + "'," +
       "'" + escapeSql(campaign.TITLE) + "'," +
@@ -84,7 +86,8 @@ function updateBudget(campaignId, deductAmount, cb) {
       campaign.CREATED_AT + "," +
       (campaign.EXPIRES_AT !== null && campaign.EXPIRES_AT !== undefined ? campaign.EXPIRES_AT : "NULL") + "," +
       "'" + escapeSql(campaign.ESCROW_COINID || '') + "'," +
-      "'" + escapeSql(campaign.ESCROW_WALLET_PK || '') + "'" +
+      "'" + escapeSql(campaign.ESCROW_WALLET_PK || '') + "'," +
+      (campaign.MAX_VIEWER_REWARD !== null && campaign.MAX_VIEWER_REWARD !== undefined ? parseFloat(campaign.MAX_VIEWER_REWARD) : "NULL") +
       ")";
 
     sqlQuery(sql, function(err2) {

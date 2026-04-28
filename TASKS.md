@@ -376,7 +376,7 @@ Update:
 | **T-CH4** | **FE** | `dapp/views/creator.js`, `dapp/app.js` | Done |
 | **T-CH5** | **SDK** | `sdk/index.js` | Done |
 | **T-CH6** | **UI** | `dapp/views/viewer.js` | Done |
-| **T-CH7** | **DB + Core + SDK + UI** | `db-init.js` (×2), `campaigns.js`, `sdk/index.js`, `creator.js`, `channel.handler.js` | Pending |
+| **T-CH7** | **DB + Core + SDK + UI** | `db-init.js` (×2), `campaigns.js`, `sdk/index.js`, `creator.js`, `channel.handler.js` | Done |
 
 ---
 

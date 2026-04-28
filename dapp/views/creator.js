@@ -44,6 +44,9 @@ function renderCreator(root) {
     + '<label>Expires at (optional, unix ms)'
     + '  <input name="expires_at" type="number" step="1" min="0">'
     + '</label>'
+    + '<label>Max reward per viewer (MINIMA) — optional'
+    + '  <input name="max_viewer_reward" type="number" step="0.000001" min="0" placeholder="Leave empty to auto-calculate: (view + click) × days">'
+    + '</label>'
     + '<button type="submit">Publish campaign</button>'
     + '<p id="ma-creator-msg" role="status"></p>';
   root.appendChild(form);
@@ -73,6 +76,8 @@ function onCreatorSubmit(e) {
   var rewardClick= parseFloat(data.get('reward_click'));
   var expiresAtRaw = (data.get('expires_at') || '').toString().trim();
   var expiresAt  = expiresAtRaw ? parseInt(expiresAtRaw, 10) : null;
+  var maxViewerRewardRaw = (data.get('max_viewer_reward') || '').toString().trim();
+  var maxViewerReward = (maxViewerRewardRaw && parseFloat(maxViewerRewardRaw) > 0) ? parseFloat(maxViewerRewardRaw) : null;
 
   if (!title || !body || !ctaLabel || !ctaUrl) {
     msgEl.textContent = 'Missing required text fields.';
@@ -103,7 +108,8 @@ function onCreatorSubmit(e) {
     created_at:       now,
     expires_at:       expiresAt,
     escrow_coinid:    '',
-    escrow_wallet_pk: ''
+    escrow_wallet_pk: '',
+    max_viewer_reward: maxViewerReward
   };
 
   var ad = {
@@ -282,6 +288,9 @@ function saveCampaignAndBroadcast(campaign, ad, form, submitBtn, msgEl) {
     }
     console.log('[CREATOR] campaign saved locally:', campaign.id);
     var payload = { type: 'CAMPAIGN_ANNOUNCE', campaign: campaign, ad: ad };
+    if (campaign.max_viewer_reward !== null && campaign.max_viewer_reward !== undefined) {
+      payload.max_viewer_reward = campaign.max_viewer_reward;
+    }
     broadcastMaxima(payload, function(ok) {
       if (submitBtn) { submitBtn.removeAttribute('disabled'); }
       if (!ok) {

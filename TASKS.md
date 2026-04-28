@@ -10,6 +10,7 @@
 
 ```
 T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9 → T10 → T11 → T12
+T-CH1 → T-CH2 → T-CH3 → T-CH4 → T-CH5 → T-CH6 → T-CH7
 ```
 
 Never start a task before all previous tasks are marked **Done**.
@@ -375,6 +376,7 @@ Update:
 | **T-CH4** | **FE** | `dapp/views/creator.js`, `dapp/app.js` | Done |
 | **T-CH5** | **SDK** | `sdk/index.js` | Done |
 | **T-CH6** | **UI** | `dapp/views/viewer.js` | Done |
+| **T-CH7** | **DB + Core + SDK + UI** | `db-init.js` (×2), `campaigns.js`, `sdk/index.js`, `creator.js`, `channel.handler.js` | Pending |
 
 ---
 
@@ -707,6 +709,105 @@ Add to the viewer UI (below the existing earned balance):
 
 VIEWER_KEY for a channel is stored in CHANNEL_STATE.VIEWER_KEY.
 Use getLatestVoucher() and getChannelState() from core/channels.js to read data.
+
+Provide the standard handoff note (CLAUDE.md §10) when done.
+```
+
+---
+
+### T-CH7 — Campaign field: MAX_VIEWER_REWARD
+
+| Camp | Valor |
+|---|---|
+| **Status** | Pending ⬜ |
+| **Agent** | Sonnet |
+| **Fitxers** | `public/service-workers/db-init.js`, `dapp/app.js` (initFEChannelState), `core/campaigns.js`, `sdk/index.js`, `dapp/views/creator.js`, `public/service-workers/handlers/campaign.handler.js` |
+| **Spec** | MinimaAds.md §3.5 (CAMPAIGNS schema), §8.3 (CAMPAIGN_ANNOUNCE), §6.5 (channel open flow) |
+
+**Context:**
+Actualment `maxAmount` del canal es calcula a `sdk/index.js` com `(REWARD_VIEW + REWARD_CLICK) × campaign_days`. Això fa que campanyes llargues bloquegin molt capital per canal (ex: 100 dies × 0.11 = 11 MINIMA per viewer). Un camp explícit `MAX_VIEWER_REWARD` dóna al creador control predictible del cost per viewer.
+
+Side-effect positiu: el viewer veu el coin d'escrow del creador al seu `confirmed` (trackall:true). Quan s'obre el canal, veu `-maxAmount` al seu historial. Reduir `maxAmount` amb `MAX_VIEWER_REWARD` redueix aquesta confusió visual.
+
+**Prompt:**
+```
+You are implementing T-CH7 for MinimaAds. Read CLAUDE.md, MinimaAds.md §3.5 §8.3 §6.5, and AGENTS.md §8 §9 before writing any code.
+
+Task: Add optional field MAX_VIEWER_REWARD to CAMPAIGNS, allowing creators to
+set an explicit cap on the MINIMA reserved per viewer channel. If set, this
+replaces the automatic formula (REWARD_VIEW + REWARD_CLICK) × campaign_days.
+
+Implement in this order:
+
+1. DB SCHEMA — both runtimes (dev workflow: fix CREATE TABLE only, no ALTER TABLE):
+   Add to CAMPAIGNS table in public/service-workers/db-init.js AND initFEChannelState
+   equivalent for CAMPAIGNS in dapp/app.js:
+     MAX_VIEWER_REWARD DECIMAL(20,6) DEFAULT NULL
+   Dev note: DB is reset on MiniDapp reinstall — no migration statement needed.
+
+2. CORE — core/campaigns.js:
+   saveCampaign(campaign, ad, cb) already uses a MERGE INTO CAMPAIGNS.
+   Ensure MAX_VIEWER_REWARD is included in the column list and VALUES.
+   The field comes from campaign.MAX_VIEWER_REWARD (may be null/undefined → store NULL).
+   Do NOT change the function signature.
+
+3. SDK — sdk/index.js, function _computeMaxAmount(campaign):
+   Current implementation:
+     function _computeMaxAmount(campaign) {
+       var rv = parseFloat(campaign.REWARD_VIEW) || 0;
+       var rc = parseFloat(campaign.REWARD_CLICK) || 0;
+       return (rv + rc) * _campaignDays();
+     }
+   New implementation:
+     function _computeMaxAmount(campaign) {
+       var explicit = parseFloat(campaign.MAX_VIEWER_REWARD);
+       if (explicit > 0) { return explicit; }
+       var rv = parseFloat(campaign.REWARD_VIEW) || 0;
+       var rc = parseFloat(campaign.REWARD_CLICK) || 0;
+       return (rv + rc) * _campaignDays();
+     }
+   No other changes to sdk/index.js.
+
+4. SW HANDLER — public/service-workers/handlers/campaign.handler.js,
+   function handleCampaignAnnounce(payload):
+   Extract max_viewer_reward from payload (may be absent — backward-compat).
+   Pass it into the campaign object before calling saveCampaign().
+   If payload.max_viewer_reward is absent or null → campaign.MAX_VIEWER_REWARD = null.
+
+5. UI — dapp/views/creator.js, campaign creation form:
+   Add an optional numeric input: "Max reward per viewer (MINIMA)".
+   Placeholder / hint: "Leave empty to auto-calculate: (view + click) × days"
+   If left empty → do not include max_viewer_reward in the campaign object
+     (or set to null) → stored as NULL → formula applies.
+   Include max_viewer_reward in the CAMPAIGN_ANNOUNCE Maxima payload if set.
+
+6. Update MinimaAds.md:
+   §3.5 CAMPAIGNS schema: add MAX_VIEWER_REWARD DECIMAL(20,6) DEFAULT NULL row.
+   §8.3 CAMPAIGN_ANNOUNCE payload: add optional field max_viewer_reward (number | null).
+
+7. Update AGENTS.md:
+   §8 CAMPAIGNS table: add MAX_VIEWER_REWARD row.
+   §9 Protocol Matrix: update CAMPAIGN_ANNOUNCE note to mention optional field.
+
+Rules:
+- Backward compatible: nodes receiving CAMPAIGN_ANNOUNCE without max_viewer_reward
+  must work identically to before (field absent → NULL → formula used).
+- No hardcoded LIMITS values.
+- SW code: Rhino-safe (var, function(), string concat, MDS.log, no trailing commas).
+- Do NOT modify any file not listed above.
+
+Definition of done:
+- [ ] MAX_VIEWER_REWARD in CAMPAIGNS CREATE TABLE (both runtimes)
+- [ ] saveCampaign() stores the field (NULL if not provided)
+- [ ] _computeMaxAmount() uses explicit value if > 0, formula otherwise
+- [ ] handleCampaignAnnounce() extracts and forwards the field
+- [ ] Creator form has optional input; CAMPAIGN_ANNOUNCE includes field when set
+- [ ] MinimaAds.md §3.5 + §8.3 updated
+- [ ] AGENTS.md §8 + §9 updated
+
+Verification: create campaign with MAX_VIEWER_REWARD = 0.50. Verify that the
+channel coin is created with amount 0.50 regardless of campaign duration.
+Also verify that a campaign without MAX_VIEWER_REWARD still uses the formula.
 
 Provide the standard handoff note (CLAUDE.md §10) when done.
 ```

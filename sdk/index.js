@@ -261,41 +261,43 @@
   // --- Channel flow orchestration --------------------------------------
 
   function _openNewChannel(campaign, eventId, amount, cb) {
-    // Per-channel viewer wallet key (§6.5 step 1). Response shape matches
-    // creator.js T-CH4 usage: res.response.publickey.
-    MDS.cmd('keys action:new', function(res) {
-      if (!res || !res.status || !res.response || !res.response.publickey) {
-        if (typeof MDS !== 'undefined' && MDS.log) {
-          MDS.log('[SDK] keys action:new failed for channel open');
-        }
-        if (cb) { cb(); }
-        return;
-      }
-      var viewerKey = res.response.publickey;
-      var maxAmount = _computeMaxAmount(campaign);
+    MDS.cmd('getaddress', function(addrRes) {
+      var viewerWalletAddr = (addrRes && addrRes.status && addrRes.response && addrRes.response.address)
+        ? addrRes.response.address : '';
+      console.log('[SDK] viewer wallet addr:', viewerWalletAddr || '(not available)');
 
-      // Prefer Mx contact string (to: routing) stored by campaign.handler.js
-      // during on-chain discovery. Fall back to pk (publickey: routing) if not found.
-      _resolveCreatorRoute(campaign, function(creatorRoute) {
-        // Write local CHANNEL_STATE (status='pending') — activateChannel() on
-        // CHANNEL_OPEN requires a pre-existing row to UPDATE (channels.js).
-        console.log('[SDK] opening new channel campaign:' + campaign.ID + ' viewerKey:' + viewerKey + ' maxAmount:' + maxAmount + ' route:' + creatorRoute.substring(0, 8) + '...');
-        openChannel(campaign.ID, viewerKey, creatorRoute, maxAmount, function(err) {
-          if (err) {
-            console.log('[SDK] openChannel error:', err);
-            if (cb) { cb(); }
-            return;
+      MDS.cmd('keys action:new', function(res) {
+        if (!res || !res.status || !res.response || !res.response.publickey) {
+          if (typeof MDS !== 'undefined' && MDS.log) {
+            MDS.log('[SDK] keys action:new failed for channel open');
           }
-          console.log('[SDK] CHANNEL_STATE(pending) written, storing pending event:' + eventId);
-          var info = { cumulative: amount, viewer_key: viewerKey, amount: amount };
-          _addPending(campaign.ID, eventId, info, function() {
-            _sendToCreator(creatorRoute, {
-              type: 'CHANNEL_OPEN_REQUEST',
-              campaign_id: campaign.ID,
-              viewer_key: viewerKey,
-              viewer_mx: _myMxAddress(),
-              max_amount: maxAmount
-            }, function() { if (cb) { cb(); } });
+          if (cb) { cb(); }
+          return;
+        }
+        var viewerKey = res.response.publickey;
+
+        var maxAmount = _computeMaxAmount(campaign);
+
+        _resolveCreatorRoute(campaign, function(creatorRoute) {
+          console.log('[SDK] opening new channel campaign:' + campaign.ID + ' viewerKey:' + viewerKey + ' maxAmount:' + maxAmount + ' walletAddr:' + viewerWalletAddr + ' route:' + creatorRoute.substring(0, 8) + '...');
+          openChannel(campaign.ID, viewerKey, creatorRoute, maxAmount, viewerWalletAddr, function(err) {
+            if (err) {
+              console.log('[SDK] openChannel error:', err);
+              if (cb) { cb(); }
+              return;
+            }
+            console.log('[SDK] CHANNEL_STATE(pending) written, storing pending event:' + eventId);
+            var info = { cumulative: amount, viewer_key: viewerKey, amount: amount };
+            _addPending(campaign.ID, eventId, info, function() {
+              _sendToCreator(creatorRoute, {
+                type: 'CHANNEL_OPEN_REQUEST',
+                campaign_id: campaign.ID,
+                viewer_key: viewerKey,
+                viewer_mx: _myMxAddress(),
+                max_amount: maxAmount,
+                viewer_wallet_addr: viewerWalletAddr
+              }, function() { if (cb) { cb(); } });
+            });
           });
         });
       });
@@ -433,7 +435,7 @@
     // a routing failure in a prior session). The creator is idempotent on this
     // message (channel.handler.js checks for an existing row).
     sqlQuery(
-      "SELECT CAMPAIGN_ID, VIEWER_KEY, CREATOR_MX, MAX_AMOUNT FROM CHANNEL_STATE WHERE STATUS = 'pending'",
+      "SELECT CAMPAIGN_ID, VIEWER_KEY, CREATOR_MX, MAX_AMOUNT, VIEWER_WALLET_ADDR FROM CHANNEL_STATE WHERE STATUS = 'pending'",
       function(err2, pending) {
         if (err2 || !pending || pending.length === 0) { return; }
         console.log('[SDK] reconnect: pending channels found:' + pending.length + ' → resending CHANNEL_OPEN_REQUEST');
@@ -445,7 +447,8 @@
               campaign_id: row.CAMPAIGN_ID,
               viewer_key: row.VIEWER_KEY,
               viewer_mx: _myMxAddress(),
-              max_amount: parseFloat(row.MAX_AMOUNT) || 0
+              max_amount: parseFloat(row.MAX_AMOUNT) || 0,
+              viewer_wallet_addr: row.VIEWER_WALLET_ADDR || ''
             }, function() {});
           })(pending[j]);
         }

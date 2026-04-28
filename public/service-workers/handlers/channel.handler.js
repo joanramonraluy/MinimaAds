@@ -21,10 +21,11 @@ function handleChannelOpenRequest(payload) {
     return;
   }
 
-  var campaignId = payload.campaign_id;
-  var viewerKey  = payload.viewer_key;
-  var viewerMx   = payload.viewer_mx;
-  var maxAmount  = parseFloat(payload.max_amount);
+  var campaignId      = payload.campaign_id;
+  var viewerKey       = payload.viewer_key;
+  var viewerMx        = payload.viewer_mx;
+  var maxAmount       = parseFloat(payload.max_amount);
+  var viewerWalletAddr = payload.viewer_wallet_addr || '';
 
   getCampaign(campaignId, function(err, campaign) {
     if (err || !campaign) {
@@ -46,7 +47,7 @@ function handleChannelOpenRequest(payload) {
         return;
       }
 
-      openChannel(campaignId, viewerKey, viewerMx, maxAmount, function(openErr) {
+      openChannel(campaignId, viewerKey, viewerMx, maxAmount, viewerWalletAddr, function(openErr) {
         if (openErr) {
           MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: openChannel failed: " + openErr);
           return;
@@ -56,7 +57,8 @@ function handleChannelOpenRequest(payload) {
           campaign_id: campaignId,
           viewer_key: viewerKey,
           viewer_mx: viewerMx,
-          max_amount: maxAmount
+          max_amount: maxAmount,
+          viewer_wallet_addr: viewerWalletAddr
         });
       });
     });

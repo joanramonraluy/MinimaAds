@@ -3,11 +3,12 @@
 // Rhino-compatible: var only, no arrow functions, no template literals, no trailing commas.
 // All DB access via sqlQuery() from core/minima.js.
 
-function openChannel(campaignId, viewerKey, creatorMx, maxAmount, cb) {
+function openChannel(campaignId, viewerKey, creatorMx, maxAmount, viewerWalletAddr, cb) {
   var now = Date.now();
+  var walletAddr = viewerWalletAddr || '';
   var sql = "MERGE INTO CHANNEL_STATE " +
     "(CAMPAIGN_ID, VIEWER_KEY, CREATOR_MX, CHANNEL_COINID, MAX_AMOUNT, " +
-    "CUMULATIVE_EARNED, LATEST_TX_HEX, STATUS, CREATED_AT) " +
+    "CUMULATIVE_EARNED, LATEST_TX_HEX, STATUS, CREATED_AT, VIEWER_WALLET_ADDR) " +
     "KEY (CAMPAIGN_ID, VIEWER_KEY) VALUES (" +
     "'" + escapeSql(campaignId) + "'," +
     "'" + escapeSql(viewerKey) + "'," +
@@ -17,7 +18,8 @@ function openChannel(campaignId, viewerKey, creatorMx, maxAmount, cb) {
     "0," +
     "''," +
     "'pending'," +
-    now +
+    now + "," +
+    "'" + escapeSql(walletAddr) + "'" +
     ")";
   sqlQuery(sql, function(err) {
     if (err) { cb(err); return; }

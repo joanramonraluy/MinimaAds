@@ -514,9 +514,11 @@ function handleDoRewardVoucher(data) {
         console.error('[CHANNEL] DO_REWARD_VOUCHER: VIEWER_WALLET_ADDR missing for campaign:', campaignId);
         return;
       }
-      deriveScriptAddress(creatorWalletPK, true, 'WALLET_ADDR_' + creatorWalletPK, function(creatorAddr) {
+      MDS.cmd('getaddress', function(addrRes) {
+        var creatorAddr = (addrRes && addrRes.status && addrRes.response && addrRes.response.address)
+          ? addrRes.response.address : '';
         if (!creatorAddr) {
-          console.error('[CHANNEL] DO_REWARD_VOUCHER: creator address derivation failed');
+          console.error('[CHANNEL] DO_REWARD_VOUCHER: creator getaddress failed');
           return;
         }
         buildAndExportVoucherTx({

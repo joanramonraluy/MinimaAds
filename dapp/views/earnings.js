@@ -163,7 +163,7 @@ function _renderChannelRewardRows(rows, container) {
       btn.addEventListener('click', function() {
         btn.disabled = true;
         btn.textContent = 'Settling…';
-        _runSettlement(campaignId, viewerKey, txHex, btn);
+        _runSettlement(campaignId, viewerKey, txHex, btn, parseFloat(row.CUMULATIVE_EARNED));
       });
 
       item.appendChild(label);
@@ -173,9 +173,10 @@ function _renderChannelRewardRows(rows, container) {
   }
 }
 
-function _runSettlement(campaignId, viewerKey, txHex, btnEl) {
+function _runSettlement(campaignId, viewerKey, txHex, btnEl, cumulative) {
   var settleId = 'stl_' + Date.now().toString(16);
-  console.log('[EARNINGS] _runSettlement start campaign:', campaignId, 'settleId:', settleId);
+  console.log('[EARNINGS] _runSettlement start campaign:', campaignId,
+    'settleId:', settleId, 'cumulative:', cumulative !== undefined ? cumulative : '?');
 
   function onError(msg) {
     console.error('[EARNINGS] _runSettlement error:', msg, 'campaign:', campaignId);
@@ -212,6 +213,12 @@ function _runSettlement(campaignId, viewerKey, txHex, btnEl) {
 function _postSettleTx(settleId, campaignId, viewerKey) {
   MDS.cmd('txnpost id:' + settleId + ' mine:true', function(r3) {
     console.log('[EARNINGS] txnpost status:', r3 && r3.status, r3 && r3.error);
+    try {
+      var outs = r3.response.body.txn.outputs;
+      for (var oi = 0; oi < outs.length; oi++) {
+        console.log('[EARNINGS] settle output[' + oi + ']:', outs[oi].amount, '→', outs[oi].address);
+      }
+    } catch (e) {}
     MDS.cmd('txndelete id:' + settleId, function() {});
     if (!r3 || !r3.status) {
       console.error('[EARNINGS] txnpost failed:', r3 && r3.error, 'campaign:', campaignId);
@@ -259,14 +266,15 @@ function onVoucherReceived(parsed) {
 }
 
 function onAutoSettle(parsed) {
-  console.log('[EARNINGS] onAutoSettle campaign:', parsed && parsed.campaign_id);
+  console.log('[EARNINGS] onAutoSettle campaign:', parsed && parsed.campaign_id,
+    'cumulative:', parsed && parsed.cumulative);
   if (!parsed || !parsed.campaign_id || !parsed.viewer_key || !parsed.tx_hex) {
     console.warn('[EARNINGS] onAutoSettle: incomplete payload', parsed);
     return;
   }
   var statusEl = document.getElementById('ma-channel-settle-status');
   if (statusEl) { statusEl.textContent = 'Settling reward channel automatically…'; }
-  _runSettlement(parsed.campaign_id, parsed.viewer_key, parsed.tx_hex, null);
+  _runSettlement(parsed.campaign_id, parsed.viewer_key, parsed.tx_hex, null, parsed.cumulative);
 }
 
 function onSettleConfirmed(parsed) {

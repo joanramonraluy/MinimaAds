@@ -421,9 +421,12 @@ function finalizeChannelOpen(txpowResponse, ctx) {
     return;
   }
   var channelCoinId = outputs[0].coinid;
+  var channelAmount = outputs[0].amount;
   var newEscrowCoinId = outputs.length > 1 ? outputs[1].coinid : '';
+  var newEscrowAmount = outputs.length > 1 ? outputs[1].amount : '0';
 
-  console.log('[CHANNEL] channel coin:', channelCoinId, 'new escrow:', newEscrowCoinId);
+  console.log('[CHANNEL] channel coin:', channelCoinId, 'amount:', channelAmount,
+    '| new escrow:', newEscrowCoinId, 'amount:', newEscrowAmount);
 
   if (typeof activateChannel === 'function') {
     activateChannel(ctx.campaignId, ctx.viewerKey, channelCoinId, function(err) {
@@ -506,28 +509,27 @@ function handleDoRewardVoucher(data) {
       }
       var creatorWalletPK = campaign.ESCROW_WALLET_PK;
 
-      deriveScriptAddress(viewerKey, false, 'VIEWER_ADDR_' + viewerKey, function(viewerAddr) {
-        if (!viewerAddr) {
-          console.error('[CHANNEL] DO_REWARD_VOUCHER: viewer address derivation failed');
+      var viewerAddr = channel.VIEWER_WALLET_ADDR;
+      if (!viewerAddr) {
+        console.error('[CHANNEL] DO_REWARD_VOUCHER: VIEWER_WALLET_ADDR missing for campaign:', campaignId);
+        return;
+      }
+      deriveScriptAddress(creatorWalletPK, true, 'WALLET_ADDR_' + creatorWalletPK, function(creatorAddr) {
+        if (!creatorAddr) {
+          console.error('[CHANNEL] DO_REWARD_VOUCHER: creator address derivation failed');
           return;
         }
-        deriveScriptAddress(creatorWalletPK, true, 'WALLET_ADDR_' + creatorWalletPK, function(creatorAddr) {
-          if (!creatorAddr) {
-            console.error('[CHANNEL] DO_REWARD_VOUCHER: creator address derivation failed');
-            return;
-          }
-          buildAndExportVoucherTx({
-            campaignId:      campaignId,
-            viewerKey:       viewerKey,
-            viewerMx:        viewerMx,
-            eventId:         eventId,
-            cumulative:      cumulative,
-            maxAmount:       maxAmount,
-            channelCoinId:   channelCoinId,
-            creatorWalletPK: creatorWalletPK,
-            viewerAddr:      viewerAddr,
-            creatorAddr:     creatorAddr
-          });
+        buildAndExportVoucherTx({
+          campaignId:      campaignId,
+          viewerKey:       viewerKey,
+          viewerMx:        viewerMx,
+          eventId:         eventId,
+          cumulative:      cumulative,
+          maxAmount:       maxAmount,
+          channelCoinId:   channelCoinId,
+          creatorWalletPK: creatorWalletPK,
+          viewerAddr:      viewerAddr,
+          creatorAddr:     creatorAddr
         });
       });
     });
@@ -538,6 +540,9 @@ function buildAndExportVoucherTx(ctx, _retries) {
   var retries = (_retries === undefined) ? 0 : _retries;
   var txId   = 'rv_' + generateUID();
   var refund = ctx.maxAmount - ctx.cumulative;
+  console.log('[CHANNEL] voucher tx: channel:', ctx.channelCoinId,
+    '| viewer→', ctx.cumulative, ctx.viewerAddr,
+    '| creator←', refund, ctx.creatorAddr);
 
   function fail(stage, res) {
     console.error('[CHANNEL] voucher tx failed at', stage, res && (res.error || res));
@@ -815,15 +820,16 @@ function probeDb() {
 
 function initFEChannelState(cb) {
   var sql = "CREATE TABLE IF NOT EXISTS CHANNEL_STATE ("
-    + "CAMPAIGN_ID       VARCHAR(256)  NOT NULL,"
-    + "VIEWER_KEY        VARCHAR(66)   NOT NULL,"
-    + "CREATOR_MX        VARCHAR(512)  NOT NULL,"
-    + "CHANNEL_COINID    VARCHAR(66)   DEFAULT '',"
-    + "MAX_AMOUNT        DECIMAL(20,6) NOT NULL,"
-    + "CUMULATIVE_EARNED DECIMAL(20,6) NOT NULL DEFAULT 0,"
-    + "LATEST_TX_HEX     TEXT          DEFAULT '',"
-    + "STATUS            VARCHAR(16)   NOT NULL DEFAULT 'pending',"
-    + "CREATED_AT        BIGINT        NOT NULL,"
+    + "CAMPAIGN_ID        VARCHAR(256)  NOT NULL,"
+    + "VIEWER_KEY         VARCHAR(66)   NOT NULL,"
+    + "CREATOR_MX         VARCHAR(512)  NOT NULL,"
+    + "CHANNEL_COINID     VARCHAR(66)   DEFAULT '',"
+    + "MAX_AMOUNT         DECIMAL(20,6) NOT NULL,"
+    + "CUMULATIVE_EARNED  DECIMAL(20,6) NOT NULL DEFAULT 0,"
+    + "LATEST_TX_HEX      TEXT          DEFAULT '',"
+    + "STATUS             VARCHAR(16)   NOT NULL DEFAULT 'pending',"
+    + "CREATED_AT         BIGINT        NOT NULL,"
+    + "VIEWER_WALLET_ADDR VARCHAR(512)  DEFAULT '',"
     + "PRIMARY KEY (CAMPAIGN_ID, VIEWER_KEY)"
     + ")";
   sqlQuery(sql, function() { if (cb) { cb(); } });

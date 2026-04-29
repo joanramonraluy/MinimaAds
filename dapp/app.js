@@ -538,8 +538,7 @@ function handleDoRewardVoucher(data) {
   });
 }
 
-function buildAndExportVoucherTx(ctx, _retries) {
-  var retries = (_retries === undefined) ? 0 : _retries;
+function buildAndExportVoucherTx(ctx) {
   var txId   = 'rv_' + generateUID();
   var refund = ctx.maxAmount - ctx.cumulative;
   console.log('[CHANNEL] voucher tx: channel:', ctx.channelCoinId,
@@ -553,26 +552,14 @@ function buildAndExportVoucherTx(ctx, _retries) {
 
   MDS.cmd('txncreate id:' + txId, function(r1) {
     if (!r1.status) { fail('txncreate', r1); return; }
-
     MDS.cmd('txninput id:' + txId + ' coinid:' + ctx.channelCoinId + ' scriptmmr:true', function(r2) {
       if (!r2.status) {
-        MDS.cmd('txndelete id:' + txId, function() {});
-        // Channel coin may not be indexed yet (just mined). Retry up to 5x with 3s delay.
-        if (retries < 5 && r2.error && r2.error.indexOf('not found') !== -1) {
-          console.log('[CHANNEL] txninput coin not found, retry', retries + 1, 'in 3s');
-          setTimeout(function() { buildAndExportVoucherTx(ctx, retries + 1); }, 3000);
-          return;
-        }
-        // Coin permanently missing — delete channel state so the viewer can re-open it.
-        if (r2.error && r2.error.indexOf('not found') !== -1 && typeof sqlQuery === 'function') {
-          console.error('[CHANNEL] channel coin missing after max retries, clearing channel state: ' + ctx.campaignId);
-          var clearSql = "DELETE FROM CHANNEL_STATE WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(ctx.campaignId) + "') AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(ctx.viewerKey) + "')";
-          sqlQuery(clearSql, function() {
-            console.log('[CHANNEL] channel state cleared, viewer can re-open: ' + ctx.campaignId);
-          });
-          return;
-        }
-        fail('txninput', r2); return;
+        // SW (T-CH8) guarantees this coin is indexed before emitting DO_REWARD_VOUCHER.
+        // A failure here is a genuine error — no retry.
+        console.error('[CHANNEL] txninput failed (coin should be indexed by now):',
+          r2 && r2.error, 'campaign:', ctx.campaignId);
+        fail('txninput', r2);
+        return;
       }
 
       MDS.cmd('txnoutput id:' + txId

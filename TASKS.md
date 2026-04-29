@@ -10,7 +10,7 @@
 
 ```
 T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9 → T10 → T11 → T12
-T-CH1 → T-CH2 → T-CH3 → T-CH4 → T-CH5 → T-CH6 → T-CH7
+T-CH1 → T-CH2 → T-CH3 → T-CH4 → T-CH5 → T-CH6 → T-CH7 → T-CH8 → T-CH9
 ```
 
 Never start a task before all previous tasks are marked **Done**.
@@ -376,7 +376,9 @@ Update:
 | **T-CH4** | **FE** | `dapp/views/creator.js`, `dapp/app.js` | Done |
 | **T-CH5** | **SDK** | `sdk/index.js` | Done |
 | **T-CH6** | **UI** | `dapp/views/viewer.js` | Done |
-| **T-CH7** | **DB + Core + SDK + UI** | `db-init.js` (×2), `campaigns.js`, `sdk/index.js`, `creator.js`, `channel.handler.js` | Done |
+| **T-CH7** | **DB + Core + SDK + UI** | `db-init.js` (×2), `campaigns.js`, `sdk/index.js`, `creator.js`, `channel.handler.js` | Done ✅ |
+| **T-CH8** | **SW** | `channel.handler.js`, `main.js` | Done ✅ |
+| **T-CH9** | **FE** | `dapp/app.js` | Done ✅ |
 
 ---
 
@@ -808,6 +810,134 @@ Definition of done:
 Verification: create campaign with MAX_VIEWER_REWARD = 0.50. Verify that the
 channel coin is created with amount 0.50 regardless of campaign duration.
 Also verify that a campaign without MAX_VIEWER_REWARD still uses the formula.
+
+Provide the standard handoff note (CLAUDE.md §10) when done.
+```
+
+---
+
+### T-CH8 — SW: NEWBLOCK-driven pending voucher queue
+
+| Camp | Valor |
+|---|---|
+| **Status** | Pending ⬜ |
+| **Agent** | Sonnet |
+| **Fitxers** | `public/service-workers/handlers/channel.handler.js`, `public/service-workers/main.js` |
+| **Spec** | MinimaAds.md §6.6, §8.10, AGENTS.md §12 fragility #26, §14 bug #15 |
+
+**Context:**
+El bug #15 (coin not found) s'ha corregit provisionalment augmentant el retry loop del FE a 20×5s (100s). Aquesta tasca implementa la solució estructural: el SW desa el `REWARD_REQUEST` pendent quan el canal acaba d'obrir-se i el coin encara no és indexat; quan arriba un `NEWBLOCK` i el coin ja és visible, el SW activa el voucher flow. Elimina qualsevol dependència de timing al FE.
+
+**Prompt:**
+```
+You are implementing T-CH8 for MinimaAds. Read CLAUDE.md, MinimaAds.md §6.6 §8.10, AGENTS.md §12 fragility #26 and §14 bug #15 before writing any code.
+
+Background: When a REWARD_REQUEST arrives at the creator's SW, the FE must build a voucher tx spending the channel coin via txninput coinid:<channelCoinId> scriptmmr:true. This fails if the coin was just mined and has not yet been indexed by the node (~62s observed delay). The current workaround is a 20×5s retry loop in the FE. This task replaces that workaround with a NEWBLOCK-driven event model in the SW.
+
+Task: Implement a pending-voucher queue in the SW so that if handleRewardRequest() cannot immediately proceed (because the coin is not yet indexed), the request is saved and retried on each NEWBLOCK until the coin is findable.
+
+Implementation plan:
+
+1. In channel.handler.js — modify handleRewardRequest():
+   After all validation passes (channel open, cumulative valid, not duplicate),
+   instead of signalling DO_REWARD_VOUCHER immediately:
+   a. Run `MDS.cmd("coins coinid:<channelCoinId> relevant:true", cb)` to check if the coin is indexed.
+   b. If coin found (res.response.length > 0): signal DO_REWARD_VOUCHER immediately (current behaviour).
+   c. If NOT found: save the pending request to keypair:
+      Key: "PENDING_VOUCHER_<campaignId>_<viewerKey>"
+      Value: JSON string of { campaign_id, viewer_key, viewer_mx, event_id, cumulative, channel_coinid }
+      Log: MDS.log("[CHANNEL] coin not yet indexed, queuing voucher for NEWBLOCK: " + campaignId)
+
+2. In channel.handler.js — add new function checkPendingVouchers():
+   a. Query all channel states that have STATUS='open': SELECT CAMPAIGN_ID, VIEWER_KEY, CHANNEL_COINID, CREATOR_MX FROM CHANNEL_STATE WHERE STATUS='open'
+   b. For each row, check if keypair "PENDING_VOUCHER_<campaignId>_<viewerKey>" has a value.
+   c. If it does: run `MDS.cmd("coins coinid:<channelCoinId> relevant:true", cb)`
+      - If coin found: read the pending payload from keypair, clear the keypair entry (set to ''), then signal DO_REWARD_VOUCHER.
+      - If not yet found: log and leave in queue.
+
+3. In main.js — inside the NEWBLOCK handler (line 119: `if (msg.event === "NEWBLOCK")`):
+   Add a call to checkPendingVouchers() after scanEscrowCoins():
+     if (msg.event === "NEWBLOCK") { scanEscrowCoins(); checkPendingVouchers(); }
+
+Rules:
+- Rhino-safe: var, function(), string concat, MDS.log, no trailing commas, no arrow functions.
+- All DB access via sqlQuery(). No bare MDS.sql.
+- checkPendingVouchers() must be defined in channel.handler.js (loaded before main.js event dispatch).
+- The keypair key format must be exactly "PENDING_VOUCHER_<campaignId>_<viewerKey>" (no spaces, verbatim).
+- Do NOT modify any other file.
+- Do NOT change the DO_REWARD_VOUCHER signal schema — it is a contract.
+
+Definition of done:
+- [ ] handleRewardRequest() checks coin indexing before signalling
+- [ ] Un-indexed coins are saved to keypair with correct key format
+- [ ] checkPendingVouchers() reads all open channels and checks their pending queue
+- [ ] On NEWBLOCK: checkPendingVouchers() is called after scanEscrowCoins()
+- [ ] On coin found: keypair cleared + DO_REWARD_VOUCHER signalled
+- [ ] No 20×5s retry loop — that is removed in T-CH9
+
+Verification: open a channel and trigger a view reward immediately after channel-open confirmation. The creator SW log should show "[CHANNEL] coin not yet indexed, queuing voucher for NEWBLOCK: <id>" and then, within 1–3 blocks, "[CHANNEL] pending voucher found, signalling FE: <id>". The FE should receive DO_REWARD_VOUCHER without retries.
+
+Provide the standard handoff note (CLAUDE.md §10) when done.
+```
+
+---
+
+### T-CH9 — FE: remove retry loop from buildAndExportVoucherTx
+
+| Camp | Valor |
+|---|---|
+| **Status** | Pending ⬜ (depends on T-CH8) |
+| **Agent** | Sonnet |
+| **Fitxers** | `dapp/app.js` |
+| **Spec** | AGENTS.md §14 bug #15 |
+
+**Context:**
+Amb T-CH8 implementat, el SW garanteix que `DO_REWARD_VOUCHER` només s'emet quan el coin del canal ja és indexat. El retry loop del FE (`retries < 20`, `setTimeout 5000`) és per tant redundant i pot emmascarar errors reals. Aquesta tasca el neteja.
+
+**Prompt:**
+```
+You are implementing T-CH9 for MinimaAds. Read CLAUDE.md and AGENTS.md §14 bug #15 before writing any code. T-CH8 must be Done before starting this task.
+
+Task: Simplify buildAndExportVoucherTx() in dapp/app.js by removing the retry-on-not-found logic. After T-CH8, the SW guarantees DO_REWARD_VOUCHER is only signalled once the channel coin is indexed — so a "not found" txninput response is a genuine error, not a timing issue.
+
+Changes to dapp/app.js, function buildAndExportVoucherTx(ctx, _retries):
+
+1. Remove the _retries parameter and all retry logic:
+   - Remove: `var retries = (_retries === undefined) ? 0 : _retries;`
+   - Remove: the `if (retries < 20 && ...) { setTimeout(...) }` branch
+   - Remove: the `buildAndExportVoucherTx(ctx, retries + 1)` recursive call
+
+2. On txninput failure (coin not found or any error):
+   - Log the error clearly: console.error('[CHANNEL] txninput failed (coin should be indexed by now):', r2.error, 'campaign:', ctx.campaignId)
+   - Call fail('txninput', r2) and return — no retry, no channel state clear.
+   (Channel state clear was a safety net for the retry case; without retries it is not needed here.)
+
+3. The coindata path (ctx.channelCoinData branch) was the experimental workaround from bug #15.
+   Remove it entirely:
+   - Remove: the `if (ctx.channelCoinData) { MDS.cmd('txninput ... coindata:...') }` block
+   - Remove: `loadChannelCoinData()` call in handleDoRewardVoucher()
+   - Remove: the channelCoinData field from the ctx object passed to buildAndExportVoucherTx()
+   - The function now always uses `txninput coinid:<channelCoinId> scriptmmr:true`.
+
+4. Also remove the now-unused helper functions and keypair accessors related to coindata:
+   - saveChannelCoinData(), loadChannelCoinData(), channelCoinDataKey() — if they are defined in app.js
+   - Remove the `saveChannelCoinData(...)` call in buildAndPostChannelTx() after txnlist
+
+5. The txnlist call in buildAndPostChannelTx() was used only to capture outputcoindata.
+   Remove it:
+   - Remove: `MDS.cmd('txnlist id:' + txId, function(r7) { ... saveChannelCoinData(...) ... })`
+   - Replace with: call finalizeChannelOpen(r6.response, ctx) directly after txnpost succeeds.
+
+Do NOT modify any other file. Do NOT change any function signatures in core/*.js or channel.handler.js.
+
+Definition of done:
+- [ ] buildAndExportVoucherTx() has no _retries parameter and no setTimeout retry
+- [ ] coindata path removed — only coinid path remains
+- [ ] saveChannelCoinData / loadChannelCoinData / channelCoinDataKey removed from app.js
+- [ ] txnlist call after txnpost removed from buildAndPostChannelTx()
+- [ ] AGENTS.md §14 bug #15 marked as Fixed with resolution note
+
+Verification: trigger a view reward. Creator FE log should show a single txninput attempt. No retries. Voucher sent within 1 block of DO_REWARD_VOUCHER signal.
 
 Provide the standard handoff note (CLAUDE.md §10) when done.
 ```

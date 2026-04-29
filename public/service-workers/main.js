@@ -116,6 +116,6 @@ MDS.init(function(msg) {
   if (msg.event === "inited")              { onInited(); }
   if (msg.event === "MAXIMA")              { onMaxima(msg); }
   if (msg.event === "MDS_TIMER_10SECONDS") { onTimer(); }
-  if (msg.event === "NEWBLOCK")            { scanEscrowCoins(); }
+  if (msg.event === "NEWBLOCK")            { scanEscrowCoins(); checkPendingVouchers(); }
   if (msg.event === "MDS_PENDING")         { onPending(msg); }
 });

@@ -84,7 +84,7 @@
 
 | Runtime | File | Role |
 |---|---|---|
-| Service Worker (Rhino) | `public/service-workers/main.js` | SW bootstrap — MDS.init, event routing |
+| Service Worker (Rhino) | `service.js` | SW bootstrap — MDS.init, event routing |
 | Frontend (browser) | `dapp/app.js` | FE bootstrap — MDS.init, routing |
 | SDK (publisher) | `sdk/index.js` | Public API surface |
 | DB schema (SW) | `public/service-workers/db-init.js` | H2 CREATE TABLE statements |

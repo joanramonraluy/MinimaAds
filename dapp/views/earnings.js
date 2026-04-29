@@ -121,8 +121,10 @@ function earningsTd(value) {
 function _refreshChannelRewards() {
   var container = document.getElementById('ma-channel-rewards-list');
   if (!container) { return; }
-  var sql = "SELECT CAMPAIGN_ID, VIEWER_KEY, CUMULATIVE_EARNED, LATEST_TX_HEX"
-          + " FROM CHANNEL_STATE WHERE STATUS = 'open' AND LATEST_TX_HEX != ''";
+  var sql = "SELECT cs.CAMPAIGN_ID, cs.VIEWER_KEY, cs.CUMULATIVE_EARNED, cs.LATEST_TX_HEX, c.TITLE"
+          + " FROM CHANNEL_STATE cs"
+          + " LEFT JOIN CAMPAIGNS c ON UPPER(cs.CAMPAIGN_ID) = UPPER(c.ID)"
+          + " WHERE cs.STATUS = 'open' AND cs.LATEST_TX_HEX != ''";
   sqlQuery(sql, function(err, rows) {
     if (err) { console.error('[EARNINGS] _refreshChannelRewards query error:', err); return; }
     var found = rows || [];
@@ -151,11 +153,21 @@ function _renderChannelRewardRows(rows, container) {
       var txHex      = row.LATEST_TX_HEX;
 
       var item = document.createElement('div');
-      item.style.cssText = 'display:flex;align-items:center;gap:.5rem;margin:.25rem 0;';
+      item.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:1rem;margin:.5rem 0;padding:.5rem;border:1px solid #e0e0e0;border-radius:4px;';
 
-      var label = document.createElement('span');
-      label.textContent = campaignId.substring(0, 8) + '… — '
-        + parseFloat(row.CUMULATIVE_EARNED).toFixed(6) + ' MINIMA pending';
+      var infoDiv = document.createElement('div');
+      var campName = row.TITLE || (campaignId.substring(0, 8) + '…');
+      var nameSpan = document.createElement('strong');
+      nameSpan.textContent = campName;
+      nameSpan.style.display = 'block';
+
+      var amountSpan = document.createElement('span');
+      amountSpan.textContent = parseFloat(row.CUMULATIVE_EARNED).toFixed(6) + ' MINIMA pending';
+      amountSpan.style.fontSize = '0.9em';
+      amountSpan.style.color = '#555';
+
+      infoDiv.appendChild(nameSpan);
+      infoDiv.appendChild(amountSpan);
 
       var btn = document.createElement('button');
       btn.textContent = 'Settle';
@@ -166,7 +178,7 @@ function _renderChannelRewardRows(rows, container) {
         _runSettlement(campaignId, viewerKey, txHex, btn, parseFloat(row.CUMULATIVE_EARNED));
       });
 
-      item.appendChild(label);
+      item.appendChild(infoDiv);
       item.appendChild(btn);
       container.appendChild(item);
     })(rows[i]);

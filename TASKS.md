@@ -201,7 +201,7 @@ getUserProfile(userAddress, cb)
 
 ### T7 — Service Worker: main.js + db-init.js wiring
 **Layer**: Service Worker  
-**File**: `public/service-workers/main.js`  
+**File**: `service.js`  
 **Spec**: MinimaAds.md §11, AGENTS.md §2, §3  
 
 Implement the SW bootstrap:
@@ -328,7 +328,7 @@ MinimaAds.trackClick(campaignId, userAddress, cb)
 
 ### T12 — Remove CAMPAIGN_ANNOUNCE broadcast to contacts
 **Layer**: Service Worker + UI
-**Files**: `dapp/views/creator.js`, `public/service-workers/main.js`
+**Files**: `dapp/views/creator.js`, `service.js`
 **Spec**: MinimaAds.md §8.1
 
 With on-chain discovery (NEWBLOCK → escrow coins → REQUEST/RESPONSE) as the primary distribution mechanism, the `sendall` broadcast via Maxima contacts is redundant. All nodes with the DApp installed discover campaigns independently via the escrow coin.
@@ -364,7 +364,7 @@ Update:
 | T4 | Core | `core/selection.js` | Done |
 | T5 | Core | `core/validation.js` | Done |
 | T6 | Core | `core/rewards.js` | Done |
-| T7 | SW | `public/service-workers/main.js` | Done |
+| T7 | SW | `service.js` | Done |
 | T8 | SW | `public/service-workers/handlers/*.js` | Done |
 | T9 | SDK | `sdk/index.js` | Done |
 | T10 | UI | `dapp/app.js`, `dapp/views/*.js` | Done |
@@ -822,7 +822,7 @@ Provide the standard handoff note (CLAUDE.md §10) when done.
 |---|---|
 | **Status** | Pending ⬜ |
 | **Agent** | Sonnet |
-| **Fitxers** | `public/service-workers/handlers/channel.handler.js`, `public/service-workers/main.js` |
+| **Fitxers** | `public/service-workers/handlers/channel.handler.js`, `service.js` |
 | **Spec** | MinimaAds.md §6.6, §8.10, AGENTS.md §12 fragility #26, §14 bug #15 |
 
 **Context:**

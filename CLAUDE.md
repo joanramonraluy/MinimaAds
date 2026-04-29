@@ -39,7 +39,7 @@ For every task, follow this sequence in order:
 |---|---|---|
 | DB schema | `public/service-workers/db-init.js` + FE DB init | MinimaAds.md §3.5 |
 | Core | `core/campaigns.js`, `core/selection.js`, `core/validation.js`, `core/rewards.js`, `core/minima.js` | MinimaAds.md §7 |
-| Service Worker | `public/service-workers/main.js`, `db-init.js`, `handlers/*.js` | MinimaAds.md §11 |
+| Service Worker | `service.js`, `db-init.js`, `handlers/*.js` | MinimaAds.md §11 |
 | SDK | `sdk/index.js` | MinimaAds.md §13 |
 | UI / MiniDapp | `dapp/app.js`, `dapp/views/*.js` | MinimaAds.md §12 |
 

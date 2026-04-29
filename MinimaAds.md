@@ -293,7 +293,7 @@ The global escrow script permits this because `STATE(10)` = `max_per_viewer` and
 
 ## 5) Anti-abuse System
 
-All limits are defined as a single constant object at the top of `service-workers/main.js`. Never hardcode these values inline.
+All limits are defined as a single constant object at the top of `service.js`. Never hardcode these values inline.
 
 ```javascript
 var LIMITS = {
@@ -942,7 +942,7 @@ The Minima blockchain is the **source of truth** for fund custody. Client-side H
 
 ### 11.1 Entry Point
 
-File: `public/service-workers/main.js`
+File: `service.js`
 
 ```javascript
 var APP_NAME = 'minima-ads';

@@ -1,5 +1,4 @@
 // T7 — Service Worker bootstrap (runtime entry, zip-root).
-// Mirror of public/service-workers/main.js.
 // Defines LIMITS and APP_NAME, loads core + handler files on `inited`,
 // routes MDS events to handlers. Rhino-safe syntax: var, function(), no
 // template literals, no arrow functions, no trailing commas.
@@ -57,7 +56,7 @@ function onInited() {
 }
 
 function registerEscrowScript() {
-  MDS.cmd("newscript script:\"" + ESCROW_SCRIPT + "\" trackall:true", function(res) {
+  MDS.cmd("newscript script:\"" + ESCROW_SCRIPT + "\" trackall:false", function(res) {
     if (!res.status) {
       MDS.log("[ADS] newscript failed: " + res.error);
       return;
@@ -72,7 +71,7 @@ function registerEscrowScript() {
 
 function scanEscrowCoins() {
   if (!ESCROW_ADDRESS) { return; }
-  MDS.cmd("coins relevant:true address:" + ESCROW_ADDRESS, function(res) {
+  MDS.cmd("coins address:" + ESCROW_ADDRESS, function(res) {
     if (!res.status || !res.response) {
       MDS.log("[DISCOVERY] coins query failed or empty response");
       return;
@@ -115,6 +114,6 @@ MDS.init(function(msg) {
   if (msg.event === "inited")              { onInited(); }
   if (msg.event === "MAXIMA")              { onMaxima(msg); }
   if (msg.event === "MDS_TIMER_10SECONDS") { onTimer(); }
-  if (msg.event === "NEWBLOCK")            { scanEscrowCoins(); }
+  if (msg.event === "NEWBLOCK")            { scanEscrowCoins(); checkPendingVouchers(); }
   if (msg.event === "MDS_PENDING")         { onPending(msg); }
 });

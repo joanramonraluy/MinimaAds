@@ -165,7 +165,7 @@ function resolveChannelScriptAddress(cb) {
       return;
     }
     console.log('[CREATOR] CHANNEL_SCRIPT_ADDRESS not in keypair — deriving via newscript');
-    MDS.cmd('newscript script:"' + CHANNEL_SCRIPT_FE + '" trackall:false', function(res) {
+    MDS.cmd('newscript script:"' + CHANNEL_SCRIPT_FE + '" trackall:true', function(res) {
       if (!res.status) {
         console.error('[CREATOR] newscript channel failed:', res.error);
         cb('');

@@ -242,7 +242,6 @@ function logPendingChannelState() {
       return;
     }
     if (!rows || rows.length === 0) {
-      MDS.log("[CHANNEL] Pending rewards: none");
       return;
     }
     for (var i = 0; i < rows.length; i++) {
@@ -300,7 +299,6 @@ function checkOnePendingVoucher(campaignId, viewerKey, channelCoinId) {
     MDS.cmd("coins coinid:" + channelCoinId + " relevant:true", function(coinRes) {
       var indexed = coinRes && coinRes.status && coinRes.response && coinRes.response.length > 0;
       if (!indexed) {
-        MDS.log("[CHANNEL] checkPendingVouchers: coin still not indexed. campaign: " + campaignId + " coinid: " + channelCoinId);
         return;
       }
 

@@ -78,7 +78,7 @@ Always implement in this sequence — never skip or reverse:
 /refs              → Minima source + official docs (read-only reference)
 ```
 
-Entry points: `public/service-workers/main.js` (SW) · `dapp/app.js` (FE) · `sdk/index.js` (SDK)
+Entry points: `service.js` (SW) · `dapp/app.js` (FE) · `sdk/index.js` (SDK)
 
 ---
 

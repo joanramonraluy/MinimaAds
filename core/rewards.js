@@ -121,9 +121,10 @@ function createRewardEvent(params, cb) {
 }
 
 function getUserRewards(userAddress, cb) {
-  var sql = "SELECT * FROM REWARD_EVENTS"
-    + " WHERE UPPER(USER_ADDRESS) = UPPER('" + escapeSql(userAddress) + "')"
-    + " ORDER BY TIMESTAMP DESC";
+  var sql = "SELECT re.*, c.TITLE, c.CREATOR_ADDRESS FROM REWARD_EVENTS re"
+    + " LEFT JOIN CAMPAIGNS c ON UPPER(re.CAMPAIGN_ID) = UPPER(c.ID)"
+    + " WHERE UPPER(re.USER_ADDRESS) = UPPER('" + escapeSql(userAddress) + "')"
+    + " ORDER BY re.TIMESTAMP DESC";
   sqlQuery(sql, function(err, rows) {
     if (err) {
       MDS.log("[REWARD] getUserRewards error: " + err);

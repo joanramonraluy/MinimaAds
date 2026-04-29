@@ -34,6 +34,11 @@ function renderEarnings(root) {
 
   root.appendChild(pendingSection);
 
+  var settleHistorySection = document.createElement('section');
+  settleHistorySection.id = 'ma-settlement-history';
+  settleHistorySection.style.cssText = 'margin-top:1.5rem;';
+  root.appendChild(settleHistorySection);
+
   var historySection = document.createElement('section');
   historySection.id = 'ma-earnings-history';
   historySection.style.cssText = 'margin-top:1.5rem;';
@@ -65,7 +70,62 @@ function loadEarnings() {
     renderRewardHistory(target, rewards || []);
   });
 
+  _refreshSettlementHistory();
   _refreshChannelRewards();
+}
+
+function _refreshSettlementHistory() {
+  var target = document.getElementById('ma-settlement-history');
+  if (!target) { return; }
+  var sql = "SELECT cs.CAMPAIGN_ID, cs.CUMULATIVE_EARNED, cs.CREATED_AT, c.TITLE, c.CREATOR_ADDRESS"
+          + " FROM CHANNEL_STATE cs"
+          + " LEFT JOIN CAMPAIGNS c ON UPPER(cs.CAMPAIGN_ID) = UPPER(c.ID)"
+          + " WHERE cs.STATUS = 'settled'";
+  sqlQuery(sql, function(err, rows) {
+    target.innerHTML = '';
+    renderSettlementHistory(target, rows || []);
+  });
+}
+
+function renderSettlementHistory(target, settlements) {
+  var h3 = document.createElement('h3');
+  h3.textContent = 'Settled channels (' + settlements.length + ')';
+  target.appendChild(h3);
+
+  if (!settlements.length) {
+    var empty = document.createElement('p');
+    empty.textContent = 'No settled channels yet.';
+    target.appendChild(empty);
+    return;
+  }
+
+  var table = document.createElement('table');
+  var thead = document.createElement('thead');
+  var headerRow = document.createElement('tr');
+  var headers = ['Campaign', 'Creator', 'Earned', 'Opened'];
+  for (var i = 0; i < headers.length; i++) {
+    var th = document.createElement('th');
+    th.textContent = headers[i];
+    headerRow.appendChild(th);
+  }
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  var tbody = document.createElement('tbody');
+  for (var j = 0; j < settlements.length; j++) {
+    var r = settlements[j];
+    var tr = document.createElement('tr');
+    var campName = r.TITLE || (r.CAMPAIGN_ID ? r.CAMPAIGN_ID.substring(0, 8) + '…' : '');
+    var creatorPk = r.CREATOR_ADDRESS ? r.CREATOR_ADDRESS.substring(0, 10) + '…' : '';
+    var date = r.CREATED_AT ? new Date(parseInt(r.CREATED_AT)).toLocaleDateString() : '';
+    tr.appendChild(earningsTd(campName));
+    tr.appendChild(earningsTd(creatorPk));
+    tr.appendChild(earningsTd(parseFloat(r.CUMULATIVE_EARNED || 0).toFixed(6) + ' MINIMA'));
+    tr.appendChild(earningsTd(date));
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  target.appendChild(table);
 }
 
 function renderRewardHistory(target, rewards) {
@@ -83,7 +143,7 @@ function renderRewardHistory(target, rewards) {
   var table = document.createElement('table');
   var thead = document.createElement('thead');
   var headerRow = document.createElement('tr');
-  var headers = ['Campaign', 'Type', 'Amount', 'Date'];
+  var headers = ['Campaign', 'Creator', 'Type', 'Amount', 'Date'];
   for (var i = 0; i < headers.length; i++) {
     var th = document.createElement('th');
     th.textContent = headers[i];
@@ -96,9 +156,11 @@ function renderRewardHistory(target, rewards) {
   for (var j = 0; j < rewards.length; j++) {
     var r = rewards[j];
     var tr = document.createElement('tr');
-    var shortId = r.CAMPAIGN_ID ? r.CAMPAIGN_ID.substring(0, 8) + '…' : '';
+    var shortId = r.TITLE || (r.CAMPAIGN_ID ? r.CAMPAIGN_ID.substring(0, 8) + '…' : '');
+    var creatorPk = r.CREATOR_ADDRESS ? r.CREATOR_ADDRESS.substring(0, 10) + '…' : '';
     var date = r.TIMESTAMP ? new Date(parseInt(r.TIMESTAMP)).toLocaleString() : '';
     tr.appendChild(earningsTd(shortId));
+    tr.appendChild(earningsTd(creatorPk));
     tr.appendChild(earningsTd(r.TYPE));
     tr.appendChild(earningsTd(parseFloat(r.AMOUNT || 0).toFixed(6)));
     tr.appendChild(earningsTd(date));
@@ -299,6 +361,7 @@ function onSettleConfirmed(parsed) {
       : 'Reward channel settled.';
   }
   _refreshChannelRewards();
+  _refreshSettlementHistory();
   var histTarget = document.getElementById('ma-earnings-history');
   if (histTarget && MY_ADDRESS) {
     getUserRewards(MY_ADDRESS, function(err, rewards) {

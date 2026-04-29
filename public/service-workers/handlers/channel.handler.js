@@ -151,7 +151,7 @@ function handleRewardRequest(payload) {
             cumulative: cumulative,
             channel_coinid: channelCoinId
           });
-          var kpKey = "PENDING_VOUCHER_" + campaignId + "_" + viewerKey;
+          var kpKey = "PENDING_VOUCHER_" + campaignId + "_" + viewerKey.toUpperCase();
           MDS.keypair.set(kpKey, pending, function() {
             MDS.log("[CHANNEL] coin not yet indexed, queuing voucher for NEWBLOCK: " + campaignId + " coinid: " + channelCoinId);
           });
@@ -281,7 +281,7 @@ function checkPendingVouchers() {
 }
 
 function checkOnePendingVoucher(campaignId, viewerKey, channelCoinId) {
-  var kpKey = "PENDING_VOUCHER_" + campaignId + "_" + viewerKey;
+  var kpKey = "PENDING_VOUCHER_" + campaignId + "_" + viewerKey.toUpperCase();
   MDS.keypair.get(kpKey, function(kpRes) {
     var raw = kpRes && kpRes.status ? kpRes.value : '';
     if (!raw) { return; } // no pending voucher for this channel

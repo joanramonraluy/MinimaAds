@@ -121,13 +121,41 @@ function handleRewardRequest(payload) {
         return;
       }
 
-      MDS.log("[CHANNEL] REWARD_REQUEST: valid. campaign: " + campaignId + " cumulative: " + cumulative);
-      signalFE("DO_REWARD_VOUCHER", {
-        campaign_id: campaignId,
-        viewer_key: viewerKey,
-        viewer_mx: channel.CREATOR_MX,
-        event_id: eventId,
-        cumulative: cumulative
+      // Check whether the channel coin is already indexed by the node.
+      // If not, queue the voucher request for the next NEWBLOCK retry.
+      var channelCoinId = channel.CHANNEL_COINID || '';
+      if (!channelCoinId) {
+        MDS.log("[CHANNEL] REWARD_REQUEST: no CHANNEL_COINID on record, cannot queue. campaign: " + campaignId);
+        return;
+      }
+
+      MDS.cmd("coins coinid:" + channelCoinId + " relevant:true", function(coinRes) {
+        var indexed = coinRes && coinRes.status && coinRes.response && coinRes.response.length > 0;
+        if (indexed) {
+          MDS.log("[CHANNEL] REWARD_REQUEST: coin indexed. signalling DO_REWARD_VOUCHER. campaign: " + campaignId + " cumulative: " + cumulative);
+          signalFE("DO_REWARD_VOUCHER", {
+            campaign_id: campaignId,
+            viewer_key: viewerKey,
+            viewer_mx: channel.CREATOR_MX,
+            event_id: eventId,
+            cumulative: cumulative
+          });
+        } else {
+          // Coin not yet indexed — save to keypair queue; checkPendingVouchers() will
+          // dispatch DO_REWARD_VOUCHER on the next NEWBLOCK once the coin appears.
+          var pending = JSON.stringify({
+            campaign_id: campaignId,
+            viewer_key: viewerKey,
+            viewer_mx: channel.CREATOR_MX,
+            event_id: eventId,
+            cumulative: cumulative,
+            channel_coinid: channelCoinId
+          });
+          var kpKey = "PENDING_VOUCHER_" + campaignId + "_" + viewerKey;
+          MDS.keypair.set(kpKey, pending, function() {
+            MDS.log("[CHANNEL] coin not yet indexed, queuing voucher for NEWBLOCK: " + campaignId + " coinid: " + channelCoinId);
+          });
+        }
       });
     });
   });
@@ -222,5 +250,71 @@ function logPendingChannelState() {
         + " total: " + rows[i].TOTAL_PENDING
         + " channels: " + rows[i].CHANNELS);
     }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// checkPendingVouchers — called on every NEWBLOCK from main.js.
+// For each open channel, checks if a queued REWARD_REQUEST is waiting for
+// the channel coin to be indexed. Once the coin is visible, dispatches
+// DO_REWARD_VOUCHER and clears the keypair queue entry.
+// Rhino-safe: var, function(), string concat, no arrow functions, no trailing commas.
+// ---------------------------------------------------------------------------
+function checkPendingVouchers() {
+  var sql = "SELECT CAMPAIGN_ID, VIEWER_KEY, CHANNEL_COINID, CREATOR_MX"
+          + " FROM CHANNEL_STATE WHERE STATUS = 'open'";
+  sqlQuery(sql, function(err, rows) {
+    if (err) {
+      MDS.log("[CHANNEL] checkPendingVouchers query error: " + err);
+      return;
+    }
+    if (!rows || rows.length === 0) { return; }
+
+    for (var i = 0; i < rows.length; i++) {
+      checkOnePendingVoucher(
+        rows[i].CAMPAIGN_ID,
+        rows[i].VIEWER_KEY,
+        rows[i].CHANNEL_COINID
+      );
+    }
+  });
+}
+
+function checkOnePendingVoucher(campaignId, viewerKey, channelCoinId) {
+  var kpKey = "PENDING_VOUCHER_" + campaignId + "_" + viewerKey;
+  MDS.keypair.get(kpKey, function(kpRes) {
+    var raw = kpRes && kpRes.status ? kpRes.value : '';
+    if (!raw) { return; } // no pending voucher for this channel
+
+    var pending = null;
+    try { pending = JSON.parse(raw); } catch (e) {
+      MDS.log("[CHANNEL] checkOnePendingVoucher: bad keypair JSON for " + kpKey);
+      return;
+    }
+
+    if (!channelCoinId) {
+      MDS.log("[CHANNEL] checkOnePendingVoucher: no coinid on record, skipping. campaign: " + campaignId);
+      return;
+    }
+
+    MDS.cmd("coins coinid:" + channelCoinId + " relevant:true", function(coinRes) {
+      var indexed = coinRes && coinRes.status && coinRes.response && coinRes.response.length > 0;
+      if (!indexed) {
+        MDS.log("[CHANNEL] checkPendingVouchers: coin still not indexed. campaign: " + campaignId + " coinid: " + channelCoinId);
+        return;
+      }
+
+      // Coin is now indexed — clear the queue and dispatch to FE.
+      MDS.keypair.set(kpKey, '', function() {
+        MDS.log("[CHANNEL] pending voucher found, signalling FE: " + campaignId + " cumulative: " + pending.cumulative);
+        signalFE("DO_REWARD_VOUCHER", {
+          campaign_id: pending.campaign_id,
+          viewer_key: pending.viewer_key,
+          viewer_mx: pending.viewer_mx,
+          event_id: pending.event_id,
+          cumulative: pending.cumulative
+        });
+      });
+    });
   });
 }

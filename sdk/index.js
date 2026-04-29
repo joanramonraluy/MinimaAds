@@ -119,11 +119,9 @@
   // --- Channel helpers --------------------------------------------------
 
   function _campaignDays() {
-    // Spec §4.4: campaign_days = ceil(CAMPAIGN_DURATION_BLOCKS / 1728).
-    // CAMPAIGN_DURATION_BLOCKS is a global defined in dapp/views/creator.js
-    // (same page, same runtime); fall back to 10000 if absent.
-    var blocks = (typeof CAMPAIGN_DURATION_BLOCKS !== 'undefined') ? CAMPAIGN_DURATION_BLOCKS : 10000;
-    return Math.ceil(blocks / 1728);
+    // Legacy fallback: return 6 days.
+    // Modern campaigns always provide max_viewer_reward explicitly.
+    return 6;
   }
 
   function _computeMaxAmount(campaign) {

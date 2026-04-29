@@ -4,8 +4,8 @@
 // Escrow flow: MinimaAds.md §6.3 step 4 / Appendix B.
 // CAMPAIGN_ANNOUNCE schema: MinimaAds.md §8.3.
 
-// ~10 000 blocks at ~50 s/block ≈ 6 days. Informational only — not enforced by script.
-var CAMPAIGN_DURATION_BLOCKS = 10000;
+// ~1728 blocks per day at ~50 s/block.
+var BLOCKS_PER_DAY = 1728;
 
 function renderCreator(root) {
   root.innerHTML = '';
@@ -41,8 +41,8 @@ function renderCreator(root) {
     + '<label>Reward per click'
     + '  <input name="reward_click" type="number" step="0.000001" min="0" value="0.10" required>'
     + '</label>'
-    + '<label>Expires at (optional, unix ms)'
-    + '  <input name="expires_at" type="number" step="1" min="0">'
+    + '<label>Campaign duration (days)'
+    + '  <input name="campaign_days" type="number" step="1" min="1" value="6" required>'
     + '</label>'
     + '<label>Max reward per viewer (MINIMA) — optional'
     + '  <input name="max_viewer_reward" type="number" step="0.000001" min="0" placeholder="Leave empty to auto-calculate: (view + click) × days">'
@@ -74,10 +74,16 @@ function onCreatorSubmit(e) {
   var budget     = parseFloat(data.get('budget'));
   var rewardView = parseFloat(data.get('reward_view'));
   var rewardClick= parseFloat(data.get('reward_click'));
-  var expiresAtRaw = (data.get('expires_at') || '').toString().trim();
-  var expiresAt  = expiresAtRaw ? parseInt(expiresAtRaw, 10) : null;
+  var campaignDaysRaw = (data.get('campaign_days') || '').toString().trim();
+  var campaignDays = campaignDaysRaw ? parseInt(campaignDaysRaw, 10) : 6;
+  var expiresAt  = Date.now() + (campaignDays * 24 * 60 * 60 * 1000);
   var maxViewerRewardRaw = (data.get('max_viewer_reward') || '').toString().trim();
   var maxViewerReward = (maxViewerRewardRaw && parseFloat(maxViewerRewardRaw) > 0) ? parseFloat(maxViewerRewardRaw) : null;
+
+  if (maxViewerReward === null) {
+    maxViewerReward = (rewardView + rewardClick) * campaignDays;
+  }
+
 
   if (!title || !body || !ctaLabel || !ctaUrl) {
     msgEl.textContent = 'Missing required text fields.';
@@ -127,7 +133,8 @@ function onCreatorSubmit(e) {
 
   msgEl.textContent = 'Funding escrow…';
 
-  fundEscrowAndPublish(campaign, ad, form, submitBtn, msgEl);
+  var campaignDurationBlocks = campaignDays * BLOCKS_PER_DAY;
+  fundEscrowAndPublish(campaign, ad, form, submitBtn, msgEl, campaignDurationBlocks);
 }
 
 var ESCROW_SCRIPT_FE  = 'LET creatorkey=PREVSTATE(1) ASSERT SIGNEDBY(creatorkey) LET payout=STATE(10) LET change=@AMOUNT-payout IF change GT 0 THEN ASSERT VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE) ENDIF RETURN TRUE';
@@ -179,7 +186,7 @@ function resolveChannelScriptAddress(cb) {
   });
 }
 
-function fundEscrowAndPublish(campaign, ad, form, submitBtn, msgEl) {
+function fundEscrowAndPublish(campaign, ad, form, submitBtn, msgEl, campaignDurationBlocks) {
   function fail(reason) {
     console.error('[CREATOR] fail:', reason);
     msgEl.textContent = reason;
@@ -213,7 +220,7 @@ function fundEscrowAndPublish(campaign, ad, form, submitBtn, msgEl) {
             fail('Could not fetch current block.');
             return;
           }
-          var expiryBlock = parseInt(blockRes.response.block) + CAMPAIGN_DURATION_BLOCKS;
+          var expiryBlock = parseInt(blockRes.response.block) + campaignDurationBlocks;
           console.log('[CREATOR] expiryBlock:', expiryBlock);
 
           MDS.cmd('maxima action:info', function(mxRes) {

@@ -79,8 +79,9 @@ No central server. No external tracking. Budget is verifiable on-chain.
 |---|---|---|
 | **Viewer** | Consumes ads, earns rewards | View ads, click CTAs, receive tokens |
 | **Creator** | Creates ad campaigns | Define budget, publish campaigns, monitor stats |
-| **Publisher** | Integrates MinimaAds in a dApp | Display ads, forward events to the system |
-| **Platform** | MinimaAds itself | Acts as Viewer + Creator + Publisher simultaneously |
+| **Publisher** | Operates a Frame that displays ads | Register frame, display ads, earn per-view publisher reward |
+| **Frame** | A registered display surface owned by a Publisher. The publisher's Maxima public key is captured at frame creation and stored as `PUBLISHER_KEY`. The built-in MinimaAds viewer is the default Frame for every node, using the node's own Maxima PK resolved at app init. Third-party publishers register additional Frames via `MinimaAds.init({ frameId, ... })`. | Receive `PUBLISHER_REWARD_VIEW` per validated view |
+| **Platform** | MinimaAds itself | Acts as Viewer + Creator + Publisher simultaneously; collects 6% fee enforced by KissVM (see §4.6) |
 
 ### 2.2 Multi-role Nodes
 
@@ -104,16 +105,19 @@ Implementation: `selection.js` must filter out campaigns where `CREATOR_ADDRESS 
 
 ```json
 {
-  "id":               "string (UUID)",
-  "creator_address":  "string (Maxima public key — 0x...)",
-  "title":            "string",
-  "budget_total":     "number (tokens)",
-  "budget_remaining": "number (tokens)",
-  "reward_view":      "number (tokens per view)",
-  "reward_click":     "number (tokens per click)",
-  "status":           "enum: draft | active | paused | finished",
-  "created_at":       "number (unix ms)",
-  "expires_at":       "number (unix ms) | null"
+  "id":                     "string (UUID)",
+  "creator_address":        "string (Maxima public key — 0x...)",
+  "title":                  "string",
+  "budget_total":           "number (tokens) — covers viewer + publisher rewards",
+  "budget_remaining":       "number (tokens)",
+  "reward_view":            "number (tokens per view to viewer)",
+  "reward_click":           "number (tokens per click to viewer)",
+  "publisher_reward_view":  "number (tokens per validated view to publisher; 0 disables publisher payouts)",
+  "max_publisher_budget":   "number (tokens) — cap on cumulative publisher payouts; subset of budget_total",
+  "publisher_budget_spent": "number (tokens) — running total paid to publishers; ≤ max_publisher_budget",
+  "status":                 "enum: draft | active | paused | finished",
+  "created_at":             "number (unix ms)",
+  "expires_at":             "number (unix ms) | null"
 }
 ```
 
@@ -139,12 +143,14 @@ Implementation: `selection.js` must filter out campaigns where `CREATOR_ADDRESS 
   "campaign_id":  "string",
   "ad_id":        "string",
   "user_address": "string",
-  "type":         "enum: view | click",
+  "type":         "enum: view | click | publisher_view",
   "amount":       "number (tokens transferred)",
   "timestamp":    "number (unix ms)",
-  "publisher_id": "string"
+  "publisher_id": "string (frame_id — for type='publisher_view' identifies the earning Frame; for type='view'|'click' identifies the displaying Frame for audit)"
 }
 ```
+
+> **`publisher_id` semantics**: This field stores the **`FRAME_ID`** of the Frame that displayed the ad. For events of `type='publisher_view'`, the Frame is the reward recipient. For `type='view'`/`'click'`, the Frame is logged for audit only.
 
 ### 3.4 UserProfile
 
@@ -164,19 +170,22 @@ Implementation: `selection.js` must filter out campaigns where `CREATOR_ADDRESS 
 
 ```sql
 CREATE TABLE IF NOT EXISTS CAMPAIGNS (
-  ID               VARCHAR(256)  PRIMARY KEY,
-  CREATOR_ADDRESS  VARCHAR(512)  NOT NULL,   -- Maxima public key RSA DER hex ~326 chars (NOT wallet signing key)
-  TITLE            VARCHAR(512)  NOT NULL,
-  BUDGET_TOTAL     DECIMAL(20,6) NOT NULL,
-  BUDGET_REMAINING DECIMAL(20,6) NOT NULL,
-  REWARD_VIEW      DECIMAL(20,6) NOT NULL,
-  REWARD_CLICK     DECIMAL(20,6) NOT NULL,
-  STATUS           VARCHAR(32)   NOT NULL DEFAULT 'active',
-  CREATED_AT       BIGINT        NOT NULL,
-  EXPIRES_AT       BIGINT        DEFAULT NULL,
-  ESCROW_COINID     VARCHAR(66)   DEFAULT '',  -- on-chain escrow coin; updated after each batch payout
-  ESCROW_WALLET_PK  VARCHAR(66)   DEFAULT '',  -- wallet signing key in escrow PREVSTATE(1)
-  MAX_VIEWER_REWARD DECIMAL(20,6) DEFAULT NULL -- optional per-viewer channel cap; if set overrides (view+click)×days formula
+  ID                     VARCHAR(256)  PRIMARY KEY,
+  CREATOR_ADDRESS        VARCHAR(512)  NOT NULL,   -- Maxima public key RSA DER hex ~326 chars (NOT wallet signing key)
+  TITLE                  VARCHAR(512)  NOT NULL,
+  BUDGET_TOTAL           DECIMAL(20,6) NOT NULL,
+  BUDGET_REMAINING       DECIMAL(20,6) NOT NULL,
+  REWARD_VIEW            DECIMAL(20,6) NOT NULL,
+  REWARD_CLICK           DECIMAL(20,6) NOT NULL,
+  PUBLISHER_REWARD_VIEW  DECIMAL(20,6) NOT NULL DEFAULT 0,   -- 0 = publisher payouts disabled
+  MAX_PUBLISHER_BUDGET   DECIMAL(20,6) NOT NULL DEFAULT 0,   -- cap on cumulative publisher payouts
+  PUBLISHER_BUDGET_SPENT DECIMAL(20,6) NOT NULL DEFAULT 0,   -- running total paid to publishers
+  STATUS                 VARCHAR(32)   NOT NULL DEFAULT 'active',
+  CREATED_AT             BIGINT        NOT NULL,
+  EXPIRES_AT             BIGINT        DEFAULT NULL,
+  ESCROW_COINID          VARCHAR(66)   DEFAULT '',  -- on-chain escrow coin; updated after each channel open
+  ESCROW_WALLET_PK       VARCHAR(66)   DEFAULT '',  -- wallet signing key in escrow PREVSTATE(1)
+  MAX_VIEWER_REWARD      DECIMAL(20,6) DEFAULT NULL -- optional per-viewer channel cap; if set overrides (view+click)×days formula
 );
 
 CREATE TABLE IF NOT EXISTS ADS (
@@ -212,23 +221,38 @@ CREATE TABLE IF NOT EXISTS DEDUP_LOG (
   LOGGED_AT BIGINT       NOT NULL      -- unix ms; reserved for future pruning
 );
 
+CREATE TABLE IF NOT EXISTS FRAMES (
+  FRAME_ID         VARCHAR(256)  PRIMARY KEY,        -- UUID, or 'builtin:<maxima_pk>' for default frame
+  PUBLISHER_KEY    VARCHAR(512)  NOT NULL,           -- Maxima public key of the publisher node (0x...)
+  PUBLISHER_WALLET VARCHAR(512)  DEFAULT '',         -- Wallet address for publisher reward settlement
+  LABEL            VARCHAR(256)  DEFAULT '',         -- Human-readable name
+  IS_BUILTIN       BOOLEAN       NOT NULL DEFAULT FALSE,
+  CREATED_AT       BIGINT        NOT NULL,
+  TOTAL_EARNED     DECIMAL(20,6) NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS CHANNEL_STATE (
   CAMPAIGN_ID       VARCHAR(256)   NOT NULL,
-  VIEWER_KEY        VARCHAR(66)    NOT NULL,   -- per-channel wallet key (keys action:new on viewer)
+  VIEWER_KEY        VARCHAR(66)    NOT NULL,   -- per-channel wallet key (keys action:new); holds viewer or publisher key per ROLE
+  ROLE              VARCHAR(16)    NOT NULL DEFAULT 'viewer', -- 'viewer' | 'publisher'
+  FRAME_ID          VARCHAR(256)   DEFAULT '', -- non-empty when ROLE='publisher'
   CREATOR_MX        VARCHAR(512)   NOT NULL,   -- creator Mx contact string (from escrow STATE(4))
   CHANNEL_COINID    VARCHAR(66)    DEFAULT '',  -- set after creator opens channel on-chain
-  MAX_AMOUNT        DECIMAL(20,6)  NOT NULL,   -- (REWARD_VIEW + REWARD_CLICK) × campaign_days
+  MAX_AMOUNT        DECIMAL(20,6)  NOT NULL,   -- (REWARD_VIEW + REWARD_CLICK) × campaign_days for viewer; MAX_PUBLISHER_BUDGET cap for publisher
   CUMULATIVE_EARNED DECIMAL(20,6)  NOT NULL DEFAULT 0,
   LATEST_TX_HEX     TEXT           DEFAULT '',  -- last partially-signed tx received from creator
   STATUS            VARCHAR(16)    NOT NULL DEFAULT 'pending', -- pending|open|settled|expired
   CREATED_AT        BIGINT         NOT NULL,
-  PRIMARY KEY (CAMPAIGN_ID, VIEWER_KEY)
+  VIEWER_WALLET_ADDR VARCHAR(512)  DEFAULT '',  -- settlement output address (viewer wallet or publisher wallet)
+  PRIMARY KEY (CAMPAIGN_ID, VIEWER_KEY, ROLE)
 );
 ```
 
 > `CHANNEL_STATE` exists on both creator and viewer nodes with different semantics:
 > - **Creator node**: `LATEST_TX_HEX` = last tx it signed and sent; `CUMULATIVE_EARNED` = total it has committed
 > - **Viewer node**: `LATEST_TX_HEX` = last tx received from creator (ready to post); `CUMULATIVE_EARNED` = total earned
+>
+> **`ROLE` column**: distinguishes viewer-channels (`'viewer'`) from publisher-channels (`'publisher'`). The same campaign can have both types. When `ROLE='publisher'`, `VIEWER_KEY` holds the publisher's per-channel wallet key and `FRAME_ID` identifies the earning Frame. **Always include `AND UPPER(ROLE) = UPPER('viewer'|'publisher')` in WHERE clauses** to avoid matching both channel types for the same key.
 
 **Note on `CAMPAIGNS.ESCROW_WALLET_PK`**: this field stores a **per-campaign generated key** (`keys action:new`), not the node's main wallet key. This provides on-chain isolation between campaigns — a spend on one campaign's escrow does not expose the creator's main wallet key.
 
@@ -245,24 +269,47 @@ CREATE TABLE IF NOT EXISTS CHANNEL_STATE (
 
 | Symbol | Description |
 |---|---|
-| `B` | Campaign budget total (tokens) |
-| `F = 0.06` | Platform fee: 6% of B |
-| `P` | Partner share: 1–2% of B (within F) |
-| `R_v` | Reward per view (recommended MVP default: `0.01`) |
-| `R_c` | Reward per click (recommended MVP default: `0.10`) |
+| `B` | Campaign budget total (tokens) — covers viewer + publisher rewards |
+| `F = 0.06` | Platform fee: 6% of B — enforced on-chain by KissVM (see §4.6) |
+| `R_v` | Reward per view to viewer (recommended MVP default: `0.01`) |
+| `R_c` | Reward per click to viewer (recommended MVP default: `0.10`) |
+| `R_p` | Publisher reward per validated view (`PUBLISHER_REWARD_VIEW`) — 0 disables publisher payouts |
+| `B_p` | Maximum publisher budget (`MAX_PUBLISHER_BUDGET`) — subset of `B` |
 
 ### 4.2 Cost & Fee Structure
 
 - Creator pays: `B + (F × B)` = `B × 1.06`
-- Fee split (if partner): `partner_cut = P × B`, `platform_net = (F × B) − partner_cut`
-- Fee split (no partner): `platform_net = F × B`
+- Platform fee `F × B` is paid to the `PLATFORM_KEY` recipient via the escrow KissVM script (see §4.6 and Appendix B).
+- The single budget `B` covers BOTH viewer rewards AND publisher rewards. The split is governed by `MAX_PUBLISHER_BUDGET`:
+  - Publisher payouts ≤ `B_p`
+  - Viewer payouts use the remaining budget
 
 ### 4.3 Budget Rules
 
-- Budget never goes negative — guaranteed by pre-execution check and KissVM
+- Budget never goes negative — guaranteed by pre-execution check, channel `MAX_AMOUNT` cap, and KissVM
 - A reward executes only if `budget_remaining >= reward_amount`
+- A publisher reward executes only if `(B_p − PUBLISHER_BUDGET_SPENT) >= R_p`
 - Campaign auto-transitions to `finished` when `budget_remaining <= 0`
 - If budget is insufficient: event rejected silently, no state change
+
+### 4.5 Publisher Reward Economics
+
+- **Per-event publisher payout**: `R_p` MINIMA for every viewer view that is validated AND originates from a registered Frame (`frameId` set in SDK `init()`).
+- **Single channel per (campaign, frame)**: the publisher node opens a `ROLE='publisher'` channel with the same campaign escrow used by viewers. Off-chain accumulation and settlement mirror the viewer flow (§6.5–§6.7).
+- **Atomicity**: when a viewer view is rewarded, the SDK fires both events sequentially: first viewer reward, then publisher reward (if `frameId` is set and `R_p > 0`). The publisher reward produces a `REWARD_REQUEST` with `role='publisher'` to the creator's node.
+- **Fee enforcement**: the escrow contract verifies that the platform fee output goes to `PLATFORM_KEY`. Network nodes silently reject any campaign whose escrow coin does not embed a valid `PLATFORM_KEY` at PREVSTATE(5). See §4.6 and Appendix B.
+
+### 4.6 PLATFORM_KEY — Decentralized Fee Enforcement
+
+`PLATFORM_KEY` is a Minima wallet public key (or `null` for MVP). It identifies the recipient of the 6% platform fee. The key is:
+
+- **Embedded in the escrow KissVM script** at campaign creation (PREVSTATE(5) of the escrow coin).
+- **Validated by every receiving node** before persisting a campaign or opening a channel against it.
+- **Constant across all DApp installations** — the value is shipped in `config.js` and is identical for every node running the official app.
+
+A campaign whose escrow does not embed the canonical `PLATFORM_KEY` is silently rejected by all participating nodes. No viewers, no publishers, no rewards, no propagation. The attack is self-defeating — it requires deliberate code modification and produces a campaign that the entire network ignores.
+
+For MVP testing, `PLATFORM_KEY = null`. When null, the on-chain enforcement is skipped. This is MVP-only and must be set to a real key before any mainnet release.
 
 ### 4.4 Unidirectional Payment Channels
 
@@ -305,6 +352,7 @@ var LIMITS = {
   MIN_BUDGET:                      100,    // minimum campaign budget in MINIMA (~$0.77)
   MIN_REWARD_VIEW:                 0.001,  // minimum reward per view in MINIMA
   MIN_REWARD_CLICK:                0.005,  // minimum reward per click in MINIMA
+  MIN_PUBLISHER_REWARD_VIEW:       0.001,  // floor for PUBLISHER_REWARD_VIEW (only applies when R_p > 0)
   MAX_CAMPAIGN_DAYS:               90      // maximum campaign duration in days
 };
 ```
@@ -321,6 +369,7 @@ var LIMITS = {
 | `MIN_BUDGET` | 100 MINIMA | `creator.js` submit validation + HTML `min` attribute — anti-spam floor (~$0.77 at current rates) |
 | `MIN_REWARD_VIEW` | 0.001 MINIMA | `creator.js` submit validation + HTML `min` attribute |
 | `MIN_REWARD_CLICK` | 0.005 MINIMA | `creator.js` submit validation + HTML `min` attribute |
+| `MIN_PUBLISHER_REWARD_VIEW` | 0.001 MINIMA | `creator.js` submit validation — only applies when `PUBLISHER_REWARD_VIEW > 0`; value of 0 (disabled) is always valid |
 | `MAX_CAMPAIGN_DAYS` | 90 | `creator.js` submit validation + HTML `max` attribute |
 
 ---
@@ -377,25 +426,39 @@ var LIMITS = {
 ### 6.3 Campaign Creation Flow
 
 ```
-1.  Creator fills form: title, budget_total, reward_view, reward_click
+1.  Creator fills form: title, budget_total, reward_view, reward_click,
+    publisher_reward_view (optional, default 0), max_publisher_budget (required if publisher_reward_view > 0)
 2.  System computes fee: fee = budget_total × 0.06
 3.  Creator reviews and approves total: budget_total + fee
 4.  Budget locked in KissVM escrow (see Appendix B):
     a. Generate a per-campaign wallet key:  keys action:new  → publickey
        → save as CAMPAIGNS.ESCROW_WALLET_PK  (isolates this campaign on-chain)
-    b. Register escrow script (once per install):
-       newscript script:"LET creatorkey=PREVSTATE(1) ASSERT SIGNEDBY(creatorkey) LET payout=STATE(10) LET change=@AMOUNT-payout IF change GT 0 THEN ASSERT VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE) ENDIF RETURN TRUE" trackall:true
-       → save returned address as ESCROW_ADDRESS constant
-    c. Send budget to escrow:
-       send amount:<budget_total> address:<ESCROW_ADDRESS>
-            state:{"1":"<wallet_pubkey>","2":"<expiry_block>","3":"<campaign_id_hex>","4":"<creator_mx_address>"}
-       Note: STATE(4) = creator Mx address (Mx...) — enables on-chain campaign discovery by all viewer nodes
-    d. Save returned coinid in CAMPAIGNS.ESCROW_COINID (new DB column)
-    Note: fee collection is off-chain only for MVP (no platform wallet address defined)
-5.  Campaign created locally: status = 'active', budget_remaining = budget_total
+    b. Register escrow script (once per install, or when PLATFORM_KEY changes):
+       newscript script:"<B.2 script with PLATFORM_KEY>" trackall:false
+       → save returned address as ESCROW_ADDRESS_V2 in keypair
+    c. Send budget + fee to escrow:
+       send amount:<budget_total + fee> address:<ESCROW_ADDRESS_V2>
+            state:{"1":"<wallet_pubkey>","2":"<expiry_block>","3":"<campaign_id_hex>",
+                   "4":"<creator_mx_address>","5":"<PLATFORM_KEY or 0x00>","6":"<max_publisher_budget>"}
+       Note: STATE(4) = creator Mx address — enables on-chain campaign discovery
+       Note: STATE(5) = PLATFORM_KEY — embedded for contract enforcement and network validation
+       Note: STATE(6) = max_publisher_budget — for publisher channel budget tracking
+    d. Save returned coinid in CAMPAIGNS.ESCROW_COINID
+5.  Campaign created locally: status='active', budget_remaining=budget_total,
+    publisher_reward_view, max_publisher_budget, publisher_budget_spent=0
 6.  Ad object created and linked to campaign
 7.  SW broadcasts CAMPAIGN_ANNOUNCE via Maxima to all contacts (poll:false)
 8.  SW schedules periodic re-broadcast every ~10 min via MDS_TIMER_10SECONDS
+```
+
+**Network-side validation** (mandatory on every receiving node, in `campaign.handler.js`):
+
+```
+On CAMPAIGN_ANNOUNCE or escrow coin discovery via NEWBLOCK:
+  1. If local PLATFORM_KEY is null → accept (MVP — no validation)
+  2. Else: read escrow coin PREVSTATE(5) from on-chain coin (NOT from Maxima payload alone)
+  3. If PREVSTATE(5).toUpperCase() === PLATFORM_KEY.toUpperCase() → accept
+  4. Else → MDS.log("[CAMPAIGN] platform_key mismatch, dropping: " + campaign_id) and return
 ```
 
 ### 6.5 Channel Open Flow
@@ -511,6 +574,35 @@ Creator receives VOUCHER_SYNC_REQUEST:
     If no tx yet → respond with CHANNEL_OPEN (re-confirm channel is open)
 ```
 
+### 6.9 Frame Creation Flow
+
+A Frame is a registered display surface for a publisher. It is the unit of identity for publisher reward attribution.
+
+```
+Built-in Frame (auto-registered at app init):
+1.  On 'inited' event, SW resolves node Maxima PK via maxima action:info
+2.  SW computes frame_id = 'builtin:' + maxima_pk.toUpperCase()
+3.  SW upserts FRAMES row: { frame_id, publisher_key=maxima_pk, is_builtin=true,
+                             label='Built-in viewer', publisher_wallet=<getaddress> }
+4.  signalFE('FRAME_READY', { frame_id, is_builtin: true })
+
+User-created Frame (via Frames UI):
+1.  Publisher opens 'Frames' menu → clicks 'Create frame'
+2.  Form: label (required)
+3.  On submit: FE generates frame_id = generateUID(), reads node Maxima PK (MY_MAXIMA_PK)
+4.  FE inserts FRAMES row: { frame_id, publisher_key: MY_MAXIMA_PK, label, is_builtin: false,
+                             publisher_wallet: MY_ADDRESS, created_at: Date.now() }
+5.  FE shows publisher the SDK integration snippet:
+      MinimaAds.init({ wallet: '0x...', frameId: '<frame_id>' }, cb);
+6.  Signals FRAME_CREATED to refresh the list
+
+Third-party SDK integration:
+1.  Publisher includes sdk/index.js and calls MinimaAds.init({ wallet, frameId })
+2.  SDK validates frame_id exists in local FRAMES table
+3.  Subsequent trackView calls include frame_id; the SDK tags REWARD_EVENTS.PUBLISHER_ID
+4.  The SDK fires a publisher REWARD_REQUEST (role='publisher') only if PUBLISHER_REWARD_VIEW > 0
+```
+
 ### 6.4 Ad Selection Algorithm
 
 ```javascript
@@ -605,28 +697,58 @@ getUserProfile(userAddress, callback)
 
 ### 7.6 channels.js
 
+> **Note**: After T-PUB8, all functions accept a `role` parameter (`'viewer'` | `'publisher'`) as the third argument, and `frameId` as the fourth where relevant. The signatures below reflect the post-T-PUB8 state. Until T-PUB8 is implemented, the existing 2-key signatures remain valid.
+
 ```javascript
-openChannel(campaignId, viewerKey, creatorMx, maxAmount, cb)
-// Inserts CHANNEL_STATE (status='pending') and calls updateBudget(deduct maxAmount).
+openChannel(campaignId, viewerKey, creatorMx, maxAmount, role, frameId, cb)
+// Inserts CHANNEL_STATE (status='pending', role, frame_id).
+// For role='viewer': calls updateBudget(deduct maxAmount).
+// For role='publisher': caller must separately increment PUBLISHER_BUDGET_SPENT.
 // Returns: callback(err, boolean)
 
-activateChannel(campaignId, viewerKey, channelCoinId, cb)
+activateChannel(campaignId, viewerKey, role, channelCoinId, cb)
 // Updates CHANNEL_STATE: status='open', channel_coinid=channelCoinId.
 // Returns: callback(err, boolean)
 
-getChannelState(campaignId, viewerKey, cb)
+getChannelState(campaignId, viewerKey, role, cb)
 // Returns: callback(err, ChannelState | null)
 
-updateChannelVoucher(campaignId, viewerKey, cumulativeEarned, latestTxHex, cb)
+updateChannelVoucher(campaignId, viewerKey, role, cumulativeEarned, latestTxHex, cb)
 // Updates CUMULATIVE_EARNED and LATEST_TX_HEX.
 // Returns: callback(err, boolean)
 
-getLatestVoucher(campaignId, viewerKey, cb)
+getLatestVoucher(campaignId, viewerKey, role, cb)
 // Returns: callback(err, { latest_tx_hex, cumulative_earned } | null)
 
-settleChannel(campaignId, viewerKey, cb)
+settleChannel(campaignId, viewerKey, role, cb)
 // Updates CHANNEL_STATE: status='settled'.
 // Returns: callback(err, boolean)
+```
+
+### 7.7 frames.js
+
+```javascript
+listFrames(cb)
+// Returns: callback(err, Frame[])
+
+getFrame(frameId, cb)
+// Returns: callback(err, Frame | null)
+
+saveFrame(frame, cb)
+// frame: { frame_id, publisher_key, publisher_wallet, label, is_builtin }
+// MERGE INTO FRAMES KEY(FRAME_ID).
+// Returns: callback(err, boolean)
+
+ensureBuiltinFrame(maximaPk, walletAddr, cb)
+// Idempotent — creates 'builtin:<pk>' frame if missing.
+// Returns: callback(err, Frame)
+
+incrementFrameEarnings(frameId, amount, cb)
+// Adds amount to FRAMES.TOTAL_EARNED.
+// Returns: callback(err, boolean)
+
+getFrameEarnings(frameId, cb)
+// Returns: callback(err, { total_earned, event_count })
 ```
 
 ### 7.5 minima.js
@@ -692,6 +814,8 @@ All `MDS.cmd("maxima action:send ... application:" + APP_NAME + " ...")` calls m
     "budget_remaining": 1000,
     "reward_view": 0.01,
     "reward_click": 0.10,
+    "publisher_reward_view": 0.005,
+    "max_publisher_budget": 100,
     "status": "active",
     "created_at": 1713200000000,
     "expires_at": null
@@ -705,11 +829,16 @@ All `MDS.cmd("maxima action:send ... application:" + APP_NAME + " ...")` calls m
     "cta_url": "https://example.com",
     "interests": "tech,minima,web3"
   },
-  "max_viewer_reward": 0.50
+  "max_viewer_reward": 0.50,
+  "platform_key": "0x... or null"
 }
 ```
 
 > `max_viewer_reward` is **optional**. When present and > 0, receiving nodes store it in `CAMPAIGNS.MAX_VIEWER_REWARD` and the SDK uses it as the channel `max_amount` instead of the `(REWARD_VIEW + REWARD_CLICK) × campaign_days` formula. When absent or null, the formula applies (backward-compatible).
+>
+> `publisher_reward_view` and `max_publisher_budget` are **optional** (default 0). When `publisher_reward_view = 0`, the campaign has no publisher payouts.
+>
+> `platform_key` is the `PLATFORM_KEY` embedded in the escrow coin. Receivers **must** validate this matches their local `PLATFORM_KEY` constant AND the on-chain coin PREVSTATE(5). Mismatch → silent drop. When local `PLATFORM_KEY` is null, skip validation.
 
 ### 8.4 Reward Processing — FE-internal (not a Maxima message)
 
@@ -773,9 +902,13 @@ Sent by the viewer SDK the first time it wants to earn rewards from a campaign. 
   "campaign_id": "uuid",
   "viewer_key": "0x...",
   "viewer_mx": "Mx...",
-  "max_amount": 0.66
+  "max_amount": 0.66,
+  "role": "viewer",
+  "frame_id": ""
 }
 ```
+
+> `role` defaults to `"viewer"`. Set to `"publisher"` for publisher channels. `frame_id` is required when `role="publisher"`.
 
 ### 8.9 CHANNEL_OPEN
 
@@ -789,7 +922,9 @@ Sent after the creator has successfully opened the channel coin on-chain.
   "campaign_id": "uuid",
   "viewer_key": "0x...",
   "channel_coinid": "0x...",
-  "max_amount": 0.66
+  "max_amount": 0.66,
+  "role": "viewer",
+  "frame_id": ""
 }
 ```
 
@@ -805,9 +940,13 @@ Sent after each successful `createRewardEvent`. The `cumulative` field is the to
   "campaign_id": "uuid",
   "viewer_key": "0x...",
   "event_id": "uuid",
-  "cumulative": 0.12
+  "cumulative": 0.12,
+  "role": "viewer",
+  "frame_id": ""
 }
 ```
+
+> `role` defaults to `"viewer"`. Set to `"publisher"` for publisher reward requests. `frame_id` is required when `role="publisher"`.
 
 ### 8.11 REWARD_VOUCHER
 
@@ -822,7 +961,9 @@ Sent in response to a `REWARD_REQUEST`. Contains the partially-signed transactio
   "viewer_key": "0x...",
   "event_id": "uuid",
   "cumulative": 0.12,
-  "tx_hex": "0x..."
+  "tx_hex": "0x...",
+  "role": "viewer",
+  "frame_id": ""
 }
 ```
 
@@ -858,6 +999,11 @@ Creator responds with the latest `REWARD_VOUCHER` it has for this pair, or with 
 | `DO_REWARD_VOUCHER` | `{ campaign_id, viewer_key, viewer_mx, event_id, cumulative }` | `channel.handler.js` (SW) | Creator FE builds partial tx and sends REWARD_VOUCHER |
 | `DO_SEND_VOUCHER` | `{ campaign_id, viewer_key, viewer_mx, cumulative, tx_hex }` | `channel.handler.js` (SW) | Creator FE re-sends REWARD_VOUCHER (reconnect sync) |
 | `DO_RESEND_CHANNEL_OPEN` | `{ campaign_id, viewer_key, viewer_mx, channel_coinid, max_amount }` | `channel.handler.js` (SW) | Creator FE re-sends CHANNEL_OPEN when no voucher issued yet |
+| `FRAME_READY` | `{ frame_id, is_builtin }` | `service.js` (SW) | Built-in frame ensured at init — SDK can resolve default frameId |
+| `FRAME_CREATED` | `{ frame_id, label }` | `dapp/views/frames.js` (FE) | New frame persisted — refresh frame list |
+| `PUBLISHER_REWARD_CONFIRMED` | `{ event_id, amount, frame_id, campaign_id }` | `core/rewards.js` (FE) | Publisher reward persisted — update Frame earnings UI |
+| `DO_PUBLISHER_CHANNEL_OPEN` | `{ campaign_id, publisher_key, publisher_mx, frame_id, max_amount }` | `channel.handler.js` (SW) | Creator FE creates publisher channel coin on-chain |
+| `DO_PUBLISHER_REWARD_VOUCHER` | `{ campaign_id, publisher_key, publisher_mx, frame_id, event_id, cumulative }` | `channel.handler.js` (SW) | Creator FE builds publisher voucher tx and sends REWARD_VOUCHER |
 
 ---
 
@@ -964,6 +1110,7 @@ var LIMITS = {
   MIN_BUDGET:                      100,
   MIN_REWARD_VIEW:                 0.001,
   MIN_REWARD_CLICK:                0.005,
+  MIN_PUBLISHER_REWARD_VIEW:       0.001,
   MAX_CAMPAIGN_DAYS:               90
 };
 
@@ -1027,6 +1174,7 @@ MDS.init(function(msg) {
     creator.js        # Campaign creation UI
     viewer.js         # Ad viewing + reward display UI
     stats.js          # Campaign stats UI
+    frames.js         # Frame management UI (list, create, view earnings per frame)
 
 /core
   campaigns.js        # Campaign CRUD, budget tracking
@@ -1034,6 +1182,7 @@ MDS.init(function(msg) {
   validation.js       # View/click validation, LIMITS enforcement, dedup
   rewards.js          # RewardEvent creation, USER_PROFILE updates
   channels.js         # CHANNEL_STATE CRUD, channel lifecycle management
+  frames.js           # FRAMES CRUD, builtin frame ensure, earnings tracking
   minima.js           # MDS.sql wrapper, Maxima sender, FE signaller
 
 /sdk
@@ -1042,6 +1191,7 @@ MDS.init(function(msg) {
 /renderer
   renderAd.js         # Renders one ad unit into a DOM container element
 
+config.js             # Shared constants — PLATFORM_KEY, APP_NAME (loaded first by SW + FE)
 dapp.conf             # Minima MiniDapp manifest — must be at zip root
 service.js            # SW entry point — must be named service.js at zip root
 
@@ -1094,8 +1244,19 @@ All SDK functions are callback-based, matching the Core API pattern (§7.5). Thi
 
 ```javascript
 MinimaAds.init(config, cb)
-// config:   { wallet: string, interests?: string, publisher_id?: string }
+// config:   { wallet: string, interests?: string, frameId?: string, publisher_id?: string }
 // cb:       function(err, ok)
+//
+// frameId behavior:
+//   - If omitted: SDK uses the built-in frame ('builtin:' + node Maxima PK).
+//   - If provided: SDK validates the frame exists in local FRAMES table.
+//     If missing: cb(new Error('UNKNOWN_FRAME')) and abort.
+//   - The frameId is attached to every REWARD_EVENTS.PUBLISHER_ID and is used to
+//     trigger publisher REWARD_REQUEST when campaign.PUBLISHER_REWARD_VIEW > 0.
+//
+// publisher_id is the LEGACY field name (kept for backward compat); when frameId
+// is provided it overrides publisher_id.
+//
 // Stores config and calls MDS.init if not already inited.
 
 MinimaAds.getAd(userAddress, interests, cb)
@@ -1140,7 +1301,7 @@ The publisher must **not**:
 |---|---|---|
 | KissVM global escrow contract | **Defined — see Appendix B** | SIGNEDBY(creatorkey); funds campaign channel opens |
 | KissVM channel contract | **Defined — see Appendix C** | MULTISIG(2 creatorkey viewerkey) + timelock |
-| Platform fee collection wallet | Not defined in MVP | Fee tracked off-chain only for now |
+| Platform fee collection wallet | **Defined — see §4.6 and Appendix B.2** | PLATFORM_KEY embedded in KissVM escrow; `null` for MVP (fee enforcement disabled) |
 | Per-reward on-chain deduction | Not applicable | Channels solve this at settlement granularity |
 | Cryptographic event signing | Future | Eliminates malicious publisher risk |
 | Campaign gossip (multi-hop) | Future | MVP: direct Maxima contacts only |
@@ -1166,10 +1327,18 @@ The escrow contract locks campaign budget on-chain, providing:
 
 ```
 LET creatorkey = PREVSTATE(1)
+LET platformkey = PREVSTATE(5)
 ASSERT SIGNEDBY(creatorkey)
 
 LET payout = STATE(10)
+LET feeflag = STATE(11)
 LET change = @AMOUNT - payout
+
+IF feeflag EQ 1 THEN
+    LET feeamount = STATE(12)
+    ASSERT VERIFYOUT(STATE(13) platformkey feeamount @TOKENID FALSE)
+ENDIF
+
 IF change GT 0 THEN
     ASSERT VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE)
 ENDIF
@@ -1179,11 +1348,14 @@ RETURN TRUE
 
 **What this enforces**:
 - Only the creator (wallet signing key in PREVSTATE(1)) can spend this coin
-- If partial spend (change > 0): change MUST return to `@ADDRESS` (same script address) with `keepstate:true` — creator cannot silently redirect remaining budget to another address
+- When `STATE(11) = 1` (fee branch): the tx must include an output paying `STATE(12)` MINIMA to `platformkey` (PREVSTATE(5)) at output index `STATE(13)`. Any other fee recipient → tx rejected on-chain.
+- If partial spend (change > 0): change MUST return to `@ADDRESS` (same script address) with `keepstate:true`
 - Full spend (change = 0): allowed — used for campaign close / full refund
-- The spending transaction provides `STATE(10)` = payout amount; contract validates the change output accordingly
+- Channel-open txs set `STATE(11) = 0` — fee branch skipped
 
-The script is constant. All MinimaAds campaigns share the same script address — coins are differentiated by their state variables.
+When `PLATFORM_KEY = null` in `config.js`: campaign launch tx sets PREVSTATE(5) = `0x00` and STATE(11) = 0. The fee assertion never fires. This is the MVP default.
+
+This script replaces the previous V1 script. The address changes — store as `ESCROW_ADDRESS_V2` in keypair to avoid clobbering V1 (used by campaigns created before T-PUB4).
 
 ### B.3 State Variables
 
@@ -1193,7 +1365,12 @@ The script is constant. All MinimaAds campaigns share the same script address �
 | 2 | `PREVSTATE(2)` | Campaign expiry block | integer string | UI reference; not enforced by script |
 | 3 | `PREVSTATE(3)` | Campaign ID (hex-encoded UTF-8) | `0x` hex | Links on-chain coin to H2 campaign record |
 | 4 | `PREVSTATE(4)` | Creator Mx address | `Mx...` string | Enables on-chain discovery: viewer nodes send REQUEST_CAMPAIGN_DATA to this address |
+| **5** | `PREVSTATE(5)` | **PLATFORM_KEY** | `0x` hex or `0x00` | Fee recipient — validated by network; `0x00` = fee disabled (MVP) |
+| **6** | `PREVSTATE(6)` | Max publisher budget | number string | Bound on cumulative publisher payouts; for on-chain audit |
 | 10 | `STATE(10)` | Payout amount (set in spending tx) | number string | Used by script to compute required change |
+| **11** | `STATE(11)` | Fee flag (0 \| 1) | integer string | When 1: triggers PLATFORM_KEY fee output assertion |
+| **12** | `STATE(12)` | Fee amount | number string | Asserted in fee output when feeflag=1 |
+| **13** | `STATE(13)` | Fee output index | integer string | Which tx output carries the platform fee |
 
 `PREVSTATE(port)` reads state frozen at coin creation. `STATE(port)` reads state provided by the spending transaction. Port 10 is the only one provided by the spender — it must match the actual payout output amount or the script will fail to validate correctly.
 

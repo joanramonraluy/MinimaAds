@@ -11,6 +11,7 @@
 ```
 T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9 → T10 → T11 → T12
 T-CH1 → T-CH2 → T-CH3 → T-CH4 → T-CH5 → T-CH6 → T-CH7 → T-CH8 → T-CH9
+T-PUB1 → T-PUB2 → T-PUB3 → T-PUB4 → T-PUB5 → T-PUB6 → T-PUB7 → T-PUB8
 ```
 
 Never start a task before all previous tasks are marked **Done**.
@@ -379,6 +380,14 @@ Update:
 | **T-CH7** | **DB + Core + SDK + UI** | `db-init.js` (×2), `campaigns.js`, `sdk/index.js`, `creator.js`, `channel.handler.js` | Done ✅ |
 | **T-CH8** | **SW** | `channel.handler.js`, `main.js` | Done ✅ |
 | **T-CH9** | **FE** | `dapp/app.js` | Done ✅ |
+| **T-PUB1** | **DB** | `db-init.js` (×2 runtimes) | Pending |
+| **T-PUB2** | **Core** | `core/frames.js` (new) | Pending |
+| **T-PUB3** | **Config + SW** | `config.js` (new), `campaign.handler.js` | Pending |
+| **T-PUB4** | **Contract + FE** | `dapp/views/creator.js`, `dapp/app.js` | Pending (Opus) |
+| **T-PUB5** | **SDK** | `sdk/index.js` | Pending |
+| **T-PUB6** | **UI** | `dapp/views/creator.js` | Pending |
+| **T-PUB7** | **UI + SW** | `dapp/views/frames.js` (new), `dapp/app.js`, `service.js` | Pending |
+| **T-PUB8** | **SW + FE** | `channel.handler.js`, `core/channels.js`, `dapp/app.js` | Pending (Opus) |
 
 ---
 
@@ -938,6 +947,509 @@ Definition of done:
 - [ ] AGENTS.md §14 bug #15 marked as Fixed with resolution note
 
 Verification: trigger a view reward. Creator FE log should show a single txninput attempt. No retries. Voucher sent within 1 block of DO_REWARD_VOUCHER signal.
+
+Provide the standard handoff note (CLAUDE.md §10) when done.
+```
+
+---
+
+## Publisher Frame System (T-PUB1 → T-PUB8)
+
+> Implementation of the Publisher Frame system (MinimaAds.md §2.1, §3.1, §3.5, §4.5–4.6, §6.9, §7.7, Appendix B.2/B.3 updated, §13).
+> Mandatory order: T-PUB1 → T-PUB2 → T-PUB3 → T-PUB4 → T-PUB5 → T-PUB6 → T-PUB7 → T-PUB8.
+> Read MinimaAds.md §4.5–4.6, §6.9, Appendix B updated sections fully before starting any task.
+
+---
+
+### T-PUB1 — DB schema (FRAMES table + CAMPAIGNS columns + CHANNEL_STATE.ROLE)
+
+| Field | Value |
+|---|---|
+| **Status** | Pending |
+| **Agent** | Sonnet |
+| **Files** | `public/service-workers/db-init.js`, `dapp/app.js` (FE DB init) |
+| **Spec** | MinimaAds.md §3.5, AGENTS.md §8 |
+
+**Prompt:**
+```
+You are implementing T-PUB1 for MinimaAds. Read CLAUDE.md, MinimaAds.md §3.5, and AGENTS.md §8 before writing any code.
+
+Task: Update CREATE TABLE statements in BOTH runtimes (SW db-init.js and FE init in dapp/app.js).
+
+1. CAMPAIGNS — add three new columns to the CREATE TABLE:
+     PUBLISHER_REWARD_VIEW DECIMAL(20,6) NOT NULL DEFAULT 0,
+     MAX_PUBLISHER_BUDGET  DECIMAL(20,6) NOT NULL DEFAULT 0,
+     PUBLISHER_BUDGET_SPENT DECIMAL(20,6) NOT NULL DEFAULT 0
+   Place them after REWARD_CLICK and before STATUS.
+
+2. FRAMES — add new CREATE TABLE IF NOT EXISTS:
+     FRAME_ID         VARCHAR(256)  PRIMARY KEY,
+     PUBLISHER_KEY    VARCHAR(512)  NOT NULL,
+     PUBLISHER_WALLET VARCHAR(512)  DEFAULT '',
+     LABEL            VARCHAR(256)  DEFAULT '',
+     IS_BUILTIN       BOOLEAN       NOT NULL DEFAULT FALSE,
+     CREATED_AT       BIGINT        NOT NULL,
+     TOTAL_EARNED     DECIMAL(20,6) NOT NULL DEFAULT 0
+
+3. CHANNEL_STATE — add two columns and change PRIMARY KEY:
+     ROLE     VARCHAR(16)  NOT NULL DEFAULT 'viewer',
+     FRAME_ID VARCHAR(256) DEFAULT ''
+   PRIMARY KEY: change from (CAMPAIGN_ID, VIEWER_KEY) to (CAMPAIGN_ID, VIEWER_KEY, ROLE)
+
+Rules:
+- Dev workflow rule (AGENTS.md §14): NO ALTER TABLE. Edit CREATE TABLE only — DB resets on reinstall.
+- SW: Rhino-safe (var, function(), no trailing commas, MDS.log).
+- FE init must mirror SW exactly.
+- Do NOT modify any other file.
+
+Definition of done:
+- [ ] CAMPAIGNS has 3 new columns in both runtimes
+- [ ] FRAMES table exists in both runtimes
+- [ ] CHANNEL_STATE has ROLE and FRAME_ID columns; PK uses 3 columns
+- [ ] Update AGENTS.md §8 (mirror schema) and §16 (document history entry)
+
+Provide the standard handoff note (CLAUDE.md §10) when done.
+```
+
+---
+
+### T-PUB2 — Core: frames.js
+
+| Field | Value |
+|---|---|
+| **Status** | Pending (depends on T-PUB1) |
+| **Agent** | Sonnet |
+| **Files** | `core/frames.js` (new) |
+| **Spec** | MinimaAds.md §7.7, §3.5 |
+
+**Prompt:**
+```
+You are implementing T-PUB2 for MinimaAds. Read CLAUDE.md, MinimaAds.md §7.7 §3.5, and AGENTS.md §8 before writing any code.
+
+Task: Create core/frames.js with these functions (signatures are contracts):
+
+  listFrames(cb)
+    → SELECT * FROM FRAMES ORDER BY CREATED_AT
+    → cb(err, [Frame, ...])
+
+  getFrame(frameId, cb)
+    → SELECT WHERE UPPER(FRAME_ID)=UPPER(...)
+    → cb(err, Frame | null)
+
+  saveFrame(frame, cb)
+    → frame: { frame_id, publisher_key, publisher_wallet, label, is_builtin }
+    → MERGE INTO FRAMES KEY(FRAME_ID); CREATED_AT = Date.now() if new
+    → cb(err, boolean)
+
+  ensureBuiltinFrame(maximaPk, walletAddr, cb)
+    → frame_id = 'builtin:' + maximaPk.toUpperCase()
+    → if exists: cb(err, frame); else: saveFrame({ ..., is_builtin:true, label:'Built-in viewer' })
+    → cb(err, Frame)
+
+  incrementFrameEarnings(frameId, amount, cb)
+    → UPDATE FRAMES SET TOTAL_EARNED = TOTAL_EARNED + amount WHERE UPPER(FRAME_ID)=UPPER(...)
+    → cb(err, boolean)
+
+  getFrameEarnings(frameId, cb)
+    → SELECT TOTAL_EARNED, plus COUNT(*) from REWARD_EVENTS WHERE UPPER(PUBLISHER_ID)=UPPER(frameId) AND TYPE='publisher_view'
+    → cb(err, { total_earned, event_count })
+
+Rules:
+- All DB access via sqlQuery() from core/minima.js
+- All H2 reads use UPPERCASE keys
+- All string interpolation through escapeSql()
+- All comparisons use UPPER() on both sides
+- Rhino-safe in SW context
+- No bare MDS.sql calls
+
+Definition of done:
+- [ ] core/frames.js created with all 6 functions
+- [ ] No hardcoded values
+- [ ] AGENTS.md §16 updated
+
+Provide the standard handoff note (CLAUDE.md §10) when done.
+```
+
+---
+
+### T-PUB3 — config.js + PLATFORM_KEY validation in campaign.handler.js
+
+| Field | Value |
+|---|---|
+| **Status** | Pending (depends on T-PUB2) |
+| **Agent** | Sonnet |
+| **Files** | `config.js` (new, project root), `public/service-workers/handlers/campaign.handler.js`, `service.js` (load order) |
+| **Spec** | MinimaAds.md §4.6, AGENTS.md §12 fragility #31 |
+
+**Prompt:**
+```
+You are implementing T-PUB3 for MinimaAds. Read CLAUDE.md, MinimaAds.md §4.6 §6.3 (network validation), AGENTS.md §12 fragility #31 before writing any code.
+
+Task: Add PLATFORM_KEY constant and on-receive validation.
+
+1. Create /config.js at project root with Rhino-safe content:
+
+   var PLATFORM_KEY = null;  // MVP: fee enforcement disabled. Set to '0x...' wallet PK before mainnet.
+   var APP_NAME = 'minima-ads';
+
+   Note: APP_NAME is currently defined in service.js — leave it there for now,
+   config.js shadows it with the same value. Future refactor will consolidate.
+
+2. service.js — add MDS.load("config.js") as the FIRST file in the inited handler load chain
+   (before core/minima.js). This makes PLATFORM_KEY available in all subsequent SW loads.
+
+3. dapp/app.js — load config.js via <script src="../config.js"> in index.html BEFORE any
+   other app script. Verify PLATFORM_KEY is accessible globally in FE.
+
+4. campaign.handler.js — extend handleCampaignAnnounce(payload):
+   After current persistence flow but BEFORE saveCampaign:
+     a. If PLATFORM_KEY === null → skip validation, proceed (MVP).
+     b. Else compare payload.platform_key (after .toUpperCase()) with PLATFORM_KEY (after .toUpperCase()).
+        Mismatch → MDS.log("[CAMPAIGN] platform_key mismatch, dropping campaign: " + id) and return.
+     c. Else also verify on-chain: MDS.cmd("coins coinid:" + payload.campaign.escrow_coinid + " relevant:false", function(res) { ... })
+        Read state.find(s => s.port === 5).data and compare. Mismatch → drop.
+
+5. handleRequestCampaignData unchanged.
+
+Rules:
+- Backward compatibility: if payload.platform_key is missing AND local PLATFORM_KEY is null → accept (MVP nodes talking).
+- Rhino-safe.
+- Update MinimaAds.md §6.3 if needed.
+- Update AGENTS.md §12 fragility #31 with implementation details.
+
+Definition of done:
+- [ ] config.js exists at root with PLATFORM_KEY=null
+- [ ] service.js loads config.js first
+- [ ] index.html loads config.js first
+- [ ] handleCampaignAnnounce validates platform_key before persisting
+- [ ] AGENTS.md §16 updated
+
+Provide the standard handoff note (CLAUDE.md §10) when done.
+```
+
+---
+
+### T-PUB4 — KissVM escrow extension (PLATFORM_KEY enforcement + publisher channel support)
+
+| Field | Value |
+|---|---|
+| **Status** | Pending (depends on T-PUB3) |
+| **Agent** | **Opus** |
+| **Files** | `dapp/views/creator.js` (escrow registration), `dapp/app.js` (publisher channel-open tx) |
+| **Spec** | MinimaAds.md Appendix B.2/B.3 (updated), §4.5 |
+
+> **Opus**: contract-level changes + multi-state spending tx with conditional fee branch. Contract bugs are silent on Rhino and on-chain failures are hard to debug.
+
+**Prompt:**
+```
+You are implementing T-PUB4 for MinimaAds. Read CLAUDE.md, MinimaAds.md §4.5 §4.6 §6.3 Appendix B.2 B.3 B.5 and Appendix C, plus AGENTS.md §12 fragility #17 and #31 before writing any code.
+
+Task: Extend the escrow KissVM contract to enforce PLATFORM_KEY and support publisher channels.
+
+PART 1 — Replace the ESCROW_SCRIPT constant in creator.js with the §B.2 updated script:
+
+   var ESCROW_SCRIPT =
+     "LET creatorkey=PREVSTATE(1) " +
+     "LET platformkey=PREVSTATE(5) " +
+     "LET maxpubbudget=PREVSTATE(6) " +
+     "ASSERT SIGNEDBY(creatorkey) " +
+     "LET payout=STATE(10) " +
+     "LET feeflag=STATE(11) " +
+     "LET change=@AMOUNT-payout " +
+     "IF feeflag EQ 1 THEN " +
+       "LET feeamount=STATE(12) " +
+       "ASSERT VERIFYOUT(STATE(13) platformkey feeamount @TOKENID FALSE) " +
+     "ENDIF " +
+     "IF change GT 0 THEN " +
+       "ASSERT VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE) " +
+     "ENDIF " +
+     "RETURN TRUE";
+
+Re-register if missing (newscript trackall:false). The address WILL change because the script changed — store under keypair 'ESCROW_ADDRESS_V2' to avoid clobbering the old V1 address used by existing campaigns. Update all reads to look at V2 first, V1 fallback for legacy campaigns.
+
+PART 2 — Campaign launch tx (creator.js):
+- Set txnstate port:5 = (PLATFORM_KEY || '0x00')
+- Set txnstate port:6 = max_publisher_budget (or 0)
+- Set txnstate port:11 = (PLATFORM_KEY ? 1 : 0)
+- If feeflag=1: also set port:12 = feeAmount, port:13 = feeOutputIndex (0)
+- Add a fee output at index 0: txnoutput amount:<fee> address:<PLATFORM_KEY-derived-address>
+- Then the budget output and change output
+
+PART 3 — Channel-open tx (dapp/app.js handleDoChannelOpen):
+- Set txnstate port:11 = 0 (no fee branch on channel-open spends)
+- Otherwise unchanged from current implementation
+
+PART 4 — Add publisher channel-open handler in dapp/app.js:
+  handleDoPublisherChannelOpen(data) — symmetric to handleDoChannelOpen but:
+    - Reads MAX_PUBLISHER_BUDGET from CAMPAIGNS
+    - Uses max_amount = data.max_amount (passed from SW handler — capped at remaining publisher budget)
+    - Sets CHANNEL_STATE.ROLE='publisher', FRAME_ID=data.frame_id
+    - Sends CHANNEL_OPEN with role:'publisher', frame_id
+
+Rules:
+- Verify VERIFYOUT 5-arg form (AGENTS.md fragility #17)
+- The fee branch must use STATE(13) as output index (NOT INC(@INPUT) — fee is at a fixed position)
+- All existing T-CH4 logic for viewer channels remains intact
+- If PLATFORM_KEY is null: feeflag=0, port:5=0x00, no fee output created — campaign launch is identical to current behavior
+
+Definition of done:
+- [ ] New ESCROW_SCRIPT registered as V2
+- [ ] Campaign launch tx includes fee output when PLATFORM_KEY is set
+- [ ] Channel-open tx sets feeflag=0
+- [ ] handleDoPublisherChannelOpen exists and produces a publisher CHANNEL_STATE row
+- [ ] Spec checked against actual KissVM grammar (refs/docs-main contracts-kissvm.mdx)
+- [ ] AGENTS.md §12 fragility #31 updated; §16 entry added
+
+Provide the standard handoff note (CLAUDE.md §10) when done.
+```
+
+---
+
+### T-PUB5 — SDK: init() accepts frameId, publisher REWARD_REQUEST flow
+
+| Field | Value |
+|---|---|
+| **Status** | Pending (depends on T-PUB4) |
+| **Agent** | Sonnet |
+| **Files** | `sdk/index.js` |
+| **Spec** | MinimaAds.md §13, §4.5, §6.9 |
+
+**Prompt:**
+```
+You are implementing T-PUB5 for MinimaAds. Read CLAUDE.md, MinimaAds.md §13 §4.5 §6.9, and AGENTS.md §12 fragility #34 #35 before writing any code.
+
+Task: Update sdk/index.js init() to accept frameId and fire publisher REWARD_REQUEST after viewer reward.
+
+PART 1 — init({ wallet, interests, frameId, publisher_id }, cb):
+  - If frameId provided: call getFrame(frameId, ...). Missing → cb(new Error('UNKNOWN_FRAME')).
+  - If frameId omitted: resolve builtin via maxima action:info, frameId = 'builtin:' + pk.toUpperCase()
+  - Store activeFrameId in module scope.
+  - publisher_id (legacy): if provided AND frameId not provided, use as frameId.
+
+PART 2 — _trackEvent (after current viewer reward flow + viewer channel logic):
+  After viewer REWARD_REQUEST is sent, check campaign.PUBLISHER_REWARD_VIEW:
+    if (parseFloat(campaign.PUBLISHER_REWARD_VIEW) > 0 && type === 'view' && activeFrameId) {
+      // Open or top up publisher channel for this campaign+frame
+      // The publisher channel partner key is derived from the FRAME's PUBLISHER_KEY
+      // This requires reading the frame: getFrame(activeFrameId, ...)
+      // Then computing maxAmount for publisher channel:
+      //   max = Math.min(parseFloat(campaign.MAX_PUBLISHER_BUDGET), R_p × campaign_days)
+      // Send CHANNEL_OPEN_REQUEST with role='publisher', frame_id=activeFrameId
+      //   (or REWARD_REQUEST if channel already open per ROLE='publisher')
+    }
+
+PART 3 — On VOUCHER_RECEIVED with role='publisher':
+  - createRewardEvent({ type:'publisher_view', amount, publisher_id: frameId, ... })
+  - incrementFrameEarnings(frameId, amount, ...)
+  - signalFE('PUBLISHER_REWARD_CONFIRMED', { event_id, amount, frame_id, campaign_id })
+
+Rules:
+- Reuse existing channel infrastructure — pass role='publisher' and frame_id consistently
+- Set REWARD_EVENTS.PUBLISHER_ID = frameId for ALL events (viewer and publisher), so audits can attribute
+- For viewer events: PUBLISHER_ID = frameId where the ad was displayed (audit only)
+- For publisher events: PUBLISHER_ID = frameId of the recipient
+- No hardcoded values
+
+Definition of done:
+- [ ] init() accepts frameId, validates against FRAMES
+- [ ] viewer events log frameId in PUBLISHER_ID
+- [ ] publisher REWARD_REQUEST fires after viewer flow when R_p > 0 and frameId is set
+- [ ] PUBLISHER_REWARD_CONFIRMED signal fires on voucher receipt
+- [ ] AGENTS.md §16 updated
+
+Provide the standard handoff note (CLAUDE.md §10) when done.
+```
+
+---
+
+### T-PUB6 — Campaign creation UI: publisher reward fields
+
+| Field | Value |
+|---|---|
+| **Status** | Pending (depends on T-PUB5) |
+| **Agent** | Sonnet |
+| **Files** | `dapp/views/creator.js` |
+| **Spec** | MinimaAds.md §6.3, §3.1 |
+
+**Prompt:**
+```
+You are implementing T-PUB6 for MinimaAds. Read CLAUDE.md, MinimaAds.md §6.3 §3.1 §5, and AGENTS.md §16 before writing any code.
+
+Task: Add publisher reward fields to the existing campaign creation form.
+
+PART 1 — HTML form additions (creator.js):
+  - Numeric input "Publisher reward per view (MINIMA, optional)"
+    name=publisher_reward_view, min=0, step=0.001, value=0
+    Hint: "Leave at 0 to disable Frame rewards"
+  - Numeric input "Max publisher budget (MINIMA)"
+    name=max_publisher_budget, min=0, step=0.01
+    Conditionally required: if publisher_reward_view > 0, max_publisher_budget > 0 required
+    Hint: "Subset of total budget reserved for publisher payouts"
+
+PART 2 — Submit validation:
+  - If publisher_reward_view > 0:
+    - Must be >= LIMITS.MIN_PUBLISHER_REWARD_VIEW (0.001)
+    - max_publisher_budget must be > 0
+    - max_publisher_budget must be <= budget_total
+  - publisher_reward_view + reward_view + reward_click cannot exceed any single per-view max sanity threshold (use existing budget logic)
+
+PART 3 — saveCampaign call:
+  - Include publisher_reward_view and max_publisher_budget in the campaign object
+  - PUBLISHER_BUDGET_SPENT defaults to 0
+
+PART 4 — CAMPAIGN_ANNOUNCE payload:
+  - Include the two new fields in the broadcast payload (per MinimaAds.md §8.3)
+
+Rules:
+- Frontend validation with inline error messages
+- HTML5 attributes (min, step) for browser-side help
+- No new files
+
+Definition of done:
+- [ ] Form has both new inputs with validation
+- [ ] saveCampaign + CAMPAIGN_ANNOUNCE include the new fields
+- [ ] AGENTS.md §16 updated
+
+Provide the standard handoff note (CLAUDE.md §10) when done.
+```
+
+---
+
+### T-PUB7 — Frames UI view + builtin frame init
+
+| Field | Value |
+|---|---|
+| **Status** | Pending (depends on T-PUB6) |
+| **Agent** | Sonnet |
+| **Files** | `dapp/views/frames.js` (new), `dapp/app.js` (route + builtin init), `service.js` (FRAME_READY signal), `public/index.html` |
+| **Spec** | MinimaAds.md §6.9, §12 |
+
+**Prompt:**
+```
+You are implementing T-PUB7 for MinimaAds. Read CLAUDE.md, MinimaAds.md §6.9 §7.7 §12, and AGENTS.md §10 §16 before writing any code.
+
+Task: Create the Frames management UI and ensure built-in frame is auto-created.
+
+PART 1 — service.js onInited:
+  After the maxima action:info call that resolves MY_MAXIMA_PK and registers USER_PROFILE,
+  also call ensureBuiltinFrame(MY_MAXIMA_PK, walletAddr, function(err, frame) {
+    signalFE('FRAME_READY', { frame_id: frame.FRAME_ID, is_builtin: true });
+  });
+
+PART 2 — dapp/app.js:
+  - Add #frames route → loads frames.js view
+  - Add 'Frames' link in main navigation
+  - Register MDSCOMMS handlers for FRAME_READY, FRAME_CREATED, PUBLISHER_REWARD_CONFIRMED
+
+PART 3 — dapp/views/frames.js:
+  Two sections:
+  a) "My Frames" — table of all frames from listFrames():
+       Columns: Label | Frame ID | Type (builtin/custom) | Total earned | SDK snippet (button "Copy")
+       Per-row "View earnings" → calls getFrameEarnings(), shows per-campaign breakdown
+  b) "Create new frame" form:
+       Input: label
+       On submit:
+         - frameId = generateUID()
+         - getMaximaPk and walletAddr from MY_MAXIMA_PK / MY_ADDRESS
+         - saveFrame({ frame_id, publisher_key:MY_MAXIMA_PK, publisher_wallet:MY_ADDRESS, label, is_builtin:false })
+         - signalFE('FRAME_CREATED', { frame_id, label })
+         - Show snippet:
+             MinimaAds.init({ wallet: '0x...', frameId: '<frame_id>' }, function(err){...});
+             MinimaAds.getAd(...); MinimaAds.render(ad, 'ad-slot');
+
+PART 4 — public/index.html:
+  - Add <a href="#frames">Frames</a> in the nav
+  - Load dapp/views/frames.js after the other view scripts
+
+Rules:
+- Sanitize all label/frame_id outputs with DOMPurify before DOM injection
+- All DB access via core/frames.js (no bare MDS.sql)
+- The built-in frame must be created BEFORE FRAME_READY is signalled
+
+Definition of done:
+- [ ] Built-in frame auto-created at SW init
+- [ ] FRAME_READY signal received and handled in FE
+- [ ] Frames list shows builtin + any user-created frames
+- [ ] User can create new frames; SDK snippet displayed
+- [ ] AGENTS.md §16 updated
+
+Provide the standard handoff note (CLAUDE.md §10) when done.
+```
+
+---
+
+### T-PUB8 — Publisher channel handler (SW + creator FE)
+
+| Field | Value |
+|---|---|
+| **Status** | Pending (depends on T-PUB7) |
+| **Agent** | **Opus** |
+| **Files** | `public/service-workers/handlers/channel.handler.js`, `core/channels.js`, `dapp/app.js` |
+| **Spec** | MinimaAds.md §6.5 §6.6 (publisher variant), §8.8–8.11 (extended fields), §4.5 |
+
+> **Opus**: requires duplicating viewer channel logic with role-aware queries, partial tx construction with publisher keys, and budget tracking against MAX_PUBLISHER_BUDGET. Branch coverage on the creator side is high.
+
+**Prompt:**
+```
+You are implementing T-PUB8 for MinimaAds. Read CLAUDE.md, MinimaAds.md §4.5 §6.5 §6.6 §8.8–8.11, AGENTS.md §10 §12 fragility #33 #34 before writing any code.
+
+Task: Extend channel handlers to support ROLE='publisher' channels — mirror viewer logic, branch on role.
+
+PART 1 — channel.handler.js:
+
+handleChannelOpenRequest — branch on payload.role (default 'viewer'):
+  if role === 'publisher':
+    - Validate: campaign active, PUBLISHER_REWARD_VIEW > 0
+    - Validate: (MAX_PUBLISHER_BUDGET - PUBLISHER_BUDGET_SPENT) >= max_amount
+    - Validate: payload.frame_id is non-empty
+    - openChannel(campaignId, viewerKey, creatorMx, maxAmount, role='publisher', frameId, cb)
+      (Extend openChannel signature in core/channels.js — add role and frameId params)
+    - Deduct from publisher budget: UPDATE CAMPAIGNS SET PUBLISHER_BUDGET_SPENT=PUBLISHER_BUDGET_SPENT+maxAmount
+    - signalFE('DO_PUBLISHER_CHANNEL_OPEN', { campaign_id, publisher_key:viewer_key, publisher_mx:viewer_mx, frame_id, max_amount })
+  else:
+    (existing viewer flow unchanged)
+
+handleRewardRequest — branch on payload.role:
+  if role === 'publisher':
+    - getChannelState now requires (campaign_id, viewer_key, role='publisher')
+    - signalFE('DO_PUBLISHER_REWARD_VOUCHER', { ... frame_id })
+
+handleRewardVoucher — branch on payload.role:
+  if role === 'publisher':
+    - updateChannelVoucher with role='publisher'
+    - signalFE('VOUCHER_RECEIVED', { campaign_id, cumulative, role:'publisher', frame_id })
+    (FE will handle the publisher_view REWARD_EVENTS write via SDK)
+
+PART 2 — core/channels.js (signature extensions):
+  openChannel(campaignId, viewerKey, creatorMx, maxAmount, role, frameId, cb)
+    → MERGE INTO with composite PK (CAMPAIGN_ID, VIEWER_KEY, ROLE)
+  getChannelState(campaignId, viewerKey, role, cb)
+    → SELECT WHERE matches all 3
+  All other functions take role as additional param.
+
+  IMPORTANT: This is a CONTRACT change — update MinimaAds.md §7.6 in the same patch.
+
+PART 3 — dapp/app.js handleDoPublisherChannelOpen / handleDoPublisherRewardVoucher:
+  Mirror existing handleDoChannelOpen / handleDoRewardVoucher but:
+  - Channel state lookup uses role='publisher'
+  - Settlement output[0] address: read FRAMES.PUBLISHER_WALLET for the frame_id (not VIEWER_WALLET_ADDR)
+  - All channel-open tx state ports identical to viewer (no fee branch — port:11=0)
+
+Rules:
+- All channel-related queries MUST include the ROLE filter (fragility #33)
+- T-PUB4 must be Done — escrow contract supports the channel-open flow already
+- Update AGENTS.md §10 with the new DO_PUBLISHER_* signals (already pre-listed in this spec change)
+- Update MinimaAds.md §7.6 with the new function signatures
+- Rhino-safe SW; all FE branches in dapp/app.js follow existing pattern
+
+Definition of done:
+- [ ] channel.handler.js handles role='publisher' for all 5 handlers
+- [ ] core/channels.js signatures extended with role param
+- [ ] MinimaAds.md §7.6 updated for new signatures
+- [ ] dapp/app.js has handleDoPublisherChannelOpen + handleDoPublisherRewardVoucher
+- [ ] PUBLISHER_BUDGET_SPENT increments correctly on channel-open
+- [ ] Settlement pays to FRAMES.PUBLISHER_WALLET
+- [ ] AGENTS.md §16 updated; §14 entry for any discovered issues
 
 Provide the standard handoff note (CLAUDE.md §10) when done.
 ```

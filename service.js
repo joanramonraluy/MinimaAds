@@ -10,7 +10,11 @@ var LIMITS = {
   MAX_CLICKS_PER_CAMPAIGN_PER_DAY: 1,
   COOLDOWN_BETWEEN_REWARDS_MS:     30000,
   MIN_VIEW_DURATION_MS:            3000,
-  MAX_CAMPAIGNS_PER_SESSION:       10
+  MAX_CAMPAIGNS_PER_SESSION:       10,
+  MIN_BUDGET:                      100,
+  MIN_REWARD_VIEW:                 0.001,
+  MIN_REWARD_CLICK:                0.005,
+  MAX_CAMPAIGN_DAYS:               90
 };
 
 // Node identity — set once in onInited after maxima action:info

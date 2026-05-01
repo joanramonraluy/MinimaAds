@@ -247,7 +247,7 @@ CREATE TABLE IF NOT EXISTS CHANNEL_STATE (
 |---|---|
 | `B` | Campaign budget total (tokens) |
 | `F = 0.06` | Platform fee: 6% of B |
-| `P` | Partner share: 0–2% of B (within F) |
+| `P` | Partner share: 1–2% of B (within F) |
 | `R_v` | Reward per view (recommended MVP default: `0.01`) |
 | `R_c` | Reward per click (recommended MVP default: `0.10`) |
 
@@ -301,7 +301,11 @@ var LIMITS = {
   MAX_CLICKS_PER_CAMPAIGN_PER_DAY: 1,
   COOLDOWN_BETWEEN_REWARDS_MS:     30000,  // 30 seconds
   MIN_VIEW_DURATION_MS:            3000,   // 3 seconds
-  MAX_CAMPAIGNS_PER_SESSION:       10
+  MAX_CAMPAIGNS_PER_SESSION:       10,
+  MIN_BUDGET:                      100,    // minimum campaign budget in MINIMA (~$0.77)
+  MIN_REWARD_VIEW:                 0.001,  // minimum reward per view in MINIMA
+  MIN_REWARD_CLICK:                0.005,  // minimum reward per click in MINIMA
+  MAX_CAMPAIGN_DAYS:               90      // maximum campaign duration in days
 };
 ```
 
@@ -314,6 +318,10 @@ var LIMITS = {
 | `COOLDOWN_BETWEEN_REWARDS_MS` | 30 s | `validation.js` → check `USER_PROFILE.LAST_REWARD_AT` |
 | `MIN_VIEW_DURATION_MS` | 3 s | SDK client-side timer — must complete before view event is emitted |
 | `MAX_CAMPAIGNS_PER_SESSION` | 10 | `selection.js` — session counter, never persisted to DB |
+| `MIN_BUDGET` | 100 MINIMA | `creator.js` submit validation + HTML `min` attribute — anti-spam floor (~$0.77 at current rates) |
+| `MIN_REWARD_VIEW` | 0.001 MINIMA | `creator.js` submit validation + HTML `min` attribute |
+| `MIN_REWARD_CLICK` | 0.005 MINIMA | `creator.js` submit validation + HTML `min` attribute |
+| `MAX_CAMPAIGN_DAYS` | 90 | `creator.js` submit validation + HTML `max` attribute |
 
 ---
 
@@ -952,7 +960,11 @@ var LIMITS = {
   MAX_CLICKS_PER_CAMPAIGN_PER_DAY: 1,
   COOLDOWN_BETWEEN_REWARDS_MS:     30000,
   MIN_VIEW_DURATION_MS:            3000,
-  MAX_CAMPAIGNS_PER_SESSION:       10
+  MAX_CAMPAIGNS_PER_SESSION:       10,
+  MIN_BUDGET:                      100,
+  MIN_REWARD_VIEW:                 0.001,
+  MIN_REWARD_CLICK:                0.005,
+  MAX_CAMPAIGN_DAYS:               90
 };
 
 MDS.init(function(msg) {

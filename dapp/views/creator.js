@@ -7,6 +7,15 @@
 // ~1728 blocks per day at ~50 s/block.
 var BLOCKS_PER_DAY = 1728;
 
+// Platform fee rate — MinimaAds.md §6.1 (F = 0.06).
+var PLATFORM_FEE_RATE = 0.06;
+
+function formatMinima(val) {
+  var parts = val.toFixed(6).split('.');
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return parts[0] + '.' + parts[1];
+}
+
 function renderCreator(root) {
   root.innerHTML = '';
 
@@ -17,41 +26,318 @@ function renderCreator(root) {
   var form = document.createElement('form');
   form.id = 'ma-creator-form';
   form.innerHTML = ''
-    + '<label>Campaign title'
-    + '  <input name="title" value="Campanya " required maxlength="256">'
-    + '</label>'
-    + '<label>Ad description'
-    + '  <textarea name="body" required maxlength="1024">Descripció de la campanya de prova</textarea>'
-    + '</label>'
-    + '<label>Interests (comma-separated)'
-    + '  <input name="interests" value="tech, web3, minima" placeholder="tech, web3, minima">'
-    + '</label>'
-    + '<label>CTA label'
-    + '  <input name="cta_label" value="Visit" required maxlength="64">'
-    + '</label>'
-    + '<label>CTA URL'
-    + '  <input name="cta_url" type="url" value="https://minima.global" required>'
-    + '</label>'
-    + '<label>Total budget (MINIMA)'
-    + '  <input name="budget" type="number" step="0.000001" min="0.000001" value="10" required>'
-    + '</label>'
-    + '<label>Reward per view'
-    + '  <input name="reward_view" type="number" step="0.000001" min="0" value="0.01" required>'
-    + '</label>'
-    + '<label>Reward per click'
-    + '  <input name="reward_click" type="number" step="0.000001" min="0" value="0.10" required>'
-    + '</label>'
-    + '<label>Campaign duration (days)'
-    + '  <input name="campaign_days" type="number" step="1" min="1" value="6" required>'
-    + '</label>'
-    + '<label>Max reward per viewer (MINIMA) — optional'
-    + '  <input name="max_viewer_reward" type="number" step="0.000001" min="0" placeholder="Leave empty to auto-calculate: (view + click) × days">'
-    + '</label>'
+    + '<div class="ma-section">'
+    + '  <p class="ma-section-title">Ad content</p>'
+    + '  <label>Campaign title'
+    + '    <input name="title" value="Campanya " required maxlength="256">'
+    + '  </label>'
+    + '  <label>Ad description'
+    + '    <textarea name="body" required maxlength="1024">Descripció de la campanya de prova</textarea>'
+    + '  </label>'
+    + '  <label>Interests (comma-separated)'
+    + '    <input name="interests" value="tech, web3, minima" placeholder="tech, web3, minima">'
+    + '  </label>'
+    + '  <label>CTA label'
+    + '    <input name="cta_label" value="Visit" required maxlength="64">'
+    + '  </label>'
+    + '  <label>CTA URL'
+    + '    <input name="cta_url" type="url" value="https://minima.global" required>'
+    + '  </label>'
+    + '</div>'
+    + '<div class="ma-section">'
+    + '  <p class="ma-section-title">Campaign parameters</p>'
+    + '  <div class="ma-autobalance-row">'
+    + '    <label>'
+    + '      <input type="checkbox" name="auto_balance" checked>'
+    + '      Auto-balance cap'
+    + '    </label>'
+    + '  </div>'
+    + '  <label>Total budget (MINIMA) — min ' + LIMITS.MIN_BUDGET + ' MINIMA'
+    + '    <input name="budget" type="text" inputmode="decimal" min="' + LIMITS.MIN_BUDGET + '" value="' + LIMITS.MIN_BUDGET + '" required>'
+    + '    <small id="ma-budget-hint">Checking wallet balance…</small>'
+    + '  </label>'
+    + '  <label>Reward per view (MINIMA)'
+    + '    <input name="reward_view" type="number" step="0.000001" min="' + LIMITS.MIN_REWARD_VIEW + '" value="0.01" required>'
+    + '  </label>'
+    + '  <label>Reward per click (MINIMA)'
+    + '    <input name="reward_click" type="number" step="0.000001" min="' + LIMITS.MIN_REWARD_CLICK + '" value="0.10" required>'
+    + '  </label>'
+    + '  <label>Max reward per viewer (MINIMA)'
+    + '    <input name="max_viewer_reward" type="number" step="0.000001" min="0.000001" value="0.11" required>'
+    + '    <small id="ma-cap-min-hint" style="display:block;margin-top:0.2rem;"></small>'
+    + '    <span id="ma-multiplier-row" style="display:flex;align-items:center;gap:0.5rem;margin-top:0.35rem;">'
+    + '      <small style="color:var(--pico-muted-color)">(view + click) &times;</small>'
+    + '      <input name="multiplier" type="number" step="0.1" min="1" value="2"'
+    + '        style="width:5rem;margin:0;padding:0.2rem 0.4rem;">'
+    + '    </span>'
+    + '    <small id="ma-max-viewer-hint"></small>'
+    + '  </label>'
+    + '  <label>Publisher commission (%)'
+    + '    <input name="publisher_rate" type="number" step="0.1" min="1" max="2" value="1">'
+    + '    <small>1–2% of budget, paid to the app displaying the ad (implementation pending)</small>'
+    + '  </label>'
+    + '  <label>Campaign duration (days) — max ' + LIMITS.MAX_CAMPAIGN_DAYS
+    + '    <input name="campaign_days" type="number" step="1" min="1" max="' + LIMITS.MAX_CAMPAIGN_DAYS + '" value="7" required>'
+    + '  </label>'
+    + '</div>'
+    + '<div id="ma-campaign-summary"></div>'
     + '<button type="submit">Publish campaign</button>'
     + '<p id="ma-creator-msg" role="status"></p>';
   root.appendChild(form);
 
   form.addEventListener('submit', onCreatorSubmit);
+  form.addEventListener('input', onCreatorFormInput);
+  form.addEventListener('change', onCreatorFormChange);
+  var budgetInput = form.querySelector('[name="budget"]');
+  budgetInput.addEventListener('focus', function() {
+    this.value = this.value.replace(/,/g, '');
+  });
+  budgetInput.addEventListener('blur', function() {
+    var val = parseFloat(this.value.replace(/,/g, ''));
+    if (isFinite(val) && val > 0) { this.value = formatMinima(val); }
+  });
+  var daysInput = form.querySelector('[name="campaign_days"]');
+  if (daysInput) {
+    daysInput.addEventListener('keydown', function(e) {
+      if (e.key === '.' || e.key === ',') { e.preventDefault(); }
+    });
+  }
+  form.addEventListener('reset', function() {
+    setTimeout(function() { applyAutoBalance(form); enforceCapMinimum(form); updateCampaignSummary(form); }, 0);
+  });
+  applyAutoBalance(form);
+  enforceCapMinimum(form);
+  updateCampaignSummary(form);
+  loadWalletBalance(form);
+}
+
+function loadWalletBalance(form) {
+  MDS.cmd('balance', function(res) {
+    var hintEl = document.getElementById('ma-budget-hint');
+    if (!res.status || !res.response) {
+      if (hintEl) { hintEl.textContent = 'Could not fetch wallet balance.'; }
+      return;
+    }
+    var sendable = 0;
+    var entries = res.response;
+    for (var i = 0; i < entries.length; i++) {
+      if (entries[i].tokenid === '0x00') {
+        sendable = parseFloat(entries[i].sendable) || 0;
+        break;
+      }
+    }
+    var budgetInput = form.querySelector('[name="budget"]');
+    if (!budgetInput) { return; }
+    budgetInput.max = sendable.toFixed(6);
+    budgetInput.dataset.walletMax = sendable;
+    var initialBudget = parseFloat(budgetInput.value.replace(/,/g, ''));
+    if (isFinite(initialBudget) && initialBudget > 0) {
+      budgetInput.value = formatMinima(initialBudget);
+    }
+    if (hintEl) {
+      hintEl.textContent = 'Available: ' + formatMinima(sendable) + ' MINIMA';
+    }
+    updateCampaignSummary(form);
+  });
+}
+
+function onCreatorFormInput(e) {
+  var form        = e.currentTarget;
+  var changedName = e.target.name;
+  var decimals    = FIELD_DECIMALS[changedName];
+  if (decimals !== undefined && e.target.type === 'number') {
+    truncateInputDecimals(e.target, decimals);
+  }
+  if (changedName === 'campaign_days') {
+    var days = parseInt(e.target.value, 10);
+    if (isFinite(days) && days > LIMITS.MAX_CAMPAIGN_DAYS) { e.target.value = LIMITS.MAX_CAMPAIGN_DAYS; }
+  }
+  if (changedName === 'publisher_rate') {
+    var rate = parseFloat(e.target.value);
+    if (isFinite(rate) && rate > 2) { e.target.value = '2.0'; }
+    if (isFinite(rate) && rate < 1) { e.target.value = '1.0'; }
+  }
+  if (changedName === 'multiplier') {
+    var mult = parseFloat(e.target.value);
+    if (isFinite(mult) && mult < 1) { e.target.value = '1.0'; }
+  }
+  if (changedName === 'budget') {
+    var budgetInput = form.querySelector('[name="budget"]');
+    var walletMax = parseFloat(budgetInput.dataset.walletMax);
+    var budgetVal = parseFloat(e.target.value.replace(/,/g, ''));
+    if (isFinite(walletMax) && isFinite(budgetVal) && budgetVal > walletMax) {
+      e.target.value = walletMax.toFixed(6);
+    }
+  }
+  if (changedName === 'reward_view' || changedName === 'reward_click'
+      || changedName === 'auto_balance' || changedName === 'multiplier') {
+    applyAutoBalance(form);
+  }
+  enforceCapMinimum(form);
+  updateCampaignSummary(form);
+}
+
+function truncateInputDecimals(input, maxDecimals) {
+  var val = input.value;
+  var dotIndex = val.indexOf('.');
+  if (dotIndex === -1) { return; }
+  if (maxDecimals === 0) {
+    input.value = val.slice(0, dotIndex);
+  } else if (val.length - dotIndex - 1 > maxDecimals) {
+    input.value = val.slice(0, dotIndex + maxDecimals + 1);
+  }
+}
+
+var FIELD_DECIMALS = {
+  budget:            6,
+  reward_view:       6,
+  reward_click:      6,
+  max_viewer_reward: 6,
+  campaign_days:     0,
+  publisher_rate:    1,
+  multiplier:        1
+};
+
+function onCreatorFormChange(e) {
+  var input = e.target;
+  var decimals = FIELD_DECIMALS[input.name];
+  if (decimals === undefined || input.type !== 'number') { return; }
+  var val = parseFloat(input.value);
+  if (!isFinite(val)) { return; }
+  var factor = Math.pow(10, decimals);
+  input.value = (Math.round(val * factor) / factor).toFixed(decimals);
+}
+
+// Keeps max_viewer_reward >= reward_view + reward_click at all times.
+// Updates the HTML min attribute and clamps the current value if needed.
+function enforceCapMinimum(form) {
+  var rewardView  = parseFloat(form.querySelector('[name="reward_view"]').value) || 0;
+  var rewardClick = parseFloat(form.querySelector('[name="reward_click"]').value) || 0;
+  var minCap      = rewardView + rewardClick;
+  var capInput    = form.querySelector('[name="max_viewer_reward"]');
+  capInput.min = minCap > 0 ? minCap.toFixed(6) : '0.000001';
+  var currentCap = parseFloat(capInput.value);
+  if (isFinite(currentCap) && currentCap < minCap) {
+    capInput.value = minCap.toFixed(6);
+  }
+  var hintEl = document.getElementById('ma-cap-min-hint');
+  if (hintEl) {
+    hintEl.textContent = minCap > 0
+      ? 'Min: ' + formatMinima(minCap) + ' MINIMA (= reward/view + reward/click)'
+      : '';
+  }
+}
+
+// When auto-balance is ON: cap = (view + click) × multiplier.
+// Multiplier defaults to 2 (balanced). Min 1 = maximum reach. Higher = more incentive per viewer.
+function applyAutoBalance(form) {
+  var autoBalance    = form.querySelector('[name="auto_balance"]').checked;
+  var capInput       = form.querySelector('[name="max_viewer_reward"]');
+  var multiplierInput = form.querySelector('[name="multiplier"]');
+  var hintEl         = document.getElementById('ma-max-viewer-hint');
+
+  var rewardView  = parseFloat(form.querySelector('[name="reward_view"]').value);
+  var rewardClick = parseFloat(form.querySelector('[name="reward_click"]').value);
+  var budget      = parseFloat((form.querySelector('[name="budget"]').value || '').replace(/,/g, ''));
+  var multiplierRow = document.getElementById('ma-multiplier-row');
+  var multiplier    = multiplierInput ? (parseFloat(multiplierInput.value) || 1) : 1;
+  if (multiplier < 1) { multiplier = 1; }
+
+  if (multiplierRow) { multiplierRow.style.display = autoBalance ? 'flex' : 'none'; }
+  capInput.readOnly = autoBalance;
+
+  if (hintEl) {
+    if (!isFinite(rewardView) || !isFinite(rewardClick) || !isFinite(budget)) {
+      hintEl.innerHTML = '';
+    } else {
+      var minCap   = rewardView + rewardClick;
+      var maxReach = minCap > 0 ? Math.floor(budget / minCap) : 0;
+      var curCap   = minCap * multiplier;
+      var curReach = curCap > 0 ? Math.floor(budget / curCap) : 0;
+      if (autoBalance) {
+        var minLine = '<span style="display:block">'
+          + '<strong>&times;1</strong> &nbsp;Max reach: <strong>' + maxReach.toLocaleString() + '</strong> viewers'
+          + ' &middot; ' + formatMinima(minCap) + '&thinsp;MINIMA/viewer'
+          + '</span>';
+        var curLine = multiplier !== 1
+          ? '<span style="display:block">'
+            + '<strong>&times;' + multiplier.toFixed(1) + '</strong> Current: <strong>' + curReach.toLocaleString() + '</strong> viewers'
+            + ' &middot; ' + formatMinima(curCap) + '&thinsp;MINIMA/viewer'
+            + '</span>'
+          : '';
+        var note = '<span style="display:block;margin-top:0.2rem;opacity:0.75">'
+          + 'Higher &times; &rarr; fewer viewers, stronger incentive per viewer'
+          + '</span>';
+        hintEl.innerHTML = minLine + curLine + note;
+      } else {
+        hintEl.innerHTML = '';
+      }
+    }
+  }
+
+  if (!autoBalance) return;
+  if (!isFinite(rewardView) || !isFinite(rewardClick)) return;
+
+  var suggested = (rewardView + rewardClick) * multiplier;
+  if (suggested > 0) { capInput.value = suggested.toFixed(6); }
+}
+
+function updateCampaignSummary(form) {
+  var summaryEl = document.getElementById('ma-campaign-summary');
+  if (!summaryEl) return;
+
+  var budget       = parseFloat((form.querySelector('[name="budget"]').value || '').replace(/,/g, ''));
+  var rewardView   = parseFloat(form.querySelector('[name="reward_view"]').value);
+  var rewardClick  = parseFloat(form.querySelector('[name="reward_click"]').value);
+  var campaignDays = parseInt(form.querySelector('[name="campaign_days"]').value, 10);
+  var cap          = parseFloat(form.querySelector('[name="max_viewer_reward"]').value);
+
+  if (!isFinite(budget) || budget <= 0 || !isFinite(rewardView) || !isFinite(rewardClick)
+      || !isFinite(campaignDays) || campaignDays <= 0 || !isFinite(cap) || cap <= 0) {
+    summaryEl.innerHTML = '';
+    return;
+  }
+
+  var publisherRateInput = form.querySelector('[name="publisher_rate"]');
+  var publisherPct = publisherRateInput ? (parseFloat(publisherRateInput.value) || 0) : 0;
+  if (publisherPct < 0) { publisherPct = 0; }
+  if (publisherPct > 2) { publisherPct = 2; }
+
+  var maxViewers    = Math.floor(budget / cap);
+  var platformFee   = budget * PLATFORM_FEE_RATE;
+  var publisherFee  = budget * (publisherPct / 100);
+  var totalCost     = budget + platformFee;
+
+  var warningHtml = '';
+  if (maxViewers === 0) {
+    warningHtml = '<p class="ma-summary-warning">No viewer can be rewarded with these settings.'
+      + ' Increase the budget or reduce the cap per viewer.</p>';
+  }
+
+  var interactionNote = '';
+  var singleInteraction = rewardView + rewardClick;
+  if (isFinite(singleInteraction) && singleInteraction > 0 && cap < singleInteraction) {
+    interactionNote = '<li><small>Cap is below a single view + click ('
+      + formatMinima(singleInteraction) + ' MINIMA) — viewers earn partial rewards per interaction.</small></li>';
+  }
+
+  summaryEl.innerHTML = '<div class="ma-summary-box">'
+    + warningHtml
+    + '<strong>Campaign reach estimate</strong>'
+    + '<ul>'
+    + '<li>Max reward per viewer: ' + formatMinima(cap) + ' MINIMA</li>'
+    + '<li>Max viewers that can be rewarded: <strong>' + maxViewers.toLocaleString() + '</strong></li>'
+    + interactionNote
+    + '</ul>'
+    + '<strong>Cost breakdown</strong>'
+    + '<ul>'
+    + '<li>Budget: ' + formatMinima(budget) + ' MINIMA</li>'
+    + '<li>Platform fee (6%): ' + formatMinima(platformFee) + ' MINIMA'
+    + '  <ul><li>Publisher commission (' + publisherPct.toFixed(1) + '%): '
+    + formatMinima(publisherFee) + ' MINIMA <small>(pending)</small></li></ul></li>'
+    + '<li>Total cost: <strong>' + formatMinima(totalCost) + ' MINIMA</strong></li>'
+    + '</ul>'
+    + '</div>';
 }
 
 function onCreatorSubmit(e) {
@@ -71,11 +357,11 @@ function onCreatorSubmit(e) {
   var interests  = (data.get('interests') || '').toString().trim();
   var ctaLabel   = (data.get('cta_label') || '').toString().trim();
   var ctaUrl     = (data.get('cta_url')   || '').toString().trim();
-  var budget     = parseFloat(data.get('budget'));
+  var budget     = parseFloat((data.get('budget') || '').replace(/,/g, ''));
   var rewardView = parseFloat(data.get('reward_view'));
   var rewardClick= parseFloat(data.get('reward_click'));
   var campaignDaysRaw = (data.get('campaign_days') || '').toString().trim();
-  var campaignDays = campaignDaysRaw ? parseInt(campaignDaysRaw, 10) : 6;
+  var campaignDays = campaignDaysRaw ? parseInt(campaignDaysRaw, 10) : 7;
   var expiresAt  = Date.now() + (campaignDays * 24 * 60 * 60 * 1000);
   var maxViewerRewardRaw = (data.get('max_viewer_reward') || '').toString().trim();
   var maxViewerReward = (maxViewerRewardRaw && parseFloat(maxViewerRewardRaw) > 0) ? parseFloat(maxViewerRewardRaw) : null;
@@ -84,17 +370,42 @@ function onCreatorSubmit(e) {
     maxViewerReward = (rewardView + rewardClick) * campaignDays;
   }
 
-
   if (!title || !body || !ctaLabel || !ctaUrl) {
     msgEl.textContent = 'Missing required text fields.';
     return;
   }
-  if (!(budget > 0) || !(rewardView >= 0) || !(rewardClick >= 0)) {
-    msgEl.textContent = 'Budget and reward amounts must be non-negative numbers.';
+  if (!(budget >= LIMITS.MIN_BUDGET)) {
+    msgEl.textContent = 'Budget must be at least ' + LIMITS.MIN_BUDGET + ' MINIMA.';
+    return;
+  }
+  var budgetInput = form.querySelector('[name="budget"]');
+  var walletMax = budgetInput ? parseFloat(budgetInput.dataset.walletMax) : NaN;
+  if (isFinite(walletMax) && budget > walletMax) {
+    msgEl.textContent = 'Budget exceeds wallet balance (' + walletMax.toFixed(6) + ' MINIMA sendable).';
+    return;
+  }
+  if (!(rewardView >= LIMITS.MIN_REWARD_VIEW)) {
+    msgEl.textContent = 'Reward per view must be at least ' + LIMITS.MIN_REWARD_VIEW + ' MINIMA.';
+    return;
+  }
+  if (!(rewardClick >= LIMITS.MIN_REWARD_CLICK)) {
+    msgEl.textContent = 'Reward per click must be at least ' + LIMITS.MIN_REWARD_CLICK + ' MINIMA.';
+    return;
+  }
+  if (!(campaignDays >= 1) || !(campaignDays <= LIMITS.MAX_CAMPAIGN_DAYS)) {
+    msgEl.textContent = 'Campaign duration must be between 1 and ' + LIMITS.MAX_CAMPAIGN_DAYS + ' days.';
     return;
   }
   if (rewardView > budget || rewardClick > budget) {
     msgEl.textContent = 'Rewards cannot exceed total budget.';
+    return;
+  }
+  if (maxViewerReward < rewardView + rewardClick) {
+    msgEl.textContent = 'Max reward per viewer cannot be less than reward/view + reward/click (' + (rewardView + rewardClick).toFixed(6) + ' MINIMA).';
+    return;
+  }
+  if (Math.floor(budget / maxViewerReward) === 0) {
+    msgEl.textContent = 'Campaign cannot reach any viewer with these settings. Increase budget or reduce cap per viewer.';
     return;
   }
 

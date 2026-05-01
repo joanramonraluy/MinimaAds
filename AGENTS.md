@@ -750,10 +750,11 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 |---|---|---|
 | `CAMPAIGNS` | Stores all known campaigns (local + received via Maxima) | `ID` |
 | `ADS` | Stores ad units linked to campaigns | `ID` |
-| `REWARD_EVENTS` | Audit log of all view/click events; used for dedup and limit checks | `ID` |
+| `REWARD_EVENTS` | Audit log of all view/click/publisher_view events; used for dedup and limit checks | `ID` |
 | `USER_PROFILE` | Stores local user address, interests, earned totals | `ADDRESS` |
 | `DEDUP_LOG` | Deduplication log for reward events; checked by `isDuplicate()` | `ID` |
-| `CHANNEL_STATE` | Per-channel payment state (viewer-campaign pair) | `(CAMPAIGN_ID, VIEWER_KEY)` |
+| `FRAMES` | Registered display surfaces (publisher frames); built-in frame auto-created at init | `FRAME_ID` |
+| `CHANNEL_STATE` | Per-channel payment state; covers both viewer and publisher channels | `(CAMPAIGN_ID, VIEWER_KEY, ROLE)` |
 
 ### CAMPAIGNS
 | Column | Type | Notes |
@@ -771,6 +772,9 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 | `ESCROW_COINID` | VARCHAR(66) DEFAULT '' | On-chain escrow coinid (updated each time a channel is opened from the escrow) |
 | `ESCROW_WALLET_PK` | VARCHAR(66) DEFAULT '' | Per-campaign key generated via `keys action:new` — used in escrow PREVSTATE(1) — NOT the Maxima PK and NOT the main wallet key |
 | `MAX_VIEWER_REWARD` | DECIMAL(20,6) DEFAULT NULL | Optional per-viewer channel cap set by creator. If > 0, overrides the `(REWARD_VIEW + REWARD_CLICK) × campaign_days` formula in `_computeMaxAmount()`. NULL → formula applies. |
+| `PUBLISHER_REWARD_VIEW` | DECIMAL(20,6) NOT NULL DEFAULT 0 | Tokens paid to the displaying Frame per validated view; 0 = publisher payouts disabled |
+| `MAX_PUBLISHER_BUDGET` | DECIMAL(20,6) NOT NULL DEFAULT 0 | Cap on cumulative publisher payouts; subset of BUDGET_TOTAL |
+| `PUBLISHER_BUDGET_SPENT` | DECIMAL(20,6) NOT NULL DEFAULT 0 | Running total of publisher payouts; incremented when a publisher channel is opened |
 
 ### ADS
 | Column | Type | Notes |
@@ -809,24 +813,38 @@ MDS.log("[DB] sqlQuery error: " + res.error);
 | `ID` | VARCHAR(256) PK | RewardEvent UUID — checked by `isDuplicate()` |
 | `LOGGED_AT` | BIGINT NOT NULL | unix ms — reserved for future pruning |
 
+### FRAMES
+| Column | Type | Notes |
+|---|---|---|
+| `FRAME_ID` | VARCHAR(256) PK | UUID, or `'builtin:<maxima_pk>'` for the auto-created default frame |
+| `PUBLISHER_KEY` | VARCHAR(512) NOT NULL | Maxima public key of the publisher node — captured at frame creation |
+| `PUBLISHER_WALLET` | VARCHAR(512) DEFAULT '' | Wallet address for publisher reward settlement output |
+| `LABEL` | VARCHAR(256) DEFAULT '' | Human-readable name |
+| `IS_BUILTIN` | BOOLEAN NOT NULL DEFAULT FALSE | True for the auto-created built-in frame |
+| `CREATED_AT` | BIGINT NOT NULL | unix ms |
+| `TOTAL_EARNED` | DECIMAL(20,6) DEFAULT 0 | Cumulative publisher earnings for this frame |
+
 ### CHANNEL_STATE
 | Column | Type | Notes |
 |---|---|---|
 | `CAMPAIGN_ID` | VARCHAR(256) NOT NULL | FK → CAMPAIGNS.ID |
-| `VIEWER_KEY` | VARCHAR(66) NOT NULL | Per-channel viewer wallet key (`keys action:new`) |
+| `VIEWER_KEY` | VARCHAR(66) NOT NULL | Per-channel wallet key (`keys action:new`); holds viewer or publisher key depending on ROLE |
+| `ROLE` | VARCHAR(16) NOT NULL DEFAULT 'viewer' | `'viewer'` or `'publisher'` — distinguishes channel type. **Always filter by ROLE in WHERE clauses** |
+| `FRAME_ID` | VARCHAR(256) DEFAULT '' | Non-empty when ROLE='publisher'; references FRAMES.FRAME_ID |
 | `CREATOR_MX` | VARCHAR(512) NOT NULL | Creator Mx contact string from escrow STATE(4) |
 | `CHANNEL_COINID` | VARCHAR(66) DEFAULT '' | Set after creator opens channel on-chain |
-| `MAX_AMOUNT` | DECIMAL(20,6) NOT NULL | `(REWARD_VIEW + REWARD_CLICK) × campaign_days` |
-| `CUMULATIVE_EARNED` | DECIMAL(20,6) DEFAULT 0 | Total committed by creator (creator) / total earned (viewer) |
-| `LATEST_TX_HEX` | TEXT DEFAULT '' | Last partially-signed tx (viewer holds for settlement) |
+| `MAX_AMOUNT` | DECIMAL(20,6) NOT NULL | viewer: `(REWARD_VIEW + REWARD_CLICK) × campaign_days`; publisher: cap from MAX_PUBLISHER_BUDGET |
+| `CUMULATIVE_EARNED` | DECIMAL(20,6) DEFAULT 0 | Total committed by creator (creator node) / total earned (viewer/publisher node) |
+| `LATEST_TX_HEX` | TEXT DEFAULT '' | Last partially-signed tx (viewer/publisher holds for settlement) |
 | `STATUS` | VARCHAR(16) DEFAULT 'pending' | `pending\|open\|settled\|expired` |
 | `CREATED_AT` | BIGINT NOT NULL | unix ms |
-| `VIEWER_WALLET_ADDR` | VARCHAR(512) DEFAULT '' | Viewer's main wallet address (`getaddress`) — used by creator as settlement output[0] so reward is sendable |
+| `VIEWER_WALLET_ADDR` | VARCHAR(512) DEFAULT '' | Settlement output address — viewer wallet for ROLE='viewer', publisher wallet for ROLE='publisher' |
 
-PRIMARY KEY: `(CAMPAIGN_ID, VIEWER_KEY)` — one channel per viewer-campaign pair.
+PRIMARY KEY: `(CAMPAIGN_ID, VIEWER_KEY, ROLE)` — one channel per (viewer/publisher key, campaign, role) triple.
 
 > Creator node writes: `CHANNEL_COINID`, `CUMULATIVE_EARNED`, `LATEST_TX_HEX` (what it has signed).
-> Viewer node writes: all fields; `LATEST_TX_HEX` is the voucher received from creator.
+> Viewer/publisher node writes: all fields; `LATEST_TX_HEX` is the voucher received from creator.
+> **Critical**: queries that previously used `WHERE CAMPAIGN_ID=X AND VIEWER_KEY=Y` must now also include `AND UPPER(ROLE)='VIEWER'` or `AND UPPER(ROLE)='PUBLISHER'` to avoid matching both rows when the same key holds both viewer and publisher channels for the same campaign (rare but possible). See fragility #33.
 
 **Schema parity rule**: Any new table or column must be added in **both** SW `db-init.js` and FE DB init in the same patch. Use `ADD COLUMN IF NOT EXISTS` for non-breaking migrations.
 
@@ -839,16 +857,16 @@ PRIMARY KEY: `(CAMPAIGN_ID, VIEWER_KEY)` — one channel per viewer-campaign pai
 
 | Maxima Type | Direction | Handler | DB Impact | FE Signal |
 |---|---|---|---|---|
-| `CAMPAIGN_ANNOUNCE` | Creator SW → all contacts | `campaign.handler.js` | `MERGE INTO CAMPAIGNS` + `MERGE INTO ADS` | `NEW_CAMPAIGN` | Optional top-level field `max_viewer_reward` (number\|null) — stored in `CAMPAIGNS.MAX_VIEWER_REWARD`; absent = NULL = formula |
+| `CAMPAIGN_ANNOUNCE` | Creator SW → all contacts | `campaign.handler.js` | `MERGE INTO CAMPAIGNS` + `MERGE INTO ADS` | `NEW_CAMPAIGN` | Optional fields `max_viewer_reward`, `publisher_reward_view`, `max_publisher_budget`, `platform_key`. Receiver MUST validate `platform_key` matches local `PLATFORM_KEY` constant AND escrow coin PREVSTATE(5); mismatch → silent drop. When local `PLATFORM_KEY` is null: skip validation (MVP). |
 | `CAMPAIGN_PAUSE` | Creator SW → all contacts | `campaign.handler.js` | `UPDATE CAMPAIGNS SET STATUS='paused'` | `CAMPAIGN_UPDATED` |
 | `CAMPAIGN_FINISH` | Creator SW → all contacts | `campaign.handler.js` | `UPDATE CAMPAIGNS SET STATUS='finished'` | `CAMPAIGN_UPDATED` |
 | `REQUEST_CAMPAIGN_DATA` | Viewer SW → Creator SW (unicast `to:Mx...`) | `campaign.handler.js` | None (read-only lookup) | None |
 | `CAMPAIGN_DATA_RESPONSE` | Creator SW → Viewer SW (unicast `to:Mx...`) | `campaign.handler.js` | `MERGE INTO CAMPAIGNS` + `MERGE INTO ADS` | `NEW_CAMPAIGN` |
-| `CHANNEL_OPEN_REQUEST` | Viewer FE → Creator FE (unicast, `poll:true`) | `channel.handler.js` | `MERGE INTO CHANNEL_STATE` (creator, incl. `VIEWER_WALLET_ADDR`) | — (triggers coin creation in FE) |
-| `CHANNEL_OPEN` | Creator FE → Viewer FE (unicast, `poll:true`) | `channel.handler.js` | `UPDATE CHANNEL_STATE status='open'` | `CHANNEL_OPENED` |
-| `REWARD_REQUEST` | Viewer FE → Creator FE (unicast, `poll:true`) | `channel.handler.js` | `UPDATE CHANNEL_STATE` (cumulative, tx_hex) | — (sends REWARD_VOUCHER) |
-| `REWARD_VOUCHER` | Creator FE → Viewer FE (unicast, `poll:true`) | `channel.handler.js` | `UPDATE CHANNEL_STATE` (tx_hex, cumulative) | `VOUCHER_RECEIVED` |
-| `VOUCHER_SYNC_REQUEST` | Viewer FE → Creator FE (unicast, `poll:true`) | `channel.handler.js` | None (read-only) | — (sends REWARD_VOUCHER or CHANNEL_OPEN) |
+| `CHANNEL_OPEN_REQUEST` | Viewer/Publisher FE → Creator FE (unicast, `poll:true`) | `channel.handler.js` | `MERGE INTO CHANNEL_STATE` (creator, incl. `VIEWER_WALLET_ADDR`) | — (triggers coin creation in FE) | + Optional fields `role` (`viewer`\|`publisher`, default `viewer`) and `frame_id` (required when `role='publisher'`). Routes to viewer or publisher channel-open flow. |
+| `CHANNEL_OPEN` | Creator FE → Viewer/Publisher FE (unicast, `poll:true`) | `channel.handler.js` | `UPDATE CHANNEL_STATE status='open', ROLE=role` | `CHANNEL_OPENED` | + `role`, `frame_id` echoed back. |
+| `REWARD_REQUEST` | Viewer/Publisher FE → Creator FE (unicast, `poll:true`) | `channel.handler.js` | `UPDATE CHANNEL_STATE` (cumulative, tx_hex) | — (sends REWARD_VOUCHER) | + `role`, `frame_id`. Creator queries `CHANNEL_STATE WHERE ROLE=role` to validate cumulative. |
+| `REWARD_VOUCHER` | Creator FE → Viewer/Publisher FE (unicast, `poll:true`) | `channel.handler.js` | `UPDATE CHANNEL_STATE` (tx_hex, cumulative) | `VOUCHER_RECEIVED` | + `role`, `frame_id` echoed. Viewer side: standard VOUCHER_RECEIVED. Publisher side: SDK writes `publisher_view` REWARD_EVENT + signals PUBLISHER_REWARD_CONFIRMED. |
+| `VOUCHER_SYNC_REQUEST` | Viewer FE → Creator FE (unicast, `poll:true`) | `channel.handler.js` | None (read-only) | — (sends REWARD_VOUCHER or CHANNEL_OPEN) | `role` included to disambiguate which channel to sync. |
 
 > **Reward accounting is FE-owned** — `core/rewards.js` writes REWARD_EVENTS, CAMPAIGNS, USER_PROFILE. See MinimaAds.md §8.4.
 > **Channel coin creation and settlement tx signing are FE-owned** — require pending approval flow; cannot run in SW.
@@ -879,6 +897,11 @@ PRIMARY KEY: `(CAMPAIGN_ID, VIEWER_KEY)` — one channel per viewer-campaign pai
 | `DO_REWARD_VOUCHER` | `{ campaign_id, viewer_key, viewer_mx, event_id, cumulative }` | `channel.handler.js` (SW) | Creator FE builds partial tx and sends REWARD_VOUCHER to viewer |
 | `DO_SEND_VOUCHER` | `{ campaign_id, viewer_key, viewer_mx, cumulative, tx_hex }` | `channel.handler.js` (SW) | Creator FE re-sends REWARD_VOUCHER with stored tx_hex (reconnect sync) |
 | `DO_RESEND_CHANNEL_OPEN` | `{ campaign_id, viewer_key, viewer_mx, channel_coinid, max_amount }` | `channel.handler.js` (SW) | Creator FE re-sends CHANNEL_OPEN when viewer syncs but no voucher exists yet |
+| `FRAME_READY` | `{ frame_id, is_builtin }` | `service.js` (SW) | Built-in frame ensured at init; SDK can resolve default frameId |
+| `FRAME_CREATED` | `{ frame_id, label }` | `dapp/views/frames.js` (FE) | New frame persisted; refresh frame list |
+| `PUBLISHER_REWARD_CONFIRMED` | `{ event_id, amount, frame_id, campaign_id }` | `core/rewards.js` (FE) | Publisher reward persisted; update Frame earnings display |
+| `DO_PUBLISHER_CHANNEL_OPEN` | `{ campaign_id, publisher_key, publisher_mx, frame_id, max_amount }` | `channel.handler.js` (SW) | Creator FE creates publisher channel coin (same tx structure as viewer channel) |
+| `DO_PUBLISHER_REWARD_VOUCHER` | `{ campaign_id, publisher_key, publisher_mx, frame_id, event_id, cumulative }` | `channel.handler.js` (SW) | Creator FE builds publisher partial tx and sends REWARD_VOUCHER with role='publisher' |
 
 **Rule**: Every new signal type fired by SW must be registered in the FE `MDSCOMMS` handler (`dapp/app.js`). Missing registrations cause silent UI failures. The payload is at `event.data.message` (not `event.data`) — see section 5.1.
 
@@ -1017,6 +1040,16 @@ PRIMARY KEY: `(CAMPAIGN_ID, VIEWER_KEY)` — one channel per viewer-campaign pai
 | 14 | **`CAMPAIGN_DATA_RESPONSE` spam — creator sends 9+ responses per campaign** | Observed in T-CH7 verification (2026-04-28): within a few seconds of a new escrow coin appearing, the creator SW sends 9+ `CAMPAIGN_DATA_RESPONSE` messages for the same campaign. Root cause unclear — likely Maxima re-delivering the same `REQUEST_CAMPAIGN_DATA` from multiple contacts or poll retries, OR multiple nodes discovered the same escrow coin simultaneously. Not related to T-CH7. Benign (receiver deduplicates via `_knownEscrowCoins`), but wastes bandwidth. Investigate deduplication in `handleRequestCampaignData` (add a seen-set or cooldown per campaign_id+requester pair). | Low |
 | ~~15~~ | ~~**Estructural: duplicitat `service.js` / `public/service-workers/main.js`**~~ | ~~Minima carrega el SW des de `service.js` a l'arrel del MiniDapp (hardcoded a `MDSManager.java:909` i `ServiceJSRunner.java:71`). El camp `"service"` del `dapp.conf` és ignorat. El projecte manté dos fitxers: `service.js` (arrel, runtime real) i `public/service-workers/main.js` (font "canònica", mai executat). Qualsevol edició al fitxer font no té efecte en producció fins que es sincronitza manualment al mirror. **Millora proposada:** eliminar `public/service-workers/main.js` i treballar directament sobre `service.js` com a única font de veritat.~~ Resolved 2026-04-29: `public/service-workers/main.js` deleted, all references updated. | ~~Pendent~~ Resolved |
 
+31. **PLATFORM_KEY validation must happen on BOTH CAMPAIGN_ANNOUNCE receive AND on-chain escrow coin discovery via NEWBLOCK.** Skipping it on either path lets a bad-fee campaign slip into the local DB. The check is: read PREVSTATE(5) from the on-chain coin (NOT from the Maxima payload alone — payload can be spoofed) and compare against the local `PLATFORM_KEY` constant (`.toUpperCase()` both sides). If `PLATFORM_KEY === null` (MVP): skip the check entirely. Never read PREVSTATE(5) from the announced JSON payload as the primary verification — always verify on-chain.
+
+32. **FRAMES.FRAME_ID for the built-in frame is deterministic per node** — `'builtin:' + maxima_pk.toUpperCase()`. Re-running `ensureBuiltinFrame()` after a node restart must be idempotent (use MERGE INTO, never INSERT). If the node's Maxima PK changes (rare — only on a fresh wallet), the old built-in frame becomes orphaned. Acceptable for MVP.
+
+33. **CHANNEL_STATE composite PK now includes ROLE.** All existing queries on CHANNEL_STATE that filtered by `(CAMPAIGN_ID, VIEWER_KEY)` alone will now potentially match BOTH viewer and publisher rows for the same key if the same node is both viewer and publisher of the same campaign. Always include `AND UPPER(ROLE) = UPPER('viewer')` or `AND UPPER(ROLE) = UPPER('publisher')` in WHERE clauses for all channel handlers.
+
+34. **Publisher reward is FE-driven from the viewer's SDK.** The viewer's node fires the publisher REWARD_REQUEST after its own viewer reward is confirmed. The publisher's node receives only CHANNEL_OPEN_REQUEST and subsequent REWARD_REQUESTs via Maxima. The creator MUST validate publisher cumulative against `MAX_PUBLISHER_BUDGET` (not MAX_AMOUNT of the publisher channel alone) to prevent over-claiming.
+
+35. **frameId in MinimaAds.init is validated against local FRAMES only.** The SDK checks the FRAMES table on the calling node. A malicious actor cannot use someone else's frame_id because the publisher_key in the publisher channel is bound at CHANNEL_OPEN_REQUEST time — the on-chain payout goes to FRAMES.PUBLISHER_WALLET, not to whoever claims the frame_id in a REWARD_REQUEST. The frame_id in REWARD_REQUEST is for accounting/display only.
+
 ### Dev Workflow Rule — No schema migrations during development
 
 During development, **never add `ALTER TABLE` migration statements** to `db-init.js`. The DB is reset with each MiniDapp reinstall. If a column type or size is wrong, fix the `CREATE TABLE` statement and reinstall — that is all that is needed. Migrations are a post-MVP concern for production upgrades.
@@ -1053,6 +1086,7 @@ During development, **never add `ALTER TABLE` migration statements** to `db-init
 | 2026-04-17 | Antigravity | **CLAUDE.md created**: new file at project root. 10-section operational guide for Claude agents. Includes: document priority table, 4-step task workflow with layer mapping, stable Core API signature reference, forbidden actions (architecture/Maxima/data model/process), Minima runtime constraints quick-reference (Rhino, H2, MDS API, Maxima encoding), multi-agent safety rules, output standards, and mandatory handoff note format. Derived entirely from MinimaAds.md and AGENTS.md — no new decisions introduced. |
 | 2026-04-22 | Claude (T9) | **§13 SDK reference aligned to TASKS.md T9 signatures** — all 5 functions now callback-based with explicit `userAddress`/`interests` params (was Promise-based in §13.2). Resolves conflict between TASKS.md T9 and MinimaAds.md §13.2 flagged during T9 implementation. Consistent with §7.5 "all functions are callback-based". No data-model or protocol changes. |
 | 2026-04-24 | Antigravity | **Visual Assets**: Implemented DApp icon for `dapp.conf` (cropped 1:1, transparent corners). Removed logo and favicon from `index.html` UI as per user request to simplify and avoid pathing issues. |
+| 2026-05-01 | Opus (architect) | **Publisher Frame system spec**: added Frame actor (§2.1) and Frame entity. Added CAMPAIGNS columns PUBLISHER_REWARD_VIEW, MAX_PUBLISHER_BUDGET, PUBLISHER_BUDGET_SPENT. Added FRAMES table. Added CHANNEL_STATE.ROLE and FRAME_ID columns; PK now `(CAMPAIGN_ID, VIEWER_KEY, ROLE)`. Added LIMITS.MIN_PUBLISHER_REWARD_VIEW=0.001. Added §4.5 Publisher Reward Economics and §4.6 PLATFORM_KEY Security Model (decentralized fee enforcement via KissVM PREVSTATE(5)). Extended escrow KissVM (Appendix B.2/B.3) with PLATFORM_KEY at PREVSTATE(5) and conditional fee branch (STATE(11)). Added §6.9 Frame Creation Flow. Added core/frames.js (§7.7). Updated §7.6 channels.js signatures with role param. Updated SDK init() to accept frameId (§13). Added 6 new SW↔FE signals (FRAME_READY, FRAME_CREATED, PUBLISHER_REWARD_CONFIRMED, DO_PUBLISHER_CHANNEL_OPEN, DO_PUBLISHER_REWARD_VOUCHER). Extended CAMPAIGN_ANNOUNCE, CHANNEL_OPEN_REQUEST/OPEN, REWARD_REQUEST/VOUCHER with optional `role` and `frame_id` fields (no new Maxima message types). Added AGENTS.md §12 fragility #31–#35. Added T-PUB1–T-PUB8 task block to TASKS.md. |
 
 
 ---

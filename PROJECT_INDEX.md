@@ -49,12 +49,15 @@
 > The project has no code yet. This is the target structure from MinimaAds.md §12.1.
 
 ```
+config.js             ← Shared constants — PLATFORM_KEY, APP_NAME (loaded first by SW + FE)
+
 /dapp
   app.js              ← FE entry point: MDS.init, routing, view dispatch
   /views
     creator.js        ← Campaign creation UI
     viewer.js         ← Ad display + reward UI
     stats.js          ← Campaign stats UI
+    frames.js         ← Frame management UI (list, create, view earnings)
 
 /core                 ← Business logic (no DOM, no MDS.sql directly)
   campaigns.js        ← Campaign CRUD, budget tracking
@@ -62,6 +65,7 @@
   validation.js       ← View/click validation, LIMITS, dedup
   rewards.js          ← RewardEvent creation, USER_PROFILE updates
   minima.js           ← sqlQuery(), broadcastMaxima(), signalFE()
+  frames.js           ← FRAMES CRUD, builtin frame ensure, earnings tracking
 
 /sdk
   index.js            ← Public API: init, getAd, render, trackView, trackClick
@@ -126,3 +130,7 @@ Non-obvious decisions made during pre-implementation, with rationale. If you're 
 | Fee collection is off-chain only for MVP | No platform wallet address defined yet — fee tracked in H2 but not enforced on-chain | Appendix A |
 | No `TextEncoder` in SW | Rhino does not support `TextEncoder` — use pure-JS `utf8ToHex` implementation | AGENTS.md §6 |
 | `VERIFYOUT` requires 5 parameters | Newer Minima: `VERIFYOUT(idx addr amt tokenid keepstate_bool)` — older docs had 4 | AGENTS.md Fragility #17 |
+| `PLATFORM_KEY` enforced on-chain via KissVM, not in JS config | Every node validates that escrow PREVSTATE(5) matches the canonical key. Tampering with `config.js` on a single node is self-defeating — every other node rejects the resulting campaign. Standard protocol pattern (analogous to Uniswap on-chain fees). MVP value is `null` (validation skipped). | MinimaAds.md §4.6, Appendix B.2 |
+| Built-in Frame uses node's own Maxima PK (resolved at init) | Every node ships with a default Frame so the in-app viewer earns publisher rewards automatically. ID = `'builtin:' + maxima_pk.toUpperCase()` — deterministic, idempotent, unique per node. Avoids requiring users to "install" a frame to get a working viewer. | MinimaAds.md §6.9 |
+| Publisher rewards reuse channel infrastructure with `ROLE` discriminator | Adding a `ROLE` column to CHANNEL_STATE (PK now `(campaign_id, viewer_key, role)`) is cleaner than maintaining a parallel `PUBLISHER_KEY` namespace — same lifecycle, same handlers, same KissVM channel contract. Settlement address comes from FRAMES.PUBLISHER_WALLET for publisher channels. | MinimaAds.md §3.5, §4.5 |
+| Single budget covers both viewer and publisher rewards (Option A) | `MAX_PUBLISHER_BUDGET` is a capped subset of `BUDGET_TOTAL`. Creators see one number and the on-chain escrow does not need parallel coins for viewer vs publisher. Simpler UI, simpler economics, simpler contract. | MinimaAds.md §4.2, §4.3 |

@@ -9,8 +9,11 @@ function initDB(cb) {
     + "TITLE            VARCHAR(512)  NOT NULL,"
     + "BUDGET_TOTAL     DECIMAL(20,6) NOT NULL,"
     + "BUDGET_REMAINING DECIMAL(20,6) NOT NULL,"
-    + "REWARD_VIEW      DECIMAL(20,6) NOT NULL,"
-    + "REWARD_CLICK     DECIMAL(20,6) NOT NULL,"
+    + "REWARD_VIEW            DECIMAL(20,6) NOT NULL,"
+    + "REWARD_CLICK           DECIMAL(20,6) NOT NULL,"
+    + "PUBLISHER_REWARD_VIEW  DECIMAL(20,6) NOT NULL DEFAULT 0,"
+    + "MAX_PUBLISHER_BUDGET   DECIMAL(20,6) NOT NULL DEFAULT 0,"
+    + "PUBLISHER_BUDGET_SPENT DECIMAL(20,6) NOT NULL DEFAULT 0,"
     + "STATUS           VARCHAR(32)   NOT NULL DEFAULT 'active',"
     + "CREATED_AT       BIGINT        NOT NULL,"
     + "EXPIRES_AT       BIGINT        DEFAULT NULL,"
@@ -52,9 +55,21 @@ function initDB(cb) {
     + "LOGGED_AT BIGINT       NOT NULL"
     + ")";
 
+  var sql_frames = "CREATE TABLE IF NOT EXISTS FRAMES ("
+    + "FRAME_ID         VARCHAR(256)  PRIMARY KEY,"
+    + "PUBLISHER_KEY    VARCHAR(512)  NOT NULL,"
+    + "PUBLISHER_WALLET VARCHAR(512)  DEFAULT '',"
+    + "LABEL            VARCHAR(256)  DEFAULT '',"
+    + "IS_BUILTIN       BOOLEAN       NOT NULL DEFAULT FALSE,"
+    + "CREATED_AT       BIGINT        NOT NULL,"
+    + "TOTAL_EARNED     DECIMAL(20,6) NOT NULL DEFAULT 0"
+    + ")";
+
   var sql_channel_state = "CREATE TABLE IF NOT EXISTS CHANNEL_STATE ("
     + "CAMPAIGN_ID        VARCHAR(256)   NOT NULL,"
     + "VIEWER_KEY         VARCHAR(66)    NOT NULL,"
+    + "ROLE               VARCHAR(16)    NOT NULL DEFAULT 'viewer',"
+    + "FRAME_ID           VARCHAR(256)   DEFAULT '',"
     + "CREATOR_MX         VARCHAR(512)   NOT NULL,"
     + "CHANNEL_COINID     VARCHAR(66)    DEFAULT '',"
     + "MAX_AMOUNT         DECIMAL(20,6)  NOT NULL,"
@@ -63,7 +78,7 @@ function initDB(cb) {
     + "STATUS             VARCHAR(16)    NOT NULL DEFAULT 'pending',"
     + "CREATED_AT         BIGINT         NOT NULL,"
     + "VIEWER_WALLET_ADDR VARCHAR(512)   DEFAULT '',"
-    + "PRIMARY KEY (CAMPAIGN_ID, VIEWER_KEY)"
+    + "PRIMARY KEY (CAMPAIGN_ID, VIEWER_KEY, ROLE)"
     + ")";
 
   sqlQuery(sql_campaigns, function(err) {
@@ -91,14 +106,20 @@ function initDB(cb) {
               MDS.log("[DB] initDB: failed to create DEDUP_LOG — " + err5);
               return;
             }
-            sqlQuery(sql_channel_state, function(err6) {
+            sqlQuery(sql_frames, function(err6) {
               if (err6) {
-                MDS.log("[DB] initDB: failed to create CHANNEL_STATE — " + err6);
+                MDS.log("[DB] initDB: failed to create FRAMES — " + err6);
                 return;
               }
-              MDS.log("[DB] initDB: all tables ready");
-              signalFE("DB_READY", {});
-              if (cb) { cb(); }
+              sqlQuery(sql_channel_state, function(err7) {
+                if (err7) {
+                  MDS.log("[DB] initDB: failed to create CHANNEL_STATE — " + err7);
+                  return;
+                }
+                MDS.log("[DB] initDB: all tables ready");
+                signalFE("DB_READY", {});
+                if (cb) { cb(); }
+              });
             });
           });
         });

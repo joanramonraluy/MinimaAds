@@ -929,10 +929,25 @@ function probeDb() {
   });
 }
 
+function initFEFrames(cb) {
+  var sql = "CREATE TABLE IF NOT EXISTS FRAMES ("
+    + "FRAME_ID         VARCHAR(256)  PRIMARY KEY,"
+    + "PUBLISHER_KEY    VARCHAR(512)  NOT NULL,"
+    + "PUBLISHER_WALLET VARCHAR(512)  DEFAULT '',"
+    + "LABEL            VARCHAR(256)  DEFAULT '',"
+    + "IS_BUILTIN       BOOLEAN       NOT NULL DEFAULT FALSE,"
+    + "CREATED_AT       BIGINT        NOT NULL,"
+    + "TOTAL_EARNED     DECIMAL(20,6) NOT NULL DEFAULT 0"
+    + ")";
+  sqlQuery(sql, function() { if (cb) { cb(); } });
+}
+
 function initFEChannelState(cb) {
   var sql = "CREATE TABLE IF NOT EXISTS CHANNEL_STATE ("
     + "CAMPAIGN_ID        VARCHAR(256)  NOT NULL,"
     + "VIEWER_KEY         VARCHAR(66)   NOT NULL,"
+    + "ROLE               VARCHAR(16)   NOT NULL DEFAULT 'viewer',"
+    + "FRAME_ID           VARCHAR(256)  DEFAULT '',"
     + "CREATOR_MX         VARCHAR(512)  NOT NULL,"
     + "CHANNEL_COINID     VARCHAR(66)   DEFAULT '',"
     + "MAX_AMOUNT         DECIMAL(20,6) NOT NULL,"
@@ -941,7 +956,7 @@ function initFEChannelState(cb) {
     + "STATUS             VARCHAR(16)   NOT NULL DEFAULT 'pending',"
     + "CREATED_AT         BIGINT        NOT NULL,"
     + "VIEWER_WALLET_ADDR VARCHAR(512)  DEFAULT '',"
-    + "PRIMARY KEY (CAMPAIGN_ID, VIEWER_KEY)"
+    + "PRIMARY KEY (CAMPAIGN_ID, VIEWER_KEY, ROLE)"
     + ")";
   sqlQuery(sql, function() { if (cb) { cb(); } });
 }
@@ -980,9 +995,11 @@ function onInited() {
         if (res.response.publickey) { MY_ADDRESS    = res.response.publickey.toUpperCase(); }
         if (res.response.contact)   { MY_MX_ADDRESS = res.response.contact; }
       }
-      initFEChannelState(function() {
-        probeDb();
-        doRender();
+      initFEFrames(function() {
+        initFEChannelState(function() {
+          probeDb();
+          doRender();
+        });
       });
     });
   });

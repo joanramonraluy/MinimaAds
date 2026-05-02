@@ -14,7 +14,8 @@ var LIMITS = {
   MIN_BUDGET:                      100,
   MIN_REWARD_VIEW:                 0.001,
   MIN_REWARD_CLICK:                0.005,
-  MAX_CAMPAIGN_DAYS:               90
+  MAX_CAMPAIGN_DAYS:               90,
+  MIN_PUBLISHER_REWARD_VIEW:       0.001
 };
 
 // Node identity — set once in onInited after maxima action:info

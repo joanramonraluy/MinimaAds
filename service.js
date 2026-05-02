@@ -41,6 +41,7 @@ function onInited() {
   MDS.load("core/validation.js");
   MDS.load("core/rewards.js");
   MDS.load("core/channels.js");
+  MDS.load("core/frames.js");
   MDS.load("public/service-workers/db-init.js");
   MDS.load("public/service-workers/handlers/maxima.handler.js");
   MDS.load("public/service-workers/handlers/campaign.handler.js");

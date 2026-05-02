@@ -15,6 +15,41 @@ function handleCampaignAnnounce(payload) {
     ? parseFloat(payload.max_viewer_reward) : null;
   payload.campaign.max_viewer_reward = maxViewerReward;
   var campaignId = payload.campaign.id;
+
+  if (typeof PLATFORM_KEY === 'undefined' || PLATFORM_KEY === null) {
+    persistCampaign(payload, campaignId);
+    return;
+  }
+
+  var payloadPk = payload.platform_key ? payload.platform_key.toUpperCase() : '';
+  if (payloadPk !== PLATFORM_KEY.toUpperCase()) {
+    MDS.log("[CAMPAIGN] platform_key mismatch, dropping campaign: " + campaignId);
+    return;
+  }
+
+  var coinId = (payload.campaign.escrow_coinid || '');
+  if (!coinId) {
+    persistCampaign(payload, campaignId);
+    return;
+  }
+
+  MDS.cmd("coins coinid:" + coinId + " relevant:false", function(res) {
+    if (!res.status || !res.response || res.response.length === 0) {
+      MDS.log("[CAMPAIGN] on-chain coin not found for PK verification, accepting: " + campaignId);
+      persistCampaign(payload, campaignId);
+      return;
+    }
+    var prevstates = res.response[0].prevstate || [];
+    var onChainPk = getStateVar(prevstates, 5);
+    if (!onChainPk || onChainPk.toUpperCase() !== PLATFORM_KEY.toUpperCase()) {
+      MDS.log("[CAMPAIGN] PREVSTATE(5) mismatch, dropping campaign: " + campaignId);
+      return;
+    }
+    persistCampaign(payload, campaignId);
+  });
+}
+
+function persistCampaign(payload, campaignId) {
   saveCampaign(payload.campaign, payload.ad, function(err) {
     if (err) {
       MDS.log("[CAMPAIGN] saveCampaign failed: " + err);

@@ -28,6 +28,49 @@
   var _config = null;
   var _inited = false;
   var _reconnectDone = false;
+  var _activeFrameId = null;
+
+  function _resolveFrame(config, cb) {
+    var frameId = config.frameId || config.publisher_id || null;
+
+    if (frameId) {
+      if (typeof getFrame !== 'function') {
+        _activeFrameId = frameId;
+        if (cb) { cb(null); }
+        return;
+      }
+      getFrame(frameId, function(err, frame) {
+        if (err) { if (cb) { cb(err); } return; }
+        if (!frame) { if (cb) { cb(new Error('UNKNOWN_FRAME')); } return; }
+        _activeFrameId = frame.FRAME_ID;
+        if (cb) { cb(null); }
+      });
+      return;
+    }
+
+    // No frameId — resolve builtin frame for this node
+    MDS.cmd('maxima action:info', function(res) {
+      if (!res || !res.status || !res.response || !res.response.publickey) {
+        if (cb) { cb(null); }
+        return;
+      }
+      var pk = res.response.publickey.toUpperCase();
+      var builtinId = 'builtin:' + pk;
+      if (typeof ensureBuiltinFrame !== 'function') {
+        _activeFrameId = builtinId;
+        if (cb) { cb(null); }
+        return;
+      }
+      MDS.cmd('getaddress', function(addrRes) {
+        var walletAddr = (addrRes && addrRes.status && addrRes.response && addrRes.response.address)
+          ? addrRes.response.address : '';
+        ensureBuiltinFrame(pk, walletAddr, function(err) {
+          if (!err) { _activeFrameId = builtinId; }
+          if (cb) { cb(null); }
+        });
+      });
+    });
+  }
 
   function init(config, cb) {
     _config = config || {};
@@ -43,8 +86,14 @@
     MDS.init(function(event) {
       if (event && event.event === 'inited' && !_inited) {
         _inited = true;
-        if (cb) { cb(null, true); }
-        _ensureReconnect();
+        _resolveFrame(_config, function(frameErr) {
+          if (frameErr) {
+            if (cb) { cb(frameErr, false); }
+            return;
+          }
+          if (cb) { cb(null, true); }
+          _ensureReconnect();
+        });
       }
     });
   }
@@ -255,6 +304,103 @@
           });
         })(list[i]);
       }
+    });
+  }
+
+  // --- Publisher channel helpers ---------------------------------------
+
+  function _getPublisherChannel(campaignId, cb) {
+    sqlQuery(
+      "SELECT * FROM CHANNEL_STATE WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') AND UPPER(ROLE) = UPPER('publisher')",
+      function(err, rows) {
+        if (err) { cb(err, null); return; }
+        cb(null, rows && rows.length > 0 ? rows[0] : null);
+      }
+    );
+  }
+
+  function _openNewPublisherChannel(campaign, frameId, frame, maxAmount, cb) {
+    var publisherWalletAddr = frame.PUBLISHER_WALLET || '';
+    MDS.cmd('keys action:new', function(res) {
+      if (!res || !res.status || !res.response || !res.response.publickey) {
+        if (cb) { cb(); }
+        return;
+      }
+      var publisherKey = res.response.publickey;
+      var now = Date.now();
+      _resolveCreatorRoute(campaign, function(creatorRoute) {
+        var sql = "INSERT INTO CHANNEL_STATE " +
+          "(CAMPAIGN_ID, VIEWER_KEY, ROLE, FRAME_ID, CREATOR_MX, MAX_AMOUNT, CUMULATIVE_EARNED, LATEST_TX_HEX, STATUS, CREATED_AT, VIEWER_WALLET_ADDR) VALUES (" +
+          "'" + escapeSql(campaign.ID) + "'," +
+          "'" + escapeSql(publisherKey) + "'," +
+          "'publisher'," +
+          "'" + escapeSql(frameId) + "'," +
+          "'" + escapeSql(creatorRoute) + "'," +
+          maxAmount + "," +
+          "0," +
+          "''," +
+          "'pending'," +
+          now + "," +
+          "'" + escapeSql(publisherWalletAddr) + "'" +
+          ")";
+        sqlQuery(sql, function(err) {
+          if (err) {
+            console.log('[SDK] publisher CHANNEL_STATE insert failed:', err);
+            if (cb) { cb(); }
+            return;
+          }
+          _sendToCreator(creatorRoute, {
+            type: 'CHANNEL_OPEN_REQUEST',
+            campaign_id: campaign.ID,
+            viewer_key: publisherKey,
+            viewer_mx: _myMxAddress(),
+            max_amount: maxAmount,
+            viewer_wallet_addr: publisherWalletAddr,
+            role: 'publisher',
+            frame_id: frameId
+          }, function() { if (cb) { cb(); } });
+        });
+      });
+    });
+  }
+
+  function _sendPublisherRewardRequest(campaign, channel, frameId, amount, cb) {
+    var newCum = (parseFloat(channel.CUMULATIVE_EARNED) || 0) + amount;
+    var evtId = 'pub_' + Date.now().toString(16) + '_' + Math.floor(Math.random() * 0xFFFF).toString(16);
+    console.log('[SDK] publisher REWARD_REQUEST campaign:' + campaign.ID + ' cumulative:' + newCum);
+    _sendToCreator(channel.CREATOR_MX, {
+      type: 'REWARD_REQUEST',
+      campaign_id: campaign.ID,
+      viewer_key: channel.VIEWER_KEY,
+      event_id: evtId,
+      cumulative: newCum,
+      role: 'publisher',
+      frame_id: frameId
+    }, function() { if (cb) { cb(); } });
+  }
+
+  function _publisherChannelFlow(campaign, frameId, amount, cb) {
+    if (typeof getFrame !== 'function') { if (cb) { cb(); } return; }
+    getFrame(frameId, function(err, frame) {
+      if (err || !frame) { if (cb) { cb(); } return; }
+      _getPublisherChannel(campaign.ID, function(err2, channel) {
+        if (err2) { if (cb) { cb(); } return; }
+        if (!channel) {
+          var maxAmount = Math.min(
+            parseFloat(campaign.MAX_PUBLISHER_BUDGET) || 0,
+            (parseFloat(campaign.PUBLISHER_REWARD_VIEW) || 0) * _campaignDays()
+          );
+          if (!(maxAmount > 0)) { if (cb) { cb(); } return; }
+          _openNewPublisherChannel(campaign, frameId, frame, maxAmount, cb);
+          return;
+        }
+        if (channel.STATUS === 'pending') { if (cb) { cb(); } return; }
+        if (channel.STATUS === 'open') {
+          _sendPublisherRewardRequest(campaign, channel, frameId, amount, cb);
+          return;
+        }
+        if (cb) { cb(); }
+      });
     });
   }
 
@@ -470,6 +616,52 @@
 
   function _onVoucherReceivedCore(parsed) {
     if (!parsed || !parsed.campaign_id || parsed.cumulative === undefined) { return; }
+
+    if (parsed.role === 'publisher') {
+      var pubFrameId = parsed.frame_id || '';
+      var pubCampaignId = parsed.campaign_id;
+      var pubCumulative = parseFloat(parsed.cumulative) || 0;
+      console.log('[SDK] VOUCHER_RECEIVED(publisher) campaign:' + pubCampaignId + ' frame:' + pubFrameId + ' cumulative:' + pubCumulative);
+      if (!pubFrameId) { return; }
+      if (typeof getCampaign !== 'function') { return; }
+      getCampaign(pubCampaignId, function(err, campaign) {
+        if (err || !campaign) { return; }
+        var pubAmount = parseFloat(campaign.PUBLISHER_REWARD_VIEW) || 0;
+        if (!(pubAmount > 0)) { return; }
+        if (typeof getFrame !== 'function') { return; }
+        getFrame(pubFrameId, function(err2, frame) {
+          var userAddr = (frame && frame.PUBLISHER_KEY) ? frame.PUBLISHER_KEY : pubFrameId;
+          _lookupAdId(pubCampaignId, function(err3, adId) {
+            var params = {
+              campaign_id: pubCampaignId,
+              ad_id: adId || '',
+              user_address: userAddr,
+              type: 'publisher_view',
+              amount: pubAmount,
+              publisher_id: pubFrameId
+            };
+            createRewardEvent(params, function(err4, evt) {
+              if (err4 || !evt) { return; }
+              if (typeof incrementFrameEarnings === 'function') {
+                incrementFrameEarnings(pubFrameId, pubAmount, function() {});
+              }
+              if (typeof MDS !== 'undefined' && MDS.comms) {
+                MDS.comms.solo(JSON.stringify({
+                  type: 'PUBLISHER_REWARD_CONFIRMED',
+                  event_id: evt.id,
+                  amount: pubAmount,
+                  frame_id: pubFrameId,
+                  campaign_id: pubCampaignId
+                }));
+              }
+            });
+          });
+        });
+      });
+      return;
+    }
+
+    // Viewer voucher — existing flow
     console.log('[SDK] VOUCHER_RECEIVED campaign:' + parsed.campaign_id + ' cumulative:' + parsed.cumulative + ' → clearing pending ≤' + parsed.cumulative);
     _clearPendingByCumulative(parsed.campaign_id, parseFloat(parsed.cumulative), function() {
       console.log('[SDK] pending cleared for campaign:' + parsed.campaign_id);
@@ -507,14 +699,17 @@
             user_address: userAddress,
             type: type,
             amount: amount,
-            publisher_id: (_config && _config.publisher_id) ? _config.publisher_id : null
+            publisher_id: _activeFrameId || null
           };
           createRewardEvent(params, function(err3, evt) {
             if (err3) { cb(err3, null); return; }
             if (!evt) { cb(null, { confirmed: false }); return; }
-            // Fire-and-forget the channel flow — reward persistence is already
-            // done; channel coordination should not block the publisher callback.
+            // Fire-and-forget viewer channel flow.
             _channelFlow(campaign, evt.id, amount, function() {});
+            // Fire-and-forget publisher reward flow when R_p > 0 and frame is set.
+            if (parseFloat(campaign.PUBLISHER_REWARD_VIEW) > 0 && type === 'view' && _activeFrameId) {
+              _publisherChannelFlow(campaign, _activeFrameId, parseFloat(campaign.PUBLISHER_REWARD_VIEW), function() {});
+            }
             cb(null, { confirmed: true, event: evt });
           });
         });

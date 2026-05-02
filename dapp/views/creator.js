@@ -72,9 +72,13 @@ function renderCreator(root) {
     + '    </span>'
     + '    <small id="ma-max-viewer-hint"></small>'
     + '  </label>'
-    + '  <label>Publisher commission (%)'
-    + '    <input name="publisher_rate" type="number" step="0.1" min="1" max="2" value="1">'
-    + '    <small>1–2% of budget, paid to the app displaying the ad (implementation pending)</small>'
+    + '  <label>Publisher reward per view (MINIMA, optional)'
+    + '    <input name="publisher_reward_view" type="number" step="0.001" min="0" value="0">'
+    + '    <small>Leave at 0 to disable Frame rewards</small>'
+    + '  </label>'
+    + '  <label>Max publisher budget (MINIMA)'
+    + '    <input name="max_publisher_budget" type="number" step="0.01" min="0" value="0">'
+    + '    <small>Subset of total budget reserved for publisher payouts</small>'
     + '  </label>'
     + '  <label>Campaign duration (days) — max ' + LIMITS.MAX_CAMPAIGN_DAYS
     + '    <input name="campaign_days" type="number" step="1" min="1" max="' + LIMITS.MAX_CAMPAIGN_DAYS + '" value="7" required>'
@@ -152,11 +156,6 @@ function onCreatorFormInput(e) {
     var days = parseInt(e.target.value, 10);
     if (isFinite(days) && days > LIMITS.MAX_CAMPAIGN_DAYS) { e.target.value = LIMITS.MAX_CAMPAIGN_DAYS; }
   }
-  if (changedName === 'publisher_rate') {
-    var rate = parseFloat(e.target.value);
-    if (isFinite(rate) && rate > 2) { e.target.value = '2.0'; }
-    if (isFinite(rate) && rate < 1) { e.target.value = '1.0'; }
-  }
   if (changedName === 'multiplier') {
     var mult = parseFloat(e.target.value);
     if (isFinite(mult) && mult < 1) { e.target.value = '1.0'; }
@@ -189,13 +188,14 @@ function truncateInputDecimals(input, maxDecimals) {
 }
 
 var FIELD_DECIMALS = {
-  budget:            6,
-  reward_view:       6,
-  reward_click:      6,
-  max_viewer_reward: 6,
-  campaign_days:     0,
-  publisher_rate:    1,
-  multiplier:        1
+  budget:                 6,
+  reward_view:            6,
+  reward_click:           6,
+  max_viewer_reward:      6,
+  publisher_reward_view:  6,
+  max_publisher_budget:   6,
+  campaign_days:          0,
+  multiplier:             1
 };
 
 function onCreatorFormChange(e) {
@@ -298,14 +298,13 @@ function updateCampaignSummary(form) {
     return;
   }
 
-  var publisherRateInput = form.querySelector('[name="publisher_rate"]');
-  var publisherPct = publisherRateInput ? (parseFloat(publisherRateInput.value) || 0) : 0;
-  if (publisherPct < 0) { publisherPct = 0; }
-  if (publisherPct > 2) { publisherPct = 2; }
+  var pubRvInput = form.querySelector('[name="publisher_reward_view"]');
+  var pubBudgInput = form.querySelector('[name="max_publisher_budget"]');
+  var publisherRewardView = pubRvInput ? (parseFloat(pubRvInput.value) || 0) : 0;
+  var maxPublisherBudget  = pubBudgInput ? (parseFloat(pubBudgInput.value) || 0) : 0;
 
   var maxViewers    = Math.floor(budget / cap);
   var platformFee   = budget * PLATFORM_FEE_RATE;
-  var publisherFee  = budget * (publisherPct / 100);
   var totalCost     = budget + platformFee;
 
   var warningHtml = '';
@@ -332,9 +331,11 @@ function updateCampaignSummary(form) {
     + '<strong>Cost breakdown</strong>'
     + '<ul>'
     + '<li>Budget: ' + formatMinima(budget) + ' MINIMA</li>'
-    + '<li>Platform fee (6%): ' + formatMinima(platformFee) + ' MINIMA'
-    + '  <ul><li>Publisher commission (' + publisherPct.toFixed(1) + '%): '
-    + formatMinima(publisherFee) + ' MINIMA <small>(pending)</small></li></ul></li>'
+    + '<li>Platform fee (6%): ' + formatMinima(platformFee) + ' MINIMA</li>'
+    + (publisherRewardView > 0
+        ? '<li>Publisher reward/view: ' + formatMinima(publisherRewardView) + ' MINIMA'
+          + ' &middot; max budget: ' + formatMinima(maxPublisherBudget) + ' MINIMA</li>'
+        : '')
     + '<li>Total cost: <strong>' + formatMinima(totalCost) + ' MINIMA</strong></li>'
     + '</ul>'
     + '</div>';
@@ -365,6 +366,8 @@ function onCreatorSubmit(e) {
   var expiresAt  = Date.now() + (campaignDays * 24 * 60 * 60 * 1000);
   var maxViewerRewardRaw = (data.get('max_viewer_reward') || '').toString().trim();
   var maxViewerReward = (maxViewerRewardRaw && parseFloat(maxViewerRewardRaw) > 0) ? parseFloat(maxViewerRewardRaw) : null;
+  var publisherRewardView = parseFloat(data.get('publisher_reward_view') || '0') || 0;
+  var maxPublisherBudget  = parseFloat(data.get('max_publisher_budget') || '0') || 0;
 
   if (maxViewerReward === null) {
     maxViewerReward = (rewardView + rewardClick) * campaignDays;
@@ -408,6 +411,20 @@ function onCreatorSubmit(e) {
     msgEl.textContent = 'Campaign cannot reach any viewer with these settings. Increase budget or reduce cap per viewer.';
     return;
   }
+  if (publisherRewardView > 0) {
+    if (!(publisherRewardView >= LIMITS.MIN_PUBLISHER_REWARD_VIEW)) {
+      msgEl.textContent = 'Publisher reward per view must be at least ' + LIMITS.MIN_PUBLISHER_REWARD_VIEW + ' MINIMA.';
+      return;
+    }
+    if (!(maxPublisherBudget > 0)) {
+      msgEl.textContent = 'Max publisher budget is required when publisher reward is enabled.';
+      return;
+    }
+    if (maxPublisherBudget > budget) {
+      msgEl.textContent = 'Max publisher budget cannot exceed total budget.';
+      return;
+    }
+  }
 
   var now        = Date.now();
   var campaignId = generateUID();
@@ -424,9 +441,12 @@ function onCreatorSubmit(e) {
     status:           'active',
     created_at:       now,
     expires_at:       expiresAt,
-    escrow_coinid:    '',
-    escrow_wallet_pk: '',
-    max_viewer_reward: maxViewerReward
+    escrow_coinid:          '',
+    escrow_wallet_pk:       '',
+    max_viewer_reward:      maxViewerReward,
+    publisher_reward_view:  publisherRewardView,
+    max_publisher_budget:   maxPublisherBudget,
+    publisher_budget_spent: 0
   };
 
   var ad = {
@@ -769,6 +789,10 @@ function saveCampaignAndBroadcast(campaign, ad, form, submitBtn, msgEl) {
     var payload = { type: 'CAMPAIGN_ANNOUNCE', campaign: campaign, ad: ad };
     if (campaign.max_viewer_reward !== null && campaign.max_viewer_reward !== undefined) {
       payload.max_viewer_reward = campaign.max_viewer_reward;
+    }
+    if (campaign.publisher_reward_view > 0) {
+      payload.publisher_reward_view = campaign.publisher_reward_view;
+      payload.max_publisher_budget  = campaign.max_publisher_budget;
     }
     broadcastMaxima(payload, function(ok) {
       if (submitBtn) { submitBtn.removeAttribute('disabled'); }

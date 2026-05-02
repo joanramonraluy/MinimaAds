@@ -35,6 +35,7 @@ var ESCROW_SCRIPT = 'LET creatorkey=PREVSTATE(1) ASSERT SIGNEDBY(creatorkey) LET
 
 function onInited() {
   MDS.log("[ADS] SW inited — loading modules");
+  MDS.load("config.js");
   MDS.load("core/minima.js");
   MDS.load("core/campaigns.js");
   MDS.load("core/selection.js");

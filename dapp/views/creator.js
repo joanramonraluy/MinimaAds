@@ -448,27 +448,52 @@ function onCreatorSubmit(e) {
   fundEscrowAndPublish(campaign, ad, form, submitBtn, msgEl, campaignDurationBlocks);
 }
 
+// V1 — legacy escrow script. Kept only to spend coins from campaigns created before T-PUB4.
 var ESCROW_SCRIPT_FE  = 'LET creatorkey=PREVSTATE(1) ASSERT SIGNEDBY(creatorkey) LET payout=STATE(10) LET change=@AMOUNT-payout IF change GT 0 THEN ASSERT VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE) ENDIF RETURN TRUE';
+
+// V2 — current escrow script (T-PUB4). Embeds PLATFORM_KEY at PREVSTATE(5)
+// and MAX_PUBLISHER_BUDGET at PREVSTATE(6); enables conditional fee branch
+// via STATE(11). All NEW campaigns use this script. See MinimaAds.md §B.2.
+var ESCROW_SCRIPT_V2 =
+  "LET creatorkey=PREVSTATE(1) " +
+  "LET platformkey=PREVSTATE(5) " +
+  "LET maxpubbudget=PREVSTATE(6) " +
+  "ASSERT SIGNEDBY(creatorkey) " +
+  "LET payout=STATE(10) " +
+  "LET feeflag=STATE(11) " +
+  "LET change=@AMOUNT-payout " +
+  "IF feeflag EQ 1 THEN " +
+    "LET feeamount=STATE(12) " +
+    "ASSERT VERIFYOUT(STATE(13) platformkey feeamount @TOKENID FALSE) " +
+  "ENDIF " +
+  "IF change GT 0 THEN " +
+    "ASSERT VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE) " +
+  "ENDIF " +
+  "RETURN TRUE";
+
 var CHANNEL_SCRIPT_FE = 'IF @COINAGE GT (40*1728) AND SIGNEDBY(PREVSTATE(1)) THEN RETURN TRUE ENDIF RETURN MULTISIG(2 PREVSTATE(1) PREVSTATE(2))';
 
+// Resolves the V2 escrow address (used by all new campaigns from T-PUB4 onward).
+// Cached under 'ESCROW_ADDRESS_V2' — independent from V1 'ESCROW_ADDRESS'
+// so legacy campaigns can still be spent from the V1 address.
 function resolveEscrowAddress(cb) {
-  MDS.keypair.get('ESCROW_ADDRESS', function(addrRes) {
+  MDS.keypair.get('ESCROW_ADDRESS_V2', function(addrRes) {
     var cached = addrRes && addrRes.status ? addrRes.value : '';
     if (cached) {
-      console.log('[CREATOR] ESCROW_ADDRESS from keypair:', cached);
+      console.log('[CREATOR] ESCROW_ADDRESS_V2 from keypair:', cached);
       cb(cached);
       return;
     }
-    console.log('[CREATOR] ESCROW_ADDRESS not in keypair — deriving via newscript');
-    MDS.cmd('newscript script:"' + ESCROW_SCRIPT_FE + '" trackall:true', function(res) {
+    console.log('[CREATOR] ESCROW_ADDRESS_V2 not in keypair — registering via newscript');
+    MDS.cmd('newscript script:"' + ESCROW_SCRIPT_V2 + '" trackall:false', function(res) {
       if (!res.status) {
-        console.error('[CREATOR] newscript failed:', res.error);
+        console.error('[CREATOR] newscript V2 failed:', res.error);
         cb('');
         return;
       }
       var addr = res.response.address;
-      console.log('[CREATOR] ESCROW_ADDRESS derived:', addr);
-      MDS.keypair.set('ESCROW_ADDRESS', addr, function() {});
+      console.log('[CREATOR] ESCROW_ADDRESS_V2 derived:', addr);
+      MDS.keypair.set('ESCROW_ADDRESS_V2', addr, function() {});
       cb(addr);
     });
   });
@@ -542,57 +567,193 @@ function fundEscrowAndPublish(campaign, ad, form, submitBtn, msgEl, campaignDura
             var creatorContact    = mxRes.response.contact;
             var campaignIdHex     = '0x' + utf8ToHex(campaign.id).toUpperCase();
             var creatorContactHex = '0x' + utf8ToHex(creatorContact).toUpperCase();
-            var stateJson         = '{"1":"' + walletPK
-                                  + '","2":"' + expiryBlock
-                                  + '","3":"' + campaignIdHex
-                                  + '","4":"' + creatorContactHex + '"}';
-            console.log('[CREATOR] sending to escrow:', escrowAddress, 'state:', stateJson);
 
-            MDS.cmd(
-              'send amount:' + campaign.budget_total
-                + ' address:' + escrowAddress
-                + ' state:' + stateJson,
-              function(sendRes) {
-                console.log('[CREATOR] send response:', JSON.stringify(sendRes));
+            // T-PUB4 — embed PLATFORM_KEY at port 5 and max_publisher_budget at port 6.
+            // PLATFORM_KEY is global (declared in config.js). null → fee branch disabled.
+            var hasPlatformKey = (typeof PLATFORM_KEY !== 'undefined') && PLATFORM_KEY !== null && PLATFORM_KEY !== '';
+            var platformKeyHex = hasPlatformKey ? PLATFORM_KEY : '0x00';
+            var maxPubBudget   = (campaign.max_publisher_budget && campaign.max_publisher_budget > 0)
+                                   ? campaign.max_publisher_budget : 0;
+            var feeflag        = hasPlatformKey ? 1 : 0;
+            var feeAmount      = hasPlatformKey ? (campaign.budget_total * PLATFORM_FEE_RATE) : 0;
+            var feeOutputIndex = 0;
 
-                if (sendRes.pending) {
-                  console.log('[CREATOR] send is pending approval, uid:', sendRes.pendinguid, 'campaignId:', campaign.id);
-                  campaign.escrow_wallet_pk = walletPK;
-                  var pendingData = JSON.stringify({ campaign: campaign, ad: ad });
-                  MDS.keypair.set('PENDING_CAMPAIGN_' + campaign.id, pendingData, function() {
-                    console.log('[CREATOR] pending data stored in keypair for campaign:', campaign.id);
-                  });
-                  msgEl.textContent = 'Awaiting approval — please approve in Minima Hub pending queue.';
-                  if (submitBtn) { submitBtn.removeAttribute('disabled'); }
-                  return;
-                }
+            // Funding-tx state. Ports 1–6 become PREVSTATE(N) on the escrow coin
+            // when later spent. Port 11 is included as an explicit marker; the
+            // script reads STATE(11) which is set by the spending tx (channel-open
+            // sets it to 0; this funding-time value is informational only).
+            var stateJson = '{"1":"' + walletPK
+                          + '","2":"' + expiryBlock
+                          + '","3":"' + campaignIdHex
+                          + '","4":"' + creatorContactHex
+                          + '","5":"' + platformKeyHex
+                          + '","6":"' + maxPubBudget
+                          + '","11":"' + feeflag + '"}';
 
-                if (!sendRes.status) {
-                  fail('Escrow send failed: ' + (sendRes.error || 'unknown error'));
-                  return;
-                }
+            if (hasPlatformKey) {
+              stateJson = stateJson.slice(0, -1) // drop trailing }
+                        + ',"12":"' + feeAmount
+                        + '","13":"' + feeOutputIndex + '"}';
+            }
 
-                var coinId = '';
-                try {
-                  coinId = sendRes.response.body.txn.outputs[0].coinid;
-                } catch (ex) {
-                  console.error('[CREATOR] coinId extraction failed. Full response:', JSON.stringify(sendRes));
-                  fail('Could not read escrow coinId from send response.');
-                  return;
-                }
+            campaign.escrow_wallet_pk = walletPK;
 
-                console.log('[CREATOR] escrow coinId:', coinId);
-                campaign.escrow_coinid    = coinId;
-                campaign.escrow_wallet_pk = walletPK;
-                msgEl.textContent = 'Escrow funded. Saving campaign…';
+            function onSendResult(sendRes) {
+              console.log('[CREATOR] send response:', JSON.stringify(sendRes));
 
-                saveCampaignAndBroadcast(campaign, ad, form, submitBtn, msgEl);
+              if (sendRes && sendRes.pending) {
+                console.log('[CREATOR] send is pending approval, uid:', sendRes.pendinguid, 'campaignId:', campaign.id);
+                var pendingData = JSON.stringify({ campaign: campaign, ad: ad });
+                MDS.keypair.set('PENDING_CAMPAIGN_' + campaign.id, pendingData, function() {
+                  console.log('[CREATOR] pending data stored in keypair for campaign:', campaign.id);
+                });
+                msgEl.textContent = 'Awaiting approval — please approve in Minima Hub pending queue.';
+                if (submitBtn) { submitBtn.removeAttribute('disabled'); }
+                return;
               }
-            );
+
+              if (!sendRes || !sendRes.status) {
+                fail('Escrow send failed: ' + (sendRes && sendRes.error ? sendRes.error : 'unknown error'));
+                return;
+              }
+
+              // Locate the escrow output by address — its index depends on whether
+              // a fee output precedes it (feeflag=1 puts fee at output[0], escrow at [1]).
+              var coinId = '';
+              try {
+                var outs = sendRes.response.body.txn.outputs;
+                for (var i = 0; i < outs.length; i++) {
+                  if (outs[i].address && outs[i].address.toUpperCase() === escrowAddress.toUpperCase()) {
+                    coinId = outs[i].coinid;
+                    break;
+                  }
+                }
+                if (!coinId) { coinId = outs[0].coinid; }
+              } catch (ex) {
+                console.error('[CREATOR] coinId extraction failed. Full response:', JSON.stringify(sendRes));
+                fail('Could not read escrow coinId from send response.');
+                return;
+              }
+
+              console.log('[CREATOR] escrow coinId:', coinId);
+              campaign.escrow_coinid = coinId;
+              msgEl.textContent = 'Escrow funded. Saving campaign…';
+
+              saveCampaignAndBroadcast(campaign, ad, form, submitBtn, msgEl);
+            }
+
+            if (!hasPlatformKey) {
+              // MVP path — feeflag=0, no fee output. Same shape as before T-PUB4.
+              console.log('[CREATOR] sending to escrow (feeflag=0):', escrowAddress, 'state:', stateJson);
+              MDS.cmd(
+                'send amount:' + campaign.budget_total
+                  + ' address:' + escrowAddress
+                  + ' state:' + stateJson,
+                onSendResult
+              );
+              return;
+            }
+
+            // PLATFORM_KEY set — feeflag=1. Build a multi-output tx:
+            //   output[0] → PLATFORM_KEY (fee, 6% of budget_total, no state)
+            //   output[1] → escrow (budget_total, with state)
+            //   change → back to creator wallet (auto-added by txnpost)
+            console.log('[CREATOR] sending to escrow (feeflag=1):', escrowAddress,
+              'fee:', feeAmount, '→', platformKeyHex, 'state:', stateJson);
+            buildEscrowFundingTx({
+              walletPK:       walletPK,
+              budgetTotal:    campaign.budget_total,
+              feeAmount:      feeAmount,
+              feeOutputIndex: feeOutputIndex,
+              escrowAddress:  escrowAddress,
+              platformKey:    platformKeyHex,
+              stateJson:      stateJson
+            }, onSendResult);
           });
         });
       });
     });
+  });
+}
+
+// T-PUB4 — Build the campaign-launch tx when a fee output is required.
+// Two-output structure (plus optional change auto-added by txnpost):
+//   output[0] → PLATFORM_KEY (fee, no state)
+//   output[1] → ESCROW_ADDRESS_V2 (budget, with state — becomes PREVSTATE)
+// Returns to onResult the raw response shape — same as `send` so the caller
+// can extract `body.txn.outputs[i].coinid`.
+function buildEscrowFundingTx(opts, onResult) {
+  var txId = 'launch_' + generateUID();
+  var stateObj = null;
+  try { stateObj = JSON.parse(opts.stateJson); } catch (e) { stateObj = null; }
+  if (!stateObj) {
+    onResult({ status: false, error: 'invalid stateJson' });
+    return;
+  }
+
+  function fail(stage, res) {
+    console.error('[CREATOR] launch tx failed at', stage, res && (res.error || res));
+    MDS.cmd('txndelete id:' + txId, function() {});
+    onResult(res || { status: false, error: stage });
+  }
+
+  MDS.cmd('txncreate id:' + txId, function(r1) {
+    if (!r1 || !r1.status) { fail('txncreate', r1); return; }
+
+    // Fee output — index 0, no state.
+    MDS.cmd('txnoutput id:' + txId
+          + ' storestate:false'
+          + ' amount:' + opts.feeAmount
+          + ' address:' + opts.platformKey, function(r2) {
+      if (!r2 || !r2.status) { fail('txnoutput[fee]', r2); return; }
+
+      // Escrow output — index 1, holds the campaign state (PREVSTATE on spend).
+      MDS.cmd('txnoutput id:' + txId
+            + ' storestate:true'
+            + ' amount:' + opts.budgetTotal
+            + ' address:' + opts.escrowAddress, function(r3) {
+        if (!r3 || !r3.status) { fail('txnoutput[escrow]', r3); return; }
+
+        // Apply state ports — these attach to outputs with storestate:true.
+        var portKeys = [];
+        for (var k in stateObj) { if (stateObj.hasOwnProperty(k)) { portKeys.push(k); } }
+        var stateCmds = [];
+        for (var i = 0; i < portKeys.length; i++) {
+          stateCmds.push('txnstate id:' + txId
+                       + ' port:' + portKeys[i]
+                       + ' value:' + stateObj[portKeys[i]]);
+        }
+
+        runCreatorStateCmds(stateCmds, 0, function(stateOk) {
+          if (!stateOk) { fail('txnstate', null); return; }
+
+          // txnpost auto:true picks the input coins, adds change back to creator,
+          // and signs with the appropriate wallet keys automatically.
+          MDS.cmd('txnpost id:' + txId + ' auto:true mine:true', function(r4) {
+            if (r4 && r4.pending) {
+              // Pending approval — keep the tx around; surface to caller.
+              onResult(r4);
+              return;
+            }
+            if (!r4 || !r4.status) { fail('txnpost', r4); return; }
+            MDS.cmd('txndelete id:' + txId, function() {});
+            onResult(r4);
+          });
+        });
+      });
+    });
+  });
+}
+
+function runCreatorStateCmds(cmds, idx, cb) {
+  if (idx >= cmds.length) { cb(true); return; }
+  MDS.cmd(cmds[idx], function(res) {
+    if (!res || !res.status) {
+      console.error('[CREATOR] state cmd failed:', cmds[idx], res && res.error);
+      cb(false);
+      return;
+    }
+    runCreatorStateCmds(cmds, idx + 1, cb);
   });
 }
 

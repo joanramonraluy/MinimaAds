@@ -301,7 +301,7 @@ function _postSettleTx(settleId, campaignId, viewerKey) {
       _refreshChannelRewards();
       return;
     }
-    settleChannel(campaignId, viewerKey, function(err) {
+    settleChannel(campaignId, viewerKey, 'viewer', function(err) {
       if (err) {
         console.error('[EARNINGS] settleChannel DB error:', err);
         var el = document.getElementById('ma-channel-settle-status');
@@ -309,7 +309,7 @@ function _postSettleTx(settleId, campaignId, viewerKey) {
         _refreshChannelRewards();
         return;
       }
-      getChannelState(campaignId, viewerKey, function(err2, ch) {
+      getChannelState(campaignId, viewerKey, 'viewer', function(err2, ch) {
         var cum = (ch && ch.CUMULATIVE_EARNED) ? parseFloat(ch.CUMULATIVE_EARNED) : 0;
         console.log('[EARNINGS] settlement complete campaign:', campaignId, 'cumulative:', cum);
         signalFE('SETTLE_CONFIRMED', { campaign_id: campaignId, amount: cum });

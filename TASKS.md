@@ -387,7 +387,7 @@ Update:
 | **T-PUB5** | **SDK** | `sdk/index.js` | Done ✅ |
 | **T-PUB6** | **UI** | `dapp/views/creator.js` | Done ✅ |
 | **T-PUB7** | **UI + SW** | `dapp/views/frames.js` (new), `dapp/app.js`, `service.js` | Done ✅ |
-| **T-PUB8** | **SW + FE** | `channel.handler.js`, `core/channels.js`, `dapp/app.js` | Pending (Opus) |
+| **T-PUB8** | **SW + FE** | `channel.handler.js`, `core/channels.js`, `dapp/app.js` | Done ✅ |
 
 ---
 

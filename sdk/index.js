@@ -426,7 +426,7 @@
 
         _resolveCreatorRoute(campaign, function(creatorRoute) {
           console.log('[SDK] opening new channel campaign:' + campaign.ID + ' viewerKey:' + viewerKey + ' maxAmount:' + maxAmount + ' walletAddr:' + viewerWalletAddr + ' route:' + creatorRoute.substring(0, 8) + '...');
-          openChannel(campaign.ID, viewerKey, creatorRoute, maxAmount, viewerWalletAddr, function(err) {
+          openChannel(campaign.ID, viewerKey, creatorRoute, maxAmount, 'viewer', '', viewerWalletAddr, function(err) {
             if (err) {
               console.log('[SDK] openChannel error:', err);
               if (cb) { cb(); }
@@ -581,21 +581,25 @@
     // a routing failure in a prior session). The creator is idempotent on this
     // message (channel.handler.js checks for an existing row).
     sqlQuery(
-      "SELECT CAMPAIGN_ID, VIEWER_KEY, CREATOR_MX, MAX_AMOUNT, VIEWER_WALLET_ADDR FROM CHANNEL_STATE WHERE STATUS = 'pending'",
+      "SELECT CAMPAIGN_ID, VIEWER_KEY, ROLE, FRAME_ID, CREATOR_MX, MAX_AMOUNT, VIEWER_WALLET_ADDR FROM CHANNEL_STATE WHERE STATUS = 'pending'",
       function(err2, pending) {
         if (err2 || !pending || pending.length === 0) { return; }
         console.log('[SDK] reconnect: pending channels found:' + pending.length + ' → resending CHANNEL_OPEN_REQUEST');
         for (var j = 0; j < pending.length; j++) {
           (function(row) {
-            console.log('[SDK] reconnect: resending CHANNEL_OPEN_REQUEST campaign:' + row.CAMPAIGN_ID);
-            _sendToCreator(row.CREATOR_MX, {
+            var r   = row.ROLE || 'viewer';
+            var msg = {
               type: 'CHANNEL_OPEN_REQUEST',
               campaign_id: row.CAMPAIGN_ID,
               viewer_key: row.VIEWER_KEY,
               viewer_mx: _myMxAddress(),
               max_amount: parseFloat(row.MAX_AMOUNT) || 0,
-              viewer_wallet_addr: row.VIEWER_WALLET_ADDR || ''
-            }, function() {});
+              viewer_wallet_addr: row.VIEWER_WALLET_ADDR || '',
+              role: r
+            };
+            if (r === 'publisher') { msg.frame_id = row.FRAME_ID || ''; }
+            console.log('[SDK] reconnect: resending CHANNEL_OPEN_REQUEST campaign:' + row.CAMPAIGN_ID + ' role:' + r);
+            _sendToCreator(row.CREATOR_MX, msg, function() {});
           })(pending[j]);
         }
       }

@@ -33,7 +33,7 @@ function generateUID() {
 
 function currentRoute() {
   var h = (window.location.hash || '').replace(/^#/, '');
-  if (h === 'creator' || h === 'stats' || h === 'viewer' || h === 'earnings') { return h; }
+  if (h === 'creator' || h === 'stats' || h === 'viewer' || h === 'earnings' || h === 'frames') { return h; }
   return 'viewer';
 }
 
@@ -66,6 +66,8 @@ function doRender() {
     renderEarnings(root);
   } else if (route === 'stats' && typeof renderStats === 'function') {
     renderStats(root);
+  } else if (route === 'frames' && typeof renderFrames === 'function') {
+    renderFrames(root);
   } else if (typeof renderViewer === 'function') {
     renderViewer(root);
   } else {
@@ -142,6 +144,18 @@ function handleMdsComms(parsed) {
   }
   if (parsed.type === 'SETTLE_CONFIRMED') {
     if (typeof onSettleConfirmed === 'function') { onSettleConfirmed(parsed); }
+    return;
+  }
+  if (parsed.type === 'FRAME_READY' || parsed.type === 'FRAME_CREATED') {
+    if (currentRoute() === 'frames' && typeof renderFrames === 'function') {
+      renderFrames(document.getElementById('app'));
+    }
+    return;
+  }
+  if (parsed.type === 'PUBLISHER_REWARD_CONFIRMED') {
+    if (currentRoute() === 'frames' && typeof onPublisherRewardConfirmed === 'function') {
+      onPublisherRewardConfirmed(parsed);
+    }
     return;
   }
 }
@@ -1118,7 +1132,7 @@ function probeDb() {
 
 function initFEFrames(cb) {
   var sql = "CREATE TABLE IF NOT EXISTS FRAMES ("
-    + "FRAME_ID         VARCHAR(256)  PRIMARY KEY,"
+    + "FRAME_ID         VARCHAR(512)  PRIMARY KEY,"
     + "PUBLISHER_KEY    VARCHAR(512)  NOT NULL,"
     + "PUBLISHER_WALLET VARCHAR(512)  DEFAULT '',"
     + "LABEL            VARCHAR(256)  DEFAULT '',"
@@ -1134,7 +1148,7 @@ function initFEChannelState(cb) {
     + "CAMPAIGN_ID        VARCHAR(256)  NOT NULL,"
     + "VIEWER_KEY         VARCHAR(66)   NOT NULL,"
     + "ROLE               VARCHAR(16)   NOT NULL DEFAULT 'viewer',"
-    + "FRAME_ID           VARCHAR(256)  DEFAULT '',"
+    + "FRAME_ID           VARCHAR(512)  DEFAULT '',"
     + "CREATOR_MX         VARCHAR(512)  NOT NULL,"
     + "CHANNEL_COINID     VARCHAR(66)   DEFAULT '',"
     + "MAX_AMOUNT         DECIMAL(20,6) NOT NULL,"

@@ -56,7 +56,7 @@ function initDB(cb) {
     + ")";
 
   var sql_frames = "CREATE TABLE IF NOT EXISTS FRAMES ("
-    + "FRAME_ID         VARCHAR(256)  PRIMARY KEY,"
+    + "FRAME_ID         VARCHAR(512)  PRIMARY KEY,"
     + "PUBLISHER_KEY    VARCHAR(512)  NOT NULL,"
     + "PUBLISHER_WALLET VARCHAR(512)  DEFAULT '',"
     + "LABEL            VARCHAR(256)  DEFAULT '',"
@@ -69,7 +69,7 @@ function initDB(cb) {
     + "CAMPAIGN_ID        VARCHAR(256)   NOT NULL,"
     + "VIEWER_KEY         VARCHAR(66)    NOT NULL,"
     + "ROLE               VARCHAR(16)    NOT NULL DEFAULT 'viewer',"
-    + "FRAME_ID           VARCHAR(256)   DEFAULT '',"
+    + "FRAME_ID           VARCHAR(512)   DEFAULT '',"
     + "CREATOR_MX         VARCHAR(512)   NOT NULL,"
     + "CHANNEL_COINID     VARCHAR(66)    DEFAULT '',"
     + "MAX_AMOUNT         DECIMAL(20,6)  NOT NULL,"

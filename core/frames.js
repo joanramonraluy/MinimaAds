@@ -82,6 +82,19 @@ function incrementFrameEarnings(frameId, amount, cb) {
   });
 }
 
+// SW-only helper: ensureBuiltinFrame + signalFE in one call.
+// Defined here so no service.js closure is passed across the MDS.load boundary
+// (avoids Rhino cross-file closure bug — AGENTS.md §14 bug #3).
+function initBuiltinFrame(maximaPk, walletAddr) {
+  ensureBuiltinFrame(maximaPk, walletAddr, function(err, frame) {
+    if (err) {
+      MDS.log("[FRAMES] ensureBuiltinFrame error: " + err);
+      return;
+    }
+    signalFE("FRAME_READY", { frame_id: frame.FRAME_ID, is_builtin: true });
+  });
+}
+
 function getFrameEarnings(frameId, cb) {
   var fid = escapeSql(frameId);
   sqlQuery(

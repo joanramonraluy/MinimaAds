@@ -222,7 +222,7 @@ CREATE TABLE IF NOT EXISTS DEDUP_LOG (
 );
 
 CREATE TABLE IF NOT EXISTS FRAMES (
-  FRAME_ID         VARCHAR(256)  PRIMARY KEY,        -- UUID, or 'builtin:<maxima_pk>' for default frame
+  FRAME_ID         VARCHAR(512)  PRIMARY KEY,        -- UUID, or 'builtin:<maxima_pk>' for default frame
   PUBLISHER_KEY    VARCHAR(512)  NOT NULL,           -- Maxima public key of the publisher node (0x...)
   PUBLISHER_WALLET VARCHAR(512)  DEFAULT '',         -- Wallet address for publisher reward settlement
   LABEL            VARCHAR(256)  DEFAULT '',         -- Human-readable name
@@ -235,7 +235,7 @@ CREATE TABLE IF NOT EXISTS CHANNEL_STATE (
   CAMPAIGN_ID       VARCHAR(256)   NOT NULL,
   VIEWER_KEY        VARCHAR(66)    NOT NULL,   -- per-channel wallet key (keys action:new); holds viewer or publisher key per ROLE
   ROLE              VARCHAR(16)    NOT NULL DEFAULT 'viewer', -- 'viewer' | 'publisher'
-  FRAME_ID          VARCHAR(256)   DEFAULT '', -- non-empty when ROLE='publisher'
+  FRAME_ID          VARCHAR(512)   DEFAULT '', -- non-empty when ROLE='publisher'
   CREATOR_MX        VARCHAR(512)   NOT NULL,   -- creator Mx contact string (from escrow STATE(4))
   CHANNEL_COINID    VARCHAR(66)    DEFAULT '',  -- set after creator opens channel on-chain
   MAX_AMOUNT        DECIMAL(20,6)  NOT NULL,   -- (REWARD_VIEW + REWARD_CLICK) × campaign_days for viewer; MAX_PUBLISHER_BUDGET cap for publisher

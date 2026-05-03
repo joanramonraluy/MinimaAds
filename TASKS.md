@@ -380,13 +380,13 @@ Update:
 | **T-CH7** | **DB + Core + SDK + UI** | `db-init.js` (×2), `campaigns.js`, `sdk/index.js`, `creator.js`, `channel.handler.js` | Done ✅ |
 | **T-CH8** | **SW** | `channel.handler.js`, `main.js` | Done ✅ |
 | **T-CH9** | **FE** | `dapp/app.js` | Done ✅ |
-| **T-PUB1** | **DB** | `db-init.js` (×2 runtimes) | Pending |
-| **T-PUB2** | **Core** | `core/frames.js` (new) | Pending |
-| **T-PUB3** | **Config + SW** | `config.js` (new), `campaign.handler.js` | Pending |
-| **T-PUB4** | **Contract + FE** | `dapp/views/creator.js`, `dapp/app.js` | Pending (Opus) |
-| **T-PUB5** | **SDK** | `sdk/index.js` | Pending |
-| **T-PUB6** | **UI** | `dapp/views/creator.js` | Pending |
-| **T-PUB7** | **UI + SW** | `dapp/views/frames.js` (new), `dapp/app.js`, `service.js` | Pending |
+| **T-PUB1** | **DB** | `db-init.js` (×2 runtimes) | Done ✅ |
+| **T-PUB2** | **Core** | `core/frames.js` (new) | Done ✅ |
+| **T-PUB3** | **Config + SW** | `config.js` (new), `campaign.handler.js` | Done ✅ |
+| **T-PUB4** | **Contract + FE** | `dapp/views/creator.js`, `dapp/app.js` | Done ✅ |
+| **T-PUB5** | **SDK** | `sdk/index.js` | Done ✅ |
+| **T-PUB6** | **UI** | `dapp/views/creator.js` | Done ✅ |
+| **T-PUB7** | **UI + SW** | `dapp/views/frames.js` (new), `dapp/app.js`, `service.js` | Done ✅ |
 | **T-PUB8** | **SW + FE** | `channel.handler.js`, `core/channels.js`, `dapp/app.js` | Pending (Opus) |
 
 ---

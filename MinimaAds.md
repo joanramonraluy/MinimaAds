@@ -697,14 +697,15 @@ getUserProfile(userAddress, callback)
 
 ### 7.6 channels.js
 
-> **Note**: After T-PUB8, all functions accept a `role` parameter (`'viewer'` | `'publisher'`) as the third argument, and `frameId` as the fourth where relevant. The signatures below reflect the post-T-PUB8 state. Until T-PUB8 is implemented, the existing 2-key signatures remain valid.
+> **Note**: T-PUB8 extended all functions with a `role` parameter (`'viewer'` | `'publisher'`). The signatures below reflect the post-T-PUB8 state.
 
 ```javascript
-openChannel(campaignId, viewerKey, creatorMx, maxAmount, role, frameId, cb)
-// Inserts CHANNEL_STATE (status='pending', role, frame_id).
-// For role='viewer': calls updateBudget(deduct maxAmount).
-// For role='publisher': caller must separately increment PUBLISHER_BUDGET_SPENT.
-// Returns: callback(err, boolean)
+openChannel(campaignId, viewerKey, creatorMx, maxAmount, role, frameId, walletAddr, cb)
+// Inserts CHANNEL_STATE (status='pending', role, frame_id, viewer_wallet_addr).
+// For role='viewer': calls updateBudget(deduct maxAmount). frameId=''.
+// For role='publisher': skips updateBudget; caller increments PUBLISHER_BUDGET_SPENT.
+// walletAddr: viewer wallet addr for viewer channels; publisher wallet addr for publisher channels.
+// Returns: callback(err)
 
 activateChannel(campaignId, viewerKey, role, channelCoinId, cb)
 // Updates CHANNEL_STATE: status='open', channel_coinid=channelCoinId.

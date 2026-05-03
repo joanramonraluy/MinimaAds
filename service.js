@@ -58,6 +58,10 @@ function onInited() {
       MY_MX_ADDRESS = resp.response.contact || "";
       MDS.log("[ADS] Maxima PK: " + MY_MAXIMA_PK + " contact: " + MY_MX_ADDRESS);
       registerEscrowScript();
+      MDS.cmd("getaddress", function(addrRes) {
+        var walletAddr = (addrRes.status && addrRes.response && addrRes.response.address) ? addrRes.response.address : "";
+        initBuiltinFrame(MY_MAXIMA_PK, walletAddr);
+      });
     });
   });
 }

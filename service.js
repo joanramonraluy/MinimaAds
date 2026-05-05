@@ -37,13 +37,12 @@ var ESCROW_SCRIPT = 'LET creatorkey=PREVSTATE(1) ASSERT SIGNEDBY(creatorkey) LET
 
 var ESCROW_SCRIPT_V2 =
   "LET creatorkey=PREVSTATE(1) " +
-  "LET platformkey=PREVSTATE(5) " +
-  "LET maxpubbudget=PREVSTATE(6) " +
   "ASSERT SIGNEDBY(creatorkey) " +
   "LET payout=STATE(10) " +
   "LET feeflag=STATE(11) " +
   "LET change=@AMOUNT-payout " +
   "IF feeflag EQ 1 THEN " +
+  "LET platformkey=PREVSTATE(5) " +
   "LET feeamount=STATE(12) " +
   "ASSERT VERIFYOUT(STATE(13) platformkey feeamount @TOKENID FALSE) " +
   "ENDIF " +

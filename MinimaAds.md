@@ -400,7 +400,7 @@ var LIMITS = {
     — Calls updateBudget(campaignId, reward_view)
     — Updates USER_PROFILE: TOTAL_EARNED += amount, LAST_REWARD_AT = now
     → callback(RewardEvent) on success
-7.  SDK fires signalFE('REWARD_CONFIRMED', { event_id, amount, type })
+7.  SDK fires signalFE('REWARD_CONFIRMED', { event_id, amount, reward_type })
     → FE viewer UI updates balance and confirmation display
 ```
 
@@ -852,7 +852,7 @@ Reward processing (view and click events) is handled entirely within the FE runt
 2. INSERT into REWARD_EVENTS
 3. `updateBudget(campaignId, amount)`
 4. UPDATE USER_PROFILE (TOTAL_EARNED, LAST_REWARD_AT)
-5. `signalFE('REWARD_CONFIRMED', { event_id, amount, type })`
+5. `signalFE('REWARD_CONFIRMED', { event_id, amount, reward_type })`
 
 ### 8.5 CAMPAIGN_PAUSE / CAMPAIGN_FINISH
 
@@ -989,7 +989,7 @@ Creator responds with the latest `REWARD_VOUCHER` it has for this pair, or with 
 | Signal type | Payload | Fired by | Trigger |
 |---|---|---|---|
 | `DB_READY` | `{}` | `db-init.js` (SW) | All tables created — FE may begin DB access |
-| `REWARD_CONFIRMED` | `{ event_id, amount, type }` | `core/rewards.js` (FE) | Successful reward persisted in callback chain |
+| `REWARD_CONFIRMED` | `{ event_id, amount, reward_type }` | `core/rewards.js` (FE) | Successful reward persisted in callback chain |
 | `CAMPAIGN_UPDATED` | `{ campaign_id, status, budget_remaining }` | `campaign.handler.js` (SW) | Status changed via Maxima |
 | `NEW_CAMPAIGN` | `{ campaign_id }` | `campaign.handler.js` (SW) | CAMPAIGN_ANNOUNCE received and persisted |
 | `CHANNEL_OPENED` | `{ campaign_id, channel_coinid, max_amount }` | `channel.handler.js` (SW) | Channel coin confirmed on-chain, viewer can earn |

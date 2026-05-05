@@ -110,7 +110,7 @@ function createRewardEvent(params, cb) {
                 publisher_id: publisherId
               };
 
-              signalFE('REWARD_CONFIRMED', { event_id: id, amount: amount, type: type });
+              signalFE('REWARD_CONFIRMED', { event_id: id, amount: amount, reward_type: type });
               cb(null, rewardEvent);
             });
           });

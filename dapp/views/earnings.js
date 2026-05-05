@@ -47,6 +47,23 @@ function renderEarnings(root) {
   loadEarnings();
 }
 
+function _loadTodayEarnedSummary() {
+  var el = document.getElementById('ma-today-earned');
+  if (!el) { return; }
+  var now = new Date();
+  var startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  var sql = "SELECT SUM(AMOUNT) AS TOTAL FROM REWARD_EVENTS"
+    + " WHERE UPPER(USER_ADDRESS) = UPPER('" + escapeSql(MY_ADDRESS) + "')"
+    + " AND TYPE IN ('view', 'click')"
+    + " AND TIMESTAMP >= " + startOfDay;
+  sqlQuery(sql, function(err, rows) {
+    var target = document.getElementById('ma-today-earned');
+    if (!target) { return; }
+    var total = (!err && rows && rows[0]) ? (parseFloat(rows[0].TOTAL) || 0) : 0;
+    target.textContent = total.toFixed(6);
+  });
+}
+
 function loadEarnings() {
   if (!MY_ADDRESS) { return; }
 
@@ -55,12 +72,26 @@ function loadEarnings() {
     if (!target) { return; }
     target.innerHTML = '';
     var totalEarned = (!err && profile) ? parseFloat(profile.TOTAL_EARNED || 0) : 0;
+
     var article = document.createElement('article');
     var strong = document.createElement('strong');
     strong.textContent = 'Total earned: ';
     article.appendChild(strong);
     article.appendChild(document.createTextNode(totalEarned.toFixed(6) + ' MINIMA'));
     target.appendChild(article);
+
+    var todayArticle = document.createElement('article');
+    var todayStrong = document.createElement('strong');
+    todayStrong.textContent = 'Today earned: ';
+    todayArticle.appendChild(todayStrong);
+    var todaySpan = document.createElement('span');
+    todaySpan.id = 'ma-today-earned';
+    todaySpan.textContent = '…';
+    todayArticle.appendChild(todaySpan);
+    todayArticle.appendChild(document.createTextNode(' MINIMA'));
+    target.appendChild(todayArticle);
+
+    _loadTodayEarnedSummary();
   });
 
   getUserRewards(MY_ADDRESS, function(err, rewards) {

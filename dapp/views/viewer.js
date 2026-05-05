@@ -18,6 +18,10 @@ function renderViewer(root) {
   h2.textContent = 'View Ads';
   root.appendChild(h2);
 
+  var footer = document.createElement('footer');
+  footer.innerHTML = 'Today earned: <span id="ma-earned">0</span> MINIMA';
+  root.appendChild(footer);
+
   var toolbar = document.createElement('div');
   toolbar.style.cssText = 'display:flex;gap:.5rem;margin-bottom:.5rem;';
 
@@ -45,15 +49,12 @@ function renderViewer(root) {
   status.setAttribute('role', 'status');
   root.appendChild(status);
 
-  var footer = document.createElement('footer');
-  footer.innerHTML = 'Session earned: <span id="ma-earned">0</span> MINIMA';
-  root.appendChild(footer);
-
   var nextBtn = document.createElement('button');
   nextBtn.textContent = 'Next ad';
   nextBtn.addEventListener('click', loadNextAd);
   root.appendChild(nextBtn);
 
+  loadTodayEarned();
   loadNextAd();
 }
 
@@ -124,7 +125,13 @@ function loadOwnCampaignAd(status, slot) {
 
 function renderAdInSlot(ad, status, isPreview) {
   _viewerState.ad = ad;
-  status.textContent = isPreview ? '[Preview — rewards not tracked]' : '';
+  if (isPreview) {
+    status.textContent = '[Preview — rewards not tracked]';
+  } else if (ad.ALREADY_SEEN) {
+    status.textContent = 'Already viewed this session — rewards may not apply.';
+  } else {
+    status.textContent = '';
+  }
   MinimaAds.render({
     id: ad.AD_ID,
     campaign_id: ad.ID,
@@ -169,6 +176,22 @@ function wireAdInteractions(ad) {
       });
     });
   }
+}
+
+function loadTodayEarned() {
+  var earnedEl = document.getElementById('ma-earned');
+  if (!earnedEl) { return; }
+  var now = new Date();
+  var startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  var sql = "SELECT SUM(AMOUNT) AS TOTAL FROM REWARD_EVENTS"
+    + " WHERE UPPER(USER_ADDRESS) = UPPER('" + escapeSql(MY_ADDRESS) + "')"
+    + " AND TYPE IN ('view', 'click')"
+    + " AND TIMESTAMP >= " + startOfDay;
+  sqlQuery(sql, function(err, rows) {
+    if (err || !rows || !rows[0]) { return; }
+    var total = parseFloat(rows[0].TOTAL) || 0;
+    earnedEl.textContent = total.toFixed(6);
+  });
 }
 
 function onRewardConfirmed(parsed) {

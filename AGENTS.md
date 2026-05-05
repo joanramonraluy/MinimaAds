@@ -885,7 +885,7 @@ PRIMARY KEY: `(CAMPAIGN_ID, VIEWER_KEY, ROLE)` — one channel per (viewer/publi
 | Signal Type | Payload | Fired By | FE Reaction |
 |---|---|---|---|
 | `DB_READY` | `{}` | `db-init.js` (SW) | Unlock FE routing — only render DB-backed views once seen |
-| `REWARD_CONFIRMED` | `{ event_id, amount, type }` | `core/rewards.js` (FE) | Update reward display, balance indicator |
+| `REWARD_CONFIRMED` | `{ event_id, amount, reward_type }` | `core/rewards.js` (FE) | Update reward display, balance indicator |
 | `CAMPAIGN_UPDATED` | `{ campaign_id, status, budget_remaining }` | `campaign.handler.js` (SW) | Refresh campaign card status |
 | `NEW_CAMPAIGN` | `{ campaign_id }` | `campaign.handler.js` (SW) | Reload available campaigns list |
 | `CAMPAIGN_PENDING_DENIED` | `{ uid }` | `campaign.handler.js` (SW) | Show "Transaction denied" in creator form |

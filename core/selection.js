@@ -4,6 +4,7 @@
 // Requires LIMITS to be defined in the global scope (set in main.js).
 
 var _sessionCampaignCount = 0;
+var _seenCampaignIds = {};
 
 function selectAd(userAddress, userInterests, campaigns) {
   if (typeof LIMITS !== "undefined" && _sessionCampaignCount >= LIMITS.MAX_CAMPAIGNS_PER_SESSION) {
@@ -27,6 +28,13 @@ function selectAd(userAddress, userInterests, campaigns) {
   var pool = matched.length > 0 ? matched : eligible;
   if (pool.length === 0) { return null; }
 
+  // Prefer unseen campaigns; fall back to already-seen ones only when all have been shown.
+  var unseen = pool.filter(function(c) { return !_seenCampaignIds[c.ID]; });
+  var pickFrom = unseen.length > 0 ? unseen : pool;
+
   _sessionCampaignCount = _sessionCampaignCount + 1;
-  return pool[Math.floor(Math.random() * pool.length)];
+  var selected = pickFrom[Math.floor(Math.random() * pickFrom.length)];
+  selected.ALREADY_SEEN = !!_seenCampaignIds[selected.ID];
+  _seenCampaignIds[selected.ID] = true;
+  return selected;
 }

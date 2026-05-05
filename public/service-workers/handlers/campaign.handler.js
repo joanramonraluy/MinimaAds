@@ -198,7 +198,8 @@ function handleRequestCampaignData(payload) {
           type: "CAMPAIGN_DATA_RESPONSE",
           campaign: campaignObj,
           ad: ad,
-          max_viewer_reward: campaignObj.max_viewer_reward
+          max_viewer_reward: campaignObj.max_viewer_reward,
+          platform_key: (typeof PLATFORM_KEY !== 'undefined' && PLATFORM_KEY) ? PLATFORM_KEY : null
         };
         sendMaxima(null, requesterMx, response, function(ok) {
           MDS.log("[CAMPAIGN] CAMPAIGN_DATA_RESPONSE sent for: " + campaignId + " ok: " + ok);

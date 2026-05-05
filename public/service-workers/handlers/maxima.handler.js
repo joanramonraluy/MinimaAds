@@ -36,7 +36,7 @@ function onMaxima(msg) {
   } else if (payload.type === "CAMPAIGN_DATA_RESPONSE") {
     handleCampaignDataResponse(payload);
   } else if (payload.type === "CHANNEL_OPEN_REQUEST") {
-    handleChannelOpenRequest(payload);
+    handleChannelOpenRequest(payload, msg.data.from || '');
   } else if (payload.type === "CHANNEL_OPEN") {
     handleChannelOpen(payload);
   } else if (payload.type === "REWARD_REQUEST") {

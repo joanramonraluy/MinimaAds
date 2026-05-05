@@ -20,6 +20,12 @@
     .ma-summary-box small { color: var(--pico-muted-color, #6c757d); }
     .ma-summary-warning { color: var(--pico-del-color, #c0392b); font-weight: bold; margin-bottom: 0.5rem; }
     .ma-cap-auto { opacity: 0.65; }
+    .ma-creator-overview { margin: 0 0 1rem; }
+    .ma-tabs { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0 0 1rem; border-bottom: 1px solid var(--pico-muted-border-color, #ddd); }
+    .ma-tabs button { width: auto; margin: 0; border-radius: 0.35rem 0.35rem 0 0; border-bottom: 0; padding: 0.45rem 0.75rem; font-size: 0.9rem; color: #fff; }
+    .ma-tabs button[aria-selected="true"] { background: var(--pico-primary-background, #0172ad); color: #fff; border-color: var(--pico-primary-border, #0172ad); font-weight: 600; }
+    .ma-tabs button[aria-selected="false"] { background: var(--pico-secondary-background, #5d6b89); color: #fff; border-color: var(--pico-secondary-border, #5d6b89); }
+    .ma-tab-panel[hidden] { display: none; }
     #app { min-height: 12rem; }
   </style>
 </head>

@@ -23,7 +23,8 @@ var MY_MAXIMA_PK   = '';
 var MY_MX_ADDRESS  = '';
 
 // Escrow script address — deterministic, same for all nodes with this DApp
-var ESCROW_ADDRESS = '';
+var ESCROW_ADDRESS    = '';
+var ESCROW_ADDRESS_V2 = '';
 
 // Tracks which escrow coinIds have already triggered a REQUEST to avoid re-asking
 var _knownEscrowCoins = {};
@@ -33,6 +34,23 @@ var _timerTicks = 0;
 var REBROADCAST_EVERY_TICKS = 60; // 60 × 10s = 600s = 10 min
 
 var ESCROW_SCRIPT = 'LET creatorkey=PREVSTATE(1) ASSERT SIGNEDBY(creatorkey) LET payout=STATE(10) LET change=@AMOUNT-payout IF change GT 0 THEN ASSERT VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE) ENDIF RETURN TRUE';
+
+var ESCROW_SCRIPT_V2 =
+  "LET creatorkey=PREVSTATE(1) " +
+  "LET platformkey=PREVSTATE(5) " +
+  "LET maxpubbudget=PREVSTATE(6) " +
+  "ASSERT SIGNEDBY(creatorkey) " +
+  "LET payout=STATE(10) " +
+  "LET feeflag=STATE(11) " +
+  "LET change=@AMOUNT-payout " +
+  "IF feeflag EQ 1 THEN " +
+  "LET feeamount=STATE(12) " +
+  "ASSERT VERIFYOUT(STATE(13) platformkey feeamount @TOKENID FALSE) " +
+  "ENDIF " +
+  "IF change GT 0 THEN " +
+  "ASSERT VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE) " +
+  "ENDIF " +
+  "RETURN TRUE";
 
 function onInited() {
   MDS.log("[ADS] SW inited — loading modules");
@@ -49,19 +67,29 @@ function onInited() {
   MDS.load("public/service-workers/handlers/campaign.handler.js");
   MDS.load("public/service-workers/handlers/channel.handler.js");
   initDB(function() {
-    MDS.cmd("maxima action:info", function(resp) {
-      if (!resp.status || !resp.response) {
-        MDS.log("[ADS] maxima action:info failed: " + (resp.error || "no response") + " — retrying in 10s");
-        return;
+    MDS.keypair.get("PLATFORM_KEY_OVERRIDE", function(kpRes) {
+      if (kpRes && kpRes.status && kpRes.value) {
+        PLATFORM_KEY = kpRes.value;
+        MDS.log("[ADS] PLATFORM_KEY overridden: " + PLATFORM_KEY);
       }
-      MY_MAXIMA_PK  = resp.response.publickey ? resp.response.publickey.toUpperCase() : "";
-      MY_MX_ADDRESS = resp.response.contact || "";
-      MDS.log("[ADS] Maxima PK: " + MY_MAXIMA_PK + " contact: " + MY_MX_ADDRESS);
-      registerEscrowScript();
-      MDS.cmd("getaddress", function(addrRes) {
-        var walletAddr = (addrRes.status && addrRes.response && addrRes.response.address) ? addrRes.response.address : "";
-        initBuiltinFrame(MY_MAXIMA_PK, walletAddr);
-      });
+      _initAfterDb();
+    });
+  });
+}
+
+function _initAfterDb() {
+  MDS.cmd("maxima action:info", function(resp) {
+    if (!resp.status || !resp.response) {
+      MDS.log("[ADS] maxima action:info failed: " + (resp.error || "no response") + " — retrying in 10s");
+      return;
+    }
+    MY_MAXIMA_PK  = resp.response.publickey ? resp.response.publickey.toUpperCase() : "";
+    MY_MX_ADDRESS = resp.response.contact || "";
+    MDS.log("[ADS] Maxima PK: " + MY_MAXIMA_PK + " contact: " + MY_MX_ADDRESS);
+    registerEscrowScript();
+    MDS.cmd("getaddress", function(addrRes) {
+      var walletAddr = (addrRes.status && addrRes.response && addrRes.response.address) ? addrRes.response.address : "";
+      initBuiltinFrame(MY_MAXIMA_PK, walletAddr);
     });
   });
 }
@@ -75,20 +103,33 @@ function registerEscrowScript() {
     ESCROW_ADDRESS = res.response.address;
     MDS.log("[ADS] ESCROW_ADDRESS: " + ESCROW_ADDRESS);
     MDS.keypair.set("ESCROW_ADDRESS", ESCROW_ADDRESS, function() {
-      scanEscrowCoins();
+      MDS.cmd("newscript script:\"" + ESCROW_SCRIPT_V2 + "\" trackall:false", function(res2) {
+        if (!res2.status) {
+          MDS.log("[ADS] newscript V2 failed: " + res2.error);
+          scanEscrowCoins();
+          return;
+        }
+        ESCROW_ADDRESS_V2 = res2.response.address;
+        MDS.log("[ADS] ESCROW_ADDRESS_V2: " + ESCROW_ADDRESS_V2);
+        scanEscrowCoins();
+      });
     });
   });
 }
 
 function scanEscrowCoins() {
-  if (!ESCROW_ADDRESS) { return; }
-  MDS.cmd("coins address:" + ESCROW_ADDRESS, function(res) {
-    if (!res.status || !res.response) {
-      MDS.log("[DISCOVERY] coins query failed or empty response");
-      return;
-    }
+  _scanAddress(ESCROW_ADDRESS);
+  _scanAddress(ESCROW_ADDRESS_V2);
+}
+
+function _scanAddress(addr) {
+  if (!addr) { return; }
+  MDS.cmd("coins address:" + addr, function(res) {
+    if (!res.status || !res.response) { return; }
     var coins = res.response;
-    MDS.log("[DISCOVERY] escrow coins found: " + coins.length);
+    if (coins.length > 0) {
+      MDS.log("[DISCOVERY] escrow coins at " + addr.substring(0, 10) + "...: " + coins.length);
+    }
     for (var i = 0; i < coins.length; i++) {
       processEscrowCoin(coins[i]);
     }

@@ -16,7 +16,7 @@
 // SW → FE signals: MinimaAds.md §8.13.
 // Rhino-safe: var, function(), string concat, MDS.log, no trailing commas.
 
-function handleChannelOpenRequest(payload) {
+function handleChannelOpenRequest(payload, senderPk) {
   if (!payload.campaign_id || !payload.viewer_key || !payload.viewer_mx || payload.max_amount === undefined) {
     MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST missing required fields");
     return;
@@ -29,11 +29,27 @@ function handleChannelOpenRequest(payload) {
   var viewerWalletAddr = payload.viewer_wallet_addr || '';
   var role             = payload.role || 'viewer';
   var frameId          = payload.frame_id || '';
+  var sndrPk           = senderPk || '';
 
   if (role === 'publisher') {
     if (!frameId) {
       MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): missing frame_id");
       return;
+    }
+    if (sndrPk) {
+      if (frameId.toLowerCase().indexOf('builtin:') === 0) {
+        var claimedPk = frameId.substring(8);
+        if (claimedPk.toUpperCase() !== sndrPk.toUpperCase()) {
+          MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): builtin frame_id/sender PK mismatch — dropping");
+          return;
+        }
+      } else {
+        var publisherMxKey = payload.publisher_mx_key || '';
+        if (publisherMxKey && publisherMxKey.toUpperCase() !== sndrPk.toUpperCase()) {
+          MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): publisher_mx_key/sender PK mismatch — dropping");
+          return;
+        }
+      }
     }
     getCampaign(campaignId, function(err, campaign) {
       if (err || !campaign) {

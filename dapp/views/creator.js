@@ -26,8 +26,21 @@ function renderCreator(root) {
   var form = document.createElement('form');
   form.id = 'ma-creator-form';
   form.innerHTML = ''
-    + '<div class="ma-section">'
-    + '  <p class="ma-section-title">Ad content</p>'
+    + '<div class="ma-creator-overview">'
+    + '  <div class="ma-autobalance-row">'
+    + '    <label>'
+    + '      <input type="checkbox" name="auto_balance" checked>'
+    + '      Auto-balance cap'
+    + '    </label>'
+    + '  </div>'
+    + '  <div id="ma-campaign-summary"></div>'
+    + '</div>'
+    + '<div class="ma-tabs" role="tablist" aria-label="Campaign setup">'
+    + '  <button type="button" id="ma-tab-content" role="tab" aria-selected="true" aria-controls="ma-panel-content" data-target="ma-panel-content">Add content & duration</button>'
+    + '  <button type="button" id="ma-tab-viewer" role="tab" aria-selected="false" aria-controls="ma-panel-viewer" data-target="ma-panel-viewer">Viewer parameters</button>'
+    + '  <button type="button" id="ma-tab-publisher" role="tab" aria-selected="false" aria-controls="ma-panel-publisher" data-target="ma-panel-publisher">Publisher parameters</button>'
+    + '</div>'
+    + '<div class="ma-section ma-tab-panel" id="ma-panel-content" role="tabpanel" aria-labelledby="ma-tab-content">'
     + '  <label>Campaign title'
     + '    <input name="title" value="Campanya " required maxlength="256">'
     + '  </label>'
@@ -43,15 +56,11 @@ function renderCreator(root) {
     + '  <label>CTA URL'
     + '    <input name="cta_url" type="url" value="https://minima.global" required>'
     + '  </label>'
+    + '  <label>Campaign duration (days) — max ' + LIMITS.MAX_CAMPAIGN_DAYS
+    + '    <input name="campaign_days" type="number" step="1" min="1" max="' + LIMITS.MAX_CAMPAIGN_DAYS + '" value="7" required>'
+    + '  </label>'
     + '</div>'
-    + '<div class="ma-section">'
-    + '  <p class="ma-section-title">Campaign parameters</p>'
-    + '  <div class="ma-autobalance-row">'
-    + '    <label>'
-    + '      <input type="checkbox" name="auto_balance" checked>'
-    + '      Auto-balance cap'
-    + '    </label>'
-    + '  </div>'
+    + '<div class="ma-section ma-tab-panel" id="ma-panel-viewer" role="tabpanel" aria-labelledby="ma-tab-viewer" hidden>'
     + '  <label>Total budget (MINIMA) — min ' + LIMITS.MIN_BUDGET + ' MINIMA'
     + '    <input name="budget" type="text" inputmode="decimal" min="' + LIMITS.MIN_BUDGET + '" value="' + LIMITS.MIN_BUDGET + '" required>'
     + '    <small id="ma-budget-hint">Checking wallet balance…</small>'
@@ -72,6 +81,8 @@ function renderCreator(root) {
     + '    </span>'
     + '    <small id="ma-max-viewer-hint"></small>'
     + '  </label>'
+    + '</div>'
+    + '<div class="ma-section ma-tab-panel" id="ma-panel-publisher" role="tabpanel" aria-labelledby="ma-tab-publisher" hidden>'
     + '  <label>Publisher reward per view (MINIMA, optional)'
     + '    <input name="publisher_reward_view" type="number" step="0.001" min="0" value="0">'
     + '    <small>Leave at 0 to disable Frame rewards</small>'
@@ -80,15 +91,12 @@ function renderCreator(root) {
     + '    <input name="max_publisher_budget" type="number" step="0.01" min="0" value="0">'
     + '    <small>Subset of total budget reserved for publisher payouts</small>'
     + '  </label>'
-    + '  <label>Campaign duration (days) — max ' + LIMITS.MAX_CAMPAIGN_DAYS
-    + '    <input name="campaign_days" type="number" step="1" min="1" max="' + LIMITS.MAX_CAMPAIGN_DAYS + '" value="7" required>'
-    + '  </label>'
     + '</div>'
-    + '<div id="ma-campaign-summary"></div>'
     + '<button type="submit">Publish campaign</button>'
     + '<p id="ma-creator-msg" role="status"></p>';
   root.appendChild(form);
 
+  setupCreatorTabs(form);
   form.addEventListener('submit', onCreatorSubmit);
   form.addEventListener('input', onCreatorFormInput);
   form.addEventListener('change', onCreatorFormChange);
@@ -113,6 +121,47 @@ function renderCreator(root) {
   enforceCapMinimum(form);
   updateCampaignSummary(form);
   loadWalletBalance(form);
+}
+
+function setupCreatorTabs(form) {
+  var tabs = form.querySelectorAll('[role="tab"][data-target]');
+  for (var i = 0; i < tabs.length; i++) {
+    tabs[i].addEventListener('click', function() {
+      selectCreatorTab(form, this.getAttribute('data-target'));
+    });
+  }
+  form.addEventListener('invalid', function(e) {
+    var panel = findCreatorTabPanel(e.target);
+    if (panel && panel.id) {
+      selectCreatorTab(form, panel.id);
+    }
+  }, true);
+}
+
+function findCreatorTabPanel(el) {
+  while (el && el !== document) {
+    if (el.className && (' ' + el.className + ' ').indexOf(' ma-tab-panel ') !== -1) {
+      return el;
+    }
+    el = el.parentNode;
+  }
+  return null;
+}
+
+function selectCreatorTab(form, panelId) {
+  var tabs = form.querySelectorAll('[role="tab"][data-target]');
+  var panels = form.querySelectorAll('.ma-tab-panel');
+  for (var i = 0; i < tabs.length; i++) {
+    var active = tabs[i].getAttribute('data-target') === panelId;
+    tabs[i].setAttribute('aria-selected', active ? 'true' : 'false');
+  }
+  for (var j = 0; j < panels.length; j++) {
+    if (panels[j].id === panelId) {
+      panels[j].removeAttribute('hidden');
+    } else {
+      panels[j].setAttribute('hidden', '');
+    }
+  }
 }
 
 function loadWalletBalance(form) {
@@ -696,85 +745,17 @@ function fundEscrowAndPublish(campaign, ad, form, submitBtn, msgEl, campaignDura
   });
 }
 
-// T-PUB4 — Build the campaign-launch tx when a fee output is required.
-// Two-output structure (plus optional change auto-added by txnpost):
-//   output[0] → PLATFORM_KEY (fee, no state)
-//   output[1] → ESCROW_ADDRESS_V2 (budget, with state — becomes PREVSTATE)
-// Returns to onResult the raw response shape — same as `send` so the caller
-// can extract `body.txn.outputs[i].coinid`.
+// T-PUB4 — Fund escrow when a platform fee applies (feeflag=1).
+// Uses send multi: for one atomic tx with two outputs — same coin-selection
+// engine as the feeflag=0 send path (proven to work). fee output gets
+// storestate:true too (harmless — state not used when spending wallet coins).
 function buildEscrowFundingTx(opts, onResult) {
-  var txId = 'launch_' + generateUID();
-  var stateObj = null;
-  try { stateObj = JSON.parse(opts.stateJson); } catch (e) { stateObj = null; }
-  if (!stateObj) {
-    onResult({ status: false, error: 'invalid stateJson' });
-    return;
-  }
-
-  function fail(stage, res) {
-    console.error('[CREATOR] launch tx failed at', stage, res && (res.error || res));
-    MDS.cmd('txndelete id:' + txId, function() {});
-    onResult(res || { status: false, error: stage });
-  }
-
-  MDS.cmd('txncreate id:' + txId, function(r1) {
-    if (!r1 || !r1.status) { fail('txncreate', r1); return; }
-
-    // Fee output — index 0, no state.
-    MDS.cmd('txnoutput id:' + txId
-          + ' storestate:false'
-          + ' amount:' + opts.feeAmount
-          + ' address:' + opts.platformKey, function(r2) {
-      if (!r2 || !r2.status) { fail('txnoutput[fee]', r2); return; }
-
-      // Escrow output — index 1, holds the campaign state (PREVSTATE on spend).
-      MDS.cmd('txnoutput id:' + txId
-            + ' storestate:true'
-            + ' amount:' + opts.budgetTotal
-            + ' address:' + opts.escrowAddress, function(r3) {
-        if (!r3 || !r3.status) { fail('txnoutput[escrow]', r3); return; }
-
-        // Apply state ports — these attach to outputs with storestate:true.
-        var portKeys = [];
-        for (var k in stateObj) { if (stateObj.hasOwnProperty(k)) { portKeys.push(k); } }
-        var stateCmds = [];
-        for (var i = 0; i < portKeys.length; i++) {
-          stateCmds.push('txnstate id:' + txId
-                       + ' port:' + portKeys[i]
-                       + ' value:' + stateObj[portKeys[i]]);
-        }
-
-        runCreatorStateCmds(stateCmds, 0, function(stateOk) {
-          if (!stateOk) { fail('txnstate', null); return; }
-
-          // txnpost auto:true picks the input coins, adds change back to creator,
-          // and signs with the appropriate wallet keys automatically.
-          MDS.cmd('txnpost id:' + txId + ' auto:true mine:true', function(r4) {
-            if (r4 && r4.pending) {
-              // Pending approval — keep the tx around; surface to caller.
-              onResult(r4);
-              return;
-            }
-            if (!r4 || !r4.status) { fail('txnpost', r4); return; }
-            MDS.cmd('txndelete id:' + txId, function() {});
-            onResult(r4);
-          });
-        });
-      });
-    });
-  });
-}
-
-function runCreatorStateCmds(cmds, idx, cb) {
-  if (idx >= cmds.length) { cb(true); return; }
-  MDS.cmd(cmds[idx], function(res) {
-    if (!res || !res.status) {
-      console.error('[CREATOR] state cmd failed:', cmds[idx], res && res.error);
-      cb(false);
-      return;
-    }
-    runCreatorStateCmds(cmds, idx + 1, cb);
-  });
+  MDS.cmd(
+    'send multi:["' + opts.platformKey + ':' + opts.feeAmount
+      + '","' + opts.escrowAddress + ':' + opts.budgetTotal + '"]'
+      + ' state:' + opts.stateJson,
+    function(r) { onResult(r); }
+  );
 }
 
 function saveCampaignAndBroadcast(campaign, ad, form, submitBtn, msgEl) {
@@ -793,6 +774,9 @@ function saveCampaignAndBroadcast(campaign, ad, form, submitBtn, msgEl) {
     if (campaign.publisher_reward_view > 0) {
       payload.publisher_reward_view = campaign.publisher_reward_view;
       payload.max_publisher_budget  = campaign.max_publisher_budget;
+    }
+    if (typeof PLATFORM_KEY !== 'undefined' && PLATFORM_KEY) {
+      payload.platform_key = PLATFORM_KEY;
     }
     broadcastMaxima(payload, function(ok) {
       if (submitBtn) { submitBtn.removeAttribute('disabled'); }

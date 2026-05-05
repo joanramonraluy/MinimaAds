@@ -29,6 +29,7 @@
   var _inited = false;
   var _reconnectDone = false;
   var _activeFrameId = null;
+  var _myMx = '';
 
   function _resolveFrame(config, cb) {
     var frameId = config.frameId || config.publisher_id || null;
@@ -86,13 +87,18 @@
     MDS.init(function(event) {
       if (event && event.event === 'inited' && !_inited) {
         _inited = true;
-        _resolveFrame(_config, function(frameErr) {
-          if (frameErr) {
-            if (cb) { cb(frameErr, false); }
-            return;
+        MDS.cmd('maxima action:info', function(mxRes) {
+          if (mxRes && mxRes.status && mxRes.response && mxRes.response.contact) {
+            _myMx = mxRes.response.contact;
           }
-          if (cb) { cb(null, true); }
-          _ensureReconnect();
+          _resolveFrame(_config, function(frameErr) {
+            if (frameErr) {
+              if (cb) { cb(frameErr, false); }
+              return;
+            }
+            if (cb) { cb(null, true); }
+            _ensureReconnect();
+          });
         });
       }
     });
@@ -182,7 +188,8 @@
   }
 
   function _myMxAddress() {
-    return (typeof MY_MX_ADDRESS !== 'undefined') ? MY_MX_ADDRESS : '';
+    if (typeof MY_MX_ADDRESS !== 'undefined' && MY_MX_ADDRESS) { return MY_MX_ADDRESS; }
+    return _myMx;
   }
 
   // Unicast Maxima send with poll:true.
@@ -321,47 +328,61 @@
 
   function _openNewPublisherChannel(campaign, frameId, frame, maxAmount, cb) {
     var publisherWalletAddr = frame.PUBLISHER_WALLET || '';
-    MDS.cmd('keys action:new', function(res) {
-      if (!res || !res.status || !res.response || !res.response.publickey) {
-        if (cb) { cb(); }
-        return;
-      }
-      var publisherKey = res.response.publickey;
-      var now = Date.now();
-      _resolveCreatorRoute(campaign, function(creatorRoute) {
-        var sql = "INSERT INTO CHANNEL_STATE " +
-          "(CAMPAIGN_ID, VIEWER_KEY, ROLE, FRAME_ID, CREATOR_MX, MAX_AMOUNT, CUMULATIVE_EARNED, LATEST_TX_HEX, STATUS, CREATED_AT, VIEWER_WALLET_ADDR) VALUES (" +
-          "'" + escapeSql(campaign.ID) + "'," +
-          "'" + escapeSql(publisherKey) + "'," +
-          "'publisher'," +
-          "'" + escapeSql(frameId) + "'," +
-          "'" + escapeSql(creatorRoute) + "'," +
-          maxAmount + "," +
-          "0," +
-          "''," +
-          "'pending'," +
-          now + "," +
-          "'" + escapeSql(publisherWalletAddr) + "'" +
-          ")";
-        sqlQuery(sql, function(err) {
-          if (err) {
-            console.log('[SDK] publisher CHANNEL_STATE insert failed:', err);
-            if (cb) { cb(); }
-            return;
-          }
-          _sendToCreator(creatorRoute, {
-            type: 'CHANNEL_OPEN_REQUEST',
-            campaign_id: campaign.ID,
-            viewer_key: publisherKey,
-            viewer_mx: _myMxAddress(),
-            max_amount: maxAmount,
-            viewer_wallet_addr: publisherWalletAddr,
-            role: 'publisher',
-            frame_id: frameId
-          }, function() { if (cb) { cb(); } });
+
+    function proceed(publisherMxKey) {
+      MDS.cmd('keys action:new', function(res) {
+        if (!res || !res.status || !res.response || !res.response.publickey) {
+          if (cb) { cb(); }
+          return;
+        }
+        var publisherKey = res.response.publickey;
+        var now = Date.now();
+        _resolveCreatorRoute(campaign, function(creatorRoute) {
+          var sql = "INSERT INTO CHANNEL_STATE " +
+            "(CAMPAIGN_ID, VIEWER_KEY, ROLE, FRAME_ID, CREATOR_MX, MAX_AMOUNT, CUMULATIVE_EARNED, LATEST_TX_HEX, STATUS, CREATED_AT, VIEWER_WALLET_ADDR) VALUES (" +
+            "'" + escapeSql(campaign.ID) + "'," +
+            "'" + escapeSql(publisherKey) + "'," +
+            "'publisher'," +
+            "'" + escapeSql(frameId) + "'," +
+            "'" + escapeSql(creatorRoute) + "'," +
+            maxAmount + "," +
+            "0," +
+            "''," +
+            "'pending'," +
+            now + "," +
+            "'" + escapeSql(publisherWalletAddr) + "'" +
+            ")";
+          sqlQuery(sql, function(err) {
+            if (err) {
+              console.log('[SDK] publisher CHANNEL_STATE insert failed:', err);
+              if (cb) { cb(); }
+              return;
+            }
+            _sendToCreator(creatorRoute, {
+              type: 'CHANNEL_OPEN_REQUEST',
+              campaign_id: campaign.ID,
+              viewer_key: publisherKey,
+              viewer_mx: _myMxAddress(),
+              max_amount: maxAmount,
+              viewer_wallet_addr: publisherWalletAddr,
+              role: 'publisher',
+              frame_id: frameId,
+              publisher_mx_key: publisherMxKey
+            }, function() { if (cb) { cb(); } });
+          });
         });
       });
-    });
+    }
+
+    if (frameId.toLowerCase().indexOf('builtin:') === 0) {
+      proceed(frameId.substring(8).toUpperCase());
+    } else {
+      MDS.cmd('maxima action:info', function(mxRes) {
+        var pk = (mxRes && mxRes.status && mxRes.response && mxRes.response.publickey)
+          ? mxRes.response.publickey.toUpperCase() : '';
+        proceed(pk);
+      });
+    }
   }
 
   function _sendPublisherRewardRequest(campaign, channel, frameId, amount, cb) {
@@ -585,23 +606,33 @@
       function(err2, pending) {
         if (err2 || !pending || pending.length === 0) { return; }
         console.log('[SDK] reconnect: pending channels found:' + pending.length + ' → resending CHANNEL_OPEN_REQUEST');
-        for (var j = 0; j < pending.length; j++) {
-          (function(row) {
-            var r   = row.ROLE || 'viewer';
-            var msg = {
-              type: 'CHANNEL_OPEN_REQUEST',
-              campaign_id: row.CAMPAIGN_ID,
-              viewer_key: row.VIEWER_KEY,
-              viewer_mx: _myMxAddress(),
-              max_amount: parseFloat(row.MAX_AMOUNT) || 0,
-              viewer_wallet_addr: row.VIEWER_WALLET_ADDR || '',
-              role: r
-            };
-            if (r === 'publisher') { msg.frame_id = row.FRAME_ID || ''; }
-            console.log('[SDK] reconnect: resending CHANNEL_OPEN_REQUEST campaign:' + row.CAMPAIGN_ID + ' role:' + r);
-            _sendToCreator(row.CREATOR_MX, msg, function() {});
-          })(pending[j]);
-        }
+        MDS.cmd('maxima action:info', function(mxRes) {
+          var myPk = (mxRes && mxRes.status && mxRes.response && mxRes.response.publickey)
+            ? mxRes.response.publickey.toUpperCase() : '';
+          for (var j = 0; j < pending.length; j++) {
+            (function(row) {
+              var r   = row.ROLE || 'viewer';
+              var msg = {
+                type: 'CHANNEL_OPEN_REQUEST',
+                campaign_id: row.CAMPAIGN_ID,
+                viewer_key: row.VIEWER_KEY,
+                viewer_mx: _myMxAddress(),
+                max_amount: parseFloat(row.MAX_AMOUNT) || 0,
+                viewer_wallet_addr: row.VIEWER_WALLET_ADDR || '',
+                role: r
+              };
+              if (r === 'publisher') {
+                var fid = row.FRAME_ID || '';
+                msg.frame_id = fid;
+                msg.publisher_mx_key = (fid.toLowerCase().indexOf('builtin:') === 0)
+                  ? fid.substring(8).toUpperCase()
+                  : myPk;
+              }
+              console.log('[SDK] reconnect: resending CHANNEL_OPEN_REQUEST campaign:' + row.CAMPAIGN_ID + ' role:' + r);
+              _sendToCreator(row.CREATOR_MX, msg, function() {});
+            })(pending[j]);
+          }
+        });
       }
     );
   }

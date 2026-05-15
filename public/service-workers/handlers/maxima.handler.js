@@ -45,6 +45,8 @@ function onMaxima(msg) {
     handleRewardVoucher(payload);
   } else if (payload.type === "VOUCHER_SYNC_REQUEST") {
     handleVoucherSyncRequest(payload);
+  } else if (payload.type === "PUBLISHER_REWARD_NOTIFY") {
+    handlePublisherRewardNotify(payload, msg.data.from || '');
   } else {
     MDS.log("[MAXIMA] unknown type: " + payload.type);
   }

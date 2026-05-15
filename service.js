@@ -6,8 +6,8 @@
 var APP_NAME = 'minima-ads';
 
 var LIMITS = {
-  MAX_VIEWS_PER_CAMPAIGN_PER_DAY:  1,
-  MAX_CLICKS_PER_CAMPAIGN_PER_DAY: 1,
+  MAX_VIEWS_PER_CAMPAIGN_PER_DAY:  100,
+  MAX_CLICKS_PER_CAMPAIGN_PER_DAY: 100,
   COOLDOWN_BETWEEN_REWARDS_MS:     30000,
   MIN_VIEW_DURATION_MS:            3000,
   MAX_CAMPAIGNS_PER_SESSION:       10,
@@ -21,10 +21,15 @@ var LIMITS = {
 // Node identity — set once in onInited after maxima action:info
 var MY_MAXIMA_PK   = '';
 var MY_MX_ADDRESS  = '';
+var MY_ADDRESS     = '';
 
 // Escrow script address — deterministic, same for all nodes with this DApp
 var ESCROW_ADDRESS    = '';
 var ESCROW_ADDRESS_V2 = '';
+
+// Channel script: time-locked creator-only exit OR 2-of-2 MULTISIG(creator, viewer/publisher)
+var CHANNEL_SCRIPT         = 'IF @COINAGE GT (40*1728) AND SIGNEDBY(PREVSTATE(1)) THEN RETURN TRUE ENDIF RETURN MULTISIG(2 PREVSTATE(1) PREVSTATE(2))';
+var CHANNEL_SCRIPT_ADDRESS = '';
 
 // Tracks which escrow coinIds have already triggered a REQUEST to avoid re-asking
 var _knownEscrowCoins = {};
@@ -65,6 +70,7 @@ function onInited() {
   MDS.load("public/service-workers/handlers/maxima.handler.js");
   MDS.load("public/service-workers/handlers/campaign.handler.js");
   MDS.load("public/service-workers/handlers/channel.handler.js");
+  MDS.load("public/service-workers/handlers/comms.handler.js");
   initDB(function() {
     MDS.keypair.get("PLATFORM_KEY_OVERRIDE", function(kpRes) {
       if (kpRes && kpRes.status && kpRes.value) {
@@ -88,6 +94,7 @@ function _initAfterDb() {
     registerEscrowScript();
     MDS.cmd("getaddress", function(addrRes) {
       var walletAddr = (addrRes.status && addrRes.response && addrRes.response.address) ? addrRes.response.address : "";
+      MY_ADDRESS = walletAddr;
       initBuiltinFrame(MY_MAXIMA_PK, walletAddr);
     });
   });
@@ -110,7 +117,22 @@ function registerEscrowScript() {
         }
         ESCROW_ADDRESS_V2 = res2.response.address;
         MDS.log("[ADS] ESCROW_ADDRESS_V2: " + ESCROW_ADDRESS_V2);
-        scanEscrowCoins();
+        MDS.cmd("newscript script:\"" + CHANNEL_SCRIPT + "\" trackall:false", function(res3) {
+          if (res3 && res3.status && res3.response && res3.response.address) {
+            CHANNEL_SCRIPT_ADDRESS = res3.response.address;
+            MDS.keypair.set("CHANNEL_SCRIPT_ADDRESS", CHANNEL_SCRIPT_ADDRESS, function() {});
+            MDS.log("[ADS] CHANNEL_SCRIPT_ADDRESS: " + CHANNEL_SCRIPT_ADDRESS);
+          } else {
+            MDS.log("[ADS] CHANNEL_SCRIPT newscript failed — will fallback to keypair");
+            MDS.keypair.get("CHANNEL_SCRIPT_ADDRESS", function(kpRes) {
+              if (kpRes && kpRes.status && kpRes.value) {
+                CHANNEL_SCRIPT_ADDRESS = kpRes.value;
+                MDS.log("[ADS] CHANNEL_SCRIPT_ADDRESS from keypair: " + CHANNEL_SCRIPT_ADDRESS);
+              }
+            });
+          }
+          scanEscrowCoins();
+        });
       });
     });
   });
@@ -161,10 +183,28 @@ function rebroadcastActiveCampaigns() {
   }
 }
 
+function onComms(msg) {
+  var raw = msg.data && msg.data.message ? msg.data.message : null;
+  if (!raw) { return; }
+  var payload = null;
+  try { payload = JSON.parse(raw); } catch (e) { return; }
+  if (payload.type === "MA_PING") {
+    MDS.log("[COMMS] MA_PING from " + (msg.data.minidapp || "?") + " — sending MA_PONG");
+    MDS.comms.broadcast(JSON.stringify({type: "MA_PONG", ok: true}), function() {});
+  } else if (payload.type === "MA_GET_AD") {
+    handleGetAd(payload);
+  } else if (payload.type === "MA_TRACK_VIEW") {
+    handleTrackView(payload);
+  } else if (payload.type === "MA_OPEN_PUBLISHER_CHANNELS") {
+    handleOpenPublisherChannels(payload);
+  }
+}
+
 MDS.init(function(msg) {
   if (msg.event === "inited")              { onInited(); }
   if (msg.event === "MAXIMA")              { onMaxima(msg); }
   if (msg.event === "MDS_TIMER_10SECONDS") { onTimer(); }
-  if (msg.event === "NEWBLOCK")            { scanEscrowCoins(); checkPendingVouchers(); }
+  if (msg.event === "NEWBLOCK")            { scanEscrowCoins(); checkPendingChannelOpens(); checkPendingVouchers(); }
   if (msg.event === "MDS_PENDING")         { onPending(msg); }
+  if (msg.event === "MDSCOMMS")            { onComms(msg); }
 });

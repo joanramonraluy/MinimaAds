@@ -31,6 +31,22 @@
   var _activeFrameId = null;
   var _myMx = '';
 
+  function _completeInit(cb) {
+    MDS.cmd('maxima action:info', function(mxRes) {
+      if (mxRes && mxRes.status && mxRes.response && mxRes.response.contact) {
+        _myMx = mxRes.response.contact;
+      }
+      _resolveFrame(_config, function(frameErr) {
+        if (frameErr) {
+          if (cb) { cb(frameErr, false); }
+          return;
+        }
+        if (cb) { cb(null, true); }
+        _ensureReconnect();
+      });
+    });
+  }
+
   function _resolveFrame(config, cb) {
     var frameId = config.frameId || config.publisher_id || null;
 
@@ -84,22 +100,19 @@
       if (cb) { cb('MDS not available', false); }
       return;
     }
+
+    // Host MiniDapps such as MetaChain already own MDS.init. In that mode the
+    // host calls MinimaAds.handleMdsEvent(msg) from its existing MDS callback.
+    if (_config.mdsAlreadyInitialized || _config.externalMdsInit || _config.skipMdsInit) {
+      _inited = true;
+      _completeInit(cb);
+      return;
+    }
+
     MDS.init(function(event) {
       if (event && event.event === 'inited' && !_inited) {
         _inited = true;
-        MDS.cmd('maxima action:info', function(mxRes) {
-          if (mxRes && mxRes.status && mxRes.response && mxRes.response.contact) {
-            _myMx = mxRes.response.contact;
-          }
-          _resolveFrame(_config, function(frameErr) {
-            if (frameErr) {
-              if (cb) { cb(frameErr, false); }
-              return;
-            }
-            if (cb) { cb(null, true); }
-            _ensureReconnect();
-          });
-        });
+        _completeInit(cb);
       }
     });
   }
@@ -158,7 +171,18 @@
       }
       return false;
     }
-    return renderAd(ad, containerId);
+    var renderable = ad;
+    if (ad && !ad.title && (ad.AD_TITLE || ad.TITLE)) {
+      renderable = {
+        id: ad.AD_ID || ad.ID || ad.id,
+        campaign_id: ad.ID || ad.CAMPAIGN_ID || ad.campaign_id,
+        title: ad.AD_TITLE || ad.TITLE,
+        body: ad.AD_BODY || ad.BODY,
+        cta_label: ad.AD_CTA_LABEL || ad.CTA_LABEL,
+        cta_url: ad.AD_CTA_URL || ad.CTA_URL
+      };
+    }
+    return renderAd(renderable, containerId);
   }
 
   function _lookupAdId(campaignId, cb) {
@@ -760,6 +784,102 @@
     _trackEvent('click', campaignId, userAddress, cb);
   }
 
+  function _persistCampaignPayload(payload) {
+    if (!payload || !payload.campaign || !payload.ad || !payload.campaign.id) { return; }
+    if (typeof PLATFORM_KEY !== 'undefined' && PLATFORM_KEY && payload.platform_key) {
+      if (String(payload.platform_key).toUpperCase() !== String(PLATFORM_KEY).toUpperCase()) { return; }
+    }
+    var maxViewerReward = (payload.max_viewer_reward !== undefined && payload.max_viewer_reward !== null)
+      ? parseFloat(payload.max_viewer_reward) : null;
+    payload.campaign.max_viewer_reward = maxViewerReward;
+    saveCampaign(payload.campaign, payload.ad, function(err) {
+      if (err) {
+        console.log('[SDK] CAMPAIGN persist failed:', err);
+      }
+    });
+  }
+
+  function _decodeMaximaPayload(event) {
+    if (!event || event.event !== 'MAXIMA' || !event.data || !event.data.data) { return null; }
+    if (event.data.application && event.data.application !== APP_NAME) { return null; }
+    try {
+      return JSON.parse(hexToUtf8(event.data.data));
+    } catch (e) {
+      console.log('[SDK] MAXIMA decode failed:', e);
+      return null;
+    }
+  }
+
+  function _handleChannelOpenPayload(payload) {
+    if (!payload || !payload.campaign_id || !payload.viewer_key || !payload.channel_coinid) { return; }
+    var role = payload.role || 'viewer';
+    activateChannel(payload.campaign_id, payload.viewer_key, role, payload.channel_coinid, function(err) {
+      if (err) {
+        console.log('[SDK] CHANNEL_OPEN activate failed:', err);
+        return;
+      }
+      _onChannelOpenedCore({
+        campaign_id: payload.campaign_id,
+        channel_coinid: payload.channel_coinid,
+        max_amount: parseFloat(payload.max_amount) || 0,
+        role: role,
+        frame_id: payload.frame_id || ''
+      });
+    });
+  }
+
+  function _handleRewardVoucherPayload(payload) {
+    if (!payload || !payload.campaign_id || !payload.viewer_key || !payload.event_id || payload.cumulative === undefined || !payload.tx_hex) { return; }
+    var role = payload.role || 'viewer';
+    var cumulative = parseFloat(payload.cumulative);
+    updateChannelVoucher(payload.campaign_id, payload.viewer_key, role, cumulative, payload.tx_hex, function(err) {
+      if (err) {
+        console.log('[SDK] REWARD_VOUCHER update failed:', err);
+        return;
+      }
+      _onVoucherReceivedCore({
+        campaign_id: payload.campaign_id,
+        cumulative: cumulative,
+        role: role,
+        frame_id: payload.frame_id || ''
+      });
+    });
+  }
+
+  function handleMdsEvent(event) {
+    if (!event || !event.event) { return; }
+
+    if (event.event === 'MDSCOMMS') {
+      var raw = event.data && event.data.message ? event.data.message : event.data;
+      var parsed = null;
+      try { parsed = (typeof raw === 'string') ? JSON.parse(raw) : raw; } catch (e) { return; }
+      if (!parsed || !parsed.type) { return; }
+      if (parsed.type === 'CHANNEL_OPENED') { _onChannelOpenedCore(parsed); }
+      if (parsed.type === 'VOUCHER_RECEIVED') { _onVoucherReceivedCore(parsed); }
+      return;
+    }
+
+    var payload = _decodeMaximaPayload(event);
+    if (!payload || !payload.type) { return; }
+    if (payload.type === 'CAMPAIGN_ANNOUNCE' || payload.type === 'CAMPAIGN_DATA_RESPONSE') {
+      _persistCampaignPayload(payload);
+    } else if (payload.type === 'CAMPAIGN_PAUSE') {
+      setCampaignStatus(payload.campaign_id, 'paused', function() {});
+    } else if (payload.type === 'CAMPAIGN_FINISH') {
+      setCampaignStatus(payload.campaign_id, 'finished', function() {});
+    } else if (payload.type === 'CHANNEL_OPEN') {
+      _handleChannelOpenPayload(payload);
+    } else if (payload.type === 'REWARD_VOUCHER') {
+      _handleRewardVoucherPayload(payload);
+    } else if (payload.type === 'PUBLISHER_REWARD_NOTIFY') {
+      getCampaign(payload.campaign_id, function(err, campaign) {
+        if (!err && campaign) {
+          _publisherChannelFlow(campaign, payload.frame_id, parseFloat(campaign.PUBLISHER_REWARD_VIEW) || 0, function() {});
+        }
+      });
+    }
+  }
+
   if (typeof window !== 'undefined') {
     window.MinimaAds = {
       init: init,
@@ -767,6 +887,7 @@
       render: render,
       trackView: trackView,
       trackClick: trackClick,
+      handleMdsEvent: handleMdsEvent,
       // Exposed so viewer.js (T-CH6) can compose UI updates on top of the
       // channel bookkeeping without re-implementing it.
       onChannelOpened:  _onChannelOpenedCore,

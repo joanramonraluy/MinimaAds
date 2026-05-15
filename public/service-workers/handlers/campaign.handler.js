@@ -14,6 +14,12 @@ function handleCampaignAnnounce(payload) {
   var maxViewerReward = (payload.max_viewer_reward !== undefined && payload.max_viewer_reward !== null)
     ? parseFloat(payload.max_viewer_reward) : null;
   payload.campaign.max_viewer_reward = maxViewerReward;
+  if (payload.max_daily_views !== undefined && payload.max_daily_views !== null) {
+    payload.campaign.max_daily_views = parseInt(payload.max_daily_views, 10);
+  }
+  if (payload.max_daily_clicks !== undefined && payload.max_daily_clicks !== null) {
+    payload.campaign.max_daily_clicks = parseInt(payload.max_daily_clicks, 10);
+  }
   var campaignId = payload.campaign.id;
 
   if (typeof PLATFORM_KEY === 'undefined' || PLATFORM_KEY === null) {
@@ -57,6 +63,9 @@ function persistCampaign(payload, campaignId) {
     }
     MDS.log("[CAMPAIGN] ANNOUNCE persisted, id: " + campaignId);
     signalFE("NEW_CAMPAIGN", { campaign_id: campaignId });
+    if (typeof _tryOpenPublisherChannelForAllFrames === 'function') {
+      _tryOpenPublisherChannelForAllFrames(campaignId);
+    }
   });
 }
 
@@ -108,7 +117,37 @@ function processEscrowCoin(coin) {
   MDS.log("[DISCOVERY] coin: " + coinId + " campaignId: " + campaignId + " creatorContact: " + creatorMxAddr);
 
   getCampaign(campaignId, function(err, campaign) {
-    if (campaign) { return; }
+    if (campaign) {
+      // Detect stale publisher data: on-chain STATE(6) has a publisher budget
+      // but local DB has MAX_PUBLISHER_BUDGET = 0 (saved with pre-fix code).
+      var onChainPubBudget = parseFloat(getStateVar(states, 6) || 0);
+      if (onChainPubBudget > 0 && parseFloat(campaign.MAX_PUBLISHER_BUDGET || 0) <= 0) {
+        MDS.log("[DISCOVERY] stale MAX_PUBLISHER_BUDGET for: " + campaignId + " — patching DB from on-chain state(" + onChainPubBudget + ")");
+        sqlQuery(
+          "UPDATE CAMPAIGNS SET MAX_PUBLISHER_BUDGET = " + onChainPubBudget +
+          " WHERE UPPER(ID) = UPPER('" + escapeSql(campaignId) + "')",
+          function(patchErr) {
+            if (patchErr) {
+              MDS.log("[DISCOVERY] patch failed: " + patchErr + " — falling back to REQUEST_CAMPAIGN_DATA");
+              MDS.keypair.set("CREATOR_MX_" + campaignId, creatorMxAddr, function() {
+                var refreshPayload = {
+                  type: "REQUEST_CAMPAIGN_DATA",
+                  campaign_id: campaignId,
+                  requester_mx: MY_MX_ADDRESS
+                };
+                sendMaxima(null, creatorMxAddr, refreshPayload, function(ok) {
+                  MDS.log("[DISCOVERY] refresh REQUEST_CAMPAIGN_DATA sent for: " + campaignId + " ok: " + ok);
+                });
+              });
+            } else {
+              MDS.log("[DISCOVERY] MAX_PUBLISHER_BUDGET patched: " + campaignId + " = " + onChainPubBudget);
+              signalFE("CAMPAIGN_UPDATED", { campaign_id: campaignId });
+            }
+          }
+        );
+      }
+      return;
+    }
 
     MDS.keypair.get("PENDING_CAMPAIGN_" + campaignId, function(kpRes) {
       var val = kpRes && kpRes.status ? kpRes.value : "";
@@ -192,13 +231,20 @@ function handleRequestCampaignData(payload) {
           status: c.STATUS,
           created_at: parseInt(c.CREATED_AT),
           expires_at: (c.EXPIRES_AT !== null && c.EXPIRES_AT !== undefined) ? parseInt(c.EXPIRES_AT) : null,
-          max_viewer_reward: (c.MAX_VIEWER_REWARD !== null && c.MAX_VIEWER_REWARD !== undefined) ? parseFloat(c.MAX_VIEWER_REWARD) : null
+          max_viewer_reward: (c.MAX_VIEWER_REWARD !== null && c.MAX_VIEWER_REWARD !== undefined) ? parseFloat(c.MAX_VIEWER_REWARD) : null,
+          publisher_reward_view: (c.PUBLISHER_REWARD_VIEW !== null && c.PUBLISHER_REWARD_VIEW !== undefined) ? parseFloat(c.PUBLISHER_REWARD_VIEW) : 0,
+          max_publisher_budget: (c.MAX_PUBLISHER_BUDGET !== null && c.MAX_PUBLISHER_BUDGET !== undefined) ? parseFloat(c.MAX_PUBLISHER_BUDGET) : 0,
+          publisher_budget_spent: (c.PUBLISHER_BUDGET_SPENT !== null && c.PUBLISHER_BUDGET_SPENT !== undefined) ? parseFloat(c.PUBLISHER_BUDGET_SPENT) : 0,
+          max_daily_views: (c.MAX_DAILY_VIEWS !== null && c.MAX_DAILY_VIEWS !== undefined) ? parseInt(c.MAX_DAILY_VIEWS, 10) : 100,
+          max_daily_clicks: (c.MAX_DAILY_CLICKS !== null && c.MAX_DAILY_CLICKS !== undefined) ? parseInt(c.MAX_DAILY_CLICKS, 10) : 100
         };
         var response = {
           type: "CAMPAIGN_DATA_RESPONSE",
           campaign: campaignObj,
           ad: ad,
           max_viewer_reward: campaignObj.max_viewer_reward,
+          max_daily_views: campaignObj.max_daily_views,
+          max_daily_clicks: campaignObj.max_daily_clicks,
           platform_key: (typeof PLATFORM_KEY !== 'undefined' && PLATFORM_KEY) ? PLATFORM_KEY : null
         };
         sendMaxima(null, requesterMx, response, function(ok) {

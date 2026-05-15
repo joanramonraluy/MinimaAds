@@ -19,7 +19,9 @@ function initDB(cb) {
     + "EXPIRES_AT       BIGINT        DEFAULT NULL,"
     + "ESCROW_COINID    VARCHAR(66)   DEFAULT '',"
     + "ESCROW_WALLET_PK  VARCHAR(66)   DEFAULT '',"
-    + "MAX_VIEWER_REWARD DECIMAL(20,6) DEFAULT NULL"
+    + "MAX_VIEWER_REWARD DECIMAL(20,6) DEFAULT NULL,"
+    + "MAX_DAILY_VIEWS  INT           DEFAULT 100,"
+    + "MAX_DAILY_CLICKS INT           DEFAULT 100"
     + ")";
 
   var sql_ads = "CREATE TABLE IF NOT EXISTS ADS ("
@@ -40,7 +42,7 @@ function initDB(cb) {
     + "TYPE         VARCHAR(16)   NOT NULL,"
     + "AMOUNT       DECIMAL(20,6) NOT NULL,"
     + "TIMESTAMP    BIGINT        NOT NULL,"
-    + "PUBLISHER_ID VARCHAR(256)  DEFAULT NULL"
+    + "PUBLISHER_ID VARCHAR(512)  DEFAULT NULL"
     + ")";
 
   var sql_user_profile = "CREATE TABLE IF NOT EXISTS USER_PROFILE ("
@@ -59,6 +61,7 @@ function initDB(cb) {
     + "FRAME_ID         VARCHAR(512)  PRIMARY KEY,"
     + "PUBLISHER_KEY    VARCHAR(512)  NOT NULL,"
     + "PUBLISHER_WALLET VARCHAR(512)  DEFAULT '',"
+    + "PUBLISHER_MX     VARCHAR(512)  DEFAULT '',"
     + "LABEL            VARCHAR(256)  DEFAULT '',"
     + "IS_BUILTIN       BOOLEAN       NOT NULL DEFAULT FALSE,"
     + "CREATED_AT       BIGINT        NOT NULL,"
@@ -67,7 +70,7 @@ function initDB(cb) {
 
   var sql_channel_state = "CREATE TABLE IF NOT EXISTS CHANNEL_STATE ("
     + "CAMPAIGN_ID        VARCHAR(256)   NOT NULL,"
-    + "VIEWER_KEY         VARCHAR(66)    NOT NULL,"
+    + "VIEWER_KEY         VARCHAR(512)   NOT NULL,"
     + "ROLE               VARCHAR(16)    NOT NULL DEFAULT 'viewer',"
     + "FRAME_ID           VARCHAR(512)   DEFAULT '',"
     + "CREATOR_MX         VARCHAR(512)   NOT NULL,"
@@ -79,6 +82,15 @@ function initDB(cb) {
     + "CREATED_AT         BIGINT         NOT NULL,"
     + "VIEWER_WALLET_ADDR VARCHAR(512)   DEFAULT '',"
     + "PRIMARY KEY (CAMPAIGN_ID, VIEWER_KEY, ROLE)"
+    + ")";
+
+  var sql_deferred_pub_rewards = "CREATE TABLE IF NOT EXISTS DEFERRED_PUB_REWARDS ("
+    + "ID              VARCHAR(96)   PRIMARY KEY,"
+    + "CAMPAIGN_ID     VARCHAR(96)   NOT NULL,"
+    + "FRAME_ID        VARCHAR(512)  NOT NULL,"
+    + "VIEWER_EVENT_ID VARCHAR(64)   NOT NULL,"
+    + "AMOUNT          DECIMAL(20,9) NOT NULL,"
+    + "CREATED_AT      BIGINT        NOT NULL"
     + ")";
 
   sqlQuery(sql_campaigns, function(err) {
@@ -96,6 +108,7 @@ function initDB(cb) {
           MDS.log("[DB] initDB: failed to create REWARD_EVENTS — " + err3);
           return;
         }
+        sqlQuery("ALTER TABLE REWARD_EVENTS ALTER COLUMN PUBLISHER_ID VARCHAR(512) DEFAULT NULL", function() {
         sqlQuery(sql_user_profile, function(err4) {
           if (err4) {
             MDS.log("[DB] initDB: failed to create USER_PROFILE — " + err4);
@@ -116,13 +129,37 @@ function initDB(cb) {
                   MDS.log("[DB] initDB: failed to create CHANNEL_STATE — " + err7);
                   return;
                 }
-                MDS.log("[DB] initDB: all tables ready");
-                signalFE("DB_READY", {});
-                if (cb) { cb(); }
+                sqlQuery("ALTER TABLE CHANNEL_STATE ALTER COLUMN VIEWER_KEY VARCHAR(512) NOT NULL", function() {
+                  sqlQuery("ALTER TABLE FRAMES ADD COLUMN IF NOT EXISTS PUBLISHER_MX VARCHAR(512) DEFAULT ''", function() {
+                    sqlQuery("ALTER TABLE CAMPAIGNS ADD COLUMN IF NOT EXISTS PUBLISHER_REWARD_VIEW DECIMAL(20,6) NOT NULL DEFAULT 0", function() {
+                    sqlQuery("ALTER TABLE CAMPAIGNS ADD COLUMN IF NOT EXISTS MAX_PUBLISHER_BUDGET DECIMAL(20,6) NOT NULL DEFAULT 0", function() {
+                    sqlQuery("ALTER TABLE CAMPAIGNS ADD COLUMN IF NOT EXISTS PUBLISHER_BUDGET_SPENT DECIMAL(20,6) NOT NULL DEFAULT 0", function() {
+                    sqlQuery("ALTER TABLE CAMPAIGNS ADD COLUMN IF NOT EXISTS MAX_DAILY_VIEWS INT DEFAULT 100", function() {
+                    sqlQuery("ALTER TABLE CAMPAIGNS ADD COLUMN IF NOT EXISTS MAX_DAILY_CLICKS INT DEFAULT 100", function() {
+                    sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS SPLIT_COINID VARCHAR(66) DEFAULT ''", function() {
+                    sqlQuery(sql_deferred_pub_rewards, function(dprErr) {
+                      if (dprErr) { MDS.log("[DB] initDB: failed to create DEFERRED_PUB_REWARDS — " + dprErr); return; }
+                    sqlQuery("UPDATE CAMPAIGNS SET MAX_PUBLISHER_BUDGET = PUBLISHER_REWARD_VIEW * 10 WHERE MAX_PUBLISHER_BUDGET <= 0 AND PUBLISHER_REWARD_VIEW > 0", function(patchErr) {
+                      if (patchErr) { MDS.log("[DB] initDB: publisher budget patch failed — " + patchErr); }
+                      else { MDS.log("[DB] initDB: stale MAX_PUBLISHER_BUDGET patched"); }
+                      MDS.log("[DB] initDB: all tables ready");
+                      signalFE("DB_READY", {});
+                      if (cb) { cb(); }
+                    }); // end publisher budget data migration
+                    }); // end DEFERRED_PUB_REWARDS creation
+                    }); // end SPLIT_COINID migration
+                    }); // end MAX_DAILY_CLICKS migration
+                    }); // end MAX_DAILY_VIEWS migration
+                    }); // end PUBLISHER_BUDGET_SPENT migration
+                    }); // end MAX_PUBLISHER_BUDGET migration
+                    }); // end PUBLISHER_REWARD_VIEW migration
+                  }); // end PUBLISHER_MX migration
+                }); // end VIEWER_KEY migration
               });
             });
           });
         });
+        }); // end ALTER TABLE migration callback
       });
     });
   });

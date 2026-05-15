@@ -25,6 +25,7 @@ function saveFrame(frame, cb) {
     var fid = escapeSql(frame.frame_id);
     var pk  = escapeSql(frame.publisher_key);
     var w   = escapeSql(frame.publisher_wallet || '');
+    var mx  = escapeSql(frame.publisher_mx || '');
     var lbl = escapeSql(frame.label || '');
     var bi  = (frame.is_builtin ? 'TRUE' : 'FALSE');
     var sql;
@@ -32,15 +33,17 @@ function saveFrame(frame, cb) {
       sql = "UPDATE FRAMES SET " +
         "PUBLISHER_KEY = '" + pk + "', " +
         "PUBLISHER_WALLET = '" + w + "', " +
+        "PUBLISHER_MX = '" + mx + "', " +
         "LABEL = '" + lbl + "', " +
         "IS_BUILTIN = " + bi + " " +
         "WHERE UPPER(FRAME_ID) = UPPER('" + fid + "')";
     } else {
       sql = "INSERT INTO FRAMES " +
-        "(FRAME_ID, PUBLISHER_KEY, PUBLISHER_WALLET, LABEL, IS_BUILTIN, CREATED_AT, TOTAL_EARNED) VALUES (" +
+        "(FRAME_ID, PUBLISHER_KEY, PUBLISHER_WALLET, PUBLISHER_MX, LABEL, IS_BUILTIN, CREATED_AT, TOTAL_EARNED) VALUES (" +
         "'" + fid + "'," +
         "'" + pk + "'," +
         "'" + w + "'," +
+        "'" + mx + "'," +
         "'" + lbl + "'," +
         bi + "," +
         now + "," +

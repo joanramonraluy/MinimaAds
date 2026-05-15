@@ -111,7 +111,8 @@ function _refreshSettlementHistory() {
   var sql = "SELECT cs.CAMPAIGN_ID, cs.CUMULATIVE_EARNED, cs.CREATED_AT, c.TITLE, c.CREATOR_ADDRESS"
           + " FROM CHANNEL_STATE cs"
           + " LEFT JOIN CAMPAIGNS c ON UPPER(cs.CAMPAIGN_ID) = UPPER(c.ID)"
-          + " WHERE cs.STATUS = 'settled'";
+          + " WHERE cs.STATUS = 'settled'"
+          + " AND UPPER(cs.VIEWER_KEY) = UPPER('" + escapeSql(MY_ADDRESS) + "')";
   sqlQuery(sql, function(err, rows) {
     target.innerHTML = '';
     renderSettlementHistory(target, rows || []);
@@ -214,10 +215,11 @@ function earningsTd(value) {
 function _refreshChannelRewards() {
   var container = document.getElementById('ma-channel-rewards-list');
   if (!container) { return; }
-  var sql = "SELECT cs.CAMPAIGN_ID, cs.VIEWER_KEY, cs.CUMULATIVE_EARNED, cs.LATEST_TX_HEX, c.TITLE"
+  var sql = "SELECT cs.CAMPAIGN_ID, cs.VIEWER_KEY, cs.ROLE, cs.CUMULATIVE_EARNED, cs.LATEST_TX_HEX, c.TITLE"
           + " FROM CHANNEL_STATE cs"
           + " LEFT JOIN CAMPAIGNS c ON UPPER(cs.CAMPAIGN_ID) = UPPER(c.ID)"
-          + " WHERE cs.STATUS = 'open' AND cs.LATEST_TX_HEX != ''";
+          + " WHERE cs.STATUS = 'open' AND cs.LATEST_TX_HEX != ''"
+          + " AND UPPER(cs.VIEWER_KEY) = UPPER('" + escapeSql(MY_ADDRESS) + "')";
   sqlQuery(sql, function(err, rows) {
     if (err) { console.error('[EARNINGS] _refreshChannelRewards query error:', err); return; }
     var found = rows || [];
@@ -225,7 +227,7 @@ function _refreshChannelRewards() {
     for (var i = 0; i < found.length; i++) {
       var vk = found[i].VIEWER_KEY ? found[i].VIEWER_KEY.substring(0, 12) + '…' : '?';
       console.log('[EARNINGS] pending — campaign:', found[i].CAMPAIGN_ID,
-        'cumulative:', found[i].CUMULATIVE_EARNED, 'viewer:', vk);
+        'role:', found[i].ROLE, 'cumulative:', found[i].CUMULATIVE_EARNED, 'viewer:', vk);
     }
     _renderChannelRewardRows(found, container);
   });
@@ -243,6 +245,7 @@ function _renderChannelRewardRows(rows, container) {
     (function(row) {
       var campaignId = row.CAMPAIGN_ID;
       var viewerKey  = row.VIEWER_KEY;
+      var role       = row.ROLE || 'viewer';
       var txHex      = row.LATEST_TX_HEX;
 
       var item = document.createElement('div');
@@ -268,7 +271,7 @@ function _renderChannelRewardRows(rows, container) {
       btn.addEventListener('click', function() {
         btn.disabled = true;
         btn.textContent = 'Settling…';
-        _runSettlement(campaignId, viewerKey, txHex, btn, parseFloat(row.CUMULATIVE_EARNED));
+        _runSettlement(campaignId, viewerKey, role, txHex, btn, parseFloat(row.CUMULATIVE_EARNED));
       });
 
       item.appendChild(infoDiv);
@@ -278,7 +281,7 @@ function _renderChannelRewardRows(rows, container) {
   }
 }
 
-function _runSettlement(campaignId, viewerKey, txHex, btnEl, cumulative) {
+function _runSettlement(campaignId, viewerKey, role, txHex, btnEl, cumulative) {
   var settleId = 'stl_' + Date.now().toString(16);
   console.log('[EARNINGS] _runSettlement start campaign:', campaignId,
     'settleId:', settleId, 'cumulative:', cumulative !== undefined ? cumulative : '?');
@@ -291,48 +294,75 @@ function _runSettlement(campaignId, viewerKey, txHex, btnEl, cumulative) {
     MDS.cmd('txndelete id:' + settleId, function() {});
   }
 
-  MDS.cmd('txnimport id:' + settleId + ' data:' + txHex, function(r1) {
-    console.log('[EARNINGS] txnimport status:', r1 && r1.status, r1 && r1.error);
-    if (!r1 || !r1.status) { onError((r1 && r1.error) || 'txnimport failed'); return; }
+  MDS.keypair.get('VIEWER_WALLET_PK_' + campaignId, function(pkRes) {
+    var signKey = (pkRes && pkRes.status && pkRes.value) ? pkRes.value : viewerKey;
+    console.log('[EARNINGS] settlement signKey:', signKey !== viewerKey ? 'wallet-pk' : 'viewer-key (fallback)');
+    MDS.cmd('txnimport id:' + settleId + ' data:' + txHex, function(r1) {
+      console.log('[EARNINGS] txnimport status:', r1 && r1.status, r1 && r1.error);
+      if (!r1 || !r1.status) { onError((r1 && r1.error) || 'txnimport failed'); return; }
 
-    MDS.cmd('txnsign id:' + settleId + ' publickey:' + viewerKey, function(r2) {
-      console.log('[EARNINGS] txnsign status:', r2 && r2.status, 'pending:', r2 && r2.pending, r2 && r2.error);
-      if (r2 && r2.pending) {
-        savePendingChannelOp(r2.pendinguid, {
-          kind:       'settlement',
-          settleId:   settleId,
-          campaignId: campaignId,
-          viewerKey:  viewerKey
-        });
-        console.log('[EARNINGS] txnsign pending, uid:', r2.pendinguid);
-        if (btnEl) { btnEl.textContent = 'Awaiting approval…'; }
-        return;
-      }
-      if (!r2 || !r2.status) { onError((r2 && r2.error) || 'txnsign failed'); return; }
+      MDS.cmd('txnsign id:' + settleId + ' publickey:' + signKey, function(r2) {
+        console.log('[EARNINGS] txnsign status:', r2 && r2.status, 'pending:', r2 && r2.pending, r2 && r2.error);
+        if (r2 && r2.pending) {
+          savePendingChannelOp(r2.pendinguid, {
+            kind:       'settlement',
+            settleId:   settleId,
+            campaignId: campaignId,
+            viewerKey:  viewerKey,
+            role:       role,
+            signKey:    signKey
+          });
+          console.log('[EARNINGS] txnsign pending, uid:', r2.pendinguid);
+          if (btnEl) { btnEl.textContent = 'Awaiting approval…'; }
+          return;
+        }
+        if (!r2 || !r2.status) { onError((r2 && r2.error) || 'txnsign failed'); return; }
 
-      _postSettleTx(settleId, campaignId, viewerKey);
+        _postSettleTx(settleId, campaignId, viewerKey, role);
+      });
     });
   });
 }
 
-function _postSettleTx(settleId, campaignId, viewerKey) {
+function _postSettleTx(settleId, campaignId, viewerKey, role) {
+  console.log('[EARNINGS] _postSettleTx enter settleId:', settleId,
+    'campaign:', campaignId,
+    'viewerKey:', viewerKey ? viewerKey.substring(0, 12) + '...' : '(none)',
+    'role:', role);
   MDS.cmd('txnpost id:' + settleId + ' mine:true', function(r3) {
-    console.log('[EARNINGS] txnpost status:', r3 && r3.status, r3 && r3.error);
+    console.log('[EARNINGS] txnpost result — status:', r3 && r3.status,
+      'pending:', r3 && r3.pending,
+      'pendinguid:', r3 && r3.pendinguid,
+      'error:', r3 && r3.error);
     try {
       var outs = r3.response.body.txn.outputs;
       for (var oi = 0; oi < outs.length; oi++) {
         console.log('[EARNINGS] settle output[' + oi + ']:', outs[oi].amount, '→', outs[oi].address);
       }
     } catch (e) {}
+    if (r3 && r3.pending) {
+      MDS.cmd('txndelete id:' + settleId, function() {});
+      savePendingChannelOp(r3.pendinguid, {
+        kind:       'settlement_post',
+        campaignId: campaignId,
+        viewerKey:  viewerKey,
+        role:       role
+      });
+      var pendEl = document.getElementById('ma-channel-settle-status');
+      if (pendEl) { pendEl.textContent = 'Settlement awaiting approval…'; }
+      return;
+    }
     MDS.cmd('txndelete id:' + settleId, function() {});
     if (!r3 || !r3.status) {
-      console.error('[EARNINGS] txnpost failed:', r3 && r3.error, 'campaign:', campaignId);
+      console.error('[EARNINGS] txnpost failed — NOT calling settleChannel. error:', r3 && r3.error, 'campaign:', campaignId, 'role:', role);
       var statusEl = document.getElementById('ma-channel-settle-status');
       if (statusEl) { statusEl.textContent = 'Settlement failed: ' + ((r3 && r3.error) || 'txnpost failed'); }
       _refreshChannelRewards();
       return;
     }
-    settleChannel(campaignId, viewerKey, 'viewer', function(err) {
+    console.log('[EARNINGS] calling settleChannel campaign:', campaignId, 'role:', role,
+      'viewerKey:', viewerKey ? viewerKey.substring(0, 12) + '...' : '(none)');
+    settleChannel(campaignId, viewerKey, role, function(err) {
       if (err) {
         console.error('[EARNINGS] settleChannel DB error:', err);
         var el = document.getElementById('ma-channel-settle-status');
@@ -340,7 +370,7 @@ function _postSettleTx(settleId, campaignId, viewerKey) {
         _refreshChannelRewards();
         return;
       }
-      getChannelState(campaignId, viewerKey, 'viewer', function(err2, ch) {
+      getChannelState(campaignId, viewerKey, role, function(err2, ch) {
         var cum = (ch && ch.CUMULATIVE_EARNED) ? parseFloat(ch.CUMULATIVE_EARNED) : 0;
         console.log('[EARNINGS] settlement complete campaign:', campaignId, 'cumulative:', cum);
         signalFE('SETTLE_CONFIRMED', { campaign_id: campaignId, amount: cum });
@@ -379,7 +409,7 @@ function onAutoSettle(parsed) {
   }
   var statusEl = document.getElementById('ma-channel-settle-status');
   if (statusEl) { statusEl.textContent = 'Settling reward channel automatically…'; }
-  _runSettlement(parsed.campaign_id, parsed.viewer_key, parsed.tx_hex, null, parsed.cumulative);
+  _runSettlement(parsed.campaign_id, parsed.viewer_key, parsed.role || 'viewer', parsed.tx_hex, null, parsed.cumulative);
 }
 
 function onSettleConfirmed(parsed) {

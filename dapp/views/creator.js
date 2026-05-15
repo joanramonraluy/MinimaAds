@@ -81,14 +81,20 @@ function renderCreator(root) {
     + '    </span>'
     + '    <small id="ma-max-viewer-hint"></small>'
     + '  </label>'
+    + '  <label>Daily view limit (per viewer)'
+    + '    <input name="max_daily_views" type="number" step="1" min="1" value="100" required>'
+    + '  </label>'
+    + '  <label>Daily click limit (per viewer)'
+    + '    <input name="max_daily_clicks" type="number" step="1" min="1" value="100" required>'
+    + '  </label>'
     + '</div>'
     + '<div class="ma-section ma-tab-panel" id="ma-panel-publisher" role="tabpanel" aria-labelledby="ma-tab-publisher" hidden>'
     + '  <label>Publisher reward per view (MINIMA, optional)'
-    + '    <input name="publisher_reward_view" type="number" step="0.001" min="0" value="0">'
+    + '    <input name="publisher_reward_view" type="number" step="0.001" min="0" value="0.001">'
     + '    <small>Leave at 0 to disable Frame rewards</small>'
     + '  </label>'
     + '  <label>Max publisher budget (MINIMA)'
-    + '    <input name="max_publisher_budget" type="number" step="0.01" min="0" value="0">'
+    + '    <input name="max_publisher_budget" type="number" step="0.01" min="0" value="5">'
     + '    <small>Subset of total budget reserved for publisher payouts</small>'
     + '  </label>'
     + '</div>'
@@ -244,7 +250,9 @@ var FIELD_DECIMALS = {
   publisher_reward_view:  6,
   max_publisher_budget:   6,
   campaign_days:          0,
-  multiplier:             1
+  multiplier:             1,
+  max_daily_views:        0,
+  max_daily_clicks:       0
 };
 
 function onCreatorFormChange(e) {
@@ -417,6 +425,8 @@ function onCreatorSubmit(e) {
   var maxViewerReward = (maxViewerRewardRaw && parseFloat(maxViewerRewardRaw) > 0) ? parseFloat(maxViewerRewardRaw) : null;
   var publisherRewardView = parseFloat(data.get('publisher_reward_view') || '0') || 0;
   var maxPublisherBudget  = parseFloat(data.get('max_publisher_budget') || '0') || 0;
+  var maxDailyViews = parseInt(data.get('max_daily_views') || '100', 10);
+  var maxDailyClicks = parseInt(data.get('max_daily_clicks') || '100', 10);
 
   if (maxViewerReward === null) {
     maxViewerReward = (rewardView + rewardClick) * campaignDays;
@@ -495,7 +505,9 @@ function onCreatorSubmit(e) {
     max_viewer_reward:      maxViewerReward,
     publisher_reward_view:  publisherRewardView,
     max_publisher_budget:   maxPublisherBudget,
-    publisher_budget_spent: 0
+    publisher_budget_spent: 0,
+    max_daily_views:        maxDailyViews,
+    max_daily_clicks:       maxDailyClicks
   };
 
   var ad = {
@@ -773,6 +785,12 @@ function saveCampaignAndBroadcast(campaign, ad, form, submitBtn, msgEl) {
     if (campaign.publisher_reward_view > 0) {
       payload.publisher_reward_view = campaign.publisher_reward_view;
       payload.max_publisher_budget  = campaign.max_publisher_budget;
+    }
+    if (campaign.max_daily_views !== null && campaign.max_daily_views !== undefined) {
+      payload.max_daily_views = campaign.max_daily_views;
+    }
+    if (campaign.max_daily_clicks !== null && campaign.max_daily_clicks !== undefined) {
+      payload.max_daily_clicks = campaign.max_daily_clicks;
     }
     if (typeof PLATFORM_KEY !== 'undefined' && PLATFORM_KEY) {
       payload.platform_key = PLATFORM_KEY;

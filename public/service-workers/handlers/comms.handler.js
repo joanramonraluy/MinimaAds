@@ -156,22 +156,22 @@ function _sendChannelOpenRequest(campaignId, campaign, _viewerMxContact, amount,
   });
 }
 
-// Derives a Minima wallet address from viewerWalletPK via newscript (cached in keypair).
-// viewer_wallet_addr must be a valid Minima address, NOT the Maxima contact string.
+// Gets a coinbase wallet address via getaddress (cached in keypair).
+// Settlement coins sent here are immediately available in the wallet.
 function _resolveViewerAddrAndSend(campaignId, campaign, walletPK, amount, eventId, publisherKey) {
   MDS.keypair.get("VIEWER_WALLET_ADDR_" + campaignId, function(addrRes) {
     if (addrRes && addrRes.status && addrRes.value) {
       _doSendChannelOpenRequest(campaignId, campaign, addrRes.value, amount, eventId, publisherKey, walletPK);
       return;
     }
-    MDS.cmd("newscript script:\"RETURN SIGNEDBY(" + walletPK + ")\" trackall:true", function(scriptRes) {
-      if (!scriptRes || !scriptRes.status || !scriptRes.response || !scriptRes.response.address) {
-        MDS.log("[COMMS] CHANNEL_OPEN_REQUEST: newscript failed — cannot derive viewer wallet addr");
+    MDS.cmd("getaddress", function(gaRes) {
+      if (!gaRes || !gaRes.status || !gaRes.response || !gaRes.response.address) {
+        MDS.log("[COMMS] CHANNEL_OPEN_REQUEST: getaddress failed — cannot get viewer wallet addr");
         return;
       }
-      var derivedAddr = scriptRes.response.address;
-      MDS.keypair.set("VIEWER_WALLET_ADDR_" + campaignId, derivedAddr, function() {
-        _doSendChannelOpenRequest(campaignId, campaign, derivedAddr, amount, eventId, publisherKey, walletPK);
+      var walletAddr = gaRes.response.address;
+      MDS.keypair.set("VIEWER_WALLET_ADDR_" + campaignId, walletAddr, function() {
+        _doSendChannelOpenRequest(campaignId, campaign, walletAddr, amount, eventId, publisherKey, walletPK);
       });
     });
   });

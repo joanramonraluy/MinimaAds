@@ -54,7 +54,7 @@ function _loadTodayEarnedSummary() {
   var startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   var sql = "SELECT SUM(AMOUNT) AS TOTAL FROM REWARD_EVENTS"
     + " WHERE UPPER(USER_ADDRESS) = UPPER('" + escapeSql(MY_ADDRESS) + "')"
-    + " AND TYPE IN ('view', 'click')"
+    + " AND TYPE IN ('view', 'click', 'publisher_view')"
     + " AND TIMESTAMP >= " + startOfDay;
   sqlQuery(sql, function(err, rows) {
     var target = document.getElementById('ma-today-earned');

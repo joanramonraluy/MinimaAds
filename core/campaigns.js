@@ -25,12 +25,14 @@ function saveCampaign(campaign, ad, cb) {
   var prv = (campaign.publisher_reward_view !== null && campaign.publisher_reward_view !== undefined) ? parseFloat(campaign.publisher_reward_view) : 0;
   var mpb = (campaign.max_publisher_budget !== null && campaign.max_publisher_budget !== undefined) ? parseFloat(campaign.max_publisher_budget) : 0;
   var pbs = (campaign.publisher_budget_spent !== null && campaign.publisher_budget_spent !== undefined) ? parseFloat(campaign.publisher_budget_spent) : 0;
+  var mdv = (campaign.max_daily_views !== null && campaign.max_daily_views !== undefined) ? parseInt(campaign.max_daily_views, 10) : LIMITS.MAX_VIEWS_PER_CAMPAIGN_PER_DAY;
+  var mdc = (campaign.max_daily_clicks !== null && campaign.max_daily_clicks !== undefined) ? parseInt(campaign.max_daily_clicks, 10) : LIMITS.MAX_CLICKS_PER_CAMPAIGN_PER_DAY;
 
   var cSql = "MERGE INTO CAMPAIGNS " +
     "(ID, CREATOR_ADDRESS, TITLE, BUDGET_TOTAL, BUDGET_REMAINING, " +
     "REWARD_VIEW, REWARD_CLICK, STATUS, CREATED_AT, EXPIRES_AT, " +
     "ESCROW_COINID, ESCROW_WALLET_PK, MAX_VIEWER_REWARD, " +
-    "PUBLISHER_REWARD_VIEW, MAX_PUBLISHER_BUDGET, PUBLISHER_BUDGET_SPENT) KEY (ID) VALUES (" +
+    "PUBLISHER_REWARD_VIEW, MAX_PUBLISHER_BUDGET, PUBLISHER_BUDGET_SPENT, MAX_DAILY_VIEWS, MAX_DAILY_CLICKS) KEY (ID) VALUES (" +
     "'" + escapeSql(campaign.id) + "'," +
     "'" + escapeSql(campaign.creator_address) + "'," +
     "'" + escapeSql(campaign.title) + "'," +
@@ -44,7 +46,8 @@ function saveCampaign(campaign, ad, cb) {
     "'" + escapeSql(campaign.escrow_coinid || '') + "'," +
     "'" + escapeSql(campaign.escrow_wallet_pk || '') + "'," +
     (mvr !== null && mvr !== undefined ? parseFloat(mvr) : "NULL") + "," +
-    prv + "," + mpb + "," + pbs +
+    prv + "," + mpb + "," + pbs + "," +
+    mdv + "," + mdc +
     ")";
 
   sqlQuery(cSql, function(err) {
@@ -81,7 +84,7 @@ function updateBudget(campaignId, deductAmount, cb) {
       "(ID, CREATOR_ADDRESS, TITLE, BUDGET_TOTAL, BUDGET_REMAINING, " +
       "REWARD_VIEW, REWARD_CLICK, STATUS, CREATED_AT, EXPIRES_AT, " +
       "ESCROW_COINID, ESCROW_WALLET_PK, MAX_VIEWER_REWARD, " +
-      "PUBLISHER_REWARD_VIEW, MAX_PUBLISHER_BUDGET, PUBLISHER_BUDGET_SPENT) KEY (ID) VALUES (" +
+      "PUBLISHER_REWARD_VIEW, MAX_PUBLISHER_BUDGET, PUBLISHER_BUDGET_SPENT, MAX_DAILY_VIEWS, MAX_DAILY_CLICKS) KEY (ID) VALUES (" +
       "'" + escapeSql(campaign.ID) + "'," +
       "'" + escapeSql(campaign.CREATOR_ADDRESS) + "'," +
       "'" + escapeSql(campaign.TITLE) + "'," +
@@ -97,7 +100,9 @@ function updateBudget(campaignId, deductAmount, cb) {
       (campaign.MAX_VIEWER_REWARD !== null && campaign.MAX_VIEWER_REWARD !== undefined ? parseFloat(campaign.MAX_VIEWER_REWARD) : "NULL") + "," +
       (campaign.PUBLISHER_REWARD_VIEW !== null && campaign.PUBLISHER_REWARD_VIEW !== undefined ? parseFloat(campaign.PUBLISHER_REWARD_VIEW) : 0) + "," +
       (campaign.MAX_PUBLISHER_BUDGET !== null && campaign.MAX_PUBLISHER_BUDGET !== undefined ? parseFloat(campaign.MAX_PUBLISHER_BUDGET) : 0) + "," +
-      (campaign.PUBLISHER_BUDGET_SPENT !== null && campaign.PUBLISHER_BUDGET_SPENT !== undefined ? parseFloat(campaign.PUBLISHER_BUDGET_SPENT) : 0) +
+      (campaign.PUBLISHER_BUDGET_SPENT !== null && campaign.PUBLISHER_BUDGET_SPENT !== undefined ? parseFloat(campaign.PUBLISHER_BUDGET_SPENT) : 0) + "," +
+      (campaign.MAX_DAILY_VIEWS !== null && campaign.MAX_DAILY_VIEWS !== undefined ? parseInt(campaign.MAX_DAILY_VIEWS, 10) : LIMITS.MAX_VIEWS_PER_CAMPAIGN_PER_DAY) + "," +
+      (campaign.MAX_DAILY_CLICKS !== null && campaign.MAX_DAILY_CLICKS !== undefined ? parseInt(campaign.MAX_DAILY_CLICKS, 10) : LIMITS.MAX_CLICKS_PER_CAMPAIGN_PER_DAY) +
       ")";
 
     sqlQuery(sql, function(err2) {

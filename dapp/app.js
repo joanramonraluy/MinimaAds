@@ -8,8 +8,8 @@
 var APP_NAME = 'minima-ads';
 
 var LIMITS = {
-  MAX_VIEWS_PER_CAMPAIGN_PER_DAY:  1,
-  MAX_CLICKS_PER_CAMPAIGN_PER_DAY: 1,
+  MAX_VIEWS_PER_CAMPAIGN_PER_DAY:  100,
+  MAX_CLICKS_PER_CAMPAIGN_PER_DAY: 100,
   COOLDOWN_BETWEEN_REWARDS_MS:     30000,
   MIN_VIEW_DURATION_MS:            3000,
   MAX_CAMPAIGNS_PER_SESSION:       10,
@@ -34,7 +34,7 @@ function generateUID() {
 function currentRoute() {
   var h = (window.location.hash || '').replace(/^#/, '');
   if (h === 'creator' || h === 'stats' || h === 'viewer' || h === 'earnings' || h === 'frames') { return h; }
-  return 'viewer';
+  return 'stats';
 }
 
 function setStatus(text) {
@@ -110,28 +110,15 @@ function handleMdsComms(parsed) {
     }
     return;
   }
-  if (parsed.type === 'DO_CHANNEL_OPEN') {
-    handleDoChannelOpen(parsed);
-    return;
-  }
-  if (parsed.type === 'DO_PUBLISHER_CHANNEL_OPEN') {
-    handleDoPublisherChannelOpen(parsed);
-    return;
-  }
-  if (parsed.type === 'DO_REWARD_VOUCHER') {
-    handleDoRewardVoucher(parsed);
-    return;
-  }
-  if (parsed.type === 'DO_PUBLISHER_REWARD_VOUCHER') {
-    handleDoPublisherRewardVoucher(parsed);
-    return;
-  }
-  if (parsed.type === 'DO_SEND_VOUCHER') {
-    handleDoSendVoucher(parsed);
-    return;
-  }
-  if (parsed.type === 'DO_RESEND_CHANNEL_OPEN') {
-    handleDoResendChannelOpen(parsed);
+  if (parsed.type === 'DO_CHANNEL_OPEN' ||
+      parsed.type === 'DO_PUBLISHER_CHANNEL_OPEN' ||
+      parsed.type === 'DO_REWARD_VOUCHER' ||
+      parsed.type === 'DO_PUBLISHER_REWARD_VOUCHER' ||
+      parsed.type === 'DO_SEND_VOUCHER' ||
+      parsed.type === 'DO_RESEND_CHANNEL_OPEN') {
+    // All channel TX building and Maxima resends are now handled by the SW.
+    // These signals are no longer emitted. Log if one arrives unexpectedly.
+    console.warn('[CHANNEL] Unexpected legacy FE signal (SW should handle this):', parsed.type);
     return;
   }
   if (parsed.type === 'CHANNEL_OPENED') {
@@ -168,7 +155,9 @@ function handleMdsComms(parsed) {
 // Channel helpers (T-CH4)
 // ---------------------------------------------------------------------------
 
-// Send a unicast Maxima message to a specific Mx address, hex-encoded.
+// Send a unicast Maxima message. Prefers publickey: routing (same as SW sendMaxima)
+// which is more reliable than to: (contact string may lack @host:port).
+// Falls back to to:mxAddress when no publicKey provided.
 // poll:true so messages survive the recipient being offline (per §6.5/§6.6).
 function sendChannelMaxima(mxAddress, payload, cb) {
   var hex = '0x' + utf8ToHex(JSON.stringify(payload)).toUpperCase();
@@ -178,7 +167,7 @@ function sendChannelMaxima(mxAddress, payload, cb) {
           + ' poll:true';
   MDS.cmd(cmd, function(res) {
     if (!res || !res.status) {
-      console.error('[CHANNEL] sendChannelMaxima failed:', res && res.error);
+      console.error('[CHANNEL] sendChannelMaxima failed to=' + mxAddress.substring(0, 20) + ':', res && res.error);
     }
     if (cb) { cb(res && res.status); }
   });
@@ -256,10 +245,11 @@ function clearPendingChannelOp(uid) {
 //    script needs the state preserved on the channel coin (PREVSTATE(1/2/3)).
 //    Both outputs use storestate:true here.
 function handleDoChannelOpen(data) {
-  var campaignId = data.campaign_id;
-  var viewerKey  = data.viewer_key;
-  var viewerMx   = data.viewer_mx;
-  var maxAmount  = parseFloat(data.max_amount);
+  var campaignId     = data.campaign_id;
+  var viewerKey      = data.viewer_key;
+  var viewerMx       = data.viewer_mx;
+  var viewerWalletPK = data.viewer_wallet_pk || '';
+  var maxAmount      = parseFloat(data.max_amount);
 
   if (!campaignId || !viewerKey || !viewerMx || !(maxAmount > 0)) {
     console.error('[CHANNEL] DO_CHANNEL_OPEN: invalid payload', data);
@@ -300,15 +290,16 @@ function handleDoChannelOpen(data) {
             return;
           }
           buildAndPostChannelTx({
-            campaignId:   campaignId,
-            viewerKey:    viewerKey,
-            viewerMx:     viewerMx,
-            maxAmount:    maxAmount,
-            budgetLeft:   budgetLeft,
-            escrowCoinId: escrowCoinId,
-            walletPK:     walletPK,
-            channelAddr:  channelAddr,
-            escrowAddr:   escrowAddr
+            campaignId:    campaignId,
+            viewerKey:     viewerKey,
+            viewerMx:      viewerMx,
+            viewerWalletPK: viewerWalletPK,
+            maxAmount:     maxAmount,
+            budgetLeft:    budgetLeft,
+            escrowCoinId:  escrowCoinId,
+            walletPK:      walletPK,
+            channelAddr:   channelAddr,
+            escrowAddr:    escrowAddr
           });
         });
       });
@@ -332,7 +323,7 @@ function buildAndPostChannelTx(ctx) {
       if (!r2.status) { fail('txninput', r2); return; }
 
       var actualAmount = parseFloat(r2.response.transaction.inputs[0].amount);
-      var change = actualAmount - ctx.maxAmount;
+      var change = parseFloat((actualAmount - ctx.maxAmount).toFixed(6));
       console.log('[CHANNEL] escrow split actualAmount:', actualAmount, 'maxAmount:', ctx.maxAmount, 'change:', change);
 
       // output[0] — split coin (max_amount → ESCROW_ADDRESS)
@@ -364,18 +355,19 @@ function buildAndPostChannelTx(ctx) {
             MDS.cmd('txnsign id:' + txId + ' publickey:' + ctx.walletPK, function(r5) {
               if (r5 && r5.pending) {
                 var splitCtx = {
-                  kind:         'channel_split_sign',
-                  txId:         txId,
-                  campaignId:   ctx.campaignId,
-                  viewerKey:    ctx.viewerKey,
-                  viewerMx:     ctx.viewerMx,
-                  maxAmount:    ctx.maxAmount,
-                  escrowCoinId: ctx.escrowCoinId,
-                  channelAddr:  ctx.channelAddr,
-                  escrowAddr:   ctx.escrowAddr,
-                  walletPK:     ctx.walletPK,
-                  role:         ctx.role || 'viewer',
-                  frameId:      ctx.frameId || ''
+                  kind:          'channel_split_sign',
+                  txId:          txId,
+                  campaignId:    ctx.campaignId,
+                  viewerKey:     ctx.viewerKey,
+                  viewerMx:      ctx.viewerMx,
+                  viewerWalletPK: ctx.viewerWalletPK || '',
+                  maxAmount:     ctx.maxAmount,
+                  escrowCoinId:  ctx.escrowCoinId,
+                  channelAddr:   ctx.channelAddr,
+                  escrowAddr:    ctx.escrowAddr,
+                  walletPK:      ctx.walletPK,
+                  role:          ctx.role || 'viewer',
+                  frameId:       ctx.frameId || ''
                 };
                 savePendingChannelOp(r5.pendinguid, splitCtx);
                 console.log('[CHANNEL] split txnsign pending, uid:', r5.pendinguid);
@@ -386,18 +378,19 @@ function buildAndPostChannelTx(ctx) {
               MDS.cmd('txnpost id:' + txId + ' mine:true', function(r6) {
                 if (r6 && r6.pending) {
                   var splitPostCtx = {
-                    kind:         'channel_split_post',
-                    txId:         txId,
-                    campaignId:   ctx.campaignId,
-                    viewerKey:    ctx.viewerKey,
-                    viewerMx:     ctx.viewerMx,
-                    maxAmount:    ctx.maxAmount,
-                    escrowCoinId: ctx.escrowCoinId,
-                    channelAddr:  ctx.channelAddr,
-                    escrowAddr:   ctx.escrowAddr,
-                    walletPK:     ctx.walletPK,
-                    role:         ctx.role || 'viewer',
-                    frameId:      ctx.frameId || ''
+                    kind:          'channel_split_post',
+                    txId:          txId,
+                    campaignId:    ctx.campaignId,
+                    viewerKey:     ctx.viewerKey,
+                    viewerMx:      ctx.viewerMx,
+                    viewerWalletPK: ctx.viewerWalletPK || '',
+                    maxAmount:     ctx.maxAmount,
+                    escrowCoinId:  ctx.escrowCoinId,
+                    channelAddr:   ctx.channelAddr,
+                    escrowAddr:    ctx.escrowAddr,
+                    walletPK:      ctx.walletPK,
+                    role:          ctx.role || 'viewer',
+                    frameId:       ctx.frameId || ''
                   };
                   savePendingChannelOp(r6.pendinguid, splitPostCtx);
                   console.log('[CHANNEL] split txnpost pending, uid:', r6.pendinguid);
@@ -504,9 +497,10 @@ function buildAndPostChannelOpenTx(ctx) {
 
           // STATE for Channel Tx: INCLUDES VIEWER KEY.
           // T-PUB4: port:11 = 0 — fee branch skipped (platform fee was paid at launch).
+          var port2Key = ctx.viewerWalletPK || ctx.viewerKey;
           var stateCmds = [
             'txnstate id:' + txId + ' port:1 value:' + ctx.walletPK,
-            'txnstate id:' + txId + ' port:2 value:' + ctx.viewerKey,
+            'txnstate id:' + txId + ' port:2 value:' + port2Key,
             'txnstate id:' + txId + ' port:3 value:' + campaignIdHex,
             'txnstate id:' + txId + ' port:4 value:' + viewerMxHex,
             'txnstate id:' + txId + ' port:10 value:' + ctx.maxAmount,
@@ -518,16 +512,17 @@ function buildAndPostChannelOpenTx(ctx) {
             MDS.cmd('txnsign id:' + txId + ' publickey:' + ctx.walletPK, function(r5) {
               if (r5 && r5.pending) {
                 var signCtx = {
-                  kind:         'channel_open_postsign',
-                  txId:         txId,
-                  campaignId:   ctx.campaignId,
-                  viewerKey:    ctx.viewerKey,
-                  viewerMx:     ctx.viewerMx,
-                  maxAmount:    ctx.maxAmount,
-                  channelAddr:  ctx.channelAddr,
-                  walletPK:     ctx.walletPK,
-                  role:         ctx.role || 'viewer',
-                  frameId:      ctx.frameId || ''
+                  kind:          'channel_open_postsign',
+                  txId:          txId,
+                  campaignId:    ctx.campaignId,
+                  viewerKey:     ctx.viewerKey,
+                  viewerMx:      ctx.viewerMx,
+                  viewerWalletPK: ctx.viewerWalletPK || '',
+                  maxAmount:     ctx.maxAmount,
+                  channelAddr:   ctx.channelAddr,
+                  walletPK:      ctx.walletPK,
+                  role:          ctx.role || 'viewer',
+                  frameId:       ctx.frameId || ''
                 };
                 savePendingChannelOp(r5.pendinguid, signCtx);
                 console.log('[CHANNEL] txnsign pending, uid:', r5.pendinguid);
@@ -538,16 +533,17 @@ function buildAndPostChannelOpenTx(ctx) {
               MDS.cmd('txnpost id:' + txId + ' mine:true', function(r6) {
                 if (r6 && r6.pending) {
                   var pendCtx = {
-                    kind:         'channel_open',
-                    txId:         txId,
-                    campaignId:   ctx.campaignId,
-                    viewerKey:    ctx.viewerKey,
-                    viewerMx:     ctx.viewerMx,
-                    maxAmount:    ctx.maxAmount,
-                    channelAddr:  ctx.channelAddr,
-                    walletPK:     ctx.walletPK,
-                    role:         ctx.role || 'viewer',
-                    frameId:      ctx.frameId || ''
+                    kind:          'channel_open',
+                    txId:          txId,
+                    campaignId:    ctx.campaignId,
+                    viewerKey:     ctx.viewerKey,
+                    viewerMx:      ctx.viewerMx,
+                    viewerWalletPK: ctx.viewerWalletPK || '',
+                    maxAmount:     ctx.maxAmount,
+                    channelAddr:   ctx.channelAddr,
+                    walletPK:      ctx.walletPK,
+                    role:          ctx.role || 'viewer',
+                    frameId:       ctx.frameId || ''
                   };
                   savePendingChannelOp(r6.pendinguid, pendCtx);
                   console.log('[CHANNEL] channel-open pending, uid:', r6.pendinguid);
@@ -639,11 +635,12 @@ function finalizeChannelOpen(txpowResponse, ctx) {
 //   - PUBLISHER_BUDGET_SPENT (not BUDGET_REMAINING) is incremented
 //   - CHANNEL_OPEN reply carries role='publisher' and frame_id
 function handleDoPublisherChannelOpen(data) {
-  var campaignId    = data.campaign_id;
-  var publisherKey  = data.publisher_key;
-  var publisherMx   = data.publisher_mx;
-  var frameId       = data.frame_id;
-  var maxAmount     = parseFloat(data.max_amount);
+  var campaignId       = data.campaign_id;
+  var publisherKey     = data.publisher_key;
+  var publisherMx      = data.publisher_mx;
+  var publisherWalletPK = data.publisher_wallet_pk || '';
+  var frameId          = data.frame_id;
+  var maxAmount        = parseFloat(data.max_amount);
 
   if (!campaignId || !publisherKey || !publisherMx || !frameId || !(maxAmount > 0)) {
     console.error('[CHANNEL] DO_PUBLISHER_CHANNEL_OPEN: invalid payload', data);
@@ -662,17 +659,9 @@ function handleDoPublisherChannelOpen(data) {
     }
     var escrowCoinId = campaign.ESCROW_COINID;
     var walletPK     = campaign.ESCROW_WALLET_PK;
-    var maxPubBudget = parseFloat(campaign.MAX_PUBLISHER_BUDGET) || 0;
-    var pubSpent     = parseFloat(campaign.PUBLISHER_BUDGET_SPENT) || 0;
-    var pubRemaining = maxPubBudget - pubSpent;
 
     if (!escrowCoinId || !walletPK) {
       console.error('[CHANNEL] DO_PUBLISHER_CHANNEL_OPEN: campaign missing escrow data', campaign);
-      return;
-    }
-    if (pubRemaining < maxAmount) {
-      console.error('[CHANNEL] DO_PUBLISHER_CHANNEL_OPEN: insufficient publisher budget',
-        pubRemaining, '<', maxAmount);
       return;
     }
 
@@ -690,7 +679,7 @@ function handleDoPublisherChannelOpen(data) {
               return;
             }
             startPublisherChannelTxs(campaignId, publisherKey, publisherMx, frameId,
-              maxAmount, escrowCoinId, walletPK, channelAddr, addrV1);
+              maxAmount, escrowCoinId, walletPK, channelAddr, addrV1, publisherWalletPK);
           });
           return;
         }
@@ -699,24 +688,26 @@ function handleDoPublisherChannelOpen(data) {
           return;
         }
         startPublisherChannelTxs(campaignId, publisherKey, publisherMx, frameId,
-          maxAmount, escrowCoinId, walletPK, channelAddr, escrowAddr);
+          maxAmount, escrowCoinId, walletPK, channelAddr, escrowAddr, publisherWalletPK);
       });
     });
   });
 }
 
 function startPublisherChannelTxs(campaignId, publisherKey, publisherMx, frameId,
-                                  maxAmount, escrowCoinId, walletPK, channelAddr, escrowAddr) {
+                                  maxAmount, escrowCoinId, walletPK, channelAddr, escrowAddr,
+                                  publisherWalletPK) {
   // Reuse the viewer split+open tx builders by passing the publisher key in
   // the viewerKey slot — at the on-chain layer the script does not distinguish
   // viewer from publisher; both produce a MULTISIG channel coin.
   // Persistence and the CHANNEL_OPEN reply branch on ctx.role.
   buildAndPostChannelTx({
-    campaignId:   campaignId,
-    viewerKey:    publisherKey,
-    viewerMx:     publisherMx,
-    maxAmount:    maxAmount,
-    budgetLeft:   maxAmount,
+    campaignId:    campaignId,
+    viewerKey:     publisherKey,
+    viewerMx:      publisherMx,
+    viewerWalletPK: publisherWalletPK || '',
+    maxAmount:     maxAmount,
+    budgetLeft:    maxAmount,
     escrowCoinId: escrowCoinId,
     walletPK:     walletPK,
     channelAddr:  channelAddr,
@@ -806,7 +797,7 @@ function handleDoRewardVoucher(data) {
 
 function buildAndExportVoucherTx(ctx) {
   var txId    = 'rv_' + generateUID();
-  var refund  = ctx.maxAmount - ctx.cumulative;
+  var refund  = parseFloat((ctx.maxAmount - ctx.cumulative).toFixed(6));
   var role    = ctx.role || 'viewer';
   var frameId = ctx.frameId || '';
   console.log('[CHANNEL] voucher tx: channel:', ctx.channelCoinId,
@@ -960,27 +951,13 @@ function handleDoPublisherRewardVoucher(data) {
       var creatorWalletPK = campaign.ESCROW_WALLET_PK;
 
       var fid = frameId || channel.FRAME_ID || '';
-      if (!fid) {
-        console.error('[CHANNEL] DO_PUBLISHER_REWARD_VOUCHER: no frame_id');
-        return;
-      }
+      var publisherAddr = channel.VIEWER_WALLET_ADDR || '';
 
-      if (typeof getFrame !== 'function') {
-        console.error('[CHANNEL] DO_PUBLISHER_REWARD_VOUCHER: getFrame not loaded');
-        return;
-      }
-
-      getFrame(fid, function(err3, frame) {
-        if (err3 || !frame) {
-          console.error('[CHANNEL] DO_PUBLISHER_REWARD_VOUCHER: frame not found', fid, err3);
-          return;
-        }
-        var publisherAddr = frame.PUBLISHER_WALLET || '';
+      function doBuildPublisherVoucher() {
         if (!publisherAddr) {
-          console.error('[CHANNEL] DO_PUBLISHER_REWARD_VOUCHER: PUBLISHER_WALLET missing for frame:', fid);
+          console.error('[CHANNEL] DO_PUBLISHER_REWARD_VOUCHER: publisher wallet address missing. campaign:', campaignId);
           return;
         }
-
         MDS.cmd('getaddress', function(addrRes) {
           var creatorAddr = (addrRes && addrRes.status && addrRes.response && addrRes.response.address)
             ? addrRes.response.address : '';
@@ -1000,10 +977,21 @@ function handleDoPublisherRewardVoucher(data) {
             viewerAddr:      publisherAddr,
             creatorAddr:     creatorAddr,
             role:            'publisher',
-            frameId:         fid
+            frameId:         fid || ''
           });
         });
-      });
+      }
+
+      if (publisherAddr) {
+        doBuildPublisherVoucher();
+      } else if (fid && typeof getFrame === 'function') {
+        getFrame(fid, function(err3, frame) {
+          publisherAddr = (!err3 && frame) ? (frame.PUBLISHER_WALLET || '') : '';
+          doBuildPublisherVoucher();
+        });
+      } else {
+        console.error('[CHANNEL] DO_PUBLISHER_REWARD_VOUCHER: no publisher addr and no frame. campaign:', campaignId);
+      }
     });
   });
 }
@@ -1072,9 +1060,20 @@ function handleFePending(msg) {
       return;
     }
     if (ctx.kind === 'settlement') {
-      console.log('[CHANNEL] settlement txnsign approved, posting campaign:', ctx.campaignId);
+      console.log('[CHANNEL] settlement txnsign approved, posting campaign:', ctx.campaignId, 'role:', ctx.role);
       if (typeof _postSettleTx === 'function') {
-        _postSettleTx(ctx.settleId, ctx.campaignId, ctx.viewerKey);
+        _postSettleTx(ctx.settleId, ctx.campaignId, ctx.viewerKey, ctx.role || 'viewer');
+      }
+      clearPendingChannelOp(uid);
+      return;
+    }
+    if (ctx.kind === 'settlement_post') {
+      console.log('[CHANNEL] settlement_post approved. campaign:', ctx.campaignId, 'role:', ctx.role);
+      if (typeof settleChannel === 'function') {
+        settleChannel(ctx.campaignId, ctx.viewerKey, ctx.role || 'viewer', function(err) {
+          if (err) { console.error('[CHANNEL] settleChannel error after settlement_post approval:', err); }
+          if (typeof _refreshChannelRewards === 'function') { _refreshChannelRewards(); }
+        });
       }
       clearPendingChannelOp(uid);
       return;
@@ -1090,18 +1089,19 @@ function handleFePending(msg) {
       MDS.cmd('txnpost id:' + ctx.txId + ' mine:true', function(r6) {
         if (r6 && r6.pending) {
           var postCtx = {
-            kind:         'channel_split_post',
-            txId:         ctx.txId,
-            campaignId:   ctx.campaignId,
-            viewerKey:    ctx.viewerKey,
-            viewerMx:     ctx.viewerMx,
-            maxAmount:    ctx.maxAmount,
-            escrowCoinId: ctx.escrowCoinId,
-            channelAddr:  ctx.channelAddr,
-            escrowAddr:   ctx.escrowAddr,
-            walletPK:     ctx.walletPK,
-            role:         ctx.role || 'viewer',
-            frameId:      ctx.frameId || ''
+            kind:          'channel_split_post',
+            txId:          ctx.txId,
+            campaignId:    ctx.campaignId,
+            viewerKey:     ctx.viewerKey,
+            viewerMx:      ctx.viewerMx,
+            viewerWalletPK: ctx.viewerWalletPK || '',
+            maxAmount:     ctx.maxAmount,
+            escrowCoinId:  ctx.escrowCoinId,
+            channelAddr:   ctx.channelAddr,
+            escrowAddr:    ctx.escrowAddr,
+            walletPK:      ctx.walletPK,
+            role:          ctx.role || 'viewer',
+            frameId:       ctx.frameId || ''
           };
           savePendingChannelOp(r6.pendinguid, postCtx);
           clearPendingChannelOp(uid);
@@ -1127,16 +1127,17 @@ function handleFePending(msg) {
       MDS.cmd('txnpost id:' + ctx.txId + ' mine:true', function(r6) {
         if (r6 && r6.pending) {
           var postCtx = {
-            kind:         'channel_open',
-            txId:         ctx.txId,
-            campaignId:   ctx.campaignId,
-            viewerKey:    ctx.viewerKey,
-            viewerMx:     ctx.viewerMx,
-            maxAmount:    ctx.maxAmount,
-            channelAddr:  ctx.channelAddr,
-            walletPK:     ctx.walletPK,
-            role:         ctx.role || 'viewer',
-            frameId:      ctx.frameId || ''
+            kind:          'channel_open',
+            txId:          ctx.txId,
+            campaignId:    ctx.campaignId,
+            viewerKey:     ctx.viewerKey,
+            viewerMx:      ctx.viewerMx,
+            viewerWalletPK: ctx.viewerWalletPK || '',
+            maxAmount:     ctx.maxAmount,
+            channelAddr:   ctx.channelAddr,
+            walletPK:      ctx.walletPK,
+            role:          ctx.role || 'viewer',
+            frameId:       ctx.frameId || ''
           };
           savePendingChannelOp(r6.pendinguid, postCtx);
           console.log('[CHANNEL] txnpost pending after sign, uid:', r6.pendinguid);

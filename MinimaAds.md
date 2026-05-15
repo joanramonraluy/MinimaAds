@@ -115,6 +115,8 @@ Implementation: `selection.js` must filter out campaigns where `CREATOR_ADDRESS 
   "publisher_reward_view":  "number (tokens per validated view to publisher; 0 disables publisher payouts)",
   "max_publisher_budget":   "number (tokens) — cap on cumulative publisher payouts; subset of budget_total",
   "publisher_budget_spent": "number (tokens) — running total paid to publishers; ≤ max_publisher_budget",
+  "max_daily_views":        "number (views) — daily view limit per user",
+  "max_daily_clicks":       "number (clicks) — daily click limit per user",
   "status":                 "enum: draft | active | paused | finished",
   "created_at":             "number (unix ms)",
   "expires_at":             "number (unix ms) | null"
@@ -185,7 +187,9 @@ CREATE TABLE IF NOT EXISTS CAMPAIGNS (
   EXPIRES_AT             BIGINT        DEFAULT NULL,
   ESCROW_COINID          VARCHAR(66)   DEFAULT '',  -- on-chain escrow coin; updated after each channel open
   ESCROW_WALLET_PK       VARCHAR(66)   DEFAULT '',  -- wallet signing key in escrow PREVSTATE(1)
-  MAX_VIEWER_REWARD      DECIMAL(20,6) DEFAULT NULL -- optional per-viewer channel cap; if set overrides (view+click)×days formula
+  MAX_VIEWER_REWARD      DECIMAL(20,6) DEFAULT NULL, -- optional per-viewer channel cap; if set overrides (view+click)×days formula
+  MAX_DAILY_VIEWS        INT           DEFAULT 100,
+  MAX_DAILY_CLICKS       INT           DEFAULT 100
 );
 
 CREATE TABLE IF NOT EXISTS ADS (
@@ -344,8 +348,8 @@ All limits are defined as a single constant object at the top of `service.js`. N
 
 ```javascript
 var LIMITS = {
-  MAX_VIEWS_PER_CAMPAIGN_PER_DAY:  1,
-  MAX_CLICKS_PER_CAMPAIGN_PER_DAY: 1,
+  MAX_VIEWS_PER_CAMPAIGN_PER_DAY:  100,
+  MAX_CLICKS_PER_CAMPAIGN_PER_DAY: 100,
   COOLDOWN_BETWEEN_REWARDS_MS:     30000,  // 30 seconds
   MIN_VIEW_DURATION_MS:            3000,   // 3 seconds
   MAX_CAMPAIGNS_PER_SESSION:       10,
@@ -361,8 +365,8 @@ var LIMITS = {
 
 | Constant | Value | Enforcement point |
 |---|---|---|
-| `MAX_VIEWS_PER_CAMPAIGN_PER_DAY` | 1 | `validation.js` → query `REWARD_EVENTS` (last 24h, same user+campaign+type=view) |
-| `MAX_CLICKS_PER_CAMPAIGN_PER_DAY` | 1 | `validation.js` → same query for `type='click'` |
+| `MAX_VIEWS_PER_CAMPAIGN_PER_DAY` | 100 | `validation.js` → query `REWARD_EVENTS` (last 24h, same user+campaign+type=view) |
+| `MAX_CLICKS_PER_CAMPAIGN_PER_DAY` | 100 | `validation.js` → same query for `type='click'` |
 | `COOLDOWN_BETWEEN_REWARDS_MS` | 30 s | `validation.js` → check `USER_PROFILE.LAST_REWARD_AT` |
 | `MIN_VIEW_DURATION_MS` | 3 s | SDK client-side timer — must complete before view event is emitted |
 | `MAX_CAMPAIGNS_PER_SESSION` | 10 | `selection.js` — session counter, never persisted to DB |
@@ -1103,8 +1107,8 @@ File: `service.js`
 var APP_NAME = 'minima-ads';
 
 var LIMITS = {
-  MAX_VIEWS_PER_CAMPAIGN_PER_DAY:  1,
-  MAX_CLICKS_PER_CAMPAIGN_PER_DAY: 1,
+  MAX_VIEWS_PER_CAMPAIGN_PER_DAY:  100,
+  MAX_CLICKS_PER_CAMPAIGN_PER_DAY: 100,
   COOLDOWN_BETWEEN_REWARDS_MS:     30000,
   MIN_VIEW_DURATION_MS:            3000,
   MAX_CAMPAIGNS_PER_SESSION:       10,
@@ -1222,22 +1226,22 @@ service.js            # SW entry point — must be named service.js at zip root
 
 ### 13.1 Minimal Integration
 
-A developer integrates MinimaAds in under 10 minutes:
+Publisher Frames generate a copy-paste snippet. For a host MiniDapp that
+already owns `MDS.init`, paste the snippet into the page and add only these two
+calls inside the host's existing MDS callback:
 
-```html
-<div id="ad-slot"></div>
-
-<script src="./sdk/index.js"></script>
-<script>
-  MinimaAds.init({ wallet: '0x...', publisher_id: 'my-dapp' }, function(err) {
-    if (err) return;
-    MinimaAds.getAd(userAddress, userInterests, function(err2, ad) {
-      if (err2 || !ad) return;
-      MinimaAds.render(ad, 'ad-slot');
-    });
-  });
-</script>
+```javascript
+MDS.init(function(msg) {
+  MinimaAdsPublisherHandleMdsEvent(msg);
+  if (msg.event === 'inited') {
+    MinimaAdsPublisherInit(myMaximaPublicKey, 'metachain,social');
+  }
+});
 ```
+
+The generated snippet loads SDK dependencies in order, calls
+`MinimaAds.init({ frameId, mdsAlreadyInitialized:true })`, renders into
+`#minimaads-slot`, waits 3 seconds, and calls `trackView`.
 
 ### 13.2 SDK API Reference
 
@@ -1245,7 +1249,8 @@ All SDK functions are callback-based, matching the Core API pattern (§7.5). Thi
 
 ```javascript
 MinimaAds.init(config, cb)
-// config:   { wallet: string, interests?: string, frameId?: string, publisher_id?: string }
+// config:   { wallet: string, interests?: string, frameId?: string, publisher_id?: string,
+//             mdsAlreadyInitialized?: boolean, externalMdsInit?: boolean, skipMdsInit?: boolean }
 // cb:       function(err, ok)
 //
 // frameId behavior:
@@ -1258,7 +1263,9 @@ MinimaAds.init(config, cb)
 // publisher_id is the LEGACY field name (kept for backward compat); when frameId
 // is provided it overrides publisher_id.
 //
-// Stores config and calls MDS.init if not already inited.
+// Stores config and calls MDS.init unless the host MiniDapp already owns MDS.init.
+// If mdsAlreadyInitialized/externalMdsInit/skipMdsInit is true, the host must
+// forward MDS events to MinimaAds.handleMdsEvent(msg).
 
 MinimaAds.getAd(userAddress, interests, cb)
 // userAddress: string (Maxima public key, 0x…)
@@ -1279,6 +1286,10 @@ MinimaAds.trackView(campaignId, userAddress, cb)
 MinimaAds.trackClick(campaignId, userAddress, cb)
 // cb: function(err, { confirmed: boolean, reason?: string, event?: RewardEvent })
 // Calls validateClick → createRewardEvent. Caller handles navigation after cb.
+
+MinimaAds.handleMdsEvent(msg)
+// Optional host bridge for React/Vite/TypeScript MiniDapps that already call
+// MDS.init. Handles MinimaAds MAXIMA messages and MDSCOMMS channel signals.
 ```
 
 ### 13.3 Publisher Responsibilities
@@ -1288,6 +1299,7 @@ The publisher must only:
 2. Define an HTML element for the ad slot
 3. Call `MinimaAds.getAd(userAddress, interests, cb)` then `MinimaAds.render(ad, containerId)`
 4. Wire a view timer (≥ `MIN_VIEW_DURATION_MS`) before calling `trackView`
+5. If the host already owns `MDS.init`, call `MinimaAds.init({ frameId, mdsAlreadyInitialized:true }, cb)` and dispatch each MDS callback message to `MinimaAds.handleMdsEvent(msg)`
 
 The publisher must **not**:
 - Calculate or distribute rewards

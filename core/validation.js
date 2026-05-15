@@ -41,7 +41,8 @@ function validateView(campaignId, userAddress, cb) {
         return;
       }
       var count = (rows && rows[0]) ? parseInt(rows[0].CNT, 10) : 0;
-      if (count >= LIMITS.MAX_VIEWS_PER_CAMPAIGN_PER_DAY) {
+      var limit = (campaign.MAX_DAILY_VIEWS !== null && campaign.MAX_DAILY_VIEWS !== undefined) ? parseInt(campaign.MAX_DAILY_VIEWS, 10) : LIMITS.MAX_VIEWS_PER_CAMPAIGN_PER_DAY;
+      if (count >= limit) {
         cb({ valid: false, reason: 'daily view limit reached' });
         return;
       }
@@ -106,7 +107,8 @@ function validateClick(campaignId, userAddress, cb) {
         return;
       }
       var count = (rows && rows[0]) ? parseInt(rows[0].CNT, 10) : 0;
-      if (count >= LIMITS.MAX_CLICKS_PER_CAMPAIGN_PER_DAY) {
+      var limit = (campaign.MAX_DAILY_CLICKS !== null && campaign.MAX_DAILY_CLICKS !== undefined) ? parseInt(campaign.MAX_DAILY_CLICKS, 10) : LIMITS.MAX_CLICKS_PER_CAMPAIGN_PER_DAY;
+      if (count >= limit) {
         cb({ valid: false, reason: 'daily click limit reached' });
         return;
       }

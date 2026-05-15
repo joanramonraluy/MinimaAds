@@ -475,29 +475,121 @@ function checkPendingChannelOpens() {
     try { queue = JSON.parse(qRes.value); } catch (e) { return; }
     if (queue.length === 0) { return; }
     MDS.log("[CHANNEL] checkPendingChannelOpens: " + queue.length + " pending channel open(s)");
-    _retryPendingChOpen(queue, 0, []);
+    _retryPendingChOpen(queue, 0, [], []);
   });
 }
 
-function _retryPendingChOpen(queue, i, remaining) {
+function _retryPendingChOpen(queue, i, remaining, deferred) {
   if (i >= queue.length) {
-    MDS.keypair.set("PENDING_CHOPEN_QUEUE", JSON.stringify(remaining), function() {});
+    // Persist the surviving queue first, THEN dispatch retries. The retries
+    // may re-enqueue (needsSplit or splitCoinId entries) and we don't want
+    // this final write to clobber those new pushes.
+    MDS.keypair.set("PENDING_CHOPEN_QUEUE", JSON.stringify(remaining), function() {
+      for (var d = 0; d < deferred.length; d++) {
+        var dctx = deferred[d];
+        if (dctx.__kind === 'split') {
+          swBuildAndPostChannelTx(dctx.ctx);
+        } else if (dctx.__kind === 'open') {
+          swBuildAndPostChannelOpenTx(dctx.ctx);
+        }
+      }
+    });
     return;
   }
   var ctx = queue[i];
-  if (!ctx || !ctx.splitCoinId) {
-    _retryPendingChOpen(queue, i + 1, remaining);
+  if (!ctx) {
+    _retryPendingChOpen(queue, i + 1, remaining, deferred);
+    return;
+  }
+  // Entries flagged needsSplit failed Tx1 (escrow coin was in mempool from a
+  // prior pending split). Retry the full split+open flow with the current
+  // ESCROW_COINID from CAMPAIGNS — which by now points to the change coin
+  // produced by the earlier split that has since confirmed.
+  if (ctx.needsSplit) {
+    MDS.log("[CHANNEL] checkPendingChannelOpens: retrying Tx1 (split) for queued entry. campaign: " + ctx.campaignId + " role: " + (ctx.role || 'viewer'));
+    getCampaign(ctx.campaignId, function(cErr, camp) {
+      if (cErr || !camp || !camp.ESCROW_COINID || !camp.ESCROW_WALLET_PK) {
+        MDS.log("[CHANNEL] checkPendingChannelOpens: campaign/escrow missing — keeping in queue. campaign: " + ctx.campaignId);
+        remaining.push(ctx);
+        _retryPendingChOpen(queue, i + 1, remaining, deferred);
+        return;
+      }
+      var retryCtx = {
+        campaignId:    ctx.campaignId,
+        viewerKey:     ctx.viewerKey,
+        viewerMx:      ctx.viewerMx,
+        viewerWalletPK: ctx.viewerWalletPK || '',
+        maxAmount:     ctx.maxAmount,
+        escrowCoinId:  camp.ESCROW_COINID,
+        walletPK:      camp.ESCROW_WALLET_PK,
+        role:          ctx.role || 'viewer',
+        frameId:       ctx.frameId || ''
+      };
+      // Drop this entry from `remaining`; defer the retry call until after the
+      // queue is persisted (so a new re-enqueue from inside the retry isn't
+      // clobbered).
+      deferred.push({ __kind: 'split', ctx: retryCtx });
+      _retryPendingChOpen(queue, i + 1, remaining, deferred);
+    });
+    return;
+  }
+  if (!ctx.splitCoinId) {
+    // Malformed entry — drop it.
+    _retryPendingChOpen(queue, i + 1, remaining, deferred);
     return;
   }
   MDS.cmd("coins coinid:" + ctx.splitCoinId, function(cRes) {
     var coins = (cRes && cRes.status && cRes.response) ? cRes.response : [];
     if (coins.length > 0) {
       MDS.log("[CHANNEL] checkPendingChannelOpens: split coin found — building Tx2. campaign: " + ctx.campaignId);
-      swBuildAndPostChannelOpenTx(ctx);
-      _retryPendingChOpen(queue, i + 1, remaining);
+      deferred.push({ __kind: 'open', ctx: ctx });
+      _retryPendingChOpen(queue, i + 1, remaining, deferred);
     } else {
       remaining.push(ctx);
-      _retryPendingChOpen(queue, i + 1, remaining);
+      _retryPendingChOpen(queue, i + 1, remaining, deferred);
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// _enqueuePendingChOpenSplitRetry — called by swBuildAndPostChannelTx when
+// txninput on the escrow coin fails (escrow is locked in mempool by a prior
+// pending split tx). Persists the channel open context flagged needsSplit so
+// checkPendingChannelOpens retries the FULL split+open flow once the prior
+// split confirms and ESCROW_COINID is updated to the change coin.
+// ---------------------------------------------------------------------------
+function _enqueuePendingChOpenSplitRetry(ctx) {
+  MDS.keypair.get("PENDING_CHOPEN_QUEUE", function(qRes) {
+    var queue = [];
+    try { queue = JSON.parse((qRes && qRes.status && qRes.value) ? qRes.value : "[]"); } catch (e) {}
+    var role = ctx.role || 'viewer';
+    var vk16 = (ctx.viewerKey || "").substring(0, 16).toUpperCase();
+    var key = ctx.campaignId + "|" + vk16 + "|" + role;
+    var exists = false;
+    for (var qi = 0; qi < queue.length; qi++) {
+      var existingRole = queue[qi].role || 'viewer';
+      var existingKey = queue[qi].campaignId + "|" + (queue[qi].viewerKey || "").substring(0, 16).toUpperCase() + "|" + existingRole;
+      if (existingKey === key) {
+        exists = true;
+        break;
+      }
+    }
+    if (!exists) {
+      queue.push({
+        needsSplit:    true,
+        campaignId:    ctx.campaignId,
+        viewerKey:     ctx.viewerKey,
+        viewerMx:      ctx.viewerMx,
+        viewerWalletPK: ctx.viewerWalletPK || '',
+        maxAmount:     ctx.maxAmount,
+        role:          role,
+        frameId:       ctx.frameId || ''
+      });
+      MDS.keypair.set("PENDING_CHOPEN_QUEUE", JSON.stringify(queue), function() {
+        MDS.log("[CHANNEL] _enqueuePendingChOpenSplitRetry: queued split retry. campaign: " + ctx.campaignId + " role: " + role);
+      });
+    } else {
+      MDS.log("[CHANNEL] _enqueuePendingChOpenSplitRetry: already queued. campaign: " + ctx.campaignId + " role: " + role);
     }
   });
 }
@@ -609,25 +701,33 @@ function handlePublisherRewardNotify(payload, senderPk) {
 }
 
 function _doSendPublisherChannelOpenRequest(campaignId, campaign, frameId, creatorKey, walletPK) {
-  var capExplicit = parseFloat(campaign.MAX_PUBLISHER_BUDGET) || 0;
-  var pubView     = parseFloat(campaign.PUBLISHER_REWARD_VIEW) || 0;
-  var maxAmount   = capExplicit > 0 ? capExplicit : pubView * 10;
-  var targetKey  = creatorKey || campaign.CREATOR_ADDRESS;
-  var payload = {
-    type:               "CHANNEL_OPEN_REQUEST",
-    campaign_id:        campaignId,
-    viewer_key:         MY_MAXIMA_PK,
-    viewer_mx:          MY_MX_ADDRESS,
-    viewer_wallet_addr: MY_ADDRESS || '',
-    viewer_wallet_pk:   walletPK,
-    max_amount:         maxAmount,
-    role:               "publisher",
-    frame_id:           frameId
-  };
-  MDS.keypair.get("CREATOR_MX_" + campaignId, function(kpRes) {
-    var creatorMx = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : null;
-    sendMaxima(targetKey, creatorMx, payload, function(ok) {
-      MDS.log("[CHANNEL] publisher CHANNEL_OPEN_REQUEST sent: campaign=" + campaignId + " frameId=" + frameId + " ok=" + ok);
+  MDS.cmd("getaddress", function(gaRes) {
+    var walletAddr = (gaRes && gaRes.status && gaRes.response && gaRes.response.address)
+      ? gaRes.response.address : '';
+    if (!walletAddr) {
+      MDS.log("[CHANNEL] _doSendPublisherChannelOpenRequest: getaddress failed. campaign: " + campaignId);
+      return;
+    }
+    var capExplicit = parseFloat(campaign.MAX_PUBLISHER_BUDGET) || 0;
+    var pubView     = parseFloat(campaign.PUBLISHER_REWARD_VIEW) || 0;
+    var maxAmount   = capExplicit > 0 ? capExplicit : pubView * 10;
+    var targetKey   = creatorKey || campaign.CREATOR_ADDRESS;
+    var payload = {
+      type:               "CHANNEL_OPEN_REQUEST",
+      campaign_id:        campaignId,
+      viewer_key:         MY_MAXIMA_PK,
+      viewer_mx:          MY_MX_ADDRESS,
+      viewer_wallet_addr: walletAddr,
+      viewer_wallet_pk:   walletPK,
+      max_amount:         maxAmount,
+      role:               "publisher",
+      frame_id:           frameId
+    };
+    MDS.keypair.get("CREATOR_MX_" + campaignId, function(kpRes) {
+      var creatorMx = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : null;
+      sendMaxima(targetKey, creatorMx, payload, function(ok) {
+        MDS.log("[CHANNEL] publisher CHANNEL_OPEN_REQUEST sent: campaign=" + campaignId + " frameId=" + frameId + " ok=" + ok);
+      });
     });
   });
 }
@@ -1050,7 +1150,16 @@ function swBuildAndPostChannelTx(ctx) {
   MDS.cmd("txncreate id:" + txId, function(r1) {
     if (!r1 || !r1.status) { fail("txncreate"); return; }
     MDS.cmd("txninput id:" + txId + " coinid:" + ctx.escrowCoinId + " scriptmmr:true", function(r2) {
-      if (!r2 || !r2.status) { fail("txninput"); return; }
+      if (!r2 || !r2.status) {
+        // The escrow coin is likely in the mempool because a prior split tx
+        // (for another viewer/publisher) is still unconfirmed. Persist this
+        // channel open as a pending-retry entry so checkPendingChannelOpens
+        // re-attempts the full split+open flow once the mempool clears and
+        // ESCROW_COINID points to the change coin.
+        fail("txninput");
+        _enqueuePendingChOpenSplitRetry(ctx);
+        return;
+      }
 
       var actualAmount = 0;
       try { actualAmount = parseFloat(r2.response.transaction.inputs[0].amount); } catch(e) {}

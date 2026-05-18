@@ -81,6 +81,7 @@ function initDB(cb) {
     + "STATUS             VARCHAR(16)    NOT NULL DEFAULT 'pending',"
     + "CREATED_AT         BIGINT         NOT NULL,"
     + "VIEWER_WALLET_ADDR VARCHAR(512)   DEFAULT '',"
+    + "VIEWER_WALLET_PK   VARCHAR(512)   DEFAULT '',"
     + "PRIMARY KEY (CAMPAIGN_ID, VIEWER_KEY, ROLE)"
     + ")";
 
@@ -91,6 +92,20 @@ function initDB(cb) {
     + "VIEWER_EVENT_ID VARCHAR(64)   NOT NULL,"
     + "AMOUNT          DECIMAL(20,9) NOT NULL,"
     + "CREATED_AT      BIGINT        NOT NULL"
+    + ")";
+
+  var sql_channel_history = "CREATE TABLE IF NOT EXISTS CHANNEL_HISTORY ("
+    + "CAMPAIGN_ID        VARCHAR(256)   NOT NULL,"
+    + "VIEWER_KEY         VARCHAR(512)   NOT NULL,"
+    + "ROLE               VARCHAR(16)    NOT NULL DEFAULT 'viewer',"
+    + "CREATOR_MX         VARCHAR(512)   NOT NULL DEFAULT '',"
+    + "CHANNEL_COINID     VARCHAR(66)    DEFAULT '',"
+    + "MAX_AMOUNT         DECIMAL(20,6)  NOT NULL,"
+    + "CUMULATIVE_EARNED  DECIMAL(20,6)  NOT NULL DEFAULT 0,"
+    + "STATUS             VARCHAR(16)    NOT NULL DEFAULT 'settled',"
+    + "CREATED_AT         BIGINT         NOT NULL,"
+    + "VIEWER_WALLET_ADDR VARCHAR(512)   DEFAULT '',"
+    + "PRIMARY KEY (CAMPAIGN_ID, VIEWER_KEY, ROLE, CREATED_AT)"
     + ")";
 
   sqlQuery(sql_campaigns, function(err) {
@@ -139,6 +154,9 @@ function initDB(cb) {
                     sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS SPLIT_COINID VARCHAR(66) DEFAULT ''", function() {
                     sqlQuery(sql_deferred_pub_rewards, function(dprErr) {
                       if (dprErr) { MDS.log("[DB] initDB: failed to create DEFERRED_PUB_REWARDS — " + dprErr); return; }
+                    sqlQuery(sql_channel_history, function(chErr) {
+                      if (chErr) { MDS.log("[DB] initDB: failed to create CHANNEL_HISTORY — " + chErr); return; }
+                    sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS VIEWER_WALLET_PK VARCHAR(512) DEFAULT ''", function() {
                     sqlQuery("UPDATE CAMPAIGNS SET MAX_PUBLISHER_BUDGET = PUBLISHER_REWARD_VIEW * 10 WHERE MAX_PUBLISHER_BUDGET <= 0 AND PUBLISHER_REWARD_VIEW > 0", function(patchErr) {
                       if (patchErr) { MDS.log("[DB] initDB: publisher budget patch failed — " + patchErr); }
                       else { MDS.log("[DB] initDB: stale MAX_PUBLISHER_BUDGET patched"); }
@@ -146,6 +164,8 @@ function initDB(cb) {
                       signalFE("DB_READY", {});
                       if (cb) { cb(); }
                     }); // end publisher budget data migration
+                    }); // end VIEWER_WALLET_PK migration
+                    }); // end CHANNEL_HISTORY creation
                     }); // end DEFERRED_PUB_REWARDS creation
                     }); // end SPLIT_COINID migration
                     }); // end MAX_DAILY_CLICKS migration

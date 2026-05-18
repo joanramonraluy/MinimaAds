@@ -112,7 +112,13 @@ function _refreshSettlementHistory() {
           + " FROM CHANNEL_STATE cs"
           + " LEFT JOIN CAMPAIGNS c ON UPPER(cs.CAMPAIGN_ID) = UPPER(c.ID)"
           + " WHERE cs.STATUS = 'settled'"
-          + " AND UPPER(cs.VIEWER_KEY) = UPPER('" + escapeSql(MY_ADDRESS) + "')";
+          + " AND UPPER(cs.VIEWER_KEY) = UPPER('" + escapeSql(MY_ADDRESS) + "')"
+          + " UNION ALL"
+          + " SELECT ch.CAMPAIGN_ID, ch.CUMULATIVE_EARNED, ch.CREATED_AT, c2.TITLE, c2.CREATOR_ADDRESS"
+          + " FROM CHANNEL_HISTORY ch"
+          + " LEFT JOIN CAMPAIGNS c2 ON UPPER(ch.CAMPAIGN_ID) = UPPER(c2.ID)"
+          + " WHERE UPPER(ch.VIEWER_KEY) = UPPER('" + escapeSql(MY_ADDRESS) + "')"
+          + " ORDER BY CREATED_AT ASC";
   sqlQuery(sql, function(err, rows) {
     target.innerHTML = '';
     renderSettlementHistory(target, rows || []);

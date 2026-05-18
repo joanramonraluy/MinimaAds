@@ -1247,6 +1247,23 @@ function initFEChannelState(cb) {
   sqlQuery(sql, function() { if (cb) { cb(); } });
 }
 
+function initFEChannelHistory(cb) {
+  var sql = "CREATE TABLE IF NOT EXISTS CHANNEL_HISTORY ("
+    + "CAMPAIGN_ID        VARCHAR(256)  NOT NULL,"
+    + "VIEWER_KEY         VARCHAR(512)  NOT NULL,"
+    + "ROLE               VARCHAR(16)   NOT NULL DEFAULT 'viewer',"
+    + "CREATOR_MX         VARCHAR(512)  NOT NULL DEFAULT '',"
+    + "CHANNEL_COINID     VARCHAR(66)   DEFAULT '',"
+    + "MAX_AMOUNT         DECIMAL(20,6) NOT NULL,"
+    + "CUMULATIVE_EARNED  DECIMAL(20,6) NOT NULL DEFAULT 0,"
+    + "STATUS             VARCHAR(16)   NOT NULL DEFAULT 'settled',"
+    + "CREATED_AT         BIGINT        NOT NULL,"
+    + "VIEWER_WALLET_ADDR VARCHAR(512)  DEFAULT '',"
+    + "PRIMARY KEY (CAMPAIGN_ID, VIEWER_KEY, ROLE, CREATED_AT)"
+    + ")";
+  sqlQuery(sql, function() { if (cb) { cb(); } });
+}
+
 function _showWriteModeRequired() {
   var root = document.getElementById('app');
   if (!root) { return; }
@@ -1287,8 +1304,10 @@ function onInited() {
         }
         initFEFrames(function() {
           initFEChannelState(function() {
-            probeDb();
-            doRender();
+            initFEChannelHistory(function() {
+              probeDb();
+              doRender();
+            });
           });
         });
       });

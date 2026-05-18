@@ -65,11 +65,16 @@ function handleChannelOpenRequest(payload, senderPk) {
         MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): campaign has no publisher reward. campaign: " + campaignId);
         return;
       }
-      var pubRemaining = (parseFloat(campaign.MAX_PUBLISHER_BUDGET) || 0) - (parseFloat(campaign.PUBLISHER_BUDGET_SPENT) || 0);
-      if (pubRemaining < maxAmount) {
-        MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): insufficient publisher budget. remaining: " + pubRemaining + " requested: " + maxAmount);
-        return;
-      }
+      sqlQuery(
+        "SELECT COALESCE(SUM(MAX_AMOUNT), 0) AS ALLOC FROM CHANNEL_STATE WHERE " +
+        "UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') AND ROLE = 'publisher' AND STATUS = 'open'",
+        function(allocErr, allocRows) {
+          var pubAllocated = (allocRows && allocRows.length > 0) ? parseFloat(allocRows[0].ALLOC) : 0;
+          var pubRemaining = (parseFloat(campaign.MAX_PUBLISHER_BUDGET) || 0) - pubAllocated;
+          if (pubRemaining < maxAmount) {
+            MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): insufficient publisher budget. remaining: " + pubRemaining + " requested: " + maxAmount);
+            return;
+          }
 
       getChannelState(campaignId, viewerKey, 'publisher', function(chErr, existing) {
         if (!chErr && existing && existing.STATUS === 'open') {
@@ -120,19 +125,29 @@ function handleChannelOpenRequest(payload, senderPk) {
             MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): openChannel failed: " + openErr);
             return;
           }
-          var bumpSql = "UPDATE CAMPAIGNS SET PUBLISHER_BUDGET_SPENT = COALESCE(PUBLISHER_BUDGET_SPENT, 0) + " + maxAmount +
-            " WHERE UPPER(ID) = UPPER('" + escapeSql(campaignId) + "')";
-          sqlQuery(bumpSql, function(bumpErr) {
-            if (bumpErr) {
-              MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): PUBLISHER_BUDGET_SPENT bump failed: " + bumpErr);
+          sqlQuery(
+            "UPDATE CHANNEL_STATE SET VIEWER_WALLET_PK = '" + escapeSql(viewerWalletPK) + "'" +
+            " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
+            " AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(viewerKey) + "')" +
+            " AND ROLE = 'publisher'",
+            function() {
+              var bumpSql = "UPDATE CAMPAIGNS SET PUBLISHER_BUDGET_SPENT = COALESCE(PUBLISHER_BUDGET_SPENT, 0) + " + maxAmount +
+                " WHERE UPPER(ID) = UPPER('" + escapeSql(campaignId) + "')";
+              sqlQuery(bumpSql, function(bumpErr) {
+                if (bumpErr) {
+                  MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): PUBLISHER_BUDGET_SPENT bump failed: " + bumpErr);
+                }
+                MDS.keypair.set("FRAME_PUBLISHER_" + frameId, viewerKey, function() {
+                  MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): building channel TX in SW. campaign: " + campaignId);
+                  _swDispatchChannelOpen(campaignId, viewerKey, viewerMx, maxAmount, 'publisher', frameId, viewerWalletPK, viewerWalletAddr);
+                });
+              });
             }
-            MDS.keypair.set("FRAME_PUBLISHER_" + frameId, viewerKey, function() {
-              MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): building channel TX in SW. campaign: " + campaignId);
-              _swDispatchChannelOpen(campaignId, viewerKey, viewerMx, maxAmount, 'publisher', frameId, viewerWalletPK, viewerWalletAddr);
-            });
-          });
+          );
         });
       });
+        }
+      );
     });
   } else {
     getCampaign(campaignId, function(err, campaign) {
@@ -155,16 +170,41 @@ function handleChannelOpenRequest(payload, senderPk) {
 
       getChannelState(campaignId, viewerKey, 'viewer', function(chErr, existing) {
         if (!chErr && existing && existing.STATUS === 'open') {
-          MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: channel already open — resending CHANNEL_OPEN. campaign: " + campaignId + " coinId: " + existing.CHANNEL_COINID);
-          sendMaxima(viewerKey, viewerMx, {
-            type:           "CHANNEL_OPEN",
-            campaign_id:    campaignId,
-            viewer_key:     viewerKey,
-            channel_coinid: existing.CHANNEL_COINID,
-            max_amount:     parseFloat(existing.MAX_AMOUNT),
-            role:           "viewer"
-          }, function(ok) {
-            MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: CHANNEL_OPEN resent ok=" + ok);
+          var _csAddr = CHANNEL_SCRIPT_ADDRESS || '';
+          MDS.cmd("coins address:" + _csAddr, function(_csRes) {
+            var _csList = (_csRes && _csRes.status && _csRes.response) ? _csRes.response : [];
+            var _coinStillOpen = false;
+            for (var _ci = 0; _ci < _csList.length; _ci++) {
+              if (_csList[_ci].coinid && _csList[_ci].coinid.toUpperCase() === existing.CHANNEL_COINID.toUpperCase()) {
+                _coinStillOpen = true;
+                break;
+              }
+            }
+            if (_coinStillOpen) {
+              MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: channel already open — resending CHANNEL_OPEN. campaign: " + campaignId + " coinId: " + existing.CHANNEL_COINID);
+              sendMaxima(viewerKey, viewerMx, {
+                type:           "CHANNEL_OPEN",
+                campaign_id:    campaignId,
+                viewer_key:     viewerKey,
+                channel_coinid: existing.CHANNEL_COINID,
+                max_amount:     parseFloat(existing.MAX_AMOUNT),
+                role:           "viewer"
+              }, function(ok) {
+                MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: CHANNEL_OPEN resent ok=" + ok);
+              });
+            } else {
+              MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: coin spent — settling and opening new channel. campaign: " + campaignId);
+              sqlQuery(
+                "UPDATE CHANNEL_STATE SET STATUS = 'settled' WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(viewerKey) + "') AND ROLE = 'viewer'",
+                function() {
+                  openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', '', viewerWalletAddr, function(openErr) {
+                    if (openErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: openChannel failed: " + openErr); return; }
+                    MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: building channel TX in SW. campaign: " + campaignId + " viewer_mx: " + viewerMx);
+                    _swDispatchChannelOpen(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', '', viewerWalletPK, viewerWalletAddr);
+                  });
+                }
+              );
+            }
           });
           return;
         }
@@ -320,8 +360,20 @@ function handleRewardRequest(payload) {
         return;
       }
 
-      MDS.cmd("coins coinid:" + channelCoinId + " relevant:true", function(coinRes) {
-        var indexed = coinRes && coinRes.status && coinRes.response && coinRes.response.length > 0;
+      var _chAddr = CHANNEL_SCRIPT_ADDRESS || '';
+      if (!_chAddr) {
+        MDS.log("[CHANNEL] REWARD_REQUEST: CHANNEL_SCRIPT_ADDRESS not set, cannot check coin. campaign: " + campaignId);
+        return;
+      }
+      MDS.cmd("coins address:" + _chAddr, function(coinRes) {
+        var coinList = (coinRes && coinRes.status && coinRes.response) ? coinRes.response : [];
+        var indexed = false;
+        for (var ci = 0; ci < coinList.length; ci++) {
+          if (coinList[ci].coinid && coinList[ci].coinid.toUpperCase() === channelCoinId.toUpperCase()) {
+            indexed = true;
+            break;
+          }
+        }
         if (indexed) {
           if (role === 'publisher') {
             MDS.log("[CHANNEL] REWARD_REQUEST (publisher): coin indexed. building publisher voucher in SW. campaign: " + campaignId + " cumulative: " + cumulative);
@@ -469,6 +521,22 @@ function logPendingChannelState() {
 // (channel-open) and removes the entry from the queue. Rhino-safe.
 // ---------------------------------------------------------------------------
 function checkPendingChannelOpens() {
+  sqlQuery(
+    "SELECT DISTINCT dpr.CAMPAIGN_ID, dpr.FRAME_ID, cs.VIEWER_KEY " +
+    "FROM DEFERRED_PUB_REWARDS dpr " +
+    "INNER JOIN CHANNEL_STATE cs ON UPPER(dpr.CAMPAIGN_ID) = UPPER(cs.CAMPAIGN_ID) " +
+    "AND UPPER(dpr.FRAME_ID) = UPPER(cs.FRAME_ID) " +
+    "AND cs.ROLE = 'publisher' AND cs.STATUS = 'open'",
+    function(retryErr, retryRows) {
+      if (!retryErr && retryRows && retryRows.length > 0) {
+        for (var _ri = 0; _ri < retryRows.length; _ri++) {
+          (function(_r) {
+            _replayDeferredPublisherRewards(_r.CAMPAIGN_ID, _r.FRAME_ID, _r.VIEWER_KEY);
+          })(retryRows[_ri]);
+        }
+      }
+    }
+  );
   MDS.keypair.get("PENDING_CHOPEN_QUEUE", function(qRes) {
     if (!qRes || !qRes.status || !qRes.value) { return; }
     var queue = [];
@@ -843,10 +911,12 @@ function _replayDeferredPublisherRewards(campaignId, frameId, publisherKey) {
         }
         var base = parseFloat(pubChannel.CUMULATIVE_EARNED);
         var totalAmount = 0;
-        var ids = [];
+        var stableIds    = [];
+        var idPlaceholds = [];
         for (var i = 0; i < rows.length; i++) {
           totalAmount += parseFloat(rows[i].AMOUNT);
-          ids.push("'" + escapeSql(rows[i].ID) + "'");
+          stableIds.push(escapeSql(rows[i].ID));
+          idPlaceholds.push("'" + escapeSql(rows[i].ID) + "'");
         }
         var cumulative = base + totalAmount;
         var maxAmount = parseFloat(pubChannel.MAX_AMOUNT);
@@ -854,23 +924,27 @@ function _replayDeferredPublisherRewards(campaignId, frameId, publisherKey) {
           MDS.log("[CHANNEL] _replayDeferredPublisherRewards: capping cumulative " + cumulative + " to max " + maxAmount + ". campaign: " + campaignId);
           cumulative = maxAmount;
         }
-        var syntheticEventId = 'replay-' + frameId + '-' + Date.now();
-        var pubEventId = 'pub-' + syntheticEventId;
+        var pubEventId = 'pub-replay-' + stableIds.join('-');
         isDuplicate(pubEventId, function(isDup) {
-          if (isDup) { return; }
-          var now = Date.now();
-          sqlQuery(
-            "MERGE INTO DEDUP_LOG (ID, LOGGED_AT) KEY (ID) VALUES ('" + escapeSql(pubEventId) + "'," + now + ")",
+          if (isDup) {
+            MDS.log("[CHANNEL] _replayDeferredPublisherRewards: already replayed. campaign: " + campaignId);
+            return;
+          }
+          MDS.log("[CHANNEL] _replayDeferredPublisherRewards: voucher dispatching cumulative: " + cumulative + " campaign: " + campaignId);
+          var _cleanupNow = Date.now();
+          _swDispatchVoucher(
+            campaignId, pubChannel.VIEWER_KEY, pubChannel.CREATOR_MX,
+            pubEventId, cumulative, pubChannel, 'publisher', frameId,
             function() {
               sqlQuery(
-                "DELETE FROM DEFERRED_PUB_REWARDS WHERE ID IN (" + ids.join(',') + ")",
-                function(delErr) {
-                  if (delErr) {
-                    MDS.log("[CHANNEL] _replayDeferredPublisherRewards: DELETE failed: " + delErr);
-                    return;
-                  }
-                  MDS.log("[CHANNEL] _replayDeferredPublisherRewards: voucher dispatched cumulative: " + cumulative + " campaign: " + campaignId);
-                  _swDispatchVoucher(campaignId, pubChannel.VIEWER_KEY, pubChannel.CREATOR_MX, pubEventId, cumulative, pubChannel, 'publisher', frameId);
+                "MERGE INTO DEDUP_LOG (ID, LOGGED_AT) KEY (ID) VALUES ('" + escapeSql(pubEventId) + "'," + _cleanupNow + ")",
+                function() {
+                  sqlQuery(
+                    "DELETE FROM DEFERRED_PUB_REWARDS WHERE ID IN (" + idPlaceholds.join(',') + ")",
+                    function() {
+                      MDS.log("[CHANNEL] _replayDeferredPublisherRewards: cleanup done. campaign: " + campaignId);
+                    }
+                  );
                 }
               );
             }
@@ -897,14 +971,74 @@ function _doGeneratePublisherVoucher(campaignId, frameId, eventId, pubChannel) {
         MDS.log("[CHANNEL] _doGeneratePublisherVoucher: duplicate event: " + pubEventId);
         return;
       }
-      var now = Date.now();
-      sqlQuery(
-        "MERGE INTO DEDUP_LOG (ID, LOGGED_AT) KEY (ID) VALUES ('" + escapeSql(pubEventId) + "'," + now + ")",
-        function() {
-          MDS.log("[CHANNEL] publisher voucher SW: campaign: " + campaignId + " frame: " + frameId + " cumulative: " + cumulative);
-          _swDispatchVoucher(campaignId, pubChannel.VIEWER_KEY, pubChannel.CREATOR_MX, pubEventId, cumulative, pubChannel, 'publisher', frameId);
+      var _pubCoinId = pubChannel.CHANNEL_COINID || '';
+      if (!_pubCoinId) {
+        MDS.log("[CHANNEL] _doGeneratePublisherVoucher: no coinId on publisher channel — skipping. campaign: " + campaignId);
+        return;
+      }
+      var _csAddr = CHANNEL_SCRIPT_ADDRESS || '';
+      MDS.cmd("coins address:" + _csAddr, function(_csRes) {
+        var _csList = (_csRes && _csRes.status && _csRes.response) ? _csRes.response : [];
+        var _coinFound = false;
+        for (var _ci = 0; _ci < _csList.length; _ci++) {
+          if (_csList[_ci].coinid && _csList[_ci].coinid.toUpperCase() === _pubCoinId.toUpperCase()) {
+            _coinFound = true;
+            break;
+          }
         }
-      );
+        if (!_coinFound) {
+          MDS.log("[CHANNEL] _doGeneratePublisherVoucher: publisher coin spent — reopening channel. campaign: " + campaignId);
+          var _pubViewerKey  = pubChannel.VIEWER_KEY        || '';
+          var _pubViewerMx   = pubChannel.CREATOR_MX        || '';
+          var _pubMaxAmount  = parseFloat(pubChannel.MAX_AMOUNT) || 0;
+          var _pubWalletAddr = pubChannel.VIEWER_WALLET_ADDR || '';
+          var _pubWalletPK   = pubChannel.VIEWER_WALLET_PK  || '';
+          sqlQuery(
+            "UPDATE CHANNEL_STATE SET STATUS = 'settled' WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(_pubViewerKey) + "') AND ROLE = 'publisher'",
+            function() {
+              var _now2 = Date.now();
+              sqlQuery(
+                "MERGE INTO DEFERRED_PUB_REWARDS (ID, CAMPAIGN_ID, FRAME_ID, VIEWER_EVENT_ID, AMOUNT, CREATED_AT) KEY (ID) VALUES ('" +
+                escapeSql(pubEventId) + "','" + escapeSql(campaignId) + "','" + escapeSql(frameId) + "','" +
+                escapeSql(eventId) + "'," + pubReward + "," + _now2 + ")",
+                function() {
+                  openChannel(campaignId, _pubViewerKey, _pubViewerMx, _pubMaxAmount, 'publisher', frameId, _pubWalletAddr, function(openErr) {
+                    if (openErr) {
+                      MDS.log("[CHANNEL] _doGeneratePublisherVoucher: openChannel (publisher) failed: " + openErr);
+                      return;
+                    }
+                    var _bumpSql = "UPDATE CAMPAIGNS SET PUBLISHER_BUDGET_SPENT = COALESCE(PUBLISHER_BUDGET_SPENT, 0) + " + _pubMaxAmount +
+                      " WHERE UPPER(ID) = UPPER('" + escapeSql(campaignId) + "')";
+                    sqlQuery(_bumpSql, function() {
+                      sqlQuery(
+                        "UPDATE CHANNEL_STATE SET VIEWER_WALLET_PK = '" + escapeSql(_pubWalletPK) + "'" +
+                        " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
+                        " AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(_pubViewerKey) + "')" +
+                        " AND ROLE = 'publisher'",
+                        function() {
+                          MDS.keypair.set("FRAME_PUBLISHER_" + frameId, _pubViewerKey, function() {
+                            MDS.log("[CHANNEL] _doGeneratePublisherVoucher: dispatching new publisher channel. campaign: " + campaignId);
+                            _swDispatchChannelOpen(campaignId, _pubViewerKey, _pubViewerMx, _pubMaxAmount, 'publisher', frameId, _pubWalletPK, _pubWalletAddr);
+                          });
+                        }
+                      );
+                    });
+                  });
+                }
+              );
+            }
+          );
+          return;
+        }
+        var now = Date.now();
+        sqlQuery(
+          "MERGE INTO DEDUP_LOG (ID, LOGGED_AT) KEY (ID) VALUES ('" + escapeSql(pubEventId) + "'," + now + ")",
+          function() {
+            MDS.log("[CHANNEL] publisher voucher SW: campaign: " + campaignId + " frame: " + frameId + " cumulative: " + cumulative);
+            _swDispatchVoucher(campaignId, pubChannel.VIEWER_KEY, pubChannel.CREATOR_MX, pubEventId, cumulative, pubChannel, 'publisher', frameId);
+          }
+        );
+      });
     });
   });
 }
@@ -927,8 +1061,17 @@ function checkOnePendingVoucher(campaignId, viewerKey, role, channelCoinId) {
       return;
     }
 
-    MDS.cmd("coins coinid:" + channelCoinId + " relevant:true", function(coinRes) {
-      var indexed = coinRes && coinRes.status && coinRes.response && coinRes.response.length > 0;
+    var _chAddr2 = CHANNEL_SCRIPT_ADDRESS || '';
+    if (!_chAddr2) { return; }
+    MDS.cmd("coins address:" + _chAddr2, function(coinRes) {
+      var coinList2 = (coinRes && coinRes.status && coinRes.response) ? coinRes.response : [];
+      var indexed = false;
+      for (var ci2 = 0; ci2 < coinList2.length; ci2++) {
+        if (coinList2[ci2].coinid && coinList2[ci2].coinid.toUpperCase() === channelCoinId.toUpperCase()) {
+          indexed = true;
+          break;
+        }
+      }
       if (!indexed) {
         return;
       }
@@ -985,7 +1128,7 @@ function _swDispatchChannelOpen(campaignId, viewerKey, viewerMx, maxAmount, role
 // swBuildAndExportVoucherTx. Used by handleRewardRequest, checkOnePendingVoucher,
 // and _doGeneratePublisherVoucher.
 // ---------------------------------------------------------------------------
-function _swDispatchVoucher(campaignId, viewerKey, viewerMx, eventId, cumulative, channel, role, frameId) {
+function _swDispatchVoucher(campaignId, viewerKey, viewerMx, eventId, cumulative, channel, role, frameId, afterSend) {
   getCampaign(campaignId, function(err, campaign) {
     if (err || !campaign || !campaign.ESCROW_WALLET_PK) {
       MDS.log("[CHANNEL] _swDispatchVoucher: campaign or ESCROW_WALLET_PK missing. campaign: " + campaignId);
@@ -1008,7 +1151,7 @@ function _swDispatchVoucher(campaignId, viewerKey, viewerMx, eventId, cumulative
       viewerAddr:      viewerAddr,
       role:            role || 'viewer',
       frameId:         frameId || ''
-    });
+    }, afterSend || null);
   });
 }
 
@@ -1055,7 +1198,7 @@ function swWaitForCoin(coinId, maxRetries, delay, cb) {
   check();
 }
 
-function swBuildAndExportVoucherTx(ctx) {
+function swBuildAndExportVoucherTx(ctx, afterSend) {
   var txId   = "rv_" + swGenerateUID();
   var refund = parseFloat((ctx.maxAmount - ctx.cumulative).toFixed(6));
   var role   = ctx.role || "viewer";
@@ -1116,6 +1259,7 @@ function swBuildAndExportVoucherTx(ctx) {
               }
               sendMaxima(ctx.viewerKey, ctx.viewerMx, voucherMsg, function(ok) {
                 MDS.log("[CHANNEL] SW REWARD_VOUCHER sent cumulative: " + ctx.cumulative + " role: " + role + " ok=" + ok);
+                if (afterSend) { afterSend(); }
               });
             });
           });
@@ -1338,24 +1482,23 @@ function swBuildAndPostChannelOpenTx(ctx) {
 
                 activateChannel(ctx.campaignId, ctx.viewerKey, ctx.role || "viewer", channelCoinId, function(actErr) {
                   if (actErr) { MDS.log("[CHANNEL] SW activateChannel failed: " + actErr); return; }
-                  if ((ctx.role || 'viewer') === 'publisher' && ctx.frameId) {
-                    _replayDeferredPublisherRewards(ctx.campaignId, ctx.frameId, ctx.viewerKey);
+                  var openMsg = {
+                    type:           "CHANNEL_OPEN",
+                    campaign_id:    ctx.campaignId,
+                    viewer_key:     ctx.viewerKey,
+                    channel_coinid: channelCoinId,
+                    max_amount:     ctx.maxAmount,
+                    role:           ctx.role || "viewer"
+                  };
+                  if (ctx.role === "publisher" && ctx.frameId) {
+                    openMsg.frame_id = ctx.frameId;
                   }
-                });
-
-                var openMsg = {
-                  type:           "CHANNEL_OPEN",
-                  campaign_id:    ctx.campaignId,
-                  viewer_key:     ctx.viewerKey,
-                  channel_coinid: channelCoinId,
-                  max_amount:     ctx.maxAmount,
-                  role:           ctx.role || "viewer"
-                };
-                if (ctx.role === "publisher" && ctx.frameId) {
-                  openMsg.frame_id = ctx.frameId;
-                }
-                sendMaxima(ctx.viewerKey, ctx.viewerMx, openMsg, function(ok) {
-                  MDS.log("[CHANNEL] SW CHANNEL_OPEN sent (" + (ctx.role || "viewer") + ") ok=" + ok);
+                  sendMaxima(ctx.viewerKey, ctx.viewerMx, openMsg, function(ok) {
+                    MDS.log("[CHANNEL] SW CHANNEL_OPEN sent (" + (ctx.role || "viewer") + ") ok=" + ok);
+                    if ((ctx.role || 'viewer') === 'publisher' && ctx.frameId) {
+                      _replayDeferredPublisherRewards(ctx.campaignId, ctx.frameId, ctx.viewerKey);
+                    }
+                  });
                 });
               });
             });

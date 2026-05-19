@@ -146,6 +146,27 @@ function processEscrowCoin(coin) {
           }
         );
       }
+      // Sync BUDGET_REMAINING when coinId changed (new change coin) or when the
+      // on-chain amount differs from the DB value (stale record from old code that
+      // updated ESCROW_COINID but not BUDGET_REMAINING). Runs once per coin per session.
+      var onChainAmount = parseFloat(coin.amount || 0);
+      var dbRemaining = parseFloat(campaign.BUDGET_REMAINING || 0);
+      if (coinId !== (campaign.ESCROW_COINID || '') || Math.abs(onChainAmount - dbRemaining) > 0.000001) {
+        MDS.log("[DISCOVERY] budget sync: " + campaignId + " coinId " + (campaign.ESCROW_COINID || '(none)') + " -> " + coinId + " amount=" + onChainAmount + " dbRemaining=" + dbRemaining);
+        sqlQuery(
+          "UPDATE CAMPAIGNS SET BUDGET_REMAINING = " + onChainAmount +
+          ", ESCROW_COINID = '" + escapeSql(coinId) + "'" +
+          " WHERE UPPER(ID) = UPPER('" + escapeSql(campaignId) + "')",
+          function(syncErr) {
+            if (syncErr) {
+              MDS.log("[DISCOVERY] budget sync failed: " + syncErr);
+            } else {
+              MDS.log("[DISCOVERY] budget synced: " + campaignId + " remaining=" + onChainAmount);
+              signalFE("CAMPAIGN_UPDATED", { campaign_id: campaignId });
+            }
+          }
+        );
+      }
       return;
     }
 

@@ -147,6 +147,9 @@ function handleMdsComms(parsed) {
     if (currentRoute() === 'frames' && typeof onPublisherRewardConfirmed === 'function') {
       onPublisherRewardConfirmed(parsed);
     }
+    if (currentRoute() === 'earnings' && typeof loadEarnings === 'function') {
+      loadEarnings();
+    }
     return;
   }
 }

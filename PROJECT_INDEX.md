@@ -22,11 +22,12 @@
 | File | Purpose | Read when… |
 |---|---|---|
 | **`MinimaAds.md`** | Full system specification — data models, flows, API contracts, KissVM escrow, security | Starting any task; source of truth on all behaviour |
-| **`AGENTS.md`** | Engineering guide — H2 quirks, Rhino constraints, Maxima patterns, DB schema, protocol matrix, fragility points | Writing any code; resolving platform doubts |
+| **`AGENTS.md`** | Short engineering guide — workflow, contracts, forbidden actions, and links into `docs/` | Writing any code; resolving platform doubts |
 | **`CLAUDE.md`** | Operational guide for Claude agents — task workflow, forbidden actions, lookup table | Agent sessions; before writing a single line |
 | **`PROJECT_INDEX.md`** | This file — navigation, folder map, entry points, pending tasks, playbooks | Project orientation; planning next steps |
-| **`PromptBase.md`** | First prompt for a new implementation agent session | Starting a new implementation session |
-| **`TASKS.md`** | Ordered implementation task list (T1–T11) with definitions of done | Picking the next task to implement |
+| **`docs/PromptBase.md`** | First prompt for a new implementation agent session | Starting a new implementation session |
+| **`docs/`** | Split project documentation — platform notes, project notes, known issues, history, verification, tasks | Looking up detailed agent reference material |
+| **`docs/TASKS.md`** | Ordered implementation task list (T1–T11) with definitions of done | Picking the next task to implement |
 | **`refs/`** | Reference material — Minima source code and official docs | Resolving doubts about platform behaviour |
 
 ### Sources breakdown
@@ -106,13 +107,13 @@ No layer may skip or reverse this order.
 
 ## 4) Pending Before Implementation
 
-All pre-implementation tasks are complete. Implementation task list is in **`TASKS.md`**.
+All pre-implementation tasks are complete. Implementation task list is in **`docs/TASKS.md`**.
 
 | # | Task | Status |
 |---|---|---|
-| 1 | Write `PromptBase.md` | ✅ Done |
+| 1 | Write `docs/PromptBase.md` | ✅ Done |
 | 2 | Create folder/file skeleton | ✅ Done |
-| 3 | Break implementation into ordered tasks (`TASKS.md`) | ✅ Done |
+| 3 | Break implementation into ordered tasks (`docs/TASKS.md`) | ✅ Done |
 | 4 | Read `minimask-main` SW | ✅ Done — Chrome extension, not applicable |
 
 ---

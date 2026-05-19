@@ -1,134 +1,90 @@
-# AGENTS.md — MinimaAds Engineering Guide
+# AGENTS.md — MinimaAds Agent Guide
 
-Last reviewed against codebase: 2026-05-09 (Rev 20: external MDS.init host SDK integration)
+Last compacted: 2026-05-18
 Scope: `/home/joanramon/Minima/MinimaAds`
 
-> **Origin note**: This file was bootstrapped from lessons learned building MetaChain (a Minima MiniDapp). Sections 1–5 are generic to any Minima MiniDapp. Sections 6+ are project-specific and must be filled in as the project evolves.
+This is the short operative guide for agents. Long-form reference material lives in `docs/`.
 
 ---
 
-## 0) Mandatory Update Mandate (Required)
+## 0) Mandatory Update Mandate
 
-**ANY AGENT (AI) making modifications to this repository IS REQUIRED to update this file (`AGENTS.md`) before finishing its task.**
+Any agent making modifications to this repository must update this file before finishing.
 
-The goal is that any learning, architectural change, new "fragility point" or design decision is recorded here for future agents. Do not use this file only for reading; it is your shared memory.
+Handoff notes must include:
+- `AGENTS.md updated: yes/no`
+- If `yes`, list affected sections.
+- If intentionally not applicable, write `AGENTS.md: N/A` and explain why.
 
-Handoff notes must include: `AGENTS.md updated: yes/no` and, if `yes`, list affected sections.
-If you intentionally do not update `AGENTS.md`, include `AGENTS.md: N/A` with explicit reason.
+For detailed changes that would make this file noisy, update the relevant document in `docs/` and add only a short pointer here.
 
 ---
 
-## 0.5) Source of Truth — Document Hierarchy (MANDATORY)
+## 1) Source Of Truth
 
-This project is governed by **two documents** with a strict priority order:
+This project is governed by two documents:
 
 | Document | Role | Authority |
 |---|---|---|
-| **MinimaAds.md** | Functional and architectural specification | **HIGHEST** — always wins on conflict |
-| **AGENTS.md** | Operative and technical guide for agents | Derives from MinimaAds.md; complements it |
+| `MinimaAds.md` | Functional and architectural specification | Highest |
+| `AGENTS.md` | Operative guide for agents | Derived from `MinimaAds.md` |
 
-### Priority Rule
+If `AGENTS.md` and `MinimaAds.md` conflict, `MinimaAds.md` wins.
 
-> **If AGENTS.md and MinimaAds.md conflict on any point → MinimaAds.md has priority.**
+Before implementing a feature, read the relevant sections of `MinimaAds.md` and the relevant reference document:
 
-Before implementing any feature, the agent MUST read the relevant sections of MinimaAds.md for the areas being touched.
-
-### What Each Document Owns
-
-**MinimaAds.md owns** (agents must NOT override):
-- Data models (Campaign, Ad, RewardEvent, UserProfile)
-- Core API function signatures (sections 7.1–7.5)
-- Maxima message schemas (sections 8.3–8.6)
-- System flows: View, Click, Campaign Creation (sections 6.1–6.3)
-- Anti-abuse limits and LIMITS constant values (section 5)
-- H2 schema (section 3.5)
-- Trust model and attack mitigations (sections 9–10)
-- Economic model and fee structure (section 4)
-
-**AGENTS.md owns** (operative and platform constraints):
-- MDS API usage patterns and gotchas
-- H2 database syntax rules
-- Rhino/Nashorn syntax constraints
-- SW ↔ FE communication patterns
-- Pre-merge checklist
-- Known fragility points (platform-level)
-- Project topology, DB schema mirror, and protocol matrix (sections 6–10)
+| Topic | Reference |
+|---|---|
+| Minima/MDS/H2/Rhino platform rules | `docs/PLATFORM_NOTES.md` |
+| Project topology, DB mirror, protocols, signals | `docs/PROJECT_NOTES.md` |
+| Fragility points and open bugs | `docs/KNOWN_ISSUES.md` |
+| Ordered implementation task list | `docs/TASKS.md` |
+| New implementation session prompt template | `docs/PromptBase.md` |
+| Verification workflow | `docs/VERIFICATION.md` |
+| Long change history | `docs/HISTORY.md` |
 
 ---
 
-## 0.6) Development Workflow (MANDATORY)
+## 2) Required Workflow
 
-Every agent working on MinimaAds MUST follow this sequence:
+1. Read the relevant `MinimaAds.md` sections first.
+2. Check `docs/KNOWN_ISSUES.md` for known fragility points or open bugs in the touched area.
+3. If Minima platform behavior is unclear, consult source and official docs under `refs/`. See `CLAUDE.md §8` for the lookup table.
+4. Identify affected layers before editing.
+5. Implement in dependency order.
+6. Validate contracts, schema parity, Maxima fields, and `poll:false`.
+7. Update `AGENTS.md` and, when needed, the relevant `docs/` reference file.
 
-### Step 1 — Read before writing
-1. Open MinimaAds.md and read the sections relevant to the task.
-2. Cross-reference section 6 (Source of Truth) to confirm which modules are affected.
-3. Check AGENTS.md sections 12 (Fragility Points) and 14 (Open Bugs) for known issues.
-4. If any Minima platform behavior is unclear, consult the source and official docs at `refs/` before improvising. See CLAUDE.md §8 for the full lookup table (covers `refs/Minima-1.0.45/` Java/JS source AND `refs/docs-main/` official documentation).
-
-### Step 2 — Identify affected modules
-Map the task to one or more layers:
+Layer map:
 
 | Layer | Files | MinimaAds.md ref |
 |---|---|---|
-| Core | `core/campaigns.js`, `core/selection.js`, `core/validation.js`, `core/rewards.js`, `core/minima.js` | §7 |
-| Service Worker | `service.js`, `db-init.js`, `handlers/*.js` | §11 |
-| Database schema | `db-init.js` (SW) + FE DB init | §3.5 |
+| Core | `core/*.js` | §7 |
+| Service Worker | `service.js`, `public/service-workers/handlers/*.js`, `public/service-workers/db-init.js` | §11 |
+| Database schema | `public/service-workers/db-init.js` plus FE initialization | §3.5 |
 | SDK | `sdk/index.js` | §13 |
 | UI / MiniDapp | `dapp/app.js`, `dapp/views/*.js` | §12.1 |
 
-### Step 3 — Implementation order (mandatory)
+Implementation order:
 
-Always implement in this order to avoid broken dependencies:
-
-1. **DB schema** — if any new table or column is needed (update both SW `db-init.js` and FE init)
-2. **Core** — `core/*.js` functions (no UI, no MDS calls outside `core/minima.js`)
-3. **Service Worker** — handlers in `public/service-workers/handlers/`
-4. **SDK** — `sdk/index.js` public API wrappers
-5. **UI** — `dapp/app.js` and `dapp/views/*.js`
-
-### Step 4 — Validate coherence
-
-Before marking the task done:
-- [ ] Function signatures match MinimaAds.md §7 exactly
-- [ ] Maxima message types match MinimaAds.md §8 schemas exactly
-- [ ] LIMITS values are read from the `LIMITS` constant, never hardcoded inline
-- [ ] Trust model not violated: client-side = semi-trusted, on-chain = authoritative (§9)
-- [ ] `poll:false` on all outbound Maxima sends
-- [ ] DB changes applied in BOTH runtimes
-- [ ] AGENTS.md sections 8, 9, 10 updated if schema/protocol/signals changed
-
-### Step 5 — Update AGENTS.md
-See section 0) Mandatory Update Mandate.
+1. DB schema, if needed, in both runtimes.
+2. Core.
+3. Service Worker handlers.
+4. SDK.
+5. UI.
 
 ---
 
-## 0.7) Contract Enforcement — Core API Stability
+## 3) Stable Contracts
 
-The functions defined in MinimaAds.md §7 are **stable contracts**. They define the interface between layers.
+The functions defined in `MinimaAds.md §7` are stable contracts. Do not rename, reorder parameters, or add undocumented parameters without updating `MinimaAds.md` in the same patch.
 
-### Rules
+Stable core signatures:
 
-1. **Do not rename Core API functions** without:
-   - Updating MinimaAds.md §7 in the same patch
-   - Documenting the change in AGENTS.md §16 (Document History)
-
-2. **Do not change function signatures** (parameter order, callback shape) without the same process.
-
-3. **Do not add undocumented parameters** to Core API functions. If a new parameter is needed, add it to MinimaAds.md §7 first, then implement.
-
-4. **SDK public API** (`sdk/index.js`) is the external contract with publishers. Changes here are breaking changes — treat them with extra caution.
-
-5. **Maxima message schemas** (§8) are wire-format contracts. A change to any field name or type may break nodes running older versions.
-
-### Stable Function Reference
-
-The following function signatures must NOT be altered without a MinimaAds.md update:
-
-```
+```javascript
 campaigns.js : getCampaigns(cb), getCampaign(id, cb), saveCampaign(campaign, ad, cb),
                updateBudget(campaignId, deductAmount, cb), setCampaignStatus(campaignId, status, cb)
-selection.js : selectAd(userAddress, userInterests, campaigns)  [synchronous]
+selection.js : selectAd(userAddress, userInterests, campaigns)
 validation.js: validateView(campaignId, userAddress, cb), validateClick(campaignId, userAddress, cb),
                isDuplicate(eventId, cb)
 rewards.js   : createRewardEvent(params, cb), getUserRewards(userAddress, cb),
@@ -136,1068 +92,126 @@ rewards.js   : createRewardEvent(params, cb), getUserRewards(userAddress, cb),
 minima.js    : sqlQuery(query, cb), broadcastMaxima(payload, cb), signalFE(type, data)
 ```
 
----
+SDK public API in `sdk/index.js` is an external publisher contract. Treat changes there as breaking unless explicitly approved.
 
-## 0.8) Forbidden Actions (MANDATORY)
-
-The following actions are **prohibited** for any agent, regardless of task scope:
-
-### Architecture
-- ❌ **Do NOT introduce JavaScript frameworks** (React, Vue, Svelte, Angular, etc.). The frontend is Vanilla JavaScript (ES Modules). This is a final, non-negotiable decision.
-- ❌ **Do NOT add a build step, bundler, or transpiler** (Webpack, Vite, esbuild, etc.) to the project. MVP has no build step.
-- ❌ **Do NOT add UI logic inside Core modules** (`core/*.js`). Core = business logic only. No DOM access, no `document.*` calls.
-- ❌ **Do NOT bypass the Service Worker for persistence**. All inbound network data must be persisted by SW (see section 1.3 Golden Rule 1).
-- ❌ **Do NOT call `MDS.sql` directly outside `core/minima.js`**. All DB operations go through the `sqlQuery()` wrapper.
-
-### Maxima
-- ❌ **Do NOT send Maxima messages without `poll:false`**. A blocking send freezes the SW event loop for ~77 seconds (see section 2.3).
-- ❌ **Do NOT add new `application:` names** in Maxima sends. Always use the `APP_NAME = 'minima-ads'` constant.
-- ❌ **Do NOT modify Maxima message schemas** without updating MinimaAds.md §8 in the same patch.
-
-### Data Model
-- ❌ **Do NOT alter the data model** (add/rename/remove fields in Campaign, Ad, RewardEvent, UserProfile) without updating MinimaAds.md §3 and §3.5.
-- ❌ **Do NOT hardcode LIMITS values inline**. Always read from the `LIMITS` constant object defined at the top of `main.js`.
-- ❌ **Do NOT allow a creator to earn rewards from their own campaigns**. The `CREATOR_ADDRESS !== userAddress` check must exist in `selectAd()` and `validateView/Click()`.
-
-### Process
-- ❌ **Do NOT run `npm run build`**, `npm run minima:*`, or release packaging unless explicitly requested by the maintainer.
-- ❌ **Do NOT invent new system flows** not defined in MinimaAds.md §6. If a new flow is needed, propose it to the maintainer first.
-- ❌ **Do NOT silently modify AGENTS.md sections 6–10** (project topology, schema, protocol matrix, signals, source of truth rules) without also updating MinimaAds.md if there is a conflict.
+Maxima message schemas in `MinimaAds.md §8` are wire-format contracts. Field changes require a spec update.
 
 ---
 
-## 0.9) Role of Agents — Implementers, Not Architects
+## 4) Forbidden Actions
 
-Agents are **implementers**. The architecture is defined.
+Architecture:
+- Do not introduce JavaScript frameworks. The frontend is vanilla JavaScript.
+- Do not add a build step, bundler, or transpiler.
+- Do not add UI logic inside `core/*.js`.
+- Do not bypass the Service Worker for inbound network persistence.
+- Do not call `MDS.sql` directly outside `core/minima.js`, except existing FE UI code that predates the wrapper; prefer the wrapper for new code.
 
-| Agent may | Agent may NOT |
-|---|---|
-| Implement functions defined in MinimaAds.md §7 | Redefine the function signature or purpose |
-| Add new handler functions to the SW | Define new Maxima message types without MinimaAds.md §8 update |
-| Add UI components to `dapp/views/` | Import React, Vue, or any framework |
-| Add DB columns via `ADD COLUMN IF NOT EXISTS` | Change column types or remove existing columns |
-| Fix bugs in existing Core logic | Refactor Core architecture unilaterally |
-| Update AGENTS.md with new fragility points | Override decisions made in MinimaAds.md |
-| Propose architectural changes (in writing) | Implement unapproved architectural changes |
+Maxima:
+- Do not send Maxima messages without `poll:false`, except `maxima action:sendall` where Minima has no `poll:false` parameter.
+- Do not add new `application:` names. Use `APP_NAME = 'minima-ads'`.
+- Do not modify Maxima schemas without updating `MinimaAds.md §8`.
 
-If you believe a MinimaAds.md decision is incorrect or incomplete, **document the issue in AGENTS.md §14 (Open Bugs / Pending Fixes)** and stop. Do not implement a workaround that diverges from the spec.
+Data model:
+- Do not add, rename, or remove fields in Campaign, Ad, RewardEvent, UserProfile, Frame, or Channel models without updating `MinimaAds.md`.
+- Do not hardcode LIMITS values inline. Read from the `LIMITS` constant.
+- Do not allow a creator to earn rewards from their own campaigns.
 
----
-
-## 1) Minima MiniDapp Runtime Model (Read First)
-
-Every Minima MiniDapp runs in **two separate, independent runtimes** that share a local H2 database but have no direct memory or state sharing:
-
-### 1.1 Frontend (FE)
-- Browser context: React, TypeScript, or vanilla JS
-- Bootstrapped via `MDS.init(...)` from the `@minima-global/mds` npm package
-- Owns UI state, route logic, optimistic UX
-- Reads/writes DB via `MDS.sql()` wrappers in services
-- Receives inbound Maxima events through the MDS event callback
-- Communicates with SW via `MDS.comms.solo()` signals (SW→FE only)
-
-### 1.2 Service Worker (SW)
-- Rhino/Nashorn JS engine running inside the Minima Java node (NOT a browser Service Worker)
-- Entry point: **`service.js` (project root)** — Minima hardcodes this path (`MDSManager.java:909`, `ServiceJSRunner.java:71`): `new File(getMiniDAPPWebFolder(uid), "service.js")`. The `"service"` field in `dapp.conf` is NOT used to locate the SW. `service.js` is the canonical source but must be manually mirrored to `service.js` — editing only the source file has no runtime effect.
-- Initializes on `inited` MDS event
-- Handles all inbound Maxima messages and network events
-- Owns DB schema initialization and migrations
-- Emits signals to FE via `MDS.comms.solo(...)`
-
-### 1.3 Golden Rules
-1. **SW is authoritative for persistence** — all inbound network data must be persisted by SW, not FE.
-2. **FE is authoritative for UI** — rendering, optimistic updates, route logic.
-3. **Never share mutable state** — the only bridge is the DB and `MDS.comms.solo` signals.
-4. **SW → FE**: via `MDS.comms.solo(JSON.stringify({ type: "...", ... }))` → fires `MDSCOMMS` event in FE.
-5. **FE → SW**: via DB writes + polling, or via raw `MDS.cmd(...)` service commands the SW listens to.
-
-### 1.4 Build and Compile Ownership
-- Compilation, build, packaging and release are owned by the project maintainer.
-- Agents do NOT run `npm run build`, `npm run minima:*`, `capacitor` builds, or release packaging unless explicitly requested.
-- Agents must always provide exact verification commands and pass criteria in handoff notes.
+Process:
+- Do not run `npm run build`, `npm run minima:*`, Capacitor builds, or release packaging unless explicitly requested.
+- Do not invent new system flows outside `MinimaAds.md §6`.
+- Do not silently change schema/protocol/signal docs without checking `MinimaAds.md`.
 
 ---
 
-## 2) MDS API — Critical Distinctions
+## 5) Critical Platform Rules
 
-### 2.1 Frontend TypeScript (`@minima-global/mds`)
+Full details live in `docs/PLATFORM_NOTES.md`. Keep these in active memory:
 
-| Operation | Correct | Wrong |
-|---|---|---|
-| Send Maxima message | `MDS.cmd.maxima({ params: { action:'send', ... } }, cb)` | `MDS.cmd("maxima action:send ...")` ← namespace, not a function |
-| Raw command (rare) | `MDS.executeRaw("maxima action:send ... poll:false", cb)` | — |
-| SQL query | `MDS.sql("SELECT ...", cb)` | — |
-| Emit SW signal | `MDS.comms.solo(payload)` | — (callback is supported but only confirms queuing, not delivery — use fire-and-forget) |
-
-**`MDS.cmd` in the TypeScript package is a namespace object, not a callable function.** Calling `(MDS.cmd as any)("maxima ...")` silently does nothing. Always use `MDS.cmd.maxima(...)`, `MDS.cmd.block()`, etc.
-
-**`MDS.executeRaw`** is available in the FE but should only be used when a raw command string is absolutely necessary (e.g., `poll:false` on a non-standard command). For standard Maxima sends, prefer `MDS.cmd.maxima()`.
-
-For raw Maxima sends from FE that need `poll:false`:
-```typescript
-MDS.executeRaw(`maxima action:send to:${addr} application:myapp data:${hex} poll:false`, cb);
-```
-
-### 2.2 Service Worker (raw `mds.js`)
-
-| Operation | Correct |
-|---|---|
-| Maxima send | `MDS.cmd("maxima action:send publickey:0x... application:myapp data:0x... poll:false", cb)` |
-| SQL | `MDS.sql("SELECT ...", cb)` |
-| Log | `MDS.log("message")` — NOT `console.log` (unavailable in Rhino) |
-| Timer | Do NOT use `MDS.cmd("timer 30000", cb)` — fires immediately in Rhino |
-| Signal to FE | `MDS.comms.solo(JSON.stringify({ type: "MY_EVENT", ... }))` — callback optional, only confirms queuing |
-
-### 2.3 SW `MDS.cmd` and `MDS.sql` are synchronous
-
-In the Service Worker (Rhino/Java), `MDS.cmd()` and `MDS.sql()` execute **synchronously** — the callback is called immediately inline before the outer function returns. There is no async scheduling, no event loop tick, no Promise.
-
-```javascript
-// In SW: callback fires synchronously — this is safe to chain deeply
-MDS.sql("SELECT ...", function(res) {
-  // This runs NOW, before the next line of the outer function
-  MDS.sql("INSERT ...", function(res2) {
-    // And this runs NOW too
-  });
-});
-```
-
-**Consequence**: race conditions within a single event handler are impossible in SW. But state shared across two separate MAXIMA events can still race if two messages arrive in quick succession.
-
-**FE contrast**: In the FE, `MDS.sql()` sends an HTTP POST (truly async). Callback fires only after the HTTP round-trip (~few ms).
-
-### 2.4 `poll:false` — Mandatory in Hot Paths
-All outbound Maxima sends in the SW (and FE) **must** use `poll:false`. Without it, the send blocks the entire SW event loop for ~77 seconds if the target is offline or not in contacts. This freezes gossip, message processing, and DB maintenance.
-
-```javascript
-// SW — always include poll:false
-MDS.cmd("maxima action:send publickey:" + pk + " application:myapp data:" + hex + " poll:false", cb);
-```
+- Minima MiniDapps run in two independent runtimes: browser FE and Rhino/Nashorn SW.
+- Runtime SW entry point is root `service.js`; `dapp.conf` does not control the service file path.
+- SW is authoritative for inbound network persistence. FE is authoritative for UI.
+- SW logs with `MDS.log()`, not `console.log`.
+- SW JavaScript must be Rhino-safe: use `var`, avoid arrow functions, trailing commas, and template literals.
+- H2 returns SQL row keys in uppercase.
+- H2 has no PostgreSQL `ON CONFLICT`; use `MERGE INTO`.
+- H2 BOOLEAN values may return as strings.
+- H2 omits NULL columns from row objects.
+- H2 string comparisons are case-sensitive; use `UPPER()` for IDs and public keys.
+- Escape all user input and inbound Maxima payload strings before SQL interpolation.
+- Maxima payloads are hex-encoded JSON.
+- Public keys must be normalized for `0x`/`0X` casing differences.
+- `MDS.comms.solo()` fires `MDSCOMMS` in FE; payload is usually at `event.data.message`.
 
 ---
 
-## 3) H2 Database — Minima-Specific Gotchas
+## 6) Project Rules
 
-### 3.1 Column Names Are UPPERCASE
-MDS SQL returns row keys in **UPPERCASE** regardless of how you defined them.
+Full project notes live in `docs/PROJECT_NOTES.md`.
 
-```javascript
-// You defined: CREATE TABLE FOO (myColumn VARCHAR(256))
-MDS.sql("SELECT myColumn FROM FOO", function(res) {
-  var row = res.rows[0];
-  console.log(row.myColumn);   // undefined
-  console.log(row.MYCOLUMN);   // ✅ correct
-});
-```
+Project identity:
+- MinimaAds is a decentralized advertising infrastructure MiniDapp.
+- Viewers earn for ad views/clicks.
+- Creators fund campaigns through Minima token escrow.
+- Publishers operate Frames and earn publisher rewards.
 
-**Rule**: When reading SQL results, always access fields in UPPERCASE, OR use `row.FIELD || row.field` if the object may come from either a raw SQL result or an already-mapped service object.
+Canonical identities:
+- `USER_PROFILE.ADDRESS` and `CAMPAIGN.CREATOR_ADDRESS` are Maxima public keys.
+- `FRAMES.FRAME_ID` for the built-in frame is `builtin:<MAXIMA_PK>`.
+- `CAMPAIGNS.ESCROW_WALLET_PK` is a wallet signing key, not a Maxima key.
 
-### 3.2 No PostgreSQL `ON CONFLICT` — Use `MERGE INTO`
-H2 does not support PostgreSQL's `ON CONFLICT(col) DO UPDATE SET`. Use H2's `MERGE INTO` syntax:
-
-```sql
--- ❌ PostgreSQL syntax — throws JdbcSQLSyntaxErrorException in H2
-INSERT INTO MY_TABLE (id, value) VALUES (1, 'x') ON CONFLICT(id) DO UPDATE SET value='x';
-
--- ✅ H2 syntax
-MERGE INTO MY_TABLE (id, value) KEY (id) VALUES (1, 'x');
-```
-
-### 3.3 BOOLEAN Columns Return Strings
-H2 BOOLEAN columns return `"true"` or `"false"` (strings), not JS `true`/`false`.
-
-```javascript
-// ❌ This will always be false for stored TRUE values:
-if (row.IS_ACTIVE) { ... }
-
-// ✅ Correct:
-if (row.IS_ACTIVE === true || row.IS_ACTIVE === 1 || row.IS_ACTIVE === "true" || row.IS_ACTIVE === "1") { ... }
-```
-
-### 3.4 NULL Columns Are Omitted from Row Objects
-
-**Verified on real H2/MDS node (2026-04-21).** When a column contains NULL, H2/MDS omits the field entirely from the returned row object — it is `undefined`, not `null`.
-
-```javascript
-// EXPIRES_AT BIGINT DEFAULT NULL — inserted as NULL
-var row = result.rows[0];
-row.EXPIRES_AT          // → undefined  (field absent)
-row.EXPIRES_AT === null // → false  ← WRONG assumption
-
-// ✅ Correct guard:
-var expiresAt = (row.EXPIRES_AT !== null && row.EXPIRES_AT !== undefined) ? row.EXPIRES_AT : "NULL";
-```
-
-This affects any column with `DEFAULT NULL` (EXPIRES_AT, INTERESTS, LAST_REWARD_AT, PUBLISHER_ID).
-
-### 3.5 Schema Migrations — Both Runtimes
-Both SW and FE initialize the DB schema independently. Any schema change must be mirrored in both:
-- SW: `public/service-workers/db-init.js` (or equivalent)
-- FE: `src/services/database.service.ts` (or equivalent)
-
-Use `ADD COLUMN IF NOT EXISTS` for non-breaking migrations:
-```sql
-ALTER TABLE MY_TABLE ADD COLUMN IF NOT EXISTS new_field VARCHAR(256) DEFAULT NULL;
-```
-
-**Never use `ALTER TABLE ... ALTER COLUMN ... SET DATA TYPE`** for virtual/computed columns — H2 does not allow altering columns referenced by expressions.
-
-### 3.5 Case-Sensitive String Comparisons
-H2 string comparisons are case-sensitive by default. For public keys, IDs, or any value that may have inconsistent casing, always use `UPPER()`:
-```sql
-WHERE UPPER(publickey) = UPPER('0x30819f...')
-WHERE UPPER(channel_id) = UPPER('0xabc...')
-```
-Silent 0-row updates are the most common symptom of missing `UPPER()`.
-
-**`0x` vs `0X` prefix inconsistency**: Maxima delivers public keys with a lowercase `0x` prefix (`0x30819f...`), but after `UPPER()` or H2 storage the prefix becomes `0X`. Any JS code that uses `startsWith('0x')`, `Set.has(pubkey)`, or strict string equality on public keys must normalize both sides:
-```javascript
-// Wrong — misses 0X variant:
-if (pubkey.startsWith('0x')) { ... }
-
-// Correct:
-if (pubkey.toLowerCase().startsWith('0x')) { ... }
-
-// For set lookups and comparisons:
-pubkey.toUpperCase() === otherKey.toUpperCase()
-```
-
-### 3.6 SQL Injection — Escape User Input
-
-User-supplied strings (campaign `TITLE`, ad `BODY`, `CTA_URL`, `INTERESTS`) must be escaped before interpolation into SQL. The official Minima examples (`maxsolo/service.js`) do **not** escape and are vulnerable — do not follow that pattern.
-
-```javascript
-// Minimal safe escape for H2 / Rhino (no external libs available):
-function escapeSql(str) {
-  return str.replace(/'/g, "''");
-}
-
-// Usage:
-var sql = "MERGE INTO ADS (ID, TITLE, BODY) KEY (ID) VALUES ("
-  + "'" + id + "',"
-  + "'" + escapeSql(title) + "',"
-  + "'" + escapeSql(body) + "')";
-```
-
-**Rule**: Every string value interpolated into an MDS.sql query that originates from user input or an inbound Maxima payload must pass through `escapeSql()`. Numeric values (BUDGET, REWARD amounts) must be cast with `parseFloat()` before interpolation — never trust them as raw strings.
-
-### 3.7 Async Callback Pattern
-All MDS SQL calls are asynchronous with Node-style callbacks. There is no Promise API in the SW (Rhino). Chain operations inside callbacks:
-
-```javascript
-MDS.sql("SELECT ...", function(res) {
-  if (!res.status) { MDS.log("Error: " + res.error); return; }
-  var rows = res.rows;
-  // next operation here
-  MDS.sql("INSERT ...", function(res2) { ... });
-});
-```
-
----
-
-## 4) Maxima — P2P Messaging Layer
-
-### 4.1 Overview
-Maxima is Minima's unicast P2P messaging layer. It routes messages by public key or Mx address.
-
-- **Public key send**: `publickey:0x30819f...` — requires the recipient to be in your Maxima contacts.
-- **Address send**: `to:Mx...` — works without contact relationship, uses routing via MLS/relay.
-- **Always use `poll:false`** — see section 2.3.
-
-### 4.2 Send Fallback Strategy
-When sending to a peer who may not be in contacts:
-1. Try `publickey:0x...` first.
-2. On "No Contact found" error, resolve `Mx...` address from local discovery cache.
-3. Retry with `to:Mx...`.
-
-Never assume a peer is in contacts. Implement the fallback chain from the start.
-
-### 4.3 Payload Size Limit — 256 KB
-
-Maxima rejects messages larger than **262144 bytes** (256 KB) with a `TOOBIG` response. The limit applies to the full MaximaPackage (header + public key + signature + data). The usable data payload is slightly smaller.
-
-A full `CAMPAIGN_ANNOUNCE` message (campaign + ad JSON, hex-encoded) is typically 1–3 KB — well within the limit. No practical risk for MinimaAds MVP.
-
-If a send returns `TOOBIG`, the message is silently dropped with a node log warning. The SW callback receives `delivered: false`. Always check `result.response.delivered` in the `broadcastMaxima` callback if you need delivery confirmation.
-
-### 4.4 `maxima action:sendall` — Broadcast to All Contacts
-
-`MDS.cmd("maxima action:sendall application:... data:... ", cb)` sends to **all Maxima contacts** in one command. It always uses the background sender (non-blocking, equivalent to `poll:true` per-contact). No `poll:false` parameter is available or needed.
-
-This is the recommended implementation for `broadcastMaxima` in `core/minima.js`:
-
-```javascript
-// Preferred: single command, always non-blocking
-function broadcastMaxima(payload, cb) {
-  var hex = "0x" + utf8ToHex(JSON.stringify(payload)).toUpperCase();
-  MDS.cmd("maxima action:sendall application:" + APP_NAME + " data:" + hex, function(res) {
-    cb(res.status);
-  });
-}
-```
-
-**Caveat**: The Maxima poll send queue is capped at **256 pending messages**. If the queue exceeds 256, it is cleared. If you have many contacts and re-broadcast frequently, this could cause silent drops. For MVP network sizes, this is not a concern.
-
-### 4.5 Triple Identity — Mx address, Maxima PK, Wallet PK
-
-Minima nodes have three identifiers. Each has a distinct role:
-
-| Identifier | Format | Source command | Used for |
-|---|---|---|---|
-| Maxima public key | `0x30819f...` (256-bit) | `maxima action:info → publickey` | Node identity in MinimaAds: `CREATOR_ADDRESS`, `USER_PROFILE.ADDRESS`, Maxima routing |
-| Mx address | `Mx...` | `maxima action:info → address` | Maxima `to:` fallback, UI display — do NOT store as identity |
-| Wallet signing key | `0x...` (64 chars, 256-bit) | `keys action:list → publickey` | KissVM `SIGNEDBY()` — escrow PREVSTATE(1) only |
-
-**Rules**:
-- `CREATOR_ADDRESS` and `USER_PROFILE.ADDRESS` = **Maxima PK** — never Mx address, never wallet key.
-- `CAMPAIGNS.ESCROW_WALLET_PK` = **wallet signing key** — never Maxima PK.
-- These are different cryptographic keys. Do not substitute one for the other.
-- When querying by address from user input or Maxima payload, always normalize with `UPPER()`.
-- When comparing in JS, always use `.toUpperCase()` on both sides — see §3.5 for the `0x`/`0X` prefix issue.
-- `broadcastMaxima` in `core/minima.js` must implement the fallback chain: try `publickey:` first, then `to:` on "No Contact found".
-
-### 4.3 Payload Encoding
-Maxima `data` field must be hex-encoded:
-```javascript
-function utf8ToHex(str) {
-  // standard utf8 → hex conversion
-}
-var payload = JSON.stringify({ type: "my_message", data: "hello" });
-var hex = "0x" + utf8ToHex(payload).toUpperCase();
-MDS.cmd("maxima action:send publickey:" + pk + " application:myapp data:" + hex + " poll:false", cb);
-```
-
-### 4.4 Application Name
-Each MiniDapp should use a consistent `application:` name in all Maxima sends. The SW filters inbound Maxima events by this name. Define it as a constant and never hardcode it in multiple places.
-
-### 4.5 Receiving Maxima Messages
-In the SW, inbound Maxima messages arrive via the `MAXIMA` MDS event:
-```javascript
-MDS.init(function(msg) {
-  if (msg.event === "MAXIMA") {
-    var payload = JSON.parse(hexToUtf8(msg.data.data));
-    // route by payload.type
-  }
-});
-```
-
----
-
-## 5) SW ↔ FE Communication
-
-### 5.1 SW → FE: `MDS.comms.solo()`
-```javascript
-// SW fires:
-MDS.comms.solo(JSON.stringify({ type: "MY_EVENT", someField: "value" }));
-```
-
-```typescript
-// FE receives via MDS event (minima.service.ts or equivalent):
-// event.event === "MDSCOMMS"
-// event.data.message === '{"type":"MY_EVENT","someField":"value"}'
-const parsed = JSON.parse(event.data?.message ?? event.data);
-if (parsed.type === "MY_EVENT") { ... }
-```
-
-**Key facts:**
-- The FE event name is `MDSCOMMS`, NOT `MDS_SOLO`.
-- The payload string is at `event.data.message`, not `event.data`.
-- `MDS.comms.solo()` is **fire-and-forget** — do NOT pass a second callback argument (it silently fails).
-- Every new SW signal type must be added to the FE MDSCOMMS handler. Missing it means the UI never reacts.
-
-### 5.2 FE → SW: Service Commands
-For FE-initiated actions that require SW execution:
-```typescript
-// FE sends a raw command string the SW listens for:
-(window as any).MDS?.cmd("service:MY_ACTION:" + someId, () => {});
-```
-```javascript
-// SW listens:
-if (msg.event === "MDS_INITED" && msg.data?.startsWith("service:MY_ACTION:")) {
-  var id = msg.data.split(":")[2];
-  // execute action
-}
-```
-
-### 5.3 Timer Pattern in SW — Periodic Re-broadcast
-
-`MDS.cmd("timer X", cb)` in Rhino fires `cb` **immediately**, not after X milliseconds. For real elapsed-time delays:
-
-```javascript
-// Store start time:
-var _myState = { startedAt: Date.now() };
-
-// Check elapsed time in the MDS_TIMER_10SECONDS handler:
-MDS.init(function(msg) {
-  if (msg.event === "MDS_TIMER_10SECONDS") {
-    if (Date.now() - _myState.startedAt >= 30000) {
-      // 30 seconds have passed
-    }
-  }
-});
-```
-
-**MinimaAds re-broadcast pattern** — `MDS_TIMER_10SECONDS` fires every ~10 s, but CAMPAIGN_ANNOUNCE should re-broadcast every ~10 min (600 s). Use a tick counter:
-
-```javascript
-var _timerTicks = 0;
-var REBROADCAST_EVERY_TICKS = 60; // 60 × 10s = 600s = 10 min
-
-function onTimer() {
-  _timerTicks++;
-  if (_timerTicks >= REBROADCAST_EVERY_TICKS) {
-    _timerTicks = 0;
-    rebroadcastActiveCampaigns();
-  }
-  checkExpiredCampaigns();
-}
-```
-
-The `_timerTicks` counter resets on SW restart (node reboot), so the first re-broadcast may happen sooner than 10 min after a restart. This is acceptable for MVP.
-
-### 5.4 Rhino/Nashorn Syntax Constraints
-The SW runs on Rhino (Java-based JS engine). Avoid:
-- **Trailing commas** in function parameter lists → `EvaluatorException: missing formal parameter`
-- **Arrow functions** (limited support) — use `function()` instead
-- **`let`/`const`** in some Rhino versions — use `var` for safety
-- **Template literals** in older Rhino — use string concatenation
-
-Syntax errors in Rhino are silent: Minima reports `Started service.js` even when the script has evaluation errors.
-
----
-
-## 6) Project Intent
-
-MinimaAds is a **decentralized advertising infrastructure** running on the Minima blockchain as a MiniDapp.
-
-**Core purpose**: Allow advertisers (creators) to publish ad campaigns with a locked token budget, and reward users (viewers) for viewing and clicking ads. Campaigns propagate peer-to-peer via Maxima — no central server, no external tracking.
-
-**Target users**:
-- **Viewers**: Minima node operators who earn token rewards for engaging with ads
-- **Creators**: Advertisers who fund campaigns with Minima tokens locked in a KissVM escrow
-- **Publishers**: dApp developers who integrate MinimaAds via the SDK to display ads
-
-**Non-goals (MVP)**: Multi-hop campaign gossip, cryptographic event signing, image/video ads, A/B testing.
-
-> Full specification: MinimaAds.md §1.3, §2, §4, Appendix A.
-
----
-
-## 6) Canonical Utility Functions
-
-These implementations are required in `service.js` (SW context). Do NOT use browser APIs (`TextEncoder`, `crypto.randomUUID`) — they are unavailable in Rhino.
-
-```javascript
-// Hex → UTF-8 string (Rhino-compatible).
-// Strips an optional leading "0x"/"0X" prefix — Maxima msg.data.data
-// arrives with the prefix and JSON.parse would fail at char 1 otherwise.
-function hexToUtf8(s) {
-  var hex = s.replace(/\s+/g, '');
-  if (hex.length >= 2 && hex.charAt(0) === '0' && (hex.charAt(1) === 'x' || hex.charAt(1) === 'X')) {
-    hex = hex.substring(2);
-  }
-  return decodeURIComponent(hex.replace(/[0-9A-F]{2}/gi, '%$&'));
-}
-
-// UTF-8 string → hex (pure JS, no TextEncoder)
-function utf8ToHex(str) {
-  var hex = '';
-  for (var i = 0; i < str.length; i++) {
-    var code = str.charCodeAt(i);
-    if (code < 128) {
-      hex += ('0' + code.toString(16)).slice(-2);
-    } else if (code < 2048) {
-      hex += ('0' + ((code >> 6) | 192).toString(16)).slice(-2);
-      hex += ('0' + ((code & 63) | 128).toString(16)).slice(-2);
-    } else {
-      hex += ('0' + ((code >> 12) | 224).toString(16)).slice(-2);
-      hex += ('0' + (((code >> 6) & 63) | 128).toString(16)).slice(-2);
-      hex += ('0' + ((code & 63) | 128).toString(16)).slice(-2);
-    }
-  }
-  return hex;
-}
-
-// Unique ID generator (not RFC UUID, but collision-safe for single-node use)
-function generateUID() {
-  return Date.now().toString(16) + '-' + Math.floor(Math.random() * 0xFFFFFFFF).toString(16);
-}
-```
-
-**Rules**:
-- `hexToUtf8` / `utf8ToHex` must be defined before `MDS.init(...)` in `main.js` — all handlers depend on them.
-- `generateUID()` is used by `createRewardEvent()` and `saveCampaign()` to assign IDs. Never call `Math.random()` alone — always combine with `Date.now()` to avoid collisions if called in the same millisecond.
-- For FE (`core/minima.js`), `utf8ToHex` can use `TextEncoder` since it runs in a browser context.
-
----
-
-## 6.0) Node Identity — Getting the User's Address
-
-`USER_PROFILE.ADDRESS` and `CAMPAIGN.CREATOR_ADDRESS` use the **Maxima public key** (`0x...`), not the Minima wallet address. The Maxima public key uniquely identifies the node, is used for Maxima routing, and is what arrives in `msg.data.from` on inbound messages.
-
-**Pattern for `onInited()` in SW:**
-
-```javascript
-var MY_MAXIMA_PK = '';  // module-level, set once on init
-
-function onInited() {
-  initDB(function() {
-    MDS.cmd("maxima action:info", function(resp) {
-      MY_MAXIMA_PK = resp.response.publickey.toUpperCase();
-      registerUserProfile(MY_MAXIMA_PK);
-    });
-  });
-}
-
-function registerUserProfile(pk) {
-  var sql = "MERGE INTO USER_PROFILE (ADDRESS, INTERESTS, TOTAL_EARNED) "
-          + "KEY (ADDRESS) VALUES ('" + pk + "', '', 0)";
-  MDS.sql(sql, function(res) {
-    MDS.log("[ADS] User profile registered: " + pk);
-  });
-}
-```
-
-**Why not `getaddress`?** `getaddress` returns a Minima wallet address (for token transactions). For all identity checks, routing, and anti-self-reward logic, use the Maxima public key.
-
-**KissVM escrow requires a third key — the wallet signing key:**
-```javascript
-// Fetch wallet signing key for escrow PREVSTATE(1) — only needed at campaign creation
-MDS.cmd("keys action:list", function(res) {
-  var walletPK = res.response.keys[0].publickey;  // 0x..., 64 hex chars
-  // Use walletPK in CAMPAIGNS.ESCROW_WALLET_PK and in the escrow send state
-});
-```
-See MinimaAds.md Appendix B for the full escrow flow.
-
----
-
-## 6.1) Logging Convention (SW)
-
-Use consistent prefixed tags in all `MDS.log()` calls so traces are searchable across sessions:
-
-| Prefix | Module |
-|---|---|
-| `[ADS]` | General / entry points (`main.js`) |
-| `[CAMPAIGN]` | `campaign.handler.js` |
-| `[MAXIMA]` | `maxima.handler.js` — inbound routing |
-| `[REWARD]` | `core/rewards.js` |
-| `[VALIDATION]` | `core/validation.js` |
-| `[CHANNEL]` | `core/channels.js` — channel lifecycle errors |
-| `[DB]` | `core/minima.js` — sqlQuery errors |
-| `[TIMER]` | `onTimer()` — re-broadcast and expiry checks |
-
-```javascript
-MDS.log("[CAMPAIGN] ANNOUNCE received, campaign_id: " + id);
-MDS.log("[VALIDATION] validateView failed: cooldown active for " + userAddress);
-MDS.log("[DB] sqlQuery error: " + res.error);
-```
-
----
-
-## 7) Runtime Topology (Project-Specific)
-
-> Full architecture: MinimaAds.md §1.2, §11, §12.
-
-### 7.1 Frontend (FE)
+Important files:
 
 | File | Responsibility |
 |---|---|
-| `dapp/app.js` | FE entry point — `MDS.init`, routing, view dispatch, MDSCOMMS handler |
-| `dapp/views/creator.js` | Campaign creation UI |
-| `dapp/views/viewer.js` | Ad viewing + reward display UI |
-| `dapp/views/stats.js` | Campaign stats UI |
-| `sdk/index.js` | Public SDK: `init`, `getAd`, `render`, `trackView`, `trackClick` |
-| `renderer/renderAd.js` | Pure DOM renderer — renders one ad unit into a container element |
-| `core/campaigns.js` | Campaign CRUD, budget tracking |
-| `core/selection.js` | `selectAd()` — synchronous ad selection algorithm |
-| `core/validation.js` | `validateView/Click()`, `isDuplicate()`, LIMITS enforcement |
-| `core/rewards.js` | `createRewardEvent()`, `getUserProfile()` |
-| `core/minima.js` | MDS.sql wrapper, Maxima sender, FE signaller |
-| `core/channels.js` | CHANNEL_STATE CRUD, channel lifecycle (`openChannel` → `settleChannel`) |
-
-**Layer constraint**: Core must not import from MiniDapp, SDK, or Renderer. Data flows downward only.
-
-### 7.2 Service Worker (SW)
-
-| File | Responsibility |
-|---|---|
-| `service.js` | SW entry point — `APP_NAME`, `LIMITS`, `MDS.init` handler |
-| `public/service-workers/db-init.js` | H2 schema init — called from `onInited()` |
-| `public/service-workers/handlers/maxima.handler.js` | Routes inbound Maxima messages by `payload.type` |
-| `public/service-workers/handlers/campaign.handler.js` | `CAMPAIGN_ANNOUNCE`: persist + signal FE |
-| `public/service-workers/handlers/reward.handler.js` | `REWARD_REQUEST`: validate + persist + signal FE |
-| `public/service.js` | Compiled SW output — do NOT edit directly |
-
-**MDS Events handled by SW**:
-
-| MDS event | Handler | Action |
-|---|---|---|
-| `inited` | `onInited()` | Init DB schema, get Maxima identity, register escrow script, initial coin scan |
-| `MAXIMA` | `onMaxima(data)` | Hex-decode payload, route by `payload.type` |
-| `MDS_TIMER_10SECONDS` | `onTimer()` | Re-broadcast active campaigns, check expirations |
-| `NEWBLOCK` | `scanEscrowCoins()` | Query `coins address:<ESCROW_ADDRESS>` and request data for unknown campaigns |
-| `MDS_PENDING` | `onPending(msg)` | Fired when user accepts/denies a pending send via Minima Hub. Reads `msg.data.{uid,accept,status,result}`. On accept: extracts coinId from `msg.data.result.response.body.txn.outputs[0].coinid` and campaignId from `msg.data.result.response.body.txn.state[port=3]`; reads campaign+ad from keypair (`PENDING_CAMPAIGN_<campaignId>`); calls `saveCampaign`; signals `NEW_CAMPAIGN` to FE. |
+| `service.js` | Runtime SW entry point |
+| `public/service-workers/db-init.js` | SW schema initialization |
+| `dapp/app.js` | FE entry point, routing, MDS event dispatch |
+| `dapp/views/*.js` | UI views |
+| `core/*.js` | Business logic |
+| `sdk/index.js` | External publisher SDK |
+| `renderer/renderAd.js` | Ad DOM renderer |
 
 ---
 
-## 8) DB Schema
+## 7) Validation Checklist
 
-> Authoritative schema definition: MinimaAds.md §3.5. This section mirrors it for quick agent reference.
-> Update BOTH this section AND MinimaAds.md §3.5 for every schema change.
+Before final handoff:
 
-| Table | Purpose | Primary Key |
-|---|---|---|
-| `CAMPAIGNS` | Stores all known campaigns (local + received via Maxima) | `ID` |
-| `ADS` | Stores ad units linked to campaigns | `ID` |
-| `REWARD_EVENTS` | Audit log of all view/click/publisher_view events; used for dedup and limit checks | `ID` |
-| `USER_PROFILE` | Stores local user address, interests, earned totals | `ADDRESS` |
-| `DEDUP_LOG` | Deduplication log for reward events; checked by `isDuplicate()` | `ID` |
-| `FRAMES` | Registered display surfaces (publisher frames); built-in frame auto-created at init | `FRAME_ID` |
-| `CHANNEL_STATE` | Per-channel payment state; covers both viewer and publisher channels | `(CAMPAIGN_ID, VIEWER_KEY, ROLE)` |
+- Function signatures still match `MinimaAds.md §7`.
+- Maxima message schemas still match `MinimaAds.md §8`.
+- Outbound Maxima sends use `poll:false`, or documented `sendall`.
+- DB schema changes are applied in both runtimes.
+- SQL string inputs are escaped.
+- Public key comparisons normalize case.
+- `LIMITS` values are not duplicated inline.
+- Creator self-reward checks remain in selection and validation paths.
+- New or changed SW signals are handled in FE.
+- `AGENTS.md` and relevant `docs/` files are updated.
 
-### CAMPAIGNS
-| Column | Type | Notes |
-|---|---|---|
-| `ID` | VARCHAR(256) PK | UUID |
-| `CREATOR_ADDRESS` | VARCHAR(512) NOT NULL | Maxima public key (0x...) — RSA DER hex, ~326 chars — NOT wallet PK |
-| `TITLE` | VARCHAR(512) NOT NULL | |
-| `BUDGET_TOTAL` | DECIMAL(20,6) NOT NULL | |
-| `BUDGET_REMAINING` | DECIMAL(20,6) NOT NULL | Decremented on each reward |
-| `REWARD_VIEW` | DECIMAL(20,6) NOT NULL | |
-| `REWARD_CLICK` | DECIMAL(20,6) NOT NULL | |
-| `STATUS` | VARCHAR(32) DEFAULT 'active' | `draft\|active\|paused\|finished` |
-| `CREATED_AT` | BIGINT NOT NULL | unix ms |
-| `EXPIRES_AT` | BIGINT DEFAULT NULL | unix ms or null |
-| `ESCROW_COINID` | VARCHAR(66) DEFAULT '' | On-chain escrow coinid (updated each time a channel is opened from the escrow) |
-| `ESCROW_WALLET_PK` | VARCHAR(66) DEFAULT '' | Per-campaign key generated via `keys action:new` — used in escrow PREVSTATE(1) — NOT the Maxima PK and NOT the main wallet key |
-| `MAX_VIEWER_REWARD` | DECIMAL(20,6) DEFAULT NULL | Optional per-viewer channel cap set by creator. If > 0, overrides the `(REWARD_VIEW + REWARD_CLICK) × campaign_days` formula in `_computeMaxAmount()`. NULL → formula applies. |
-| `PUBLISHER_REWARD_VIEW` | DECIMAL(20,6) NOT NULL DEFAULT 0 | Tokens paid to the displaying Frame per validated view; 0 = publisher payouts disabled |
-| `MAX_PUBLISHER_BUDGET` | DECIMAL(20,6) NOT NULL DEFAULT 0 | Cap on cumulative publisher payouts; subset of BUDGET_TOTAL |
-| `PUBLISHER_BUDGET_SPENT` | DECIMAL(20,6) NOT NULL DEFAULT 0 | Running total of publisher payouts; incremented when a publisher channel is opened |
-| `MAX_DAILY_VIEWS` | INT DEFAULT 100 | Daily view limit per viewer |
-| `MAX_DAILY_CLICKS` | INT DEFAULT 100 | Daily click limit per viewer |
-
-### ADS
-| Column | Type | Notes |
-|---|---|---|
-| `ID` | VARCHAR(256) PK | UUID |
-| `CAMPAIGN_ID` | VARCHAR(256) NOT NULL | FK → CAMPAIGNS.ID |
-| `TITLE` | VARCHAR(512) NOT NULL | |
-| `BODY` | VARCHAR(2048) | |
-| `CTA_LABEL` | VARCHAR(128) | |
-| `CTA_URL` | VARCHAR(1024) | |
-| `INTERESTS` | VARCHAR(1024) DEFAULT NULL | comma-separated tags |
-
-### REWARD_EVENTS
-| Column | Type | Notes |
-|---|---|---|
-| `ID` | VARCHAR(256) PK | UUID — used for dedup via `isDuplicate()` |
-| `CAMPAIGN_ID` | VARCHAR(256) NOT NULL | |
-| `AD_ID` | VARCHAR(256) NOT NULL | |
-| `USER_ADDRESS` | VARCHAR(512) NOT NULL | Maxima public key — same RSA DER hex format, ~326 chars |
-| `TYPE` | VARCHAR(16) NOT NULL | `view\|click` |
-| `AMOUNT` | DECIMAL(20,6) NOT NULL | |
-| `TIMESTAMP` | BIGINT NOT NULL | unix ms |
-| `PUBLISHER_ID` | VARCHAR(256) DEFAULT NULL | audit trail |
-
-### USER_PROFILE
-| Column | Type | Notes |
-|---|---|---|
-| `ADDRESS` | VARCHAR(512) PK | Maxima public key (0x...) — RSA DER hex, ~326 chars |
-| `INTERESTS` | VARCHAR(1024) DEFAULT NULL | comma-separated tags |
-| `TOTAL_EARNED` | DECIMAL(20,6) DEFAULT 0 | cumulative rewards |
-| `LAST_REWARD_AT` | BIGINT DEFAULT NULL | unix ms; used for cooldown check |
-
-### DEDUP_LOG
-| Column | Type | Notes |
-|---|---|---|
-| `ID` | VARCHAR(256) PK | RewardEvent UUID — checked by `isDuplicate()` |
-| `LOGGED_AT` | BIGINT NOT NULL | unix ms — reserved for future pruning |
-
-### FRAMES
-| Column | Type | Notes |
-|---|---|---|
-| `FRAME_ID` | VARCHAR(512) PK | UUID, or `'builtin:<maxima_pk>'` for the auto-created default frame |
-| `PUBLISHER_KEY` | VARCHAR(512) NOT NULL | Maxima public key of the publisher node — captured at frame creation |
-| `PUBLISHER_WALLET` | VARCHAR(512) DEFAULT '' | Wallet address for publisher reward settlement output |
-| `LABEL` | VARCHAR(256) DEFAULT '' | Human-readable name |
-| `IS_BUILTIN` | BOOLEAN NOT NULL DEFAULT FALSE | True for the auto-created built-in frame |
-| `CREATED_AT` | BIGINT NOT NULL | unix ms |
-| `TOTAL_EARNED` | DECIMAL(20,6) DEFAULT 0 | Cumulative publisher earnings for this frame |
-
-### CHANNEL_STATE
-| Column | Type | Notes |
-|---|---|---|
-| `CAMPAIGN_ID` | VARCHAR(256) NOT NULL | FK → CAMPAIGNS.ID |
-| `VIEWER_KEY` | VARCHAR(66) NOT NULL | Per-channel wallet key (`keys action:new`); holds viewer or publisher key depending on ROLE |
-| `ROLE` | VARCHAR(16) NOT NULL DEFAULT 'viewer' | `'viewer'` or `'publisher'` — distinguishes channel type. **Always filter by ROLE in WHERE clauses** |
-| `FRAME_ID` | VARCHAR(512) DEFAULT '' | Non-empty when ROLE='publisher'; references FRAMES.FRAME_ID |
-| `CREATOR_MX` | VARCHAR(512) NOT NULL | Creator Mx contact string from escrow STATE(4) |
-| `CHANNEL_COINID` | VARCHAR(66) DEFAULT '' | Set after creator opens channel on-chain |
-| `MAX_AMOUNT` | DECIMAL(20,6) NOT NULL | viewer: `(REWARD_VIEW + REWARD_CLICK) × campaign_days`; publisher: cap from MAX_PUBLISHER_BUDGET |
-| `CUMULATIVE_EARNED` | DECIMAL(20,6) DEFAULT 0 | Total committed by creator (creator node) / total earned (viewer/publisher node) |
-| `LATEST_TX_HEX` | TEXT DEFAULT '' | Last partially-signed tx (viewer/publisher holds for settlement) |
-| `STATUS` | VARCHAR(16) DEFAULT 'pending' | `pending\|open\|settled\|expired` |
-| `CREATED_AT` | BIGINT NOT NULL | unix ms |
-| `VIEWER_WALLET_ADDR` | VARCHAR(512) DEFAULT '' | Settlement output address — viewer wallet for ROLE='viewer', publisher wallet for ROLE='publisher' |
-
-PRIMARY KEY: `(CAMPAIGN_ID, VIEWER_KEY, ROLE)` — one channel per (viewer/publisher key, campaign, role) triple.
-
-> Creator node writes: `CHANNEL_COINID`, `CUMULATIVE_EARNED`, `LATEST_TX_HEX` (what it has signed).
-> Viewer/publisher node writes: all fields; `LATEST_TX_HEX` is the voucher received from creator.
-> **Critical**: queries that previously used `WHERE CAMPAIGN_ID=X AND VIEWER_KEY=Y` must now also include `AND UPPER(ROLE)='VIEWER'` or `AND UPPER(ROLE)='PUBLISHER'` to avoid matching both rows when the same key holds both viewer and publisher channels for the same campaign (rare but possible). See fragility #33.
-
-**Schema parity rule**: Any new table or column must be added in **both** SW `db-init.js` and FE DB init in the same patch. Use `ADD COLUMN IF NOT EXISTS` for non-breaking migrations.
+For verification procedures, see `docs/VERIFICATION.md`.
 
 ---
 
-## 9) Protocol / Message Types
-
-> Authoritative schemas: MinimaAds.md §8. This section mirrors them for agent reference.
-> Update BOTH this section AND MinimaAds.md §8 for every new message type.
-
-| Maxima Type | Direction | Handler | DB Impact | FE Signal |
-|---|---|---|---|---|
-| `CAMPAIGN_ANNOUNCE` | Creator SW → all contacts | `campaign.handler.js` | `MERGE INTO CAMPAIGNS` + `MERGE INTO ADS` | `NEW_CAMPAIGN` | Optional fields `max_viewer_reward`, `publisher_reward_view`, `max_publisher_budget`, `platform_key`. Receiver MUST validate `platform_key` matches local `PLATFORM_KEY` constant AND escrow coin PREVSTATE(5); mismatch → silent drop. When local `PLATFORM_KEY` is null: skip validation (MVP). |
-| `CAMPAIGN_PAUSE` | Creator SW → all contacts | `campaign.handler.js` | `UPDATE CAMPAIGNS SET STATUS='paused'` | `CAMPAIGN_UPDATED` |
-| `CAMPAIGN_FINISH` | Creator SW → all contacts | `campaign.handler.js` | `UPDATE CAMPAIGNS SET STATUS='finished'` | `CAMPAIGN_UPDATED` |
-| `REQUEST_CAMPAIGN_DATA` | Viewer SW → Creator SW (unicast `to:Mx...`) | `campaign.handler.js` | None (read-only lookup) | None |
-| `CAMPAIGN_DATA_RESPONSE` | Creator SW → Viewer SW (unicast `to:Mx...`) | `campaign.handler.js` | `MERGE INTO CAMPAIGNS` + `MERGE INTO ADS` | `NEW_CAMPAIGN` |
-| `CHANNEL_OPEN_REQUEST` | Viewer/Publisher FE → Creator FE (unicast, `poll:true`) | `channel.handler.js` | `MERGE INTO CHANNEL_STATE` (creator, incl. `VIEWER_WALLET_ADDR`) | — (triggers coin creation in FE) | + Optional fields `role` (`viewer`\|`publisher`, default `viewer`) and `frame_id` (required when `role='publisher'`). Routes to viewer or publisher channel-open flow. |
-| `CHANNEL_OPEN` | Creator FE → Viewer/Publisher FE (unicast, `poll:true`) | `channel.handler.js` | `UPDATE CHANNEL_STATE status='open', ROLE=role` | `CHANNEL_OPENED` | + `role`, `frame_id` echoed back. |
-| `REWARD_REQUEST` | Viewer/Publisher FE → Creator FE (unicast, `poll:true`) | `channel.handler.js` | `UPDATE CHANNEL_STATE` (cumulative, tx_hex) | — (sends REWARD_VOUCHER) | + `role`, `frame_id`. Creator queries `CHANNEL_STATE WHERE ROLE=role` to validate cumulative. |
-| `REWARD_VOUCHER` | Creator FE → Viewer/Publisher FE (unicast, `poll:true`) | `channel.handler.js` | `UPDATE CHANNEL_STATE` (tx_hex, cumulative) | `VOUCHER_RECEIVED` | + `role`, `frame_id` echoed. Viewer side: standard VOUCHER_RECEIVED. Publisher side: SDK writes `publisher_view` REWARD_EVENT + signals PUBLISHER_REWARD_CONFIRMED. |
-| `VOUCHER_SYNC_REQUEST` | Viewer FE → Creator FE (unicast, `poll:true`) | `channel.handler.js` | None (read-only) | — (sends REWARD_VOUCHER or CHANNEL_OPEN) | `role` included to disambiguate which channel to sync. |
-
-> **Reward accounting is FE-owned** — `core/rewards.js` writes REWARD_EVENTS, CAMPAIGNS, USER_PROFILE. See MinimaAds.md §8.4.
-> **Channel coin creation and settlement tx signing are FE-owned** — require pending approval flow; cannot run in SW.
-
-**Application name**: `application:minima-ads` — defined as `APP_NAME` constant in `main.js`. Never hardcode the literal string in `MDS.cmd` calls.
-
-**Rule**: Every new message type added to the SW must also be added to this table. If a type is handled somewhere and not listed here, future agents will implement duplicate handlers.
-
----
-
-## 10) FE ↔ SW Signal Contract
-
-> Authoritative signal contract: MinimaAds.md §8.13. This section mirrors it for agent reference.
-> Update BOTH this section AND MinimaAds.md §8.13 whenever a new signal is added.
-
-| Signal Type | Payload | Fired By | FE Reaction |
-|---|---|---|---|
-| `DB_READY` | `{}` | `db-init.js` (SW) | Unlock FE routing — only render DB-backed views once seen |
-| `REWARD_CONFIRMED` | `{ event_id, amount, reward_type }` | `core/rewards.js` (FE) | Update reward display, balance indicator |
-| `CAMPAIGN_UPDATED` | `{ campaign_id, status, budget_remaining }` | `campaign.handler.js` (SW) | Refresh campaign card status |
-| `NEW_CAMPAIGN` | `{ campaign_id }` | `campaign.handler.js` (SW) | Reload available campaigns list |
-| `CAMPAIGN_PENDING_DENIED` | `{ uid }` | `campaign.handler.js` (SW) | Show "Transaction denied" in creator form |
-| `CHANNEL_OPENED` | `{ campaign_id, channel_coinid, max_amount }` | `channel.handler.js` (SW) | Clear "Opening channel…" message; flush pending rewards |
-| `VOUCHER_RECEIVED` | `{ campaign_id, cumulative }` | `channel.handler.js` (SW) | Update viewer earned balance display |
-| `AUTO_SETTLE` | `{ campaign_id, viewer_key, tx_hex }` | `channel.handler.js` (SW) | Prompt viewer to settle or auto-settle (txnimport → txnsign → txnpost) |
-| `SETTLE_CONFIRMED` | `{ campaign_id, amount }` | `channel.handler.js` (FE) | Show settlement confirmation; update channel status |
-| `DO_CHANNEL_OPEN` | `{ campaign_id, viewer_key, viewer_mx, max_amount }` | `channel.handler.js` (SW) | Creator FE creates channel coin (txncreate/txninput/txnoutput/txnpost) |
-| `DO_REWARD_VOUCHER` | `{ campaign_id, viewer_key, viewer_mx, event_id, cumulative }` | `channel.handler.js` (SW) | Creator FE builds partial tx and sends REWARD_VOUCHER to viewer |
-| `DO_SEND_VOUCHER` | `{ campaign_id, viewer_key, viewer_mx, cumulative, tx_hex }` | `channel.handler.js` (SW) | Creator FE re-sends REWARD_VOUCHER with stored tx_hex (reconnect sync) |
-| `DO_RESEND_CHANNEL_OPEN` | `{ campaign_id, viewer_key, viewer_mx, channel_coinid, max_amount }` | `channel.handler.js` (SW) | Creator FE re-sends CHANNEL_OPEN when viewer syncs but no voucher exists yet |
-| `FRAME_READY` | `{ frame_id, is_builtin }` | `service.js` (SW) | Built-in frame ensured at init; SDK can resolve default frameId |
-| `FRAME_CREATED` | `{ frame_id, label }` | `dapp/views/frames.js` (FE) | New frame persisted; refresh frame list |
-| `PUBLISHER_REWARD_CONFIRMED` | `{ event_id, amount, frame_id, campaign_id }` | `core/rewards.js` (FE) | Publisher reward persisted; update Frame earnings display |
-| `DO_PUBLISHER_CHANNEL_OPEN` | `{ campaign_id, publisher_key, publisher_mx, frame_id, max_amount }` | `channel.handler.js` (SW) | Creator FE creates publisher channel coin (same tx structure as viewer channel) |
-| `DO_PUBLISHER_REWARD_VOUCHER` | `{ campaign_id, publisher_key, publisher_mx, frame_id, event_id, cumulative }` | `channel.handler.js` (SW) | Creator FE builds publisher partial tx and sends REWARD_VOUCHER with role='publisher' |
-
-**Rule**: Every new signal type fired by SW must be registered in the FE `MDSCOMMS` handler (`dapp/app.js`). Missing registrations cause silent UI failures. The payload is at `event.data.message` (not `event.data`) — see section 5.1.
-
----
-
-## 11) Source of Truth Rules
-
-> For document-level source of truth, see section 0.5.
-> This section covers runtime state ownership.
-
-| State | Owner | Details |
-|---|---|---|
-| Inbound Maxima event persistence | **SW** | `campaign.handler.js` only — reward processing is FE-owned |
-| DB schema initialization | **Both** | SW `db-init.js` + FE init — both must be identical |
-| UI state and rendering | **FE** | `dapp/views/*.js` |
-| LIMITS constant | **SW** | Single `LIMITS` object in `main.js`. FE reads limits from DB if needed — never redefines them |
-| Campaign availability (what to display) | **FE** | Reads from local DB via `getCampaigns()` |
-| Budget tracking | **FE** | `updateBudget()` called by `core/rewards.js` in FE callback chain |
-| Anti-abuse enforcement | **FE** | `validateView/Click()` in `validation.js` — FE writes directly to shared H2 DB |
-| Token payment / escrow | **KissVM** | On-chain — authoritative. Client-side is performance optimization only |
-| Reward event deduplication | **FE** | `isDuplicate(eventId)` called by `core/rewards.js` before any DB write |
-
-**Creator cannot earn from own campaigns** — enforced in both `selectAd()` (FE, filters candidates) and `validateView/Click()` (SW, rejects events). Both checks must always be present.
-
----
-
-## 12) Known Fragility Points
-
-*Pre-populated with Minima platform gotchas. Add project-specific points as they are discovered.*
-
-1. **MDS SQL returns UPPERCASE column names**. Always access `row.MYFIELD`, not `row.myField`. When objects may come from either raw SQL or already-mapped service objects, check both casings: `row.MYFIELD || row.myField`. See section 3.1.
-
-2. **`MDS.cmd` in FE TypeScript is a namespace, not a function**. Use `MDS.cmd.maxima(...)` for Maxima sends. `(MDS.cmd as any)("...")` silently does nothing. See section 2.1.
-
-3. **`MDS.comms.solo()` fires `MDSCOMMS` (not `MDS_SOLO`) in the FE**. Payload is at `event.data.message`. Using the wrong event name means all SW→FE signals are silently dropped. See section 5.1.
-
-4. **`MDS.comms.solo()` does NOT support a second callback argument**. Providing one causes the notification to fail silently. Always fire-and-forget. See section 5.1.
-
-5. **`poll:false` is mandatory on all Maxima sends in hot paths**. A blocking send to an offline peer freezes the SW event loop for ~77 seconds. See section 2.3.
-
-6. **H2 BOOLEAN columns return strings `"true"`/`"false"`, not JS booleans**. Always check all four variants: `value === true || value === 1 || value === "true" || value === "1"`. See section 3.3.
-
-7. **H2 NULL columns are omitted from row objects entirely — they are `undefined`, not `null`**. Verified on real node (2026-04-21). Affects: EXPIRES_AT, INTERESTS, LAST_REWARD_AT, PUBLISHER_ID. Guard with `!== null && !== undefined`. See section 3.4.
-
-8. **`MERGE INTO ... KEY(...)` for upserts, not PostgreSQL `ON CONFLICT`**. H2 throws `JdbcSQLSyntaxErrorException` on PostgreSQL syntax. See section 3.2.
-
-8. **`MDS.cmd("timer X", cb)` fires immediately in Rhino**. Use `MDS_TIMER_10SECONDS` + `Date.now()` timestamps for real elapsed-time logic. See section 5.3.
-
-9. **Rhino trailing commas crash the SW silently**. Minima still reports `Started service.js` even when the script has a syntax error. No trailing commas in function parameter or argument lists. See section 5.4.
-
-10. **Schema changes must be applied in both SW and FE runtimes**. Both initialize the DB independently. A column added only in one runtime causes the other to fail silently on INSERT/SELECT. See section 3.4.
-
-11. **`UPPER()` required for all string comparisons on IDs and public keys**. H2 string comparisons are case-sensitive. Exact-case WHERE clauses silently match 0 rows when casing drifts. See section 3.5.
-
-12. **All Maxima `data` payloads must be hex-encoded**. The raw JSON string must be converted to `0x` + uppercase hex before sending. Receiving side must hex-decode before `JSON.parse`. See section 4.3.
-
-13. **SW handler function parameters must exactly match the dispatcher call**. In Rhino, referencing a variable from an outer function's scope in a sibling function causes `ReferenceError` on the receiver's node (different call context). Always pass all needed values as explicit arguments.
-
-14. **Inbound Maxima handler must be registered for ALL expected message types**. If a message type arrives and no handler exists, Rhino throws `ReferenceError` and silently drops the message. Enumerate all types in the dispatcher from the start.
-
-15. **`MDS.log()` is the only logging available in the SW**. `console.log` is not available in Rhino. Log with prefixed tags for searchability: `MDS.log("[MYFEATURE] ...")`.
-
-18. **`MDSINIT` event fires alongside `inited` in SW**: Java source confirms `MDS.init()` fires the callback twice — first with `{ event: "inited" }`, then immediately with `{ event: "MDSINIT" }`. The SW handler must check `msg.event === "inited"` specifically and silently ignore `MDSINIT`. If you use `if(msg.event == "inited")` (exact match), this is already safe.
-
-17. **FE/SW race condition on Maxima-triggered UI reloads**: When a `MAXIMA` event arrives, both the SW (persistence) and FE (UI) react. If the FE reloads from DB immediately on the MAXIMA event, the SW may not have finished writing yet. Add a ~200ms delay before DB reads triggered by MAXIMA events in the FE. Signals from SW via `MDS.comms.solo` (`MDSCOMMS`) are deterministic — the SW fires them only after writing — so no delay is needed for `MDSCOMMS`-triggered reloads.
-
-16. **FE also receives `MAXIMA` events via polling** (every ~2.5 s via `PollListener`). The FE `MDS.init` callback will fire for ALL Maxima message types handled by the SW: `CAMPAIGN_ANNOUNCE`, `CAMPAIGN_PAUSE`, `CAMPAIGN_FINISH`, `REQUEST_CAMPAIGN_DATA`, `CAMPAIGN_DATA_RESPONSE`. The FE handler **must silently ignore** all of these types to prevent duplicate DB writes. Handle only `MDSCOMMS` (SW signals) and UI-specific events in the FE `MDS.init` callback.
-
-18. **`newscript` removes and re-adds the script on every call** (verified in `newscript.java`). This means calling it on every SW restart is safe (address is deterministic), but the script's `trackall` setting is briefly reset during re-registration. The `scanEscrowCoins()` call immediately after `registerEscrowScript()` re-indexes all currently tracked coins, so no data is lost in practice.
-
-17. **`VERIFYOUT` has 5 parameters** (not 4 as in older Minima docs). The 5th is a BOOL for `keepstate`. Always use the 5-param form: `VERIFYOUT(output_index address amount tokenid keepstate_bool)`. In MinimaAds escrow, the change output uses `TRUE` (keepstate). The payout output uses `FALSE` (no state needed for recipient's regular wallet). Example: `VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE)`.
-
-18. **`MDS_PENDING` event** — fired in the **SW** (not FE) when the user approves or denies a pending transaction via Minima Hub. The `send` command returns `{pending:true, pendinguid:"0x..."}` immediately; the original callback is **never called again** after approval. Recovery is via `MDS_PENDING`. The approved result arrives as `msg.data.result` with shape `{command, status, response: {txpowid, body: {txn: {inputs, outputs, state}}, ...}}` — **no `.txpow` wrapper** between `response` and `body`. CoinId: `msg.data.result.response.body.txn.outputs[0].coinid`. State variables: `msg.data.result.response.body.txn.state` (array of `{port, type, data}`). Verified on Minima 1.0.45.
-
-19. **`MDS.keypair`** — persistent key-value store for MiniDapp config (survives restarts). Use it to store `ESCROW_ADDRESS` after the first `newscript` call, and to pass pending campaign data from FE to SW. **Critical: response shape differs between FE and SW contexts.** FE (HTTP API): `res.response.value`. SW (Rhino Java binding, `KEYPAIRService`): `res.value` (flat — no `response` wrapper). Always use `res.value` in SW code and `res.response.value` in FE code. Key not found → SW returns `{status:false}`, FE returns `{status:false}`. FE and SW share the same underlying store (scoped per DApp UID). Verified on Minima 1.0.45.
-
-20. **Transaction shortcut commands**: `txninput scriptmmr:true` adds the MMR proof for the input coin at input time (avoids a separate `txnbasics` call). `txnpost id:... auto:true` adds MMR proofs and scripts automatically at post time. `txnsign id:... publickey:auto` signs with the matching key automatically — but for custom script coins (like the escrow), specify the wallet public key explicitly: `txnsign id:... publickey:<wallet_pubkey>`.
-
-22. **`service.js` must be at the zip root — the `"service"` field in `dapp.conf` is ignored by Minima**. Use `MDS.load("path/to/file.js")` to load other JS files from the SW — the global `load()` function is **not defined** in the Minima Rhino runtime and throws `ReferenceError` at startup. All TASKS.md references to `load(...)` must be read as `MDS.load(...)`. Verified on Minima 1.0.45. Minima automatically looks for a file named exactly `service.js` at the root of the extracted MiniDapp zip. Any other name or path causes the SW to silently not start — no error is logged, Minima simply does not execute it. `dapp.conf` must also be at the zip root. For MinimaAds, both `service.js` and `dapp.conf` live at the project root; the zip is built from the project root (not from `public/`). `load()` paths inside `service.js` are relative to the zip root (e.g. `load("core/minima.js")`, `load("public/service-workers/db-init.js")`). Verified on Minima 1.0.45.
-
-25. **`MDS_PENDING` is a catch-all — ALL pending txns arrive in `onPending()`**. The SW `onPending()` handler in `campaign.handler.js` receives pending events for every `txnpost`/`txnsign`/`send` call in the entire DApp — not only campaign-creation sends. Channel `txnsign` returns a completely different response shape (no `body.txn.outputs`). Without a null guard, `onPending()` crashes on the first channel pending approval with `TypeError: Cannot read property "txn" from undefined`. **Rule**: Always guard `body.txn` and `body.txn.outputs` before accessing them. Silently return (not fail) when the structure does not match the expected campaign-creation shape — the channel flow has its own FE-side handler (`handleFePending`).
-
-26. **Channel coin UTXO indexing delay — and the phantom-coin edge case**. After `txnpost` mines a channel-open tx, the resulting coin may not be immediately queryable via `txninput coinid:...`. Symptom: `CoinID not found` error. Mitigation: retry loop (up to 20× with 5 s delay). **Edge case**: if the block containing the coin had an invalid MMR proof and was rejected by peers, the coin never enters the UTXO. After exhausted retries the channel coin is permanently absent. If the channel state is left with `STATUS='open'` and a non-existent `CHANNEL_COINID`, the creator will repeatedly fail to build voucher txs and the channel is stuck forever. **Fix**: after exhausting retries with a "not found" error, `DELETE FROM CHANNEL_STATE` for that `(CAMPAIGN_ID, VIEWER_KEY)` pair so the viewer's next `CHANNEL_OPEN_REQUEST` creates a fresh channel. Implemented in `buildAndExportVoucherTx()` (`dapp/app.js`). Note: the budget deducted by `openChannel()` is NOT refunded automatically — this is an accepted limitation for MVP (the escrow coin retains the budget, and a new channel will deduct again).
-
-27. **`txnsign` returns `{status:false, pending:true}` when approval is required** — NOT an error. When Minima's write-protection is active, `txnsign id:X publickey:Y` returns `{status:false, pending:true, pendinguid:"0x..."}`. The `status:false` field looks like a failure but is NOT — it means "not yet signed, pending user approval". **Critical check order**: always test `r.pending` BEFORE `!r.status`. If you delete the imported tx on `!status` (as the `onError` cleanup path does), the tx is gone when the user approves and Minima retries `txnsign id:X` → "Transaction not found" error. The retry arrives via `MDS_PENDING` in `handleFePending` — at that point the tx no longer exists. Implemented correctly in `_runSettlement()` (`dapp/views/viewer.js`): `if (r2 && r2.pending) { savePendingChannelOp(...); return; }` appears before `if (!r2 || !r2.status) { onError(...); }`. Verified on Minima 1.0.45 (2026-04-27).
-
-28. **`NEWBLOCK` fires before the new coin is queryable via `coins coinid:...`** — UTXO query lag. Verified in T-CH8 node test (2026-04-29): when a channel-open tx is mined, the `NEWBLOCK` event fires and the "NEW Unspent Coin" notification appears immediately, but `MDS.cmd("coins coinid:<id> relevant:true")` returns an empty array for approximately **5 more blocks (~81 s at testnet block time)**. This means a NEWBLOCK handler that checks coin availability must be resilient to multiple "not found" responses before the UTXO index catches up. The `checkPendingVouchers()` loop (T-CH8) is designed for this: it retries on every NEWBLOCK and dispatches only when the coin is truly queryable. Do NOT assume that receiving a "NEW Unspent Coin" notification means the coin is immediately available via `coins coinid:...`.
-
-29. **ESCROW_ADDRESS uses `trackall:false` + address-only coin query — fixed in bug #16.** `registerEscrowScript()` uses `trackall:false` so ESCROW_ADDRESS is never added to the wallet's tracked address set. `scanEscrowCoins()` uses `coins address:ESCROW_ADDRESS` (NO `relevant:` parameter) which correctly evaluates to `relevant=false` inside Minima, calling `getAllCoins()` (full UTXO set) rather than `getRelevantCoins()`. Do NOT pass `relevant:false` explicitly — see fragility #30. Do NOT change `trackall` back to `true` — it causes all creator escrow change coins to appear as locked in every viewer's wallet.
-
-30. **`coins relevant:false` is treated as `relevant:true` by Minima — platform bug.** In `coins.java` (Minima 1.0.45), the `relevant` flag is set via `existsParam("relevant")` (a boolean presence check), not `getBooleanParam("relevant", false)` (a value check). This means that whenever `relevant:` appears in the command string — with any value including `false` — the flag evaluates to `true`, and Minima uses `getRelevantCoins()` (wallet-filtered) instead of `getAllCoins()` (full UTXO). The correct workaround is to **omit `relevant:` entirely** when you want `relevant=false`. Logic: if `address:` is provided but `relevant:` is absent, `hardsetrel` stays `false` and `existsParam("relevant")` returns `false` → `getAllCoins()` is used. This is verified in source: `coins.java:102–115` + `Command.java:79–81` (Minima 1.0.45). `scanEscrowCoins()` uses `"coins address:" + ESCROW_ADDRESS` (no `relevant:` flag) for this reason.
-
-39. **SDK embedded in a host MiniDapp must not call a second `MDS.init()`**. React/Vite hosts such as MetaChain already own the single MDS event loop. Use `MinimaAds.init({ frameId: ..., mdsAlreadyInitialized:true }, cb)` and forward every host MDS callback message into `MinimaAds.handleMdsEvent(msg)`. Without this bridge, campaign MAXIMA messages and channel/voucher replies are not persisted or flushed by the SDK.
-
-21. **Sanitize Maxima payloads before rendering (DOMPurify)**. Ad content (title, body, imageUrl) comes from third-party advertisers via Maxima. Before injecting any field into the DOM, run it through `DOMPurify.sanitize()`. The recommended pattern (from MinimaDEX) is to sanitize the entire JSON object at once: `var safe = JSON.parse(DOMPurify.sanitize(JSON.stringify(payload)))`. Apply this in `renderer/renderAd.js` (T11) and any place that renders campaign or ad data into HTML. `DOMPurify` must be included in `public/index.html` before `dapp/app.js`.
-
-23. **`broadcastMaxima` in `core/minima.js` depends on `APP_NAME` being a global**. The function references `APP_NAME` directly (no import). In the SW, `APP_NAME` is defined at the top of `main.js` before `MDS.load("core/minima.js")` — so it is in scope. In the FE, any module that calls `broadcastMaxima` must ensure `APP_NAME` is defined in the same or outer scope before calling it. Do not refactor `broadcastMaxima` to accept `appName` as a parameter without updating MinimaAds.md §7.5.
-
-24. **`signalFE` spreads `data` fields at root level of the payload object** — NOT nested under a `data` key. The FE MDSCOMMS handler must read fields directly from `parsed.*`, not from `parsed.data.*`. Example: `signalFE("REWARD_CONFIRMED", { event_id: "x", amount: 0.1 })` → `{ type: "REWARD_CONFIRMED", event_id: "x", amount: 0.1 }`. The T1 stub incorrectly nested data — this was fixed in T2.
-
-40. **Settlement coins appear "locked" when the recipient address is a custom script address**. Minima distinguishes `confirmed` (all tracked coins) from `sendable` (coins the wallet can spend directly — at a coinbase address OR a registered-and-owned script). A coin sent to a `newscript "RETURN SIGNEDBY(pk)"` address is "tracked" (appears in `confirmed`) but NOT immediately in `sendable` — it shows as "locked". The correct pattern for settlement recipients is `MDS.cmd("getaddress", ...)` which returns the node's default coinbase address; coins at coinbase addresses are immediately `sendable`. **Rule**: always use `getaddress` for the recipient address in channel-open and publisher payment requests. Do NOT use `newscript` to derive a recipient address. Implemented in `comms.handler.js` (`_resolveViewerAddrAndSend`) and `channel.handler.js` (`_doSendPublisherChannelOpenRequest`). The `getaddress` result is cached in keypair under `VIEWER_WALLET_ADDR_<campaignId>`. See Closed/Fixed PUB-1. Verified 2026-05-13.
-
-41. **Race condition — viewer channel open silently dropped when another channel-open split tx is in the mempool**. When two `CHANNEL_OPEN_REQUEST` messages arrive near-simultaneously (e.g. publisher then viewer), the creator's `swBuildAndPostChannelTx` builds Tx1 (escrow split) for both. The first mines successfully and spends the escrow coin; the second attempt's `txninput` fails ("CoinID not found" — coin in mempool). Previously this failed silently with no retry. **Fix (2026-05-13)**: on Tx1 `txninput` failure, `swBuildAndPostChannelTx` calls `_enqueuePendingChOpenSplitRetry(ctx)` which persists the context to `PENDING_CHOPEN_QUEUE` keypair with `needsSplit:true`. On each `NEWBLOCK`, `retryPendingChOpen()` processes the queue: for `needsSplit` entries, re-reads current `ESCROW_COINID`/`ESCROW_WALLET_PK` from CAMPAIGNS (the confirmed split change coin has now replaced the original), then retries `swBuildAndPostChannelTx` with fresh data. Deduplication by `campaignId|viewerKey16|role` prevents double-queuing. See Closed/Fixed PUB-2.
-
-42. **Maxima `publickey` vs `contact` string — userAddress in SDK must be the raw public key**. `maxima action:info` returns two relevant fields: `contact` (combined `publickey@host:port` used for sharing contact info) and `publickey` (the raw 66-char hex key used as the node's unique identifier in all DB queries). SDK-generated snippets embed the viewer's identity as `userAddress` in `MA_GET_AD` and `MA_TRACK_VIEW`. If `userAddress` is set to the `contact` string, `getUserRewards(userAddress)` will match 0 rows because REWARD_EVENTS stores the raw publickey — Reward History appears empty. **Rule**: always use `res.response.publickey` (NOT `res.response.contact`) when storing the viewer's own identity. In `dapp/views/frames.js` `_getMxContact`, the correct field is `res.response.publickey`. The function name `_getMxContact` is historical — it actually returns the raw publickey. See Closed/Fixed PUB-3.
-
-43. **`txninput coinid:X scriptmmr:true` fails when the coin is too fresh (< ~5 seconds on-chain)**. When `swBuildAndExportVoucherTx` is called immediately after a channel coin activates — e.g. from `_replayDeferredPublisherRewards` inside the `sendMaxima(CHANNEL_OPEN)` callback — `coins coinid:X relevant:true` already returns the coin, but `txninput ... scriptmmr:true` fails because the script's MMR proof has not been indexed yet. There is no explicit platform error; the MDS cmd just returns `status:false`. **Rule**: any TX build that references a coin via `scriptmmr:true` must not be triggered synchronously on the same NEWBLOCK event that saw the coin appear. Use a NEWBLOCK-retry pattern: on failure, leave the pending work in a DB table (e.g. `DEFERRED_PUB_REWARDS`), and retry from the next `checkPendingChannelOpens` call (triggered by the next NEWBLOCK, ~4 seconds later). The coin's MMR proof is reliably available by the second NEWBLOCK after creation. See Closed/Fixed PUB-4. Verified 2026-05-18.
-
-44. **Deferred-reward cleanup must happen AFTER TX success, not before**. In `_replayDeferredPublisherRewards` (and any similar deferred-dispatch pattern), writing to `DEDUP_LOG` and deleting from `DEFERRED_PUB_REWARDS` BEFORE the TX build permanently destroys the pending reward if the TX build fails (e.g. fragility #43 `txninput` timing failure). The event ID appears in `DEDUP_LOG` → subsequent calls skip it; the rows are gone from `DEFERRED_PUB_REWARDS` → no retry data. **Rule**: pass an `afterSend` callback to `swBuildAndExportVoucherTx`; do DEDUP_LOG write and DEFERRED_PUB_REWARDS delete only inside that callback, which fires only after `sendMaxima` succeeds. If the TX fails at any step (`txncreate`, `txninput`, `txnsign`, `txnexport`), `afterSend` is never called and the deferred rows survive for the next retry. See Closed/Fixed PUB-4. Verified 2026-05-18.
-
----
-
-## 13) Pre-merge Checklist
-
-1. Verify each new Maxima message type:
-   - [ ] Added to Protocol Matrix (section 9)
-   - [ ] Handler exists in SW
-   - [ ] Signal type registered in FE MDSCOMMS handler (if applicable)
-   - [ ] Outbound sends use `maxima action:sendall` or `send poll:false`
-2. Verify each schema change:
-   - [ ] Applied in SW `db-init.js`
-   - [ ] Applied in FE DB init (`.js`, not `.ts` — MinimaAds is Vanilla JS)
-   - [ ] Uses `ADD COLUMN IF NOT EXISTS` for non-breaking migration
-3. Verify each new `MDS.comms.solo` signal type is listed in section 10.
-4. All user-input strings pass through `escapeSql()` before SQL interpolation.
-5. All public key comparisons use `.toUpperCase()` on both sides.
-6. `AGENTS.md` updated: yes/no + affected sections listed.
-
----
-
-## 14) Open Bugs / Pending Fixes
-
-| # | Component | Description | Severity |
-|---|---|---|---|
-| ~~1~~ | ~~`service.js` (T7 stub)~~ | ~~Uses `load(...)` instead of `MDS.load(...)`. Fixed in T2 verification patch.~~ | ~~High~~ |
-| ~~2~~ | ~~`core/selection.js` + `core/campaigns.js`~~ | ~~`selectAd()` filters by `c.AD_INTERESTS` but `getCampaigns()` queries only CAMPAIGNS.~~ Resolved in T9: `sdk/index.js` `_enrichWithAds()` fetches ADS and merges `AD_INTERESTS` (plus `AD_ID/TITLE/BODY/CTA_*`) onto each campaign before `selectAd` runs. | ~~Medium~~ |
-| 3 | Rhino cross-file closures | A closure defined in `service.js` and passed as `cb` to a function loaded via `MDS.load()` (e.g. `initDB(cb)`) silently fails to execute when called from inside a nested `MDS.sql` callback chain in the loaded file. No error is thrown — the closure is simply never called. Workaround: never pass closures from `service.js` into `MDS.load`-ed functions. Keep all callback logic self-contained within the file where it is defined. Verified on Minima 1.0.45, Rhino. | High |
-| ~~4~~ | ~~`core/validation.js` + `core/campaigns.js`~~ | ~~`validateView/Click` used single-arg callback where `getCampaign` uses err-first `cb(null, campaign)`.~~ Resolved in T9: `validateView` and `validateClick` now use `function(err, campaign)` and short-circuit to `{ valid:false, reason:'db error' }` on err. | ~~High~~ |
-| ~~5~~ | ~~TASKS.md T7 description~~ | ~~`MDS_PENDING` listed incorrectly as FE-only.~~ Resolved: `MDS_PENDING` fires in the **SW**, not the FE. `onPending(msg)` is implemented in `campaign.handler.js` and handles campaign creation after user approves the escrow `send`. SW event table and fragility #18 updated. | Resolved |
-| 6 | TASKS.md T7 description | Lists `onMaxima(msg)` but MinimaAds.md §11.1 shows `onMaxima(msg.data)`. T8's handler spec accesses `msg.data.data`, which matches passing the full `msg`. T7 was implemented as `onMaxima(msg)` to align with T8. MinimaAds.md §11.1 snippet is inconsistent with its own §11.3 handler flow; consider clarifying. | Low |
-| 7 | TASKS.md T8 description (resolved during T8 implementation) | TASKS.md T8 listed handler names as `onCampaignAnnounce/Pause/Finish`; MinimaAds.md §11.3 uses `handleCampaignAnnounce/Pause/Finish`. Resolved: implemented per MinimaAds.md (source of truth wins), TASKS.md T8 updated to match. Convention moving forward: `on*` = MDS event entry points; `handle*` = Maxima sub-handlers dispatched inside `onMaxima`. | Resolved |
-| 8 | `core/minima.js` `hexToUtf8` (resolved during T8 verification) | The canonical `hexToUtf8` did not strip the `0x`/`0X` prefix. Maxima delivers `msg.data.data` with the prefix (e.g. `"0x7B..."`), so the decoded string started with literal `0x{…}`. `JSON.parse` parsed `0` as a valid number and then threw `SyntaxError: Expected end of stream at char 1`. Fixed: `hexToUtf8` now strips an optional `0x`/`0X` prefix before hex-to-UTF8 conversion. AGENTS.md §6 canonical snippet updated to match. Confirmed via two-node Maxima send test (21-Apr-2026). | Resolved |
-| 9 | **Spec conflict — Appendix B.5 `port:2` vs Appendix C.3** | Appendix B.5 (channel-open tx) sets `txnstate port:2 = expiry_block`. Appendix C.3 (channel script state variables) requires `PREVSTATE(2) = viewer_key` for `MULTISIG(2 creatorkey viewerkey)`. Since all outputs with `storestate:true` share the same tx state, port:2 can only hold one value. **T-CH4 implementation uses `port:2 = viewer_key`** (channel script requires it; escrow script reads only `PREVSTATE(1)` so expiry_block at port:2 is irrelevant). **Maintainer must reconcile Appendix B.5** — the expiry_block serves no script purpose and should be removed from the channel-open tx or moved to an unused port. | Open — spec |
-| 10 | **Spec conflict — Appendix B.5 `storestate:false` on channel output** | Appendix B.5 sets `storestate:false` for the channel coin output (output[0]). The channel script (`IF @COINAGE GT ... SIGNEDBY(PREVSTATE(1))`) requires `PREVSTATE(1)` and `PREVSTATE(2)` to be recoverable at settlement time, which is only possible if the coin was created with `storestate:true`. **T-CH4 implementation uses `storestate:true` on both outputs.** Maintainer must correct Appendix B.5. | Open — spec |
-| 11 | **`getaddress` does not accept a `publickey` parameter** (verified in `getaddress.java` 1.0.45) | TASKS.md T-CH4 prompt and MinimaAds.md Appendix C suggest `MDS.cmd('getaddress publickey:<viewer_key>')` to derive a wallet address from a public key. The actual command ignores all parameters and returns only the node's default address. **Workaround (implemented in T-CH4):** derive the address via `newscript script:"RETURN SIGNEDBY(<pk>)" trackall:false` — the resulting script address is deterministic and identical across all nodes for the same key. Cache the result in keypair under `VIEWER_ADDR_<pk>` / `WALLET_ADDR_<pk>`. Maintainer must correct the spec and TASKS.md prompt. | Open — spec |
-| 12 | **`keys action:new` response shape: `res.response.publickey`, not `res.response.key.publickey`** (verified in `keys.java` + `KeyRow.toJSON` 1.0.45) | TASKS.md T-CH4 prompt and MinimaAds.md Appendix B example use `keysRes.response.key.publickey`. The actual Java source does `ret.put("response", krow.toJSON())` and `KeyRow.toJSON` puts `"publickey"` directly under the response object — no `.key` wrapper. **T-CH4 implementation uses `res.response.publickey` directly.** Maintainer must correct TASKS.md and Appendix B. | Open — spec |
-| 13 | **`txnpost` also fires `MDS_PENDING`** — same shape as `send` | When a custom tx is posted via `txnpost` and the node is in write-protection mode, `txnpost` returns `{pending:true, pendinguid:"0x..."}` exactly like `send`. The pending approval event fires in both SW and FE. T-CH4 handles this in `handleFePending` (FE) using `PENDING_CHANNEL_<uid>` keypair namespace. The SW `onPending` in `campaign.handler.js` parses `port:3` for campaign ID and looks up `PENDING_CHANNEL_<campaign_id>` — it will find nothing for channel-open txns (different namespace) and harmlessly log+return. No collision. | Documented |
-| 14 | **`CAMPAIGN_DATA_RESPONSE` spam — creator sends 9+ responses per campaign** | Observed in T-CH7 verification (2026-04-28): within a few seconds of a new escrow coin appearing, the creator SW sends 9+ `CAMPAIGN_DATA_RESPONSE` messages for the same campaign. Root cause unclear — likely Maxima re-delivering the same `REQUEST_CAMPAIGN_DATA` from multiple contacts or poll retries, OR multiple nodes discovered the same escrow coin simultaneously. Not related to T-CH7. Benign (receiver deduplicates via `_knownEscrowCoins`), but wastes bandwidth. Investigate deduplication in `handleRequestCampaignData` (add a seen-set or cooldown per campaign_id+requester pair). | Low |
-| ~~15~~ | ~~**Estructural: duplicitat `service.js` / `public/service-workers/main.js`**~~ | ~~Minima carrega el SW des de `service.js` a l'arrel del MiniDapp (hardcoded a `MDSManager.java:909` i `ServiceJSRunner.java:71`). El camp `"service"` del `dapp.conf` és ignorat. El projecte manté dos fitxers: `service.js` (arrel, runtime real) i `public/service-workers/main.js` (font "canònica", mai executat). Qualsevol edició al fitxer font no té efecte en producció fins que es sincronitza manualment al mirror. **Millora proposada:** eliminar `public/service-workers/main.js` i treballar directament sobre `service.js` com a única font de veritat.~~ Resolved 2026-04-29: `public/service-workers/main.js` deleted, all references updated. | ~~Pendent~~ Resolved |
-
-31. **PLATFORM_KEY validation must happen on BOTH CAMPAIGN_ANNOUNCE receive AND on-chain escrow coin discovery via NEWBLOCK.** Skipping it on either path lets a bad-fee campaign slip into the local DB. The check is: read PREVSTATE(5) from the on-chain coin (NOT from the Maxima payload alone — payload can be spoofed) and compare against the local `PLATFORM_KEY` constant (`.toUpperCase()` both sides). If `PLATFORM_KEY === null` (MVP): skip the check entirely. Never read PREVSTATE(5) from the announced JSON payload as the primary verification — always verify on-chain. **T-PUB3 implemented** CAMPAIGN_ANNOUNCE path in `handleCampaignAnnounce`: checks `payload.platform_key` first (drop on mismatch), then queries on-chain `coins coinid:<escrow_coinid> relevant:false` and reads `coin.prevstate` port 5 (accept if coin not yet visible; drop on mismatch). `processEscrowCoin` (NEWBLOCK path) does NOT yet validate PLATFORM_KEY — open issue for a future task. **T-PUB4 implemented** the producer side: `creator.js` registers `ESCROW_SCRIPT_V2` (with PLATFORM_KEY at PREVSTATE(5), MAX_PUBLISHER_BUDGET at PREVSTATE(6), conditional fee branch on STATE(11)) and stores its address under keypair key `ESCROW_ADDRESS_V2` (V1 `ESCROW_ADDRESS` retained for legacy campaigns). The campaign-launch tx now embeds ports 5/6/11 in funding-tx state; when `PLATFORM_KEY` is set, `buildEscrowFundingTx()` adds a fee output at index 0 paying `budget_total × 0.06` to PLATFORM_KEY. Channel-open spends (viewer split + open) set `port:11=0` so the fee branch is skipped (fee was paid upfront). **Note**: per MinimaAds.md §B.3, ports 11/12/13 are STATE (set by spending tx). T-PUB4's funding-tx state JSON includes them as informational PREVSTATE markers; the script does not read them on the funding tx since it does not run there. Only ports 1–6 are functionally required at funding time.
-
-32. **FRAMES.FRAME_ID for the built-in frame is deterministic per node** — `'builtin:' + maxima_pk.toUpperCase()`. Re-running `ensureBuiltinFrame()` after a node restart must be idempotent (use MERGE INTO, never INSERT). If the node's Maxima PK changes (rare — only on a fresh wallet), the old built-in frame becomes orphaned. Acceptable for MVP.
-
-33. **CHANNEL_STATE composite PK now includes ROLE.** All existing queries on CHANNEL_STATE that filtered by `(CAMPAIGN_ID, VIEWER_KEY)` alone will now potentially match BOTH viewer and publisher rows for the same key if the same node is both viewer and publisher of the same campaign. Always include `AND UPPER(ROLE) = UPPER('viewer')` or `AND UPPER(ROLE) = UPPER('publisher')` in WHERE clauses for all channel handlers.
-
-34. **Publisher reward is FE-driven from the viewer's SDK.** The viewer's node fires the publisher REWARD_REQUEST after its own viewer reward is confirmed. The publisher's node receives only CHANNEL_OPEN_REQUEST and subsequent REWARD_REQUESTs via Maxima. The creator MUST validate publisher cumulative against `MAX_PUBLISHER_BUDGET` (not MAX_AMOUNT of the publisher channel alone) to prevent over-claiming.
-
-35. **frameId in MinimaAds.init is validated against local FRAMES only.** The SDK checks the FRAMES table on the calling node. A malicious actor cannot use someone else's frame_id because the publisher_key in the publisher channel is bound at CHANNEL_OPEN_REQUEST time — the on-chain payout goes to FRAMES.PUBLISHER_WALLET, not to whoever claims the frame_id in a REWARD_REQUEST. The frame_id in REWARD_REQUEST is for accounting/display only.
-
-36. **Publisher channel impersonation protection (implemented 2026-05-04).** The SW `handleChannelOpenRequest` now validates the Maxima sender PK (`msg.data.from`, forwarded as `senderPk` from `onMaxima`) against the claimed frame identity before accepting a publisher CHANNEL_OPEN_REQUEST. For **builtin frames** (`frame_id = 'builtin:<PK>'`): `senderPk` must equal `frameId.substring(8)` (case-insensitive). For **custom frames**: if `publisher_mx_key` is present in the payload, `senderPk` must match it; if absent, validation is skipped (custom-frame owners are responsible for their own Maxima PK binding). The SDK sends `publisher_mx_key` in all CHANNEL_OPEN_REQUEST payloads: for builtin frames it is derived from `frameId.substring(8)` (no extra MDS call); for custom frames it is fetched via `maxima action:info` at open time. The reconnect resend path also includes `publisher_mx_key`. This prevents a malicious third party from impersonating a publisher node and collecting publisher rewards to a different wallet. The security is Maxima-layer (cryptographic sender PK) — not payload-layer (the payload data can be spoofed but `msg.data.from` cannot).
-
-37. **Creator online check — future task.** Design: before calling `getAd()`, the SDK can send a lightweight Maxima ping to the creator's Maxima PK and wait up to ~2 s for a PONG response. If no PONG, skip that campaign (creator is offline → viewer would earn rewards but never receive vouchers). Cache the liveness result per campaign for ~2 min to avoid repeated pings on consecutive ad views. This is an ergonomic improvement (no stuck channels), not a security requirement — channels still settle correctly even if the creator goes offline mid-session (viewer keeps their latest voucher). **Not yet implemented.** When implemented: add a `CREATOR_LIVENESS_PING` + `CREATOR_LIVENESS_PONG` Maxima message pair, update §8 schema table, add `_pingCreator(campaignId, cb)` to `sdk/index.js`, gate `_channelFlow` on liveness, add cache in `_creatorAlive` map.
-
-38. **KissVM `PREVSTATE(n)` throws `ExecutionException` if port `n` is not stored in the coin — it does NOT return a default/zero.** Verified in `refs/Minima-1.0.45/src/org/minima/kissvm/Contract.java:521`: `throw new ExecutionException("PREVSTATE Missing : "+zPrev)`. Any `LET var=PREVSTATE(n)` at script top-level causes the entire script to FAIL if the spending coin lacks that port — **even when the variable is only used inside an `IF` branch that is never taken**. **Rule: never place `LET var=PREVSTATE(n)` at top-level if `n` may be absent from intermediate coins; move it inside the `IF` branch that uses it.** `ESCROW_SCRIPT_V2` originally read `PREVSTATE(5)` and `PREVSTATE(6)` unconditionally — any split/change coin (which legitimately omit those ports) made Tx2 always fail. **Fixed by restructuring the script**: `LET platformkey=PREVSTATE(5)` moved inside `IF feeflag EQ 1 THEN`; `LET maxpubbudget=PREVSTATE(6)` removed entirely (unused). Secondary benefit: storing a wallet address in an unconditional `LET PREVSTATE` caused Minima's wallet relevance scanner (TxPoWTreeNode.java:314) to mark all escrow coins as "relevant" to the platform node, showing them as locked balance. With the `LET` inside the branch, the scanner never evaluates PREVSTATE(5) on feeflag=0 spends.
-
-### Dev Workflow Rule — No schema migrations during development
-
-During development, **never add `ALTER TABLE` migration statements** to `db-init.js`. The DB is reset with each MiniDapp reinstall. If a column type or size is wrong, fix the `CREATE TABLE` statement and reinstall — that is all that is needed. Migrations are a post-MVP concern for production upgrades.
-
-### Closed / Fixed
-| ID | Component | Description |
-|---|---|---|
-| CH-5 | `sdk/index.js`, `core/channels.js`, `channel.handler.js`, `dapp/app.js` | **`sendable:0` — viewer reward and creator refund confirmed on-chain but unspendable.** Root cause: `buildAndExportVoucherTx` derived both settlement output addresses via `newscript "RETURN SIGNEDBY(key)"`. Coins at custom script addresses appear in `confirmed` but NOT in `sendable`. Fix (2026-04-28): (1) viewer calls `getaddress` before opening a channel, stores result as `VIEWER_WALLET_ADDR` in `CHANNEL_STATE`, included in `CHANNEL_OPEN_REQUEST`; creator's `handleDoRewardVoucher` reads `channel.VIEWER_WALLET_ADDR` directly for output[0]. (2) creator calls `getaddress` inside `handleDoRewardVoucher` (runs on creator's node) for output[1] refund address. Both settlement outputs now land at real wallet addresses → `sendable` = `confirmed` for both parties. |
-| CH-6 | `dapp/app.js` `buildAndExportVoucherTx()` | **Channel coin indexing delay can exceed the original 5×3s retry window under normal node load.** Observed in T-CH7 verification (2026-04-28): a valid channel coin took ~62 s after confirmation to become findable by `txninput coinid:...`. Fixed (2026-04-28): retain the `coinid`-based spend path, but increase voucher-build retries from 5×3 s to 20×5 s (100 s total) so normal indexing delay no longer forces channel deletion/re-open. Superseded by T-CH8 (2026-04-29): NEWBLOCK-driven queue in SW replaces the timer. T-CH9 removes the retry loop from the FE entirely. |
-| CH-4 | `sdk/index.js` `_openNewChannel()` | **Viewer never receives reward tokens after settlement — 0.01 coin invisible and unspendable.** Root cause: the creator derives the viewer's settlement address via `newscript "RETURN SIGNEDBY(viewerKey)" trackall:false` (creator's node). The viewer's node never registers this script, so the reward coin is invisible in the viewer's wallet (not tracked) and the viewer cannot spend it (`sendable:0`). The script address is deterministic — both nodes hash to the same address — but only nodes that have registered it with `trackall:true` will track coins at that address. Fix (2026-04-28): in `_openNewChannel`, immediately after `keys action:new` returns `viewerKey`, call `newscript script:"RETURN SIGNEDBY(viewerKey)" trackall:true` on the viewer's node before proceeding with channel opening. This registers the settlement address locally so the reward coin is tracked and spendable. The creator's existing derivation in `buildAndExportVoucherTx` is unchanged — it produces the same address. **Confirmed via log analysis**: the settlement tx correctly pays 0.01 to the script address (creator wallet shows -0.01 net); the fix makes that coin visible on the viewer's node. |
-| CH-7 | `dapp/app.js` `buildAndPostChannelTx()` | **Escrow Splitting (UX Optimization) — implemented 2026-04-29.** Viewer's wallet was showing the full unspent campaign budget as locked because the viewer's key was present in the transaction state that generated the escrow change. Fixed by splitting the process into two chained transactions: Tx1 splits the escrow (without the viewer's key), isolating the change. Tx2 opens the channel using only the maxAmount coin and the viewer's key. Includes a `waitForCoin` polling loop to gracefully handle Minima's internal mempool indexing delay. |
-| 16 | `service.js` `registerEscrowScript()` + `scanEscrowCoins()` | **Viewer wallet showed locked Minima; then viewer campaign discovery broken (two-phase fix, 2026-04-29).** Phase 1 — locked coins: `newscript trackall:true` added ESCROW_ADDRESS to `mAllTrackedAddress` (Wallet.java), causing ALL coins at that address to appear in every node's `confirmed` balance as unspendable. Fix: `newscript trackall:false`. Phase 2 — campaign discovery broken: after removing `trackall:true`, `coins relevant:false address:ESCROW_ADDRESS` returned 0 results on the viewer. Root cause (Minima platform bug): `coins.java` uses `existsParam("relevant")` (presence check) not `getBooleanParam` (value check) — so `relevant:false` is treated as `relevant:true`, calling `getRelevantCoins()` (wallet-filtered) instead of `getAllCoins()`. Because ESCROW_ADDRESS is no longer wallet-tracked, `getRelevantCoins()` is empty. Fix: remove `relevant:false` entirely — call `"coins address:" + ESCROW_ADDRESS`. When `relevant:` is absent and `address:` is present, `existsParam("relevant")` → `false` → `getAllCoins()` (full UTXO) is used. Verified via source: `coins.java:102–115`, `Command.java:79–81`, `TxPoWSearcher.java:148–151`, `TxPoWTreeNode.java:221` (Minima 1.0.45). Creator's `txninput coinid:X` is unaffected — it hardcodes `relevant=false` internally. See fragility #30. |
-| CH-1 | `campaign.handler.js` `onPending()` | **`MDS_PENDING` crash on channel-open pending**. `onPending()` assumed all pending events have `body.txn.outputs[0].coinid` (campaign-creation shape). Channel `txnsign` returns a different body with no `txn` key → `TypeError: Cannot read property "txn" from undefined`. Fixed (2026-04-27): null guard added — if `!body \|\| !body.txn \|\| !body.txn.outputs` → silently return. The channel flow is handled by its own FE-side `handleFePending`. |
-| CH-2 | `dapp/app.js` `buildAndExportVoucherTx()` | **Phantom channel coin leaves channel stuck in `open`**. When a `txnpost` lands in a block that peers later reject (invalid MMR proof), the coin never enters the UTXO. After 5 retries (`txninput` returning "not found"), `buildAndExportVoucherTx` would call `fail()` and stop — leaving `CHANNEL_STATE.STATUS='open'` with an invalid `CHANNEL_COINID`. Every subsequent `DO_REWARD_VOUCHER` for that channel would loop through the same failure. Fixed (2026-04-27): after max retries with "not found", `DELETE FROM CHANNEL_STATE` so the viewer can re-send `CHANNEL_OPEN_REQUEST` and create a fresh channel. See fragility point #26. |
-| CH-3 | `dapp/views/viewer.js` `_runSettlement()` + `dapp/app.js` `handleFePending()` | **`txnsign pending:true` treated as error; imported tx deleted before approval completes**. When Minima write-protection is on, `txnsign` returns `{status:false, pending:true, pendinguid}`. The original code checked only `!r2.status` → called `onError()` → `txndelete` destroyed the imported tx. When the user approved in the Minima app, Minima retried `txnsign id:stl_X` → "Transaction not found". Fixed (2026-04-27): check `r2.pending` BEFORE `!r2.status`; on pending, call `savePendingChannelOp` with `{kind:'settlement', settleId, campaignId, viewerKey}` and return without deleting the tx. `handleFePending` in `app.js` handles approval by calling `_postSettleTx(ctx.settleId, ctx.campaignId, ctx.viewerKey)`. The `kind:'settlement'` block is placed BEFORE the `resp` null-guard (settlement does not use `resp.body.txn`). See fragility #27. |
-| PUB-1 | `comms.handler.js` `_resolveViewerAddrAndSend`, `channel.handler.js` `_doSendPublisherChannelOpenRequest` | **Settlement coins arrive "locked" (sendable:0) for both viewer and publisher (2026-05-13).** Root cause: viewer used `newscript "RETURN SIGNEDBY(pk)"` address (custom script — tracked but locked); publisher used `MY_ADDRESS` (Maxima public key, not a wallet address — unspendable). Fix: replaced both paths with `MDS.cmd("getaddress", ...)` which returns the node's coinbase wallet address. Coins at coinbase addresses are immediately in `sendable`. Result cached in keypair under `VIEWER_WALLET_ADDR_<campaignId>` to avoid repeated calls. See fragility #40. |
-| PUB-2 | `channel.handler.js` `swBuildAndPostChannelTx`, `_enqueuePendingChOpenSplitRetry`, `_retryPendingChOpen` | **Viewer channel open silently dropped when publisher opened channel simultaneously (2026-05-13).** Creator's publisher split Tx1 was pending in mempool; viewer's subsequent `txninput` on the same escrow coin failed silently — viewer's channel never opened, no error logged. Fix: `swBuildAndPostChannelTx` calls `_enqueuePendingChOpenSplitRetry(ctx)` on Tx1 failure. Queue persisted as `PENDING_CHOPEN_QUEUE` with `needsSplit:true`. `retryPendingChOpen()` on each NEWBLOCK re-reads ESCROW_COINID/WALLET_PK from CAMPAIGNS and retries with the post-split change coin. See fragility #41. |
-| PUB-3 | `comms.handler.js`, `channel.handler.js`, `dapp/views/frames.js`, `dapp/views/earnings.js`, `dapp/app.js` | **Publisher settlement end-to-end: multiple display and routing fixes (2026-05-13).** (1) Publisher reward routing: replaced fragile `frame_id`-based publisher identification with explicit `publisher_key` propagated from snippet → `MA_TRACK_VIEW` payload → `PENDING_REWARD` keypair → `REWARD_REQUEST`. Creator reads `publisher_key` directly in `_maybeGeneratePublisherVoucher` fast path. (2) Cross-node earnings contamination: `_refreshChannelRewards` and `_refreshSettlementHistory` now filter `AND UPPER(cs.VIEWER_KEY) = UPPER(MY_ADDRESS)` so other nodes' channels are excluded. (3) Viewer Reward History empty: `_getMxContact` in snippet changed from `res.response.contact` to `res.response.publickey`. (4) `_postSettleTx` now checks `r3.pending` before error path; uses `savePendingChannelOp(kind:'settlement_post')`; `handleFePending` `settlement_post` branch calls `settleChannel` after TX confirmed. See fragility #42. |
-| PUB-4 | `channel.handler.js` `_replayDeferredPublisherRewards`, `_swDispatchVoucher`, `swBuildAndExportVoucherTx`, `checkPendingChannelOpens` | **Second publisher reward permanently lost after first settlement (2026-05-18).** Two chained root causes: (1) `txninput coinid:X scriptmmr:true` is called immediately after channel activation — the new coin is on-chain but its MMR proof is not yet indexed, so `txninput` fails silently; (2) `_replayDeferredPublisherRewards` wrote to `DEDUP_LOG` and deleted from `DEFERRED_PUB_REWARDS` BEFORE the TX build — if the TX failed, the reward was permanently lost with no retry possible. Fix: (1) Added `afterSend` callback param to `swBuildAndExportVoucherTx` and `_swDispatchVoucher` — both `DEDUP_LOG` write and `DEFERRED_PUB_REWARDS` delete now execute only inside `afterSend`, i.e. after `sendMaxima` succeeds. (2) Changed dedup key from `'pub-replay-' + frameId + '-' + Date.now()` (unique per call → failed retries were never deduplicated) to `'pub-replay-' + stableRowIds.join('-')` (stable across retries → correct dedup once replay succeeds). (3) Added a `DEFERRED_PUB_REWARDS JOIN CHANNEL_STATE` query at the start of `checkPendingChannelOpens` — retries `_replayDeferredPublisherRewards` on every NEWBLOCK for any open publisher channel that still has pending deferred rows; MMR is indexed within ~4 s so the very next NEWBLOCK succeeds. See fragility #43, #44. Verified 2026-05-18. |
-| T-CH8 | `channel.handler.js` `handleRewardRequest()` + `checkPendingVouchers()` + `service.js` | **NEWBLOCK-driven pending voucher queue (T-CH8, 2026-04-29).** `handleRewardRequest()` now checks `coins coinid:<channelCoinId> relevant:true` before signalling `DO_REWARD_VOUCHER`. If the coin is not indexed yet, the request payload is saved to keypair under `PENDING_VOUCHER_<campaignId>_<VIEWERKEY_UPPER>`. `checkPendingVouchers()` is called on every `NEWBLOCK` via `service.js`; it scans all `STATUS='open'` channels, checks for a queued payload, and dispatches `DO_REWARD_VOUCHER` once the coin is visible. Replaces the 20×5 s retry loop in `buildAndExportVoucherTx()` (FE), which is removed in T-CH9. **Bug fix (2026-04-29):** keypair key must use `viewerKey.toUpperCase()` on both the write side (`handleRewardRequest`) and the read side (`checkOnePendingVoucher`). Maxima delivers `viewer_key` with lowercase `0x` prefix; H2 returns `VIEWER_KEY` with uppercase `0X` prefix — mismatched keys caused the pending entry to never be found (silent `!raw` return). **Sync fix (2026-04-29):** T-CH8 was originally implemented against the now-deleted `public/service-workers/main.js`. `service.js` (actual runtime) was missing `checkPendingVouchers()` on its `NEWBLOCK` handler until this session synced it. |
-| T-CH9 | `dapp/app.js` `buildAndExportVoucherTx()` | **FE retry loop removed (T-CH9, 2026-04-29).** Removed `_retries` parameter, `setTimeout` retry loop, and channel-state-clear fallback from `buildAndExportVoucherTx()`. The function now has a single `coinid`-only path; a `txninput` failure is logged as a genuine error (not a timing issue) since T-CH8 guarantees the coin is indexed before `DO_REWARD_VOUCHER` is emitted. |
-
----
-
-## 16) MinimaAds.md Document History
-
-> Track structural changes to the primary spec document here.
-
-| Date | Agent | Changes |
-|---|---|---|
-| 2026-04-16 | Antigravity | **Bloc A structural cleanup**: removed duplicate `# Índex` header; removed 10 duplicate section h1 titles (sections 1–8, 10, 11); fixed section 12 duplicate title; removed colloquial AI-chat text (lines 1606–1612); added section 12 to index; removed stray empty `## ` from index; renumbered `12.X` → `12.6` for frontend architecture subsection (12.6.1–12.6.9). Total lines: 1792 → 1760. |
-| 2026-04-16 | Antigravity | **Format conversion**: converted entire document from Google Docs markdown style (`# **N\. Name**`, `## **N.N Name**`) to AGENTS.md style (`## N) Name`, `### N.N Name`). Added document title `# MinimaAds — Especificació del Sistema`. Converted index to compact list. Removed excessive `---` separators between subsections. Total lines: 1760 → 1449. |
-| 2026-04-16 | Antigravity | **Bloc B content**: completed section 2.3 (formal object definitions: Campaign, Ad, RewardEvent, User with typed attribute tables); created section 9 (Risks & Mitigations: 6 risks with impact+mitigation+summary table); completed section 12.2 (H2 SQL schema: CAMPAIGNS, ADS, REWARD_EVENTS, USER_PROFILE); added section 12.4 (SW responsibilities and handler table). Total lines: 1449 → 1700. |
-| 2026-04-16 | Antigravity | **Bloc C design decisions**: added section 3.6 (multi-role nodes: same node can be Viewer+Creator+Publisher; creator cannot earn rewards from own campaigns); concretized section 7.10 (anti-abuse limits with exact MVP values: 1 view/day per campaign, 1 click/day, 30s cooldown, 3s min view, LIMITS constant pattern); added section 10.12 (Maxima campaign distribution protocol: push broadcast model, CAMPAIGN_ANNOUNCE + REWARD_REQUEST message schemas, new-node discovery via periodic re-emit). Total lines: 1700 → 1815. |
-| 2026-04-16 | Antigravity | **Consistency fixes**: 12.1 — removed React ambiguity, confirmed Vanilla JavaScript (ES Modules) as sole frontend choice; 12.5 — removed confused "cooldown" terminology, replaced with reference to 7.10 constants (LIMITS pattern) and correct distinction between daily limit vs cooldown. |
-| 2026-04-16 | Antigravity | **Full rewrite**: complete refactor of MinimaAds.md from Catalan planning document (1819 lines) to English technical implementation spec (777 lines). New structure: 13 sections + appendix. Added: Core API signatures (7 modules), View/Click/Creation flows (step-by-step), Ad selection algorithm (code), Attack Vectors section (farming, malicious publisher, replay, race condition), Trust Model (client vs on-chain), Rhino constraint table, SDK API reference, folder structure. Eliminated: all redundancy between sections 5/6/8/11/12. All decisions are explicit — no open items in main spec. |
-| 2026-04-17 | Antigravity | **Agent governance**: added sections 0.5 (Source of Truth — document hierarchy with priority rules), 0.6 (Development Workflow — 5-step mandatory process), 0.7 (Contract Enforcement — stable Core API reference), 0.8 (Forbidden Actions — 14 explicit prohibitions), 0.9 (Role of Agents — implementer vs architect boundary). Completed all [TO BE FILLED IN] project sections: 6 (Project Intent), 7 (Runtime Topology with file table), 8 (DB Schema with full column detail), 9 (Protocol Matrix with all 4 message types), 10 (SW→FE Signal Contract with 3 signals), 11 (Source of Truth Rules — runtime state ownership table). Updated §15 Maintenance Rules to cross-reference MinimaAds.md in parallel with AGENTS.md updates. |
-| 2026-04-17 | Antigravity | **CLAUDE.md created**: new file at project root. 10-section operational guide for Claude agents. Includes: document priority table, 4-step task workflow with layer mapping, stable Core API signature reference, forbidden actions (architecture/Maxima/data model/process), Minima runtime constraints quick-reference (Rhino, H2, MDS API, Maxima encoding), multi-agent safety rules, output standards, and mandatory handoff note format. Derived entirely from MinimaAds.md and AGENTS.md — no new decisions introduced. |
-| 2026-04-22 | Claude (T9) | **§13 SDK reference aligned to TASKS.md T9 signatures** — all 5 functions now callback-based with explicit `userAddress`/`interests` params (was Promise-based in §13.2). Resolves conflict between TASKS.md T9 and MinimaAds.md §13.2 flagged during T9 implementation. Consistent with §7.5 "all functions are callback-based". No data-model or protocol changes. |
-| 2026-04-24 | Antigravity | **Visual Assets**: Implemented DApp icon for `dapp.conf` (cropped 1:1, transparent corners). Removed logo and favicon from `index.html` UI as per user request to simplify and avoid pathing issues. |
-| 2026-05-01 | Opus (architect) | **Publisher Frame system spec**: added Frame actor (§2.1) and Frame entity. Added CAMPAIGNS columns PUBLISHER_REWARD_VIEW, MAX_PUBLISHER_BUDGET, PUBLISHER_BUDGET_SPENT. Added FRAMES table. Added CHANNEL_STATE.ROLE and FRAME_ID columns; PK now `(CAMPAIGN_ID, VIEWER_KEY, ROLE)`. Added LIMITS.MIN_PUBLISHER_REWARD_VIEW=0.001. Added §4.5 Publisher Reward Economics and §4.6 PLATFORM_KEY Security Model (decentralized fee enforcement via KissVM PREVSTATE(5)). Extended escrow KissVM (Appendix B.2/B.3) with PLATFORM_KEY at PREVSTATE(5) and conditional fee branch (STATE(11)). Added §6.9 Frame Creation Flow. Added core/frames.js (§7.7). Updated §7.6 channels.js signatures with role param. Updated SDK init() to accept frameId (§13). Added 6 new SW↔FE signals (FRAME_READY, FRAME_CREATED, PUBLISHER_REWARD_CONFIRMED, DO_PUBLISHER_CHANNEL_OPEN, DO_PUBLISHER_REWARD_VOUCHER). Extended CAMPAIGN_ANNOUNCE, CHANNEL_OPEN_REQUEST/OPEN, REWARD_REQUEST/VOUCHER with optional `role` and `frame_id` fields (no new Maxima message types). Added AGENTS.md §12 fragility #31–#35. Added T-PUB1–T-PUB8 task block to TASKS.md. |
-| 2026-05-02 | Sonnet (T-PUB3) | **PLATFORM_KEY (T-PUB3)**: created `config.js` (root) with `PLATFORM_KEY=null` and `APP_NAME`. Added `MDS.load("config.js")` as first load in `service.js`. Added `<script src="config.js">` as first script in `public/index.html`. Extended `handleCampaignAnnounce` with PLATFORM_KEY validation (payload field check + on-chain PREVSTATE(5) check via `coins coinid:X relevant:false`); extracted `persistCampaign()` helper. AGENTS.md §12 fragility #31 updated with implementation status. |
-| 2026-05-02 | Sonnet (T-PUB5) | **SDK publisher frame flow (T-PUB5)**: added `_activeFrameId` module var. Added `_resolveFrame()`: validates explicit `frameId`/`publisher_id` against FRAMES, or resolves builtin via `ensureBuiltinFrame(pk, walletAddr)`. `init()` now calls `_resolveFrame` inside the `inited` handler before invoking `cb`. `_trackEvent` sets `publisher_id=_activeFrameId` on all RewardEvents and fires `_publisherChannelFlow` (fire-and-forget) when `PUBLISHER_REWARD_VIEW > 0 && type='view' && _activeFrameId`. Added `_getPublisherChannel` (SELECT with `ROLE='publisher'`), `_openNewPublisherChannel` (keys:new + INSERT CHANNEL_STATE + CHANNEL_OPEN_REQUEST with role/frame_id), `_sendPublisherRewardRequest` (REWARD_REQUEST with role/frame_id). `_onVoucherReceivedCore` branches on `role='publisher'`: reads frame's PUBLISHER_KEY, calls `createRewardEvent(type:'publisher_view')`, `incrementFrameEarnings`, signals `PUBLISHER_REWARD_CONFIRMED`. |
-| 2026-05-02 | Sonnet (T-PUB2) | **Core frames.js (T-PUB2)**: created `core/frames.js` with 6 functions: `listFrames`, `getFrame`, `saveFrame` (SELECT+INSERT/UPDATE to preserve CREATED_AT and TOTAL_EARNED), `ensureBuiltinFrame` (idempotent, frame_id = 'builtin:<PK>'), `incrementFrameEarnings`, `getFrameEarnings` (COUNT from REWARD_EVENTS WHERE TYPE='publisher_view'). Added `MDS.load("core/frames.js")` to `service.js` and `<script src="core/frames.js">` to `public/index.html`. |
-| 2026-05-02 | Sonnet (T-PUB1) | **DB schema (T-PUB1)**: added PUBLISHER_REWARD_VIEW, MAX_PUBLISHER_BUDGET, PUBLISHER_BUDGET_SPENT columns to CAMPAIGNS CREATE TABLE in SW db-init.js. Added FRAMES CREATE TABLE in SW db-init.js (7 columns, FRAME_ID PK). Updated CHANNEL_STATE CREATE TABLE: added ROLE (VARCHAR(16) NOT NULL DEFAULT 'viewer') and FRAME_ID (VARCHAR(256) DEFAULT '') columns; changed PK from (CAMPAIGN_ID, VIEWER_KEY) to (CAMPAIGN_ID, VIEWER_KEY, ROLE). Added initFEFrames() and updated initFEChannelState() in dapp/app.js to mirror SW schema. AGENTS.md §8 was already updated by architect. |
-| 2026-05-03 | Sonnet (T-PUB7) | **Frames UI + builtin frame init (T-PUB7)**: added `initBuiltinFrame(maximaPk, walletAddr)` to `core/frames.js` — fire-and-forget wrapper for `ensureBuiltinFrame` + `signalFE('FRAME_READY')`, defined within frames.js to avoid Rhino cross-file closure bug (AGENTS.md §14 bug #3). Updated `service.js` `onInited`: after `maxima action:info` resolves, calls `MDS.cmd('getaddress')` then `initBuiltinFrame(MY_MAXIMA_PK, walletAddr)` (no closure passed from service.js). Added `#frames` route to `currentRoute()`, `doRender()`, and `handleMdsComms()` in `dapp/app.js`; wired `FRAME_READY`/`FRAME_CREATED` → re-render frames view; wired `PUBLISHER_REWARD_CONFIRMED` → `onPublisherRewardConfirmed()`. Created `dapp/views/frames.js` with `renderFrames(root)`, `_refreshFramesList()`, `_renderFramesList(rows)`, `_showSnippet(fid)`, `_showEarnings(fid)`, `_onFrameSubmit(e)`, `onPublisherRewardConfirmed(parsed)`. All DOM output sanitized with DOMPurify. Frame creation from FE calls `saveFrame()` directly; snippet shown immediately after save. Added `<a href="#frames">Frames</a>` to `public/index.html` nav; added `<script src="dapp/views/frames.js">` after earnings.js. |
-| 2026-05-03 | Codex | **Campaign creation UI tabs**: reorganized `dapp/views/creator.js` form into three tabs without changing field names, submit payload, validation, calculations, or campaign publishing flow. Header now keeps `auto_balance` and `ma-campaign-summary` before tabs. Tab 1 contains ad content plus `campaign_days`; tab 2 contains viewer budget/reward/cap controls; tab 3 contains publisher reward controls. Added lightweight tab styling in `public/index.html` and an `invalid` event handler that opens the relevant tab before native browser validation focuses a hidden invalid field. Follow-ups: tab backgrounds now use Pico theme colors (`--pico-primary-background` active, `--pico-secondary-background` inactive) with white text and non-white fallbacks; duplicate section titles inside tab panels were removed because the active tab already provides the title. |
-| 2026-05-02 | Sonnet (T-PUB6) | **Campaign UI: publisher reward fields (T-PUB6)**: replaced placeholder `publisher_rate` input in `dapp/views/creator.js` form with `publisher_reward_view` (step=0.001, min=0, value=0) and `max_publisher_budget` (step=0.01, min=0) inputs. Updated `FIELD_DECIMALS` (removed publisher_rate, added both new fields at 6 decimals). Removed publisher_rate clamp from `onCreatorFormInput`. Updated `updateCampaignSummary` to read new fields and display publisher reward line only when > 0. Added submit validation: if publisher_reward_view > 0 → must be >= LIMITS.MIN_PUBLISHER_REWARD_VIEW (0.001); max_publisher_budget must be > 0 and <= budget_total. Added `publisher_reward_view`, `max_publisher_budget`, `publisher_budget_spent: 0` to campaign object in `onCreatorSubmit`. Added explicit publisher fields to CAMPAIGN_ANNOUNCE payload in `saveCampaignAndBroadcast`. Updated `saveCampaign` and `updateBudget` MERGE INTO in `core/campaigns.js` to include all 3 publisher columns (PUBLISHER_REWARD_VIEW, MAX_PUBLISHER_BUDGET, PUBLISHER_BUDGET_SPENT). Added `MIN_PUBLISHER_REWARD_VIEW: 0.001` to LIMITS in both `dapp/app.js` and `service.js`. |
-| 2026-05-03 | Sonnet (T-PUB8) | **Publisher channel handler (T-PUB8)**: extended `core/channels.js` — all 6 functions now accept `role` as 3rd param; `openChannel` also adds `frameId` (4th) and `walletAddr` (5th), MERGE INTO KEY uses `(CAMPAIGN_ID, VIEWER_KEY, ROLE)`; viewer branch still calls `updateBudget`, publisher branch skips it. Rewrote `channel.handler.js`: `handleChannelOpenRequest` branches on `payload.role` — publisher path validates `PUBLISHER_REWARD_VIEW > 0` and publisher budget remaining, calls `openChannel` with role/frameId/walletAddr, runs `UPDATE CAMPAIGNS SET PUBLISHER_BUDGET_SPENT += maxAmount`, signals `DO_PUBLISHER_CHANNEL_OPEN`; viewer path unchanged but passes explicit `'viewer'` role. `handleChannelOpen` reads `payload.role` and passes to `activateChannel`. `handleRewardRequest` reads role and dispatches `DO_PUBLISHER_REWARD_VOUCHER` (publisher) or `DO_REWARD_VOUCHER` (viewer); keypair key now includes role suffix. `handleRewardVoucher` calls `updateChannelVoucher` with role; publisher path includes `role:'publisher'` and `frame_id` in `VOUCHER_RECEIVED` signal. `handleVoucherSyncRequest` passes role to `getChannelState`. `checkPendingVouchers` SELECT now includes ROLE; `checkOnePendingVoucher` uses role-aware keypair key and dispatches to correct signal type. `dapp/app.js`: removed `persistPublisherChannelOpen`; `finalizeChannelOpen` publisher branch now calls `activateChannel(role='publisher')`; viewer branch passes explicit `'viewer'`; added `DO_PUBLISHER_REWARD_VOUCHER` MDSCOMMS handler; added `handleDoPublisherRewardVoucher` (reads FRAMES.PUBLISHER_WALLET for settlement output, calls `buildAndExportVoucherTx` with `role:'publisher'`); `buildAndExportVoucherTx` now reads `ctx.role`/`ctx.frameId` for `updateChannelVoucher` and REWARD_VOUCHER message; pending `voucher_sign` resume context also propagated role/frameId. `handleDoRewardVoucher` → `getChannelState(...,'viewer',...)`. `dapp/views/earnings.js`: `settleChannel` and `getChannelState` calls updated to pass `'viewer'`. `sdk/index.js`: viewer `openChannel` call updated to new 8-param signature; reconnect query now selects ROLE/FRAME_ID and includes them in CHANNEL_OPEN_REQUEST. `MinimaAds.md §7.6` updated: `openChannel` signature now includes `walletAddr`. |
-| 2026-05-05 | Sonnet | **Split coin PREVSTATE(5/6) missing → Script FAIL + locked wallet balance (fixed 2026-05-05, two-step).** Step 1: fixed by adding port:5/6 to split tx state (workaround). Step 2 (definitive): restructured `ESCROW_SCRIPT_V2` in `service.js` and `dapp/views/creator.js` — `LET platformkey=PREVSTATE(5)` moved inside `IF feeflag EQ 1 THEN`, `LET maxpubbudget=PREVSTATE(6)` removed entirely. Port:5/6 removed from `buildAndPostChannelTx` stateCmds and all pending contexts; `platformKeyHex`/`maxPubBudget` propagation removed from `handleDoChannelOpen` and `startPublisherChannelTxs`. Script hash changes → `ESCROW_ADDRESS_V2` will differ after reinstall; existing campaigns at old address remain valid via legacy fallback. Secondary benefit: platform node wallet no longer shows escrow coins as locked (wallet relevance scanner no longer evaluates PREVSTATE(5) on feeflag=0 spends). See fragility #38. |
-| 2026-05-05 | Sonnet | **Multiple session bugfixes**: (1) `sdk/index.js` `_myMxAddress()` returned empty string in standalone publisher dapp context (no `MY_MX_ADDRESS` global) — fixed by adding private `_myMx` var populated via `maxima action:info` in `init()`. (2) `campaign.handler.js` `handleRequestCampaignData` was missing `platform_key` in `CAMPAIGN_DATA_RESPONSE` — viewer nodes with PLATFORM_KEY set were silently dropping every discovered campaign. Fixed by adding `platform_key` field to response payload. (3) `dapp/app.js` `buildAndPostChannelTx` split tx was missing `port:4` (creatorMxHex) on split outputs — change coins at ESCROW_ADDRESS_V2 had no STATE(4) so other nodes skipped them in `processEscrowCoin`. Fixed by adding `port:4 = creatorMxHex` to stateCmds. |
-| 2026-05-09 | Codex | **External host SDK integration**: `sdk/index.js` now supports `mdsAlreadyInitialized` / `externalMdsInit` / `skipMdsInit` config for MiniDapps that already own `MDS.init`, and exposes `MinimaAds.handleMdsEvent(msg)` so hosts can forward `MAXIMA` and `MDSCOMMS` events. The SDK now normalizes uppercase campaign/ad rows before rendering. Updated MinimaAds.md §13 and `dapp/views/frames.js` to generate a plug-and-play publisher snippet: slot element, ordered SDK script loader, `MinimaAdsPublisherInit`, `MinimaAdsPublisherRefresh`, and `MinimaAdsPublisherHandleMdsEvent` bridge for host-owned `MDS.init`. |
-| 2026-05-13 | Sonnet | **Publisher settlement end-to-end (commit be0f377)**: (1) Publisher reward routing: replaced `frame_id`-based publisher identification with explicit `publisher_key` propagated from snippet → `MA_TRACK_VIEW` → `PENDING_REWARD` → `REWARD_REQUEST`. `_maybeGeneratePublisherVoucher` fast path reads `publisherKey` directly from payload. (2) Cross-node earnings contamination fixed: `earnings.js` `_refreshChannelRewards` and `_refreshSettlementHistory` filter by `VIEWER_KEY = MY_ADDRESS`. (3) Viewer Reward History fix: `_getMxContact` in snippet now returns `res.response.publickey` instead of `res.response.contact`. (4) Settlement pending persistence: `_postSettleTx` checks `r3.pending`; uses `savePendingChannelOp(kind:'settlement_post')`; `handleFePending` in `app.js` adds `settlement_post` branch that calls `settleChannel` after TX confirmation. See fragility #42, Closed/Fixed PUB-3. |
-| 2026-05-18 | Sonnet | **Second publisher reward: `txninput scriptmmr:true` + premature cleanup (commit → Closed/Fixed PUB-4)**: fixed two chained bugs in `channel.handler.js`. (1) `afterSend` callback threading: `swBuildAndExportVoucherTx` and `_swDispatchVoucher` now accept an `afterSend` param; DEDUP_LOG write and DEFERRED_PUB_REWARDS delete execute only inside `afterSend` (after `sendMaxima` returns ok). (2) Stable dedup key: changed from `'pub-replay-'+frameId+'-'+Date.now()` (unique per call) to `'pub-replay-'+stableRowIds.join('-')` (row-ID based, stable across retries). (3) NEWBLOCK retry: added `DEFERRED_PUB_REWARDS JOIN CHANNEL_STATE` query at the start of `checkPendingChannelOpens`; calls `_replayDeferredPublisherRewards` for every open publisher channel with pending deferred rows — guarantees the MMR-indexed retry fires within one NEWBLOCK (~4 s). (4) Earlier fix same session: moved `_replayDeferredPublisherRewards` call inside `sendMaxima` callback in `swBuildAndPostChannelTx` so CHANNEL_OPEN is delivered before replay starts. Added fragility #43 and #44. Verified end-to-end: publisher balance shows 2×10 MINIMA after two view+settlement cycles. |
-| 2026-05-13 | Sonnet + Opus | **Settlement coins available + viewer channel race condition (commit 3286b6e)**: (1) Viewer settlement address changed from `newscript "RETURN SIGNEDBY(pk)"` to `getaddress` coinbase address in `comms.handler.js` `_resolveViewerAddrAndSend` — coins now immediately `sendable`. (2) Publisher settlement address changed from `MY_ADDRESS` (Maxima PK, not spendable) to `getaddress` coinbase address in `channel.handler.js` `_doSendPublisherChannelOpenRequest`. (3) Race condition fix: `swBuildAndPostChannelTx` Tx1 failure calls `_enqueuePendingChOpenSplitRetry(ctx)` instead of silently dropping. New `_retryPendingChOpen` on NEWBLOCK re-reads current ESCROW_COINID/WALLET_PK from CAMPAIGNS and retries. Deduplicated by `campaignId|viewerKey16|role`. End-to-end verified: viewer channel activated and coin confirmed on-chain (2026-05-13). See fragility #40, #41, Closed/Fixed PUB-1, PUB-2. |
-| 2026-05-02 | Opus (T-PUB4) | **KissVM escrow extension (T-PUB4)**: introduced `ESCROW_SCRIPT_V2` in `dapp/views/creator.js` (PLATFORM_KEY at PREVSTATE(5), MAX_PUBLISHER_BUDGET at PREVSTATE(6), conditional fee branch via STATE(11)/STATE(12)/STATE(13) using 5-arg `VERIFYOUT`). Address registered with `trackall:false`, cached under keypair `ESCROW_ADDRESS_V2`; legacy V1 retained under `ESCROW_ADDRESS` for old campaigns. `resolveEscrowAddress()` now resolves V2. Campaign-launch state JSON extended to include ports 5, 6, 11 (and 12, 13 when feeflag=1). When `PLATFORM_KEY` is set, new helper `buildEscrowFundingTx()` builds a multi-output tx: `output[0]` fee → PLATFORM_KEY, `output[1]` budget → escrow (with state), change auto-added by `txnpost auto:true`. When `PLATFORM_KEY === null` (MVP), the legacy `send` shorthand is used (no fee output, identical to pre-T-PUB4 shape). Channel-open spend tx (`buildAndPostChannelTx` + `buildAndPostChannelOpenTx` in `dapp/app.js`) sets `port:11=0` on both the split and the open transactions. Added `handleDoPublisherChannelOpen(data)` in `dapp/app.js` and wired `DO_PUBLISHER_CHANNEL_OPEN` into the `MDSCOMMS` dispatch in `handleMdsComms`; reuses `buildAndPostChannelTx` with `ctx.role='publisher'` and `ctx.frameId`. New helper `persistPublisherChannelOpen()` writes the publisher CHANNEL_STATE row via direct SQL (3-key MERGE INTO with ROLE='publisher', FRAME_ID) and increments `CAMPAIGNS.PUBLISHER_BUDGET_SPENT` rather than `BUDGET_REMAINING`. `finalizeChannelOpen()` branches on `ctx.role`: publisher path uses `persistPublisherChannelOpen` + sends CHANNEL_OPEN with `role:'publisher'`, `frame_id`. Pending-resume contexts (`channel_split_sign`, `channel_split_post`, `channel_open_postsign`, `channel_open`) now propagate `role` and `frameId`. AGENTS.md §12 fragility #31 updated. |
-
-
----
-
-## 17) Node Verification Workflow
-
-The maintainer has access to one or more active Minima nodes at any time. Any number of nodes can run simultaneously — typically one as **creator** and one or more as **viewer** nodes.
-
-### How verification works
-
-The agent cannot access the nodes directly. The workflow is:
-
-1. **Agent implements** a feature and provides the handoff note with verification steps.
-2. **Maintainer installs / reloads** the MiniDapp on the relevant nodes (reinstall clears the H2 DB; reload without reinstall preserves it).
-3. **Maintainer triggers** the action described in the verification step (e.g. creates a campaign, sends a Maxima message, clicks an ad).
-4. **Maintainer copies** the relevant `MDS.log` output from the node debug panel and pastes it into the conversation.
-5. **Agent reads the logs** and confirms the expected log lines are present, or diagnoses any errors.
-
-### What to look for in logs
-
-Each module uses a bracketed prefix in `MDS.log` calls. Use these to filter:
-
-| Prefix | Module |
-|---|---|
-| `[ADS]` | `main.js` — bootstrap, Maxima PK, escrow registration |
-| `[DB]` | `db-init.js` — table creation |
-| `[SQL]` | `core/minima.js` — sqlQuery errors |
-| `[MAXIMA]` | `maxima.handler.js` — inbound Maxima routing |
-| `[CAMPAIGN]` | `campaign.handler.js` — campaign persist, status change, discovery |
-| `[CHANNEL]` | `channel.handler.js` — channel open, reward request, voucher |
-| `[DISCOVERY]` | `campaign.handler.js` — escrow coin scan |
-| `[PENDING]` | `campaign.handler.js` — MDS_PENDING approval flow |
-| `[TIMER]` | `main.js` — timer ticks |
-| `[VALIDATION]` | `core/validation.js` — isDuplicate errors |
-
-### Verification steps for T-CH3 (channel.handler.js)
-
-To verify `handleChannelOpenRequest`:
-- Node A (creator) must have an active campaign in DB.
-- Send a `CHANNEL_OPEN_REQUEST` Maxima message from Node B to Node A.
-- Expected in Node A logs: `[CHANNEL] CHANNEL_OPEN_REQUEST: channel pending. campaign: <id>`
-- If budget insufficient: `[CHANNEL] CHANNEL_OPEN_REQUEST: insufficient budget`
-- If campaign inactive: `[CHANNEL] CHANNEL_OPEN_REQUEST: campaign not active`
-
-To verify `handleRewardRequest` duplicate rejection:
-- Send the same `REWARD_REQUEST` twice (same `event_id`).
-- Second time: `[CHANNEL] REWARD_REQUEST: duplicate event_id: <id>`
-
-To verify `handleRewardVoucher` DEDUP_LOG write:
-- After receiving a `REWARD_VOUCHER`, query `SELECT * FROM DEDUP_LOG` from the node SQL console.
-- The `event_id` from the voucher should appear as a row.
-
-### T-CH3 Verification Result (2026-04-24)
-
-Two-node test (creator = node1 `10.0.0.11:9001`, viewer = node2):
-
-- ✅ Both nodes boot without Rhino errors — `channel.handler.js` loads cleanly
-- ✅ Both nodes reach `[DB] initDB: all tables ready` (CHANNEL_STATE table present)
-- ✅ Maxima messaging functional: viewer discovers escrow coin on-chain → sends `REQUEST_CAMPAIGN_DATA` → creator replies → viewer persists campaign `19dbe586589-e7bfa9c1`
-- ⏳ `[CHANNEL]` handler functions not yet triggered — expected, as `CHANNEL_OPEN_REQUEST` is only sent by T-CH5 (SDK), not yet implemented
-
-Full per-handler verification (handleChannelOpenRequest, handleRewardRequest, handleRewardVoucher) pending T-CH4 + T-CH5.
-
----
-
-## 15) AGENTS.md Maintenance Rules
-
-1. Update the header review line (date) whenever protocol handlers, DB schema, or core architecture are touched.
-2. Any new Maxima message type → update **section 9** (Protocol Matrix) AND **MinimaAds.md §8** in the same patch.
-3. Any new SW signal → update **section 10** AND **MinimaAds.md §8.6** in the same patch.
-4. Any schema change → update **section 8** AND **MinimaAds.md §3.5** in the same patch.
-5. Any non-obvious bug found during development → add to **section 12** (Fragility Points) and **section 14** (Bugs).
-6. Any architectural decision with a non-obvious "why" → document it here, not just in the code.
-7. Any change to Core API function signatures → update **section 0.7** (Stable Function Reference) AND **MinimaAds.md §7** in the same patch.
-8. Any change to the Forbidden Actions list (section 0.8) or Role of Agents (section 0.9) requires explicit maintainer approval.
+## 8) Current Handoff Notes
+
+2026-05-19:
+- `dapp/app.js` `PUBLISHER_REWARD_CONFIRMED` handler: changed to call `loadEarnings()` (full reload). Previously only refreshed the history table — "Total earned" headline stayed stale when new publisher vouchers arrived.
+- `dapp/views/earnings.js` `onSettleConfirmed()`: added `getUserProfile` reload + re-render of the summary section after settlement. Previously only the channel list and reward history updated.
+- `core/rewards.js` `createRewardEvent()`: replaced non-atomic read-modify-write `MERGE INTO` for `USER_PROFILE.TOTAL_EARNED` with atomic `UPDATE ... SET TOTAL_EARNED = COALESCE(TOTAL_EARNED, 0) + amount`. Prevents lost increments under concurrent reward events. INSERT path for new users unchanged.
+- Verified end-to-end with earnings.txt (19/5/2026): user2 (publisher) 20 MINIMA and user3 (viewer) 2 MINIMA consistent across Total earned / Settled channels / Reward history. Zero errors in all log files.
+
+2026-05-18:
+- Compacted `AGENTS.md` from 1,224 lines into a short operative guide.
+- Extracted long-form reference content into:
+  - `docs/PLATFORM_NOTES.md`
+  - `docs/PROJECT_NOTES.md`
+  - `docs/KNOWN_ISSUES.md`
+  - `docs/HISTORY.md`
+  - `docs/VERIFICATION.md`
+- Removed the temporary full pre-compaction archive after confirming the extracted documents cover the needed reference content.
+- Moved the implementation task list from root `TASKS.md` to `docs/TASKS.md`.
+- Removed obsolete temporary handoff file `handoff_session_2026-05-13.md`; its relevant fixes are already tracked in `docs/HISTORY.md` and `docs/KNOWN_ISSUES.md`.
+- Moved the new-session prompt template from root `PromptBase.md` to `docs/PromptBase.md`.
+- Removed obsolete `latest-deploy.mds` packaged artifact; it was a non-source deploy ZIP containing logs and temporary files.
+- `MinimaAds.md` remains the highest-authority functional specification.

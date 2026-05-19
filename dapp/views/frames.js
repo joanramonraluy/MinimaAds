@@ -298,13 +298,21 @@ function _showEarnings(fid) {
       return;
     }
     el.innerHTML = '<div class="ma-section">'
-      + '<p class="ma-section-title">Earnings — ' + DOMPurify.sanitize(fid) + '</p>'
+      + '<p class="ma-section-title">' + _frameEarningsTitle(fid) + '</p>'
       + '<ul>'
       + '<li>Total earned: <strong>' + (data.total_earned || 0).toFixed(6) + ' MINIMA</strong></li>'
       + '<li>Publisher view events: <strong>' + (data.event_count || 0) + '</strong></li>'
       + '</ul>'
       + '</div>';
   });
+}
+
+function _frameEarningsTitle(fid) {
+  var frameId = String(fid || '');
+  if (frameId.toLowerCase().indexOf('builtin:') === 0) {
+    return 'Earnings — Built-in viewer';
+  }
+  return 'Earnings — ' + DOMPurify.sanitize(frameId);
 }
 
 function _openPublisherChannelsForExistingFrames() {

@@ -108,17 +108,11 @@ function loadEarnings() {
 function _refreshSettlementHistory() {
   var target = document.getElementById('ma-settlement-history');
   if (!target) { return; }
-  var sql = "SELECT cs.CAMPAIGN_ID, cs.CUMULATIVE_EARNED, cs.CREATED_AT, c.TITLE, c.CREATOR_ADDRESS"
-          + " FROM CHANNEL_STATE cs"
-          + " LEFT JOIN CAMPAIGNS c ON UPPER(cs.CAMPAIGN_ID) = UPPER(c.ID)"
-          + " WHERE cs.STATUS = 'settled'"
-          + " AND UPPER(cs.VIEWER_KEY) = UPPER('" + escapeSql(MY_ADDRESS) + "')"
-          + " UNION ALL"
-          + " SELECT ch.CAMPAIGN_ID, ch.CUMULATIVE_EARNED, ch.CREATED_AT, c2.TITLE, c2.CREATOR_ADDRESS"
+  var sql = "SELECT ch.CAMPAIGN_ID, ch.CUMULATIVE_EARNED, ch.CREATED_AT, c.TITLE, c.CREATOR_ADDRESS"
           + " FROM CHANNEL_HISTORY ch"
-          + " LEFT JOIN CAMPAIGNS c2 ON UPPER(ch.CAMPAIGN_ID) = UPPER(c2.ID)"
+          + " LEFT JOIN CAMPAIGNS c ON UPPER(ch.CAMPAIGN_ID) = UPPER(c.ID)"
           + " WHERE UPPER(ch.VIEWER_KEY) = UPPER('" + escapeSql(MY_ADDRESS) + "')"
-          + " ORDER BY CREATED_AT ASC";
+          + " ORDER BY ch.CREATED_AT ASC";
   sqlQuery(sql, function(err, rows) {
     target.innerHTML = '';
     renderSettlementHistory(target, rows || []);
@@ -429,6 +423,32 @@ function onSettleConfirmed(parsed) {
   }
   _refreshChannelRewards();
   _refreshSettlementHistory();
+  var summaryTarget = document.getElementById('ma-earnings-summary');
+  if (summaryTarget && MY_ADDRESS) {
+    getUserProfile(MY_ADDRESS, function(err, profile) {
+      if (summaryTarget && !err) {
+        summaryTarget.innerHTML = '';
+        var totalEarned = profile ? parseFloat(profile.TOTAL_EARNED || 0) : 0;
+        var article = document.createElement('article');
+        var strong = document.createElement('strong');
+        strong.textContent = 'Total earned: ';
+        article.appendChild(strong);
+        article.appendChild(document.createTextNode(totalEarned.toFixed(6) + ' MINIMA'));
+        summaryTarget.appendChild(article);
+        var todayArticle = document.createElement('article');
+        var todayStrong = document.createElement('strong');
+        todayStrong.textContent = 'Today earned: ';
+        todayArticle.appendChild(todayStrong);
+        var todaySpan = document.createElement('span');
+        todaySpan.id = 'ma-today-earned';
+        todaySpan.textContent = '…';
+        todayArticle.appendChild(todaySpan);
+        todayArticle.appendChild(document.createTextNode(' MINIMA'));
+        summaryTarget.appendChild(todayArticle);
+        _loadTodayEarnedSummary();
+      }
+    });
+  }
   var histTarget = document.getElementById('ma-earnings-history');
   if (histTarget && MY_ADDRESS) {
     getUserRewards(MY_ADDRESS, function(err, rewards) {

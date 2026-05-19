@@ -17,7 +17,7 @@
 |---|---|
 | `PROJECT_INDEX.md` | Folder map, entry points, pending tasks, key decisions |
 | `MinimaAds.md` | Data models, API signatures, system flows, KissVM escrow spec — **source of truth, always wins** |
-| `AGENTS.md` | Platform gotchas: H2 quirks, Rhino constraints, Maxima patterns, fragility points |
+| `AGENTS.md` + `docs/` | Agent workflow plus platform gotchas, project notes, fragility points, history, and tasks |
 | `CLAUDE.md` | Your task workflow and forbidden actions |
 
 Read the sections relevant to your task. Do not skip this.
@@ -84,15 +84,15 @@ Entry points: `service.js` (SW) · `dapp/app.js` (FE) · `sdk/index.js` (SDK)
 
 ## 6) Current Task
 
-Read `TASKS.md` and find the task indicated by the maintainer. That task entry is your complete specification: files to modify, relevant spec sections, constraints, and definition of done.
+Read `docs/TASKS.md` and find the task indicated by the maintainer. That task entry is your complete specification: files to modify, relevant spec sections, constraints, and definition of done.
 
-Do not start implementing until you have read the full task entry in `TASKS.md`.
+Do not start implementing until you have read the full task entry in `docs/TASKS.md`.
 
 ---
 
 ## 7) When You Are Done
 
-Before closing the session, review `TASKS.md` and assess whether anything discovered during this task affects future tasks. If yes, note it explicitly in the handoff — the maintainer will decide whether to update `TASKS.md`.
+Before closing the session, review `docs/TASKS.md` and assess whether anything discovered during this task affects future tasks. If yes, note it explicitly in the handoff — the maintainer will decide whether to update `docs/TASKS.md`.
 
 End every session with this handoff note (required):
 

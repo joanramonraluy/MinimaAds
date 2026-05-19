@@ -65,7 +65,7 @@ function createRewardEvent(params, cb) {
             return;
           }
 
-          var profileSql = "SELECT TOTAL_EARNED, INTERESTS FROM USER_PROFILE"
+          var profileSql = "SELECT INTERESTS FROM USER_PROFILE"
             + " WHERE UPPER(ADDRESS) = UPPER('" + escapeSql(userAddress) + "')";
 
           sqlQuery(profileSql, function(err4, profileRows) {
@@ -75,26 +75,31 @@ function createRewardEvent(params, cb) {
               return;
             }
 
-            var currentEarned = 0;
-            var interests = null;
-            if (profileRows && profileRows.length > 0) {
-              currentEarned = parseFloat(profileRows[0].TOTAL_EARNED || 0);
-              interests = (profileRows[0].INTERESTS !== null && profileRows[0].INTERESTS !== undefined)
-                ? profileRows[0].INTERESTS
-                : null;
+            var profileExists = profileRows && profileRows.length > 0;
+            var interests = profileExists
+              ? ((profileRows[0].INTERESTS !== null && profileRows[0].INTERESTS !== undefined)
+                  ? profileRows[0].INTERESTS : null)
+              : null;
+
+            var profileSql5;
+            if (profileExists) {
+              profileSql5 = "UPDATE USER_PROFILE"
+                + " SET TOTAL_EARNED = COALESCE(TOTAL_EARNED, 0) + " + amount
+                + ", LAST_REWARD_AT = " + timestamp
+                + " WHERE UPPER(ADDRESS) = UPPER('" + escapeSql(userAddress) + "')";
+            } else {
+              profileSql5 = "INSERT INTO USER_PROFILE"
+                + " (ADDRESS, INTERESTS, TOTAL_EARNED, LAST_REWARD_AT) VALUES ("
+                + "'" + escapeSql(userAddress) + "',"
+                + (interests ? "'" + escapeSql(interests) + "'" : "NULL") + ","
+                + amount + ","
+                + timestamp
+                + ")";
             }
 
-            var profileMergeSql = "MERGE INTO USER_PROFILE "
-              + "(ADDRESS, INTERESTS, TOTAL_EARNED, LAST_REWARD_AT) KEY (ADDRESS) VALUES ("
-              + "'" + escapeSql(userAddress) + "',"
-              + (interests ? "'" + escapeSql(interests) + "'" : "NULL") + ","
-              + (currentEarned + amount) + ","
-              + timestamp
-              + ")";
-
-            sqlQuery(profileMergeSql, function(err5) {
+            sqlQuery(profileSql5, function(err5) {
               if (err5) {
-                MDS.log("[REWARD] createRewardEvent: USER_PROFILE merge error: " + err5);
+                MDS.log("[REWARD] createRewardEvent: USER_PROFILE update error: " + err5);
                 cb(err5, null);
                 return;
               }

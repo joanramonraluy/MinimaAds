@@ -9,16 +9,7 @@ function openChannel(campaignId, viewerKey, creatorMx, maxAmount, role, frameId,
   var r     = role || 'viewer';
   var fid   = frameId || '';
   var wAddr = walletAddr || '';
-  var archiveSql = "SELECT * FROM CHANNEL_STATE WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(viewerKey) + "') AND UPPER(ROLE) = UPPER('" + escapeSql(r) + "') AND STATUS = 'settled'";
-  sqlQuery(archiveSql, function(archErr, archRows) {
-    if (!archErr && archRows && archRows.length > 0) {
-      var old = archRows[0];
-      var histSql = "MERGE INTO CHANNEL_HISTORY (CAMPAIGN_ID, VIEWER_KEY, ROLE, CREATOR_MX, CHANNEL_COINID, MAX_AMOUNT, CUMULATIVE_EARNED, STATUS, CREATED_AT, VIEWER_WALLET_ADDR) KEY (CAMPAIGN_ID, VIEWER_KEY, ROLE, CREATED_AT) VALUES ('" + escapeSql(old.CAMPAIGN_ID) + "','" + escapeSql(old.VIEWER_KEY) + "','" + escapeSql(old.ROLE) + "','" + escapeSql(old.CREATOR_MX || '') + "','" + escapeSql(old.CHANNEL_COINID || '') + "'," + parseFloat(old.MAX_AMOUNT) + "," + parseFloat(old.CUMULATIVE_EARNED) + ",'settled'," + parseInt(old.CREATED_AT) + ",'" + escapeSql(old.VIEWER_WALLET_ADDR || '') + "')";
-      sqlQuery(histSql, function() { _doMergeChannel(campaignId, viewerKey, creatorMx, maxAmount, r, fid, wAddr, now, cb); });
-    } else {
-      _doMergeChannel(campaignId, viewerKey, creatorMx, maxAmount, r, fid, wAddr, now, cb);
-    }
-  });
+  _doMergeChannel(campaignId, viewerKey, creatorMx, maxAmount, r, fid, wAddr, now, cb);
 }
 
 function _doMergeChannel(campaignId, viewerKey, creatorMx, maxAmount, r, fid, wAddr, now, cb) {
@@ -106,12 +97,38 @@ function getLatestVoucher(campaignId, viewerKey, role, cb) {
 
 function settleChannel(campaignId, viewerKey, role, cb) {
   var r = role || 'viewer';
-  var sql = "UPDATE CHANNEL_STATE SET STATUS = 'settled' " +
-    "WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') " +
-    "AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(viewerKey) + "') " +
-    "AND UPPER(ROLE) = UPPER('" + escapeSql(r) + "')";
-  sqlQuery(sql, function(err) {
-    if (err) { cb(err); return; }
-    cb(null, true);
+  var selSql = "SELECT * FROM CHANNEL_STATE" +
+    " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
+    " AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(viewerKey) + "')" +
+    " AND UPPER(ROLE) = UPPER('" + escapeSql(r) + "')";
+  sqlQuery(selSql, function(selErr, selRows) {
+    var updSql = "UPDATE CHANNEL_STATE SET STATUS = 'settled'" +
+      " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
+      " AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(viewerKey) + "')" +
+      " AND UPPER(ROLE) = UPPER('" + escapeSql(r) + "')";
+    sqlQuery(updSql, function(err) {
+      if (err) { cb(err); return; }
+      if (selErr || !selRows || selRows.length === 0) { cb(null, true); return; }
+      var ch = selRows[0];
+      var histSql = "MERGE INTO CHANNEL_HISTORY" +
+        " (CAMPAIGN_ID, VIEWER_KEY, ROLE, CREATOR_MX, CHANNEL_COINID, MAX_AMOUNT," +
+        " CUMULATIVE_EARNED, STATUS, CREATED_AT, VIEWER_WALLET_ADDR)" +
+        " KEY (CAMPAIGN_ID, VIEWER_KEY, ROLE, CREATED_AT) VALUES (" +
+        "'" + escapeSql(ch.CAMPAIGN_ID) + "'," +
+        "'" + escapeSql(ch.VIEWER_KEY) + "'," +
+        "'" + escapeSql(ch.ROLE) + "'," +
+        "'" + escapeSql(ch.CREATOR_MX || '') + "'," +
+        "'" + escapeSql(ch.CHANNEL_COINID || '') + "'," +
+        parseFloat(ch.MAX_AMOUNT) + "," +
+        parseFloat(ch.CUMULATIVE_EARNED) + "," +
+        "'settled'," +
+        parseInt(ch.CREATED_AT) + "," +
+        "'" + escapeSql(ch.VIEWER_WALLET_ADDR || '') + "'" +
+        ")";
+      sqlQuery(histSql, function(histErr) {
+        if (histErr) { MDS.log("[CHANNELS] settleChannel: CHANNEL_HISTORY write failed — " + histErr); }
+        cb(null, true);
+      });
+    });
   });
 }

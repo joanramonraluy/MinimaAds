@@ -199,6 +199,7 @@ function handleChannelOpenRequest(payload, senderPk) {
                 function() {
                   openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', '', viewerWalletAddr, function(openErr) {
                     if (openErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: openChannel failed: " + openErr); return; }
+                    _signalCampaignUpdated(campaignId);
                     MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: building channel TX in SW. campaign: " + campaignId + " viewer_mx: " + viewerMx);
                     _swDispatchChannelOpen(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', '', viewerWalletPK, viewerWalletAddr);
                   });
@@ -241,12 +242,27 @@ function handleChannelOpenRequest(payload, senderPk) {
             MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: openChannel failed: " + openErr);
             return;
           }
+          _signalCampaignUpdated(campaignId);
           MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: building channel TX in SW. campaign: " + campaignId + " viewer_mx: " + viewerMx);
           _swDispatchChannelOpen(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', '', viewerWalletPK, viewerWalletAddr);
         });
       });
     });
   }
+}
+
+function _signalCampaignUpdated(campaignId) {
+  getCampaign(campaignId, function(err, campaign) {
+    if (err || !campaign) {
+      MDS.log("[CHANNEL] _signalCampaignUpdated: campaign not found. campaign: " + campaignId);
+      return;
+    }
+    signalFE("CAMPAIGN_UPDATED", {
+      campaign_id: campaignId,
+      status: campaign.STATUS,
+      budget_remaining: parseFloat(campaign.BUDGET_REMAINING || 0)
+    });
+  });
 }
 
 function handleChannelOpen(payload) {
@@ -1356,9 +1372,15 @@ function swBuildAndPostChannelTx(ctx) {
                 MDS.log("[CHANNEL] SW split posted. splitCoinId: " + splitCoinId);
 
                 if (changeCoinId) {
-                  sqlQuery("UPDATE CAMPAIGNS SET ESCROW_COINID = '" + escapeSql(changeCoinId) + "' WHERE UPPER(ID) = UPPER('" + escapeSql(ctx.campaignId) + "')", function(err) {
-                    if (err) { MDS.log("[CHANNEL] SW CAMPAIGNS escrow update failed: " + err); }
-                  });
+                  sqlQuery(
+                    "UPDATE CAMPAIGNS SET ESCROW_COINID = '" + escapeSql(changeCoinId) + "'" +
+                    ", BUDGET_REMAINING = " + change +
+                    " WHERE UPPER(ID) = UPPER('" + escapeSql(ctx.campaignId) + "')",
+                    function(err) {
+                      if (err) { MDS.log("[CHANNEL] SW CAMPAIGNS escrow update failed: " + err); }
+                      else { MDS.log("[CHANNEL] budget synced from split: " + ctx.campaignId + " remaining=" + change); }
+                    }
+                  );
                 }
 
                 sqlQuery("UPDATE CHANNEL_STATE SET SPLIT_COINID = '" + escapeSql(splitCoinId) + "' " +

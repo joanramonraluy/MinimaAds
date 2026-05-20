@@ -965,6 +965,19 @@ function _replayDeferredPublisherRewards(campaignId, frameId, publisherKey) {
           MDS.log("[CHANNEL] _replayDeferredPublisherRewards: channel not found. campaign: " + campaignId);
           return;
         }
+        swWaitForCoin(pubChannel.CHANNEL_COINID, 1, 0, function(coinFound) {
+          if (!coinFound) {
+            MDS.log("[CHANNEL] _replayDeferredPublisherRewards: channel coin not yet indexed, deferring. campaign: " + campaignId);
+            return;
+          }
+          _replayDeferredPublisherRewardsNow(campaignId, frameId, rows, pubChannel);
+        });
+      });
+    }
+  );
+}
+
+function _replayDeferredPublisherRewardsNow(campaignId, frameId, rows, pubChannel) {
         var base = parseFloat(pubChannel.CUMULATIVE_EARNED);
         var totalAmount = 0;
         var stableIds    = [];
@@ -1006,9 +1019,6 @@ function _replayDeferredPublisherRewards(campaignId, frameId, publisherKey) {
             }
           );
         });
-      });
-    }
-  );
 }
 
 function _doGeneratePublisherVoucher(campaignId, frameId, eventId, pubChannel) {

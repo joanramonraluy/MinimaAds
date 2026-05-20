@@ -3,14 +3,9 @@
 // Rhino-compatible: var only, no arrow functions, no template literals.
 // Requires LIMITS to be defined in the global scope (set in main.js).
 
-var _sessionCampaignCount = 0;
 var _seenCampaignIds = {};
 
 function selectAd(userAddress, userInterests, campaigns) {
-  if (typeof LIMITS !== "undefined" && _sessionCampaignCount >= LIMITS.MAX_CAMPAIGNS_PER_SESSION) {
-    return null;
-  }
-
   var eligible = campaigns.filter(function(c) {
     return c.STATUS === "active"
       && parseFloat(c.BUDGET_REMAINING) >= parseFloat(c.REWARD_VIEW)
@@ -32,7 +27,6 @@ function selectAd(userAddress, userInterests, campaigns) {
   var unseen = pool.filter(function(c) { return !_seenCampaignIds[c.ID]; });
   var pickFrom = unseen.length > 0 ? unseen : pool;
 
-  _sessionCampaignCount = _sessionCampaignCount + 1;
   var selected = pickFrom[Math.floor(Math.random() * pickFrom.length)];
   selected.ALREADY_SEEN = !!_seenCampaignIds[selected.ID];
   _seenCampaignIds[selected.ID] = true;

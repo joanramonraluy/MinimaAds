@@ -189,7 +189,8 @@ CREATE TABLE IF NOT EXISTS CAMPAIGNS (
   ESCROW_WALLET_PK       VARCHAR(66)   DEFAULT '',  -- wallet signing key in escrow PREVSTATE(1)
   MAX_VIEWER_REWARD      DECIMAL(20,6) DEFAULT NULL, -- optional per-viewer channel cap; if set overrides (view+click)×days formula
   MAX_DAILY_VIEWS        INT           DEFAULT 100,
-  MAX_DAILY_CLICKS       INT           DEFAULT 100
+  MAX_DAILY_CLICKS       INT           DEFAULT 100,
+  COOLDOWN_MS            BIGINT        DEFAULT 300000  -- ms between rewards for the same viewer; overrides LIMITS.COOLDOWN_BETWEEN_REWARDS_MS
 );
 
 CREATE TABLE IF NOT EXISTS ADS (
@@ -367,7 +368,7 @@ var LIMITS = {
 |---|---|---|
 | `MAX_VIEWS_PER_CAMPAIGN_PER_DAY` | 100 | `validation.js` → query `REWARD_EVENTS` (last 24h, same user+campaign+type=view) |
 | `MAX_CLICKS_PER_CAMPAIGN_PER_DAY` | 100 | `validation.js` → same query for `type='click'` |
-| `COOLDOWN_BETWEEN_REWARDS_MS` | 30 s | `validation.js` → check `USER_PROFILE.LAST_REWARD_AT` |
+| `COOLDOWN_BETWEEN_REWARDS_MS` | 30 s | `validation.js` fallback only — overridden by `CAMPAIGNS.COOLDOWN_MS` when set |
 | `MIN_VIEW_DURATION_MS` | 3 s | SDK client-side timer — must complete before view event is emitted |
 | `MAX_CAMPAIGNS_PER_SESSION` | 10 | `selection.js` — session counter, never persisted to DB |
 | `MIN_BUDGET` | 100 MINIMA | `creator.js` submit validation + HTML `min` attribute — anti-spam floor (~$0.77 at current rates) |
@@ -835,11 +836,14 @@ All `MDS.cmd("maxima action:send ... application:" + APP_NAME + " ...")` calls m
     "interests": "tech,minima,web3"
   },
   "max_viewer_reward": 0.50,
+  "cooldown_ms": 300000,
   "platform_key": "0x... or null"
 }
 ```
 
 > `max_viewer_reward` is **optional**. When present and > 0, receiving nodes store it in `CAMPAIGNS.MAX_VIEWER_REWARD` and the SDK uses it as the channel `max_amount` instead of the `(REWARD_VIEW + REWARD_CLICK) × campaign_days` formula. When absent or null, the formula applies (backward-compatible).
+>
+> `cooldown_ms` is **optional** (default 300 000 ms = 5 min). Receiving nodes store it in `CAMPAIGNS.COOLDOWN_MS`. `validation.js` uses it as the cooldown between rewards for any single viewer — overrides the global `LIMITS.COOLDOWN_BETWEEN_REWARDS_MS`. When absent, the LIMITS fallback applies (backward-compatible).
 >
 > `publisher_reward_view` and `max_publisher_budget` are **optional** (default 0). When `publisher_reward_view = 0`, the campaign has no publisher payouts.
 >

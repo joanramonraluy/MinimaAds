@@ -449,11 +449,51 @@ function handleRewardVoucher(payload) {
       }
       MDS.log("[CHANNEL] REWARD_VOUCHER: voucher stored. campaign: " + campaignId + " cumulative: " + cumulative + " role: " + role);
       if (role === 'publisher') {
-        signalFE("VOUCHER_RECEIVED", {
-          campaign_id: campaignId,
-          cumulative:  cumulative,
-          role:        'publisher',
-          frame_id:    frameId
+        if (!frameId) {
+          MDS.log("[CHANNEL] REWARD_VOUCHER (publisher): no frame_id — cannot create reward event. campaign: " + campaignId);
+          return;
+        }
+        getCampaign(campaignId, function(campErr, campaign) {
+          if (campErr || !campaign) {
+            MDS.log("[CHANNEL] REWARD_VOUCHER (publisher): campaign not found: " + campaignId);
+            return;
+          }
+          var pubAmount = parseFloat(campaign.PUBLISHER_REWARD_VIEW) || 0;
+          if (!(pubAmount > 0)) {
+            MDS.log("[CHANNEL] REWARD_VOUCHER (publisher): no publisher reward on campaign: " + campaignId);
+            return;
+          }
+          sqlQuery(
+            "SELECT ID FROM ADS WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')",
+            function(adErr, adRows) {
+              var adId = (adRows && adRows.length > 0) ? adRows[0].ID : '';
+              getFrame(frameId, function(frErr, frame) {
+                var userAddr = (frame && frame.PUBLISHER_KEY) ? frame.PUBLISHER_KEY : frameId;
+                var reParams = {
+                  campaign_id:  campaignId,
+                  ad_id:        adId,
+                  user_address: userAddr,
+                  type:         'publisher_view',
+                  amount:       pubAmount,
+                  publisher_id: frameId
+                };
+                createRewardEvent(reParams, function(evtErr, evt) {
+                  if (evtErr || !evt) {
+                    MDS.log("[CHANNEL] REWARD_VOUCHER (publisher): createRewardEvent failed: " + evtErr);
+                    return;
+                  }
+                  MDS.log("[CHANNEL] REWARD_VOUCHER (publisher): reward event created. campaign: " + campaignId + " frame: " + frameId + " amount: " + pubAmount);
+                  incrementFrameEarnings(frameId, pubAmount, function() {});
+                  signalFE("PUBLISHER_REWARD_CONFIRMED", {
+                    event_id:    evt.id,
+                    amount:      pubAmount,
+                    frame_id:    frameId,
+                    campaign_id: campaignId
+                  });
+                });
+              });
+            }
+          );
         });
       } else {
         signalFE("VOUCHER_RECEIVED", {

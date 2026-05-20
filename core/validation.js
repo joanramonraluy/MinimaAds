@@ -58,7 +58,9 @@ function validateView(campaignId, userAddress, cb) {
         if (profileRows && profileRows.length > 0) {
           var lastRewardAt = profileRows[0].LAST_REWARD_AT;
           if (lastRewardAt !== null && lastRewardAt !== undefined) {
-            if (now - parseInt(lastRewardAt, 10) < LIMITS.COOLDOWN_BETWEEN_REWARDS_MS) {
+            var cooldown = (campaign.COOLDOWN_MS !== null && campaign.COOLDOWN_MS !== undefined)
+              ? parseInt(campaign.COOLDOWN_MS, 10) : LIMITS.COOLDOWN_BETWEEN_REWARDS_MS;
+            if (now - parseInt(lastRewardAt, 10) < cooldown) {
               cb({ valid: false, reason: 'cooldown active' });
               return;
             }
@@ -124,7 +126,9 @@ function validateClick(campaignId, userAddress, cb) {
         if (profileRows && profileRows.length > 0) {
           var lastRewardAt = profileRows[0].LAST_REWARD_AT;
           if (lastRewardAt !== null && lastRewardAt !== undefined) {
-            if (now - parseInt(lastRewardAt, 10) < LIMITS.COOLDOWN_BETWEEN_REWARDS_MS) {
+            var cooldown = (campaign.COOLDOWN_MS !== null && campaign.COOLDOWN_MS !== undefined)
+              ? parseInt(campaign.COOLDOWN_MS, 10) : LIMITS.COOLDOWN_BETWEEN_REWARDS_MS;
+            if (now - parseInt(lastRewardAt, 10) < cooldown) {
               cb({ valid: false, reason: 'cooldown active' });
               return;
             }

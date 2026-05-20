@@ -20,6 +20,9 @@ function handleCampaignAnnounce(payload) {
   if (payload.max_daily_clicks !== undefined && payload.max_daily_clicks !== null) {
     payload.campaign.max_daily_clicks = parseInt(payload.max_daily_clicks, 10);
   }
+  if (payload.cooldown_ms !== undefined && payload.cooldown_ms !== null) {
+    payload.campaign.cooldown_ms = parseInt(payload.cooldown_ms, 10);
+  }
   var campaignId = payload.campaign.id;
 
   if (typeof PLATFORM_KEY === 'undefined' || PLATFORM_KEY === null) {
@@ -257,7 +260,8 @@ function handleRequestCampaignData(payload) {
           max_publisher_budget: (c.MAX_PUBLISHER_BUDGET !== null && c.MAX_PUBLISHER_BUDGET !== undefined) ? parseFloat(c.MAX_PUBLISHER_BUDGET) : 0,
           publisher_budget_spent: (c.PUBLISHER_BUDGET_SPENT !== null && c.PUBLISHER_BUDGET_SPENT !== undefined) ? parseFloat(c.PUBLISHER_BUDGET_SPENT) : 0,
           max_daily_views: (c.MAX_DAILY_VIEWS !== null && c.MAX_DAILY_VIEWS !== undefined) ? parseInt(c.MAX_DAILY_VIEWS, 10) : 100,
-          max_daily_clicks: (c.MAX_DAILY_CLICKS !== null && c.MAX_DAILY_CLICKS !== undefined) ? parseInt(c.MAX_DAILY_CLICKS, 10) : 100
+          max_daily_clicks: (c.MAX_DAILY_CLICKS !== null && c.MAX_DAILY_CLICKS !== undefined) ? parseInt(c.MAX_DAILY_CLICKS, 10) : 100,
+          cooldown_ms: (c.COOLDOWN_MS !== null && c.COOLDOWN_MS !== undefined) ? parseInt(c.COOLDOWN_MS, 10) : 300000
         };
         var response = {
           type: "CAMPAIGN_DATA_RESPONSE",
@@ -266,6 +270,7 @@ function handleRequestCampaignData(payload) {
           max_viewer_reward: campaignObj.max_viewer_reward,
           max_daily_views: campaignObj.max_daily_views,
           max_daily_clicks: campaignObj.max_daily_clicks,
+          cooldown_ms: campaignObj.cooldown_ms,
           platform_key: (typeof PLATFORM_KEY !== 'undefined' && PLATFORM_KEY) ? PLATFORM_KEY : null
         };
         sendMaxima(null, requesterMx, response, function(ok) {

@@ -21,7 +21,8 @@ function initDB(cb) {
     + "ESCROW_WALLET_PK  VARCHAR(66)   DEFAULT '',"
     + "MAX_VIEWER_REWARD DECIMAL(20,6) DEFAULT NULL,"
     + "MAX_DAILY_VIEWS  INT           DEFAULT 100,"
-    + "MAX_DAILY_CLICKS INT           DEFAULT 100"
+    + "MAX_DAILY_CLICKS INT           DEFAULT 100,"
+    + "COOLDOWN_MS      BIGINT        DEFAULT 300000"
     + ")";
 
   var sql_ads = "CREATE TABLE IF NOT EXISTS ADS ("
@@ -157,6 +158,7 @@ function initDB(cb) {
                     sqlQuery(sql_channel_history, function(chErr) {
                       if (chErr) { MDS.log("[DB] initDB: failed to create CHANNEL_HISTORY — " + chErr); return; }
                     sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS VIEWER_WALLET_PK VARCHAR(512) DEFAULT ''", function() {
+                    sqlQuery("ALTER TABLE CAMPAIGNS ADD COLUMN IF NOT EXISTS COOLDOWN_MS BIGINT DEFAULT 300000", function() {
                     sqlQuery("UPDATE CAMPAIGNS SET MAX_PUBLISHER_BUDGET = PUBLISHER_REWARD_VIEW * 10 WHERE MAX_PUBLISHER_BUDGET <= 0 AND PUBLISHER_REWARD_VIEW > 0", function(patchErr) {
                       if (patchErr) { MDS.log("[DB] initDB: publisher budget patch failed — " + patchErr); }
                       else { MDS.log("[DB] initDB: stale MAX_PUBLISHER_BUDGET patched"); }
@@ -164,6 +166,7 @@ function initDB(cb) {
                       signalFE("DB_READY", {});
                       if (cb) { cb(); }
                     }); // end publisher budget data migration
+                    }); // end COOLDOWN_MS migration
                     }); // end VIEWER_WALLET_PK migration
                     }); // end CHANNEL_HISTORY creation
                     }); // end DEFERRED_PUB_REWARDS creation

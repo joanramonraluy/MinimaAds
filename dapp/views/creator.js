@@ -87,6 +87,10 @@ function renderCreator(root) {
     + '  <label>Daily click limit (per viewer)'
     + '    <input name="max_daily_clicks" type="number" step="1" min="1" value="100" required>'
     + '  </label>'
+    + '  <label>Cooldown between rewards (seconds)'
+    + '    <input name="cooldown_s" type="number" step="1" min="1" value="300" required>'
+    + '    <small>Minimum time between two rewards for the same viewer (default 5 min)</small>'
+    + '  </label>'
     + '</div>'
     + '<div class="ma-section ma-tab-panel" id="ma-panel-publisher" role="tabpanel" aria-labelledby="ma-tab-publisher" hidden>'
     + '  <label>Publisher reward per view (MINIMA, optional)'
@@ -427,6 +431,8 @@ function onCreatorSubmit(e) {
   var maxPublisherBudget  = parseFloat(data.get('max_publisher_budget') || '0') || 0;
   var maxDailyViews = parseInt(data.get('max_daily_views') || '100', 10);
   var maxDailyClicks = parseInt(data.get('max_daily_clicks') || '100', 10);
+  var cooldownS = parseInt(data.get('cooldown_s') || '300', 10);
+  var cooldownMs = (cooldownS >= 1 ? cooldownS : 300) * 1000;
 
   if (maxViewerReward === null) {
     maxViewerReward = (rewardView + rewardClick) * campaignDays;
@@ -507,7 +513,8 @@ function onCreatorSubmit(e) {
     max_publisher_budget:   maxPublisherBudget,
     publisher_budget_spent: 0,
     max_daily_views:        maxDailyViews,
-    max_daily_clicks:       maxDailyClicks
+    max_daily_clicks:       maxDailyClicks,
+    cooldown_ms:            cooldownMs
   };
 
   var ad = {
@@ -791,6 +798,9 @@ function saveCampaignAndBroadcast(campaign, ad, form, submitBtn, msgEl) {
     }
     if (campaign.max_daily_clicks !== null && campaign.max_daily_clicks !== undefined) {
       payload.max_daily_clicks = campaign.max_daily_clicks;
+    }
+    if (campaign.cooldown_ms !== null && campaign.cooldown_ms !== undefined) {
+      payload.cooldown_ms = campaign.cooldown_ms;
     }
     if (typeof PLATFORM_KEY !== 'undefined' && PLATFORM_KEY) {
       payload.platform_key = PLATFORM_KEY;

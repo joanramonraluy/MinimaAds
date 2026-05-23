@@ -125,7 +125,7 @@
       return;
     }
     sqlQuery(
-      "SELECT ID, CAMPAIGN_ID, TITLE, BODY, CTA_LABEL, CTA_URL, INTERESTS FROM ADS",
+      "SELECT ID, CAMPAIGN_ID, TITLE, BODY, CTA_LABEL, CTA_URL, INTERESTS, IMAGE_DATA, SHOW_TITLE, SHOW_BODY, SHOW_CTA, BG_COLOR, TEXT_COLOR, IMAGE_POSITION, IMAGE_ZOOM, IMAGE_WIDTH_PCT FROM ADS",
       function(err, rows) {
         if (err) { cb(err, null); return; }
         var byCampaign = {};
@@ -145,6 +145,15 @@
             c.AD_CTA_LABEL = ad.CTA_LABEL;
             c.AD_CTA_URL = ad.CTA_URL;
             c.AD_INTERESTS = ad.INTERESTS;
+            c.AD_IMAGE_DATA  = ad.IMAGE_DATA || null;
+            c.AD_SHOW_TITLE  = (ad.SHOW_TITLE !== null && ad.SHOW_TITLE !== undefined) ? parseInt(ad.SHOW_TITLE, 10) : 1;
+            c.AD_SHOW_BODY   = (ad.SHOW_BODY !== null && ad.SHOW_BODY !== undefined) ? parseInt(ad.SHOW_BODY, 10) : 1;
+            c.AD_SHOW_CTA    = (ad.SHOW_CTA !== null && ad.SHOW_CTA !== undefined) ? parseInt(ad.SHOW_CTA, 10) : 1;
+            c.AD_BG_COLOR       = ad.BG_COLOR       || '#ffffff';
+            c.AD_TEXT_COLOR     = ad.TEXT_COLOR     || '#111111';
+            c.AD_IMAGE_POSITION = ad.IMAGE_POSITION || 'center';
+            c.AD_IMAGE_ZOOM      = (ad.IMAGE_ZOOM !== null && ad.IMAGE_ZOOM !== undefined) ? parseFloat(ad.IMAGE_ZOOM) : 1.0;
+            c.AD_IMAGE_WIDTH_PCT = (ad.IMAGE_WIDTH_PCT !== null && ad.IMAGE_WIDTH_PCT !== undefined) ? parseInt(ad.IMAGE_WIDTH_PCT, 10) : 40;
           }
           return c;
         });
@@ -179,7 +188,16 @@
         title: ad.AD_TITLE || ad.TITLE,
         body: ad.AD_BODY || ad.BODY,
         cta_label: ad.AD_CTA_LABEL || ad.CTA_LABEL,
-        cta_url: ad.AD_CTA_URL || ad.CTA_URL
+        cta_url: ad.AD_CTA_URL || ad.CTA_URL,
+        image_data: ad.AD_IMAGE_DATA || ad.IMAGE_DATA || ad.image_data || null,
+        show_title: ad.AD_SHOW_TITLE !== undefined ? ad.AD_SHOW_TITLE : (ad.SHOW_TITLE !== undefined ? ad.SHOW_TITLE : 1),
+        show_body:  ad.AD_SHOW_BODY !== undefined ? ad.AD_SHOW_BODY : (ad.SHOW_BODY !== undefined ? ad.SHOW_BODY : 1),
+        show_cta:   ad.AD_SHOW_CTA !== undefined ? ad.AD_SHOW_CTA : (ad.SHOW_CTA !== undefined ? ad.SHOW_CTA : 1),
+        bg_color:       ad.AD_BG_COLOR       || ad.BG_COLOR       || ad.bg_color       || '#ffffff',
+        text_color:     ad.AD_TEXT_COLOR     || ad.TEXT_COLOR     || ad.text_color     || '#111111',
+        image_position:  ad.AD_IMAGE_POSITION || ad.IMAGE_POSITION || ad.image_position || 'center',
+        image_zoom:      parseFloat(ad.AD_IMAGE_ZOOM || ad.IMAGE_ZOOM || ad.image_zoom) || 1.0,
+        image_width_pct: parseInt(ad.AD_IMAGE_WIDTH_PCT || ad.IMAGE_WIDTH_PCT || ad.image_width_pct, 10) || 40
       };
     }
     return renderAd(renderable, containerId);

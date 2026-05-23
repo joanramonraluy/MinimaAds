@@ -195,6 +195,25 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 ## 8) Current Handoff Notes
 
+2026-05-23 (Responsive banner layout + UI cleanup):
+- `renderer/renderAd.js`: two-mode layout based on `container.offsetWidth` at render time. ≥480px → row layout (image left, text right, max-height:160px). <480px with image → image-only (height:140px, clickable). <480px without image → text column. `baseFs` formula scales text block font size with image column width (`clamp(0.70rem … 0.95rem)`); child elements use `em` units. `isMobile` check uses container width, NOT a device media query — a slot in a ≥480px panel always uses desktop layout.
+- `dapp/views/frames.js` (SDK snippet): same two-mode logic mirrored in the self-contained `_render` function. `isMobile` reads `el.offsetWidth`.
+- `dapp/views/creator.js`: zoom UI (+/− buttons, `_updateZoom`) removed from `_attachImagePositioner`. Focal-point drag and draggable divider (`_attachDivider`) retained. "Remove image" button added to the image preview area — clears `_pendingImageData`, detaches positioner listeners, resets hidden inputs, re-renders. Hint text adapts to mobile/desktop preview (no "drag the divider" text in mobile mode).
+- `image_zoom` field: kept in DB (`ADS.IMAGE_ZOOM FLOAT DEFAULT 1.0`), all handlers, and renderer. Always 1.0 for new ads. `transform:scale(1.0)` is a no-op. Backward-compatible with any existing ads that stored a zoom value.
+- `image_width_pct`: still active for the desktop row layout (divider drag sets 20–70%). Ignored in mobile layout.
+- `MinimaAds.md` updated: §3.2 Ad model (added all missing fields), §3.5 ADS schema (added 7 missing columns), §15.3 Ad Unit (full rewrite to match actual two-mode layout).
+
+2026-05-22 (IMAGE_POSITION field — ad image focal-point control):
+- `ADS` table: new column `IMAGE_POSITION VARCHAR(32) DEFAULT 'center'`. Migration via `ALTER TABLE ADS ADD COLUMN IF NOT EXISTS IMAGE_POSITION VARCHAR(32) DEFAULT 'center'` in `public/service-workers/db-init.js`.
+- `core/campaigns.js` (`saveCampaign`): `IMAGE_POSITION` included in MERGE INTO ADS; value escaped with `escapeSql`.
+- `public/service-workers/handlers/campaign.handler.js`: `image_position` mapped from `r.IMAGE_POSITION` in ad-row reads.
+- `public/service-workers/handlers/comms.handler.js`: `IMAGE_POSITION` included in ADS SELECT; propagated as `c.AD_IMAGE_POSITION` and re-exposed as `image_position` in `MA_AD_RESPONSE`.
+- `sdk/index.js`: `IMAGE_POSITION` included in ADS SELECT; mapped to `c.AD_IMAGE_POSITION`; passed through in the renderable object.
+- `renderer/renderAd.js`: uses `ad.image_position` as CSS `object-position` on the image element.
+- `dapp/views/frames.js`: same CSS `object-position` usage in the SDK snippet renderer.
+- `dapp/views/creator.js`: hidden form field `image_position`; drag overlay on preview image sets value interactively; hint text shown below preview.
+- `MinimaAds.md §3.2` (Ad model) and `§3.5` (ADS schema) updated.
+
 2026-05-20 (Publisher REWARD_EVENT now created in SW — PUB-5 fix):
 - `public/service-workers/handlers/channel.handler.js` `handleRewardVoucher`: the publisher branch no longer signals `VOUCHER_RECEIVED` to the FE. Instead, the SW creates the `publisher_view` REWARD_EVENT directly via `createRewardEvent`, calls `incrementFrameEarnings`, then signals `PUBLISHER_REWARD_CONFIRMED`. All three functions (`getCampaign`, `getFrame`, `createRewardEvent`, `incrementFrameEarnings`) are already loaded in the SW runtime (`core/campaigns.js`, `core/frames.js`, `core/rewards.js`). The ADS lookup (for `ad_id`) is done inline via a direct `sqlQuery`.
 - Root cause of the bug: `MDS.comms.solo()` (used by `signalFE`) is fire-and-forget. If the publisher's FE is not open when the voucher arrives, the `VOUCHER_RECEIVED` signal is permanently lost and the FE's `_onVoucherReceivedCore` never runs — so no `publisher_view` REWARD_EVENT is created. Verified in logs/user2.txt: voucher stored at 09:50:21 (cumulative=40) but earnings only showed 4 rewards (missing 09:50); FE was not open at that moment.

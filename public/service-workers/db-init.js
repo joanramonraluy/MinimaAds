@@ -32,7 +32,16 @@ function initDB(cb) {
     + "BODY        VARCHAR(2048),"
     + "CTA_LABEL   VARCHAR(128),"
     + "CTA_URL     VARCHAR(1024),"
-    + "INTERESTS   VARCHAR(1024) DEFAULT NULL"
+    + "INTERESTS   VARCHAR(1024) DEFAULT NULL,"
+    + "IMAGE_DATA  CLOB          DEFAULT NULL,"
+    + "SHOW_TITLE  SMALLINT      DEFAULT 1,"
+    + "SHOW_BODY   SMALLINT      DEFAULT 1,"
+    + "SHOW_CTA    SMALLINT      DEFAULT 1,"
+    + "BG_COLOR       VARCHAR(16)   DEFAULT '#ffffff',"
+    + "TEXT_COLOR     VARCHAR(16)   DEFAULT '#111111',"
+    + "IMAGE_POSITION  VARCHAR(32)   DEFAULT 'center',"
+    + "IMAGE_ZOOM      FLOAT         DEFAULT 1.0,"
+    + "IMAGE_WIDTH_PCT INT           DEFAULT 40"
     + ")";
 
   var sql_reward_events = "CREATE TABLE IF NOT EXISTS REWARD_EVENTS ("
@@ -159,6 +168,16 @@ function initDB(cb) {
                       if (chErr) { MDS.log("[DB] initDB: failed to create CHANNEL_HISTORY — " + chErr); return; }
                     sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS VIEWER_WALLET_PK VARCHAR(512) DEFAULT ''", function() {
                     sqlQuery("ALTER TABLE CAMPAIGNS ADD COLUMN IF NOT EXISTS COOLDOWN_MS BIGINT DEFAULT 300000", function() {
+                    sqlQuery("ALTER TABLE ADS DROP COLUMN IMAGE_URL", function() {
+                    sqlQuery("ALTER TABLE ADS ADD COLUMN IF NOT EXISTS IMAGE_DATA CLOB DEFAULT NULL", function() {
+                    sqlQuery("ALTER TABLE ADS ADD COLUMN IF NOT EXISTS SHOW_TITLE SMALLINT DEFAULT 1", function() {
+                    sqlQuery("ALTER TABLE ADS ADD COLUMN IF NOT EXISTS SHOW_BODY SMALLINT DEFAULT 1", function() {
+                    sqlQuery("ALTER TABLE ADS ADD COLUMN IF NOT EXISTS SHOW_CTA SMALLINT DEFAULT 1", function() {
+                    sqlQuery("ALTER TABLE ADS ADD COLUMN IF NOT EXISTS BG_COLOR VARCHAR(16) DEFAULT '#ffffff'", function() {
+                    sqlQuery("ALTER TABLE ADS ADD COLUMN IF NOT EXISTS TEXT_COLOR VARCHAR(16) DEFAULT '#111111'", function() {
+                    sqlQuery("ALTER TABLE ADS ADD COLUMN IF NOT EXISTS IMAGE_POSITION VARCHAR(32) DEFAULT 'center'", function() {
+                    sqlQuery("ALTER TABLE ADS ADD COLUMN IF NOT EXISTS IMAGE_ZOOM FLOAT DEFAULT 1.0", function() {
+                    sqlQuery("ALTER TABLE ADS ADD COLUMN IF NOT EXISTS IMAGE_WIDTH_PCT INT DEFAULT 40", function() {
                     sqlQuery("UPDATE CAMPAIGNS SET MAX_PUBLISHER_BUDGET = PUBLISHER_REWARD_VIEW * 10 WHERE MAX_PUBLISHER_BUDGET <= 0 AND PUBLISHER_REWARD_VIEW > 0", function(patchErr) {
                       if (patchErr) { MDS.log("[DB] initDB: publisher budget patch failed — " + patchErr); }
                       else { MDS.log("[DB] initDB: stale MAX_PUBLISHER_BUDGET patched"); }
@@ -166,6 +185,16 @@ function initDB(cb) {
                       signalFE("DB_READY", {});
                       if (cb) { cb(); }
                     }); // end publisher budget data migration
+                    }); // end IMAGE_WIDTH_PCT migration
+                    }); // end IMAGE_ZOOM migration
+                    }); // end IMAGE_POSITION migration
+                    }); // end TEXT_COLOR migration
+                    }); // end BG_COLOR migration
+                    }); // end SHOW_CTA migration
+                    }); // end SHOW_BODY migration
+                    }); // end SHOW_TITLE migration
+                    }); // end IMAGE_DATA migration
+                    }); // end IMAGE_URL drop
                     }); // end COOLDOWN_MS migration
                     }); // end VIEWER_WALLET_PK migration
                     }); // end CHANNEL_HISTORY creation

@@ -127,13 +127,22 @@ Implementation: `selection.js` must filter out campaigns where `CREATOR_ADDRESS 
 
 ```json
 {
-  "id":          "string (UUID)",
-  "campaign_id": "string",
-  "title":       "string",
-  "body":        "string",
-  "cta_label":   "string",
-  "cta_url":     "string",
-  "interests":   "string (comma-separated tags, optional)"
+  "id":             "string (UUID)",
+  "campaign_id":    "string",
+  "title":          "string",
+  "body":           "string",
+  "cta_label":      "string",
+  "cta_url":        "string",
+  "interests":      "string (comma-separated tags, optional)",
+  "image_data":     "string (JPEG data URI — data:image/jpeg;base64,… — optional, only on first send)",
+  "show_title":     "int 0|1 — whether to render the title in the banner (default 1)",
+  "show_body":      "int 0|1 — whether to render the body text (default 1)",
+  "show_cta":       "int 0|1 — whether to render the CTA button; image still links when 0 (default 1)",
+  "bg_color":       "string (CSS color — background of text block, default '#ffffff')",
+  "text_color":     "string (CSS color — title/body/CTA text, default '#111111')",
+  "image_position": "string (CSS object-position — focal point, e.g. '50% 30%' — default 'center')",
+  "image_zoom":     "float — kept in DB for backward compat; UI removed; always 1.0 for new ads",
+  "image_width_pct":"int — desktop image column width as % of banner (20–70, default 40); ignored in mobile layout"
 }
 ```
 
@@ -200,7 +209,16 @@ CREATE TABLE IF NOT EXISTS ADS (
   BODY        VARCHAR(2048),
   CTA_LABEL   VARCHAR(128),
   CTA_URL     VARCHAR(1024),
-  INTERESTS   VARCHAR(1024) DEFAULT NULL
+  INTERESTS   VARCHAR(1024) DEFAULT NULL,
+  IMAGE_DATA      CLOB          DEFAULT NULL,    -- JPEG data URI; only populated on first Maxima send
+  SHOW_TITLE      SMALLINT      DEFAULT 1,
+  SHOW_BODY       SMALLINT      DEFAULT 1,
+  SHOW_CTA        SMALLINT      DEFAULT 1,       -- hides CTA button; image still links when 0
+  BG_COLOR        VARCHAR(16)   DEFAULT '#ffffff',
+  TEXT_COLOR      VARCHAR(16)   DEFAULT '#111111',
+  IMAGE_POSITION  VARCHAR(32)   DEFAULT 'center', -- CSS object-position focal point; e.g. "50% 30%"
+  IMAGE_ZOOM      FLOAT         DEFAULT 1.0,      -- kept for backward compat; UI removed; always 1.0 for new ads
+  IMAGE_WIDTH_PCT INT           DEFAULT 40        -- desktop image column width %; ignored in mobile layout
 );
 
 CREATE TABLE IF NOT EXISTS REWARD_EVENTS (
@@ -833,7 +851,8 @@ All `MDS.cmd("maxima action:send ... application:" + APP_NAME + " ...")` calls m
     "body": "string",
     "cta_label": "See more",
     "cta_url": "https://example.com",
-    "interests": "tech,minima,web3"
+    "interests": "tech,minima,web3",
+    "image_data": "data:image/jpeg;base64,/9j/..."
   },
   "max_viewer_reward": 0.50,
   "cooldown_ms": 300000,
@@ -1587,28 +1606,37 @@ Pico styles standard HTML elements (`<button>`, `<input>`, `<table>`, `<article>
 
 ### 15.3 Ad Unit — Responsive Banner
 
-The ad unit rendered by `renderer/renderAd.js` is a **fluid responsive banner**:
+The ad unit rendered by `renderer/renderAd.js` is a **fluid responsive banner** with two layout modes selected automatically based on the container's rendered width at render time (`container.offsetWidth`):
 
-- Width: `100%` of its container — the publisher controls placement by sizing the container
-- Layout: horizontal (image left, text right) on wide screens; stacked (image top, text below) on narrow screens (`flex-wrap`)
-- Elements: thumbnail image · title · short description · CTA button
-- Placement examples the publisher can create: header bar, sticky footer, sidebar card
+**Desktop layout (container ≥ 480 px)**
+- Row: image column (left, `IMAGE_WIDTH_PCT`% wide, default 40%) + text block (right, fills remaining space)
+- Banner height: `min-height: 80px; max-height: 160px`; image fills column via `object-fit: cover`
+- Text block font size scales with column width (`baseFs` formula: `clamp(0.70rem, (100−imgWidthPct)/60×0.9, 0.95rem)`)
+- Creator can drag a divider to adjust `IMAGE_WIDTH_PCT` (20–70%)
+
+**Mobile layout (container < 480 px) — with image**
+- Image only, full width, fixed `height: 140px`, `object-fit: cover`
+- Tapping the image navigates to `cta_url` (CTA button is not rendered)
+- Note: the 480 px threshold is the **container width**, not a device breakpoint. A slot inside a 500 px panel will always use the desktop layout even on a phone.
+
+**Mobile layout (container < 480 px) — without image**
+- Text column only, no height cap, content flows naturally
 
 ```
-┌─────────────────────────────────────────┐
-│ [img] │ Title                           │
-│       │ Short description text…         │
-│       │                    [Visit →]    │
-└─────────────────────────────────────────┘
-
-On mobile (stacked):
-┌──────────────┐
-│    [img]     │
-│ Title        │
-│ Description… │
-│  [Visit →]   │
-└──────────────┘
+Desktop (≥480px):               Mobile (<480px, with image):
+┌──────────┬──────────────────┐  ┌────────────────────────────┐
+│          │ Title            │  │                            │
+│  image   │ Body text…       │  │        [image only]        │
+│ (40%+)   │ [Visit →]        │  │        (tappable)          │
+└──────────┴──────────────────┘  └────────────────────────────┘
+ min 80px / max 160px              fixed 140px
 ```
+
+**Ad fields rendered:** `title` (if `show_title`), `body` (if `show_body`), `cta_label`/`cta_url` (if `show_cta`), `bg_color`, `text_color`, `image_data`, `image_position` (focal point), `image_width_pct` (desktop only), `image_zoom` (always 1.0 — UI removed, field kept for backward compat).
+
+- Banner capped at `max-width: 600px`; fully self-contained inline styles (no Pico CSS dependency)
+- Recommended image size: **600×300 px** (ratio 2:1). Max 55 KB after JPEG compression.
+- Image source: JPEG data URI compressed by creator (`canvas.toDataURL('image/jpeg', 0.7)`) and transmitted in `CAMPAIGN_ANNOUNCE` / `CAMPAIGN_DATA_RESPONSE`.
 
 All ad fields must be sanitized with `DOMPurify.sanitize()` before DOM injection (see AGENTS.md §12 fragility #21).
 

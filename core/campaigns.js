@@ -54,15 +54,27 @@ function saveCampaign(campaign, ad, cb) {
   sqlQuery(cSql, function(err) {
     if (err) { cb(err); return; }
 
+    var imgZoom = (ad.image_zoom !== undefined && ad.image_zoom !== null) ? parseFloat(ad.image_zoom) : 1.0;
+    var imgWidthPct = (ad.image_width_pct !== undefined && ad.image_width_pct !== null) ? parseInt(ad.image_width_pct, 10) : 40;
+
     var aSql = "MERGE INTO ADS " +
-      "(ID, CAMPAIGN_ID, TITLE, BODY, CTA_LABEL, CTA_URL, INTERESTS) KEY (ID) VALUES (" +
+      "(ID, CAMPAIGN_ID, TITLE, BODY, CTA_LABEL, CTA_URL, INTERESTS, IMAGE_DATA, SHOW_TITLE, SHOW_BODY, SHOW_CTA, BG_COLOR, TEXT_COLOR, IMAGE_POSITION, IMAGE_ZOOM, IMAGE_WIDTH_PCT) KEY (ID) VALUES (" +
       "'" + escapeSql(ad.id) + "'," +
       "'" + escapeSql(ad.campaign_id) + "'," +
       "'" + escapeSql(ad.title) + "'," +
       "'" + escapeSql(ad.body || '') + "'," +
       "'" + escapeSql(ad.cta_label || '') + "'," +
       "'" + escapeSql(ad.cta_url || '') + "'," +
-      (ad.interests ? "'" + escapeSql(ad.interests) + "'" : "NULL") +
+      (ad.interests ? "'" + escapeSql(ad.interests) + "'" : "NULL") + "," +
+      (ad.image_data ? "'" + escapeSql(ad.image_data) + "'" : "NULL") + "," +
+      (ad.show_title !== undefined && ad.show_title !== null ? (ad.show_title ? 1 : 0) : 1) + "," +
+      (ad.show_body !== undefined && ad.show_body !== null ? (ad.show_body ? 1 : 0) : 1) + "," +
+      (ad.show_cta !== undefined && ad.show_cta !== null ? (ad.show_cta ? 1 : 0) : 1) + "," +
+      "'" + escapeSql(ad.bg_color || '#ffffff') + "'," +
+      "'" + escapeSql(ad.text_color || '#111111') + "'," +
+      "'" + escapeSql(ad.image_position || 'center') + "'," +
+      imgZoom + "," +
+      imgWidthPct +
       ")";
 
     sqlQuery(aSql, function(err2) {

@@ -20,7 +20,7 @@ function handleGetAd(payload) {
       return;
     }
     sqlQuery(
-      "SELECT ID, CAMPAIGN_ID, TITLE, BODY, CTA_LABEL, CTA_URL, INTERESTS FROM ADS",
+      "SELECT ID, CAMPAIGN_ID, TITLE, BODY, CTA_LABEL, CTA_URL, INTERESTS, IMAGE_DATA, SHOW_TITLE, SHOW_BODY, SHOW_CTA, BG_COLOR, TEXT_COLOR, IMAGE_POSITION, IMAGE_ZOOM, IMAGE_WIDTH_PCT FROM ADS",
       function(err2, adRows) {
         if (err2) {
           MDS.comms.broadcast(JSON.stringify({type: "MA_AD_RESPONSE", found: false}), function() {});
@@ -36,12 +36,21 @@ function handleGetAd(payload) {
           var c = campaigns[j];
           var adData = byCampaign[(c.ID || "").toUpperCase()];
           if (adData) {
-            c.AD_ID      = adData.ID;
-            c.AD_TITLE   = adData.TITLE;
-            c.AD_BODY    = adData.BODY;
+            c.AD_ID        = adData.ID;
+            c.AD_TITLE     = adData.TITLE;
+            c.AD_BODY      = adData.BODY;
             c.AD_CTA_LABEL = adData.CTA_LABEL;
             c.AD_CTA_URL   = adData.CTA_URL;
             c.AD_INTERESTS = adData.INTERESTS;
+            c.AD_IMAGE_DATA  = adData.IMAGE_DATA || null;
+            c.AD_SHOW_TITLE  = (adData.SHOW_TITLE !== null && adData.SHOW_TITLE !== undefined) ? parseInt(adData.SHOW_TITLE, 10) : 1;
+            c.AD_SHOW_BODY   = (adData.SHOW_BODY !== null && adData.SHOW_BODY !== undefined) ? parseInt(adData.SHOW_BODY, 10) : 1;
+            c.AD_SHOW_CTA    = (adData.SHOW_CTA !== null && adData.SHOW_CTA !== undefined) ? parseInt(adData.SHOW_CTA, 10) : 1;
+            c.AD_BG_COLOR       = adData.BG_COLOR       || '#ffffff';
+            c.AD_TEXT_COLOR     = adData.TEXT_COLOR     || '#111111';
+            c.AD_IMAGE_POSITION = adData.IMAGE_POSITION || 'center';
+            c.AD_IMAGE_ZOOM      = (adData.IMAGE_ZOOM !== null && adData.IMAGE_ZOOM !== undefined) ? parseFloat(adData.IMAGE_ZOOM) : 1.0;
+            c.AD_IMAGE_WIDTH_PCT = (adData.IMAGE_WIDTH_PCT !== null && adData.IMAGE_WIDTH_PCT !== undefined) ? parseInt(adData.IMAGE_WIDTH_PCT, 10) : 40;
           }
         }
         var selected = selectAd(userAddress, interests, campaigns);
@@ -60,6 +69,15 @@ function handleGetAd(payload) {
             body:         selected.AD_BODY || "",
             cta_label:    selected.AD_CTA_LABEL || "",
             cta_url:      selected.AD_CTA_URL || "",
+            image_data:   selected.AD_IMAGE_DATA || null,
+            show_title:   (selected.AD_SHOW_TITLE !== undefined && selected.AD_SHOW_TITLE !== null) ? selected.AD_SHOW_TITLE : 1,
+            show_body:    (selected.AD_SHOW_BODY !== undefined && selected.AD_SHOW_BODY !== null) ? selected.AD_SHOW_BODY : 1,
+            show_cta:     (selected.AD_SHOW_CTA !== undefined && selected.AD_SHOW_CTA !== null) ? selected.AD_SHOW_CTA : 1,
+            bg_color:       selected.AD_BG_COLOR       || '#ffffff',
+            text_color:     selected.AD_TEXT_COLOR     || '#111111',
+            image_position:  selected.AD_IMAGE_POSITION || 'center',
+            image_zoom:      selected.AD_IMAGE_ZOOM !== undefined ? selected.AD_IMAGE_ZOOM : 1.0,
+            image_width_pct: selected.AD_IMAGE_WIDTH_PCT !== undefined ? selected.AD_IMAGE_WIDTH_PCT : 40,
             reward_view:  selected.REWARD_VIEW || 0
           }
         }), function() {});

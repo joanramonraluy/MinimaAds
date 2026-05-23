@@ -241,7 +241,16 @@ function handleRequestCampaignData(payload) {
           body: r.BODY,
           cta_label: r.CTA_LABEL,
           cta_url: r.CTA_URL,
-          interests: r.INTERESTS
+          interests: r.INTERESTS,
+          image_data: r.IMAGE_DATA || null,
+          show_title: (r.SHOW_TITLE !== null && r.SHOW_TITLE !== undefined) ? parseInt(r.SHOW_TITLE, 10) : 1,
+          show_body:  (r.SHOW_BODY !== null && r.SHOW_BODY !== undefined) ? parseInt(r.SHOW_BODY, 10) : 1,
+          show_cta:   (r.SHOW_CTA !== null && r.SHOW_CTA !== undefined) ? parseInt(r.SHOW_CTA, 10) : 1,
+          bg_color:       r.BG_COLOR       || '#ffffff',
+          text_color:     r.TEXT_COLOR     || '#111111',
+          image_position:  r.IMAGE_POSITION || 'center',
+          image_zoom:      (r.IMAGE_ZOOM !== null && r.IMAGE_ZOOM !== undefined) ? parseFloat(r.IMAGE_ZOOM) : 1.0,
+          image_width_pct: (r.IMAGE_WIDTH_PCT !== null && r.IMAGE_WIDTH_PCT !== undefined) ? parseInt(r.IMAGE_WIDTH_PCT, 10) : 40
         };
         var c = campaign;
         var campaignObj = {

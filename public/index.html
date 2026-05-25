@@ -27,6 +27,28 @@
     .ma-tabs button[aria-selected="false"] { background: var(--pico-secondary-background, #5d6b89); color: #fff; border-color: var(--pico-secondary-border, #5d6b89); }
     .ma-tab-panel[hidden] { display: none; }
     #app { min-height: 12rem; }
+    #ma-mode-switcher { gap: .35rem; }
+    .ma-mode-btn { width: auto; margin: 0; padding: .2rem .6rem; font-size: .8rem; border-radius: .25rem; }
+    .ma-mode-btn[aria-selected="true"] { background: var(--pico-primary-background, #0172ad); color: #fff; border-color: var(--pico-primary-border, #0172ad); font-weight: 600; }
+    .ma-mode-btn[aria-selected="false"] { background: var(--pico-secondary-background, #5d6b89); color: #fff; border-color: var(--pico-secondary-border, #5d6b89); }
+    .ma-profile-btn { width:auto;margin:0;padding:.2rem .55rem;font-size:.85rem;border-radius:50%;min-width:1.8rem;font-weight:600; }
+    /* 1A-1: Responsive nav at 375 px — mode-switcher and nav-links each get their own row */
+    @media (max-width: 479px) {
+      header nav { flex-wrap: wrap; }
+      header nav > ul:first-child { flex: 1 0 auto; order: 0; }
+      header nav > ul:last-child  { order: 1; flex-shrink: 0; }
+      #ma-mode-switcher { order: 2; flex: 0 0 100%; flex-wrap: wrap; }
+      #ma-nav-links     { order: 3; flex: 0 0 100%; flex-wrap: wrap; gap: 0.75rem; }
+    }
+    /* 1A-2: Responsive tables — block container enables overflow-x scroll */
+    #app table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    /* 1A-3: Creator on mobile — hide inline preview and size-toggle buttons */
+    #ma-creator-preview-open-btn { display: none; }
+    @media (max-width: 479px) {
+      #ma-creator-preview { display: none !important; }
+      #ma-preview-btn-mobile, #ma-preview-btn-desktop { display: none !important; }
+      #ma-creator-preview-open-btn { display: inline-block !important; }
+    }
   </style>
 </head>
 <body>
@@ -39,19 +61,29 @@
           </a>
         </li>
       </ul>
-      <ul>
-        <li><a href="#viewer">View Ads</a></li>
-        <li><a href="#creator">Create</a></li>
-        <li><a href="#earnings">Earnings</a></li>
-        <li><a href="#frames">Frames</a></li>
-        <li><a href="#stats">Stats</a></li>
+      <ul id="ma-mode-switcher">
+        <li><button class="ma-mode-btn" id="ma-mode-btn-viewer" onclick="setMode('viewer')">Viewer</button></li>
+        <li><button class="ma-mode-btn" id="ma-mode-btn-creator" onclick="setMode('creator')">Creator</button></li>
+        <li><button class="ma-mode-btn" id="ma-mode-btn-publisher" onclick="setMode('publisher')">Publisher</button></li>
       </ul>
+      <ul id="ma-nav-links"></ul>
+      <ul style="gap:0"><li><button id="ma-profile-btn" class="ma-profile-btn secondary" onclick="openProfileModal()">P</button></li></ul>
     </nav>
   </header>
 
   <main>
     <div id="app"><p aria-busy="true">Loading…</p></div>
   </main>
+
+  <dialog id="ma-profile-modal" onclick="if(event.target===this)closeProfileModal()">
+    <article style="max-width:420px">
+      <header>
+        <button aria-label="Close" rel="prev" onclick="closeProfileModal()"></button>
+        <strong>Profile</strong>
+      </header>
+      <div id="ma-profile-modal-body"></div>
+    </article>
+  </dialog>
 
   <!-- Minima platform bridge — must be first -->
   <script type="text/javascript" src="mds.js"></script>
@@ -86,6 +118,7 @@
   <script src="dapp/views/earnings.js"></script>
   <script src="dapp/views/frames.js"></script>
   <script src="dapp/views/stats.js"></script>
+  <script src="dapp/views/mycampaigns.js"></script>
 
   <!-- Dev SQL console (Ctrl+Shift+D) -->
   <script src="dapp/views/devtools.js"></script>

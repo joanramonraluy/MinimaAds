@@ -31,6 +31,8 @@ function onMaxima(msg) {
     handleCampaignPause(payload);
   } else if (payload.type === "CAMPAIGN_FINISH") {
     handleCampaignFinish(payload);
+  } else if (payload.type === "CAMPAIGN_RESUME") {
+    handleCampaignResume(payload);
   } else if (payload.type === "REQUEST_CAMPAIGN_DATA") {
     handleRequestCampaignData(payload);
   } else if (payload.type === "CAMPAIGN_DATA_RESPONSE") {
@@ -47,6 +49,10 @@ function onMaxima(msg) {
     handleVoucherSyncRequest(payload);
   } else if (payload.type === "PUBLISHER_REWARD_NOTIFY") {
     handlePublisherRewardNotify(payload, msg.data.from || '');
+  } else if (payload.type === "CREATOR_LIVENESS_PING") {
+    handleCreatorLivenessPing(payload, msg.data.from || '');
+  } else if (payload.type === "CREATOR_LIVENESS_PONG") {
+    handleCreatorLivenessPong(payload);
   } else {
     MDS.log("[MAXIMA] unknown type: " + payload.type);
   }

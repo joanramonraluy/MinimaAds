@@ -70,7 +70,11 @@ function _renderFramesList(rows) {
 
   if (rows.length === 0) {
     listEl.innerHTML = '<div class="ma-section">'
-      + '<p>No frames yet. Your built-in frame will appear here once the node initialises.</p>'
+      + '<p>A <strong>Frame</strong> is an ad slot you embed in your MiniDapp. '
+      + 'When viewers see ads through your Frame, you earn publisher rewards.</p>'
+      + '<p style="color:var(--pico-muted-color,#6c757d)">'
+      + 'Your built-in Frame will appear here once the node initialises. '
+      + 'To create a custom Frame, use the form below.</p>'
       + '</div>';
     return;
   }

@@ -39,11 +39,6 @@ function renderEarnings(root) {
   settleHistorySection.style.cssText = 'margin-top:1.5rem;';
   root.appendChild(settleHistorySection);
 
-  var historySection = document.createElement('section');
-  historySection.id = 'ma-earnings-history';
-  historySection.style.cssText = 'margin-top:1.5rem;';
-  root.appendChild(historySection);
-
   loadEarnings();
 }
 
@@ -91,14 +86,18 @@ function loadEarnings() {
     todayArticle.appendChild(document.createTextNode(' MINIMA'));
     target.appendChild(todayArticle);
 
-    _loadTodayEarnedSummary();
-  });
+    if (totalEarned === 0) {
+      var hint = document.createElement('p');
+      hint.style.cssText = 'color:var(--pico-muted-color,#6c757d);margin-top:.5rem;';
+      hint.appendChild(document.createTextNode('Nothing earned yet. '));
+      var hintLink = document.createElement('a');
+      hintLink.href = '#viewer';
+      hintLink.textContent = 'Go to View Ads to get started.';
+      hint.appendChild(hintLink);
+      target.appendChild(hint);
+    }
 
-  getUserRewards(MY_ADDRESS, function(err, rewards) {
-    var target = document.getElementById('ma-earnings-history');
-    if (!target) { return; }
-    target.innerHTML = '';
-    renderRewardHistory(target, rewards || []);
+    _loadTodayEarnedSummary();
   });
 
   _refreshSettlementHistory();
@@ -134,7 +133,7 @@ function renderSettlementHistory(target, settlements) {
   var table = document.createElement('table');
   var thead = document.createElement('thead');
   var headerRow = document.createElement('tr');
-  var headers = ['Campaign', 'Creator', 'Earned', 'Opened'];
+  var headers = ['Campaign', 'Creator', 'Earned', 'Opened', ''];
   for (var i = 0; i < headers.length; i++) {
     var th = document.createElement('th');
     th.textContent = headers[i];
@@ -145,58 +144,48 @@ function renderSettlementHistory(target, settlements) {
 
   var tbody = document.createElement('tbody');
   for (var j = 0; j < settlements.length; j++) {
-    var r = settlements[j];
-    var tr = document.createElement('tr');
-    var campName = r.TITLE || (r.CAMPAIGN_ID ? r.CAMPAIGN_ID.substring(0, 8) + '…' : '');
-    var creatorPk = r.CREATOR_ADDRESS ? r.CREATOR_ADDRESS.substring(0, 10) + '…' : '';
-    var date = r.CREATED_AT ? new Date(parseInt(r.CREATED_AT)).toLocaleDateString() : '';
-    tr.appendChild(earningsTd(campName));
-    tr.appendChild(earningsTd(creatorPk));
-    tr.appendChild(earningsTd(parseFloat(r.CUMULATIVE_EARNED || 0).toFixed(6) + ' MINIMA'));
-    tr.appendChild(earningsTd(date));
-    tbody.appendChild(tr);
-  }
-  table.appendChild(tbody);
-  target.appendChild(table);
-}
+    (function(r) {
+      var tr = document.createElement('tr');
+      var campName = r.TITLE || (r.CAMPAIGN_ID ? r.CAMPAIGN_ID.substring(0, 8) + '…' : '');
+      var creatorPk = r.CREATOR_ADDRESS ? r.CREATOR_ADDRESS.substring(0, 10) + '…' : '';
+      var date = r.CREATED_AT ? new Date(parseInt(r.CREATED_AT)).toLocaleDateString() : '';
+      tr.appendChild(earningsTd(campName));
+      tr.appendChild(earningsTd(creatorPk));
+      tr.appendChild(earningsTd(parseFloat(r.CUMULATIVE_EARNED || 0).toFixed(6) + ' MINIMA'));
+      tr.appendChild(earningsTd(date));
 
-function renderRewardHistory(target, rewards) {
-  var h3 = document.createElement('h3');
-  h3.textContent = 'Reward history (' + rewards.length + ')';
-  target.appendChild(h3);
+      var toggleTd = document.createElement('td');
+      var toggleBtn = document.createElement('button');
+      toggleBtn.textContent = '▶';
+      toggleBtn.style.cssText = 'padding:.1rem .35rem;font-size:.75rem;';
+      toggleTd.appendChild(toggleBtn);
+      tr.appendChild(toggleTd);
+      tbody.appendChild(tr);
 
-  if (!rewards.length) {
-    var empty = document.createElement('p');
-    empty.textContent = 'No rewards yet.';
-    target.appendChild(empty);
-    return;
-  }
+      var detailTr = document.createElement('tr');
+      detailTr.style.display = 'none';
+      var detailTd = document.createElement('td');
+      detailTd.setAttribute('colspan', '5');
+      detailTd.style.cssText = 'padding:.5rem 1rem;background:var(--pico-card-sectionning-background-color,#f8f8f8);';
+      detailTr.appendChild(detailTd);
+      tbody.appendChild(detailTr);
 
-  var table = document.createElement('table');
-  var thead = document.createElement('thead');
-  var headerRow = document.createElement('tr');
-  var headers = ['Campaign', 'Creator', 'Type', 'Amount', 'Date'];
-  for (var i = 0; i < headers.length; i++) {
-    var th = document.createElement('th');
-    th.textContent = headers[i];
-    headerRow.appendChild(th);
-  }
-  thead.appendChild(headerRow);
-  table.appendChild(thead);
-
-  var tbody = document.createElement('tbody');
-  for (var j = 0; j < rewards.length; j++) {
-    var r = rewards[j];
-    var tr = document.createElement('tr');
-    var shortId = r.TITLE || (r.CAMPAIGN_ID ? r.CAMPAIGN_ID.substring(0, 8) + '…' : '');
-    var creatorPk = r.CREATOR_ADDRESS ? r.CREATOR_ADDRESS.substring(0, 10) + '…' : '';
-    var date = r.TIMESTAMP ? new Date(parseInt(r.TIMESTAMP)).toLocaleString() : '';
-    tr.appendChild(earningsTd(shortId));
-    tr.appendChild(earningsTd(creatorPk));
-    tr.appendChild(earningsTd(r.TYPE));
-    tr.appendChild(earningsTd(parseFloat(r.AMOUNT || 0).toFixed(6)));
-    tr.appendChild(earningsTd(date));
-    tbody.appendChild(tr);
+      var loaded = false;
+      toggleBtn.addEventListener('click', function() {
+        if (detailTr.style.display === 'none') {
+          detailTr.style.display = '';
+          toggleBtn.textContent = '▼';
+          if (!loaded) {
+            loaded = true;
+            detailTd.textContent = 'Loading…';
+            _loadChannelEvents(r.CAMPAIGN_ID, detailTd);
+          }
+        } else {
+          detailTr.style.display = 'none';
+          toggleBtn.textContent = '▶';
+        }
+      });
+    })(settlements[j]);
   }
   table.appendChild(tbody);
   target.appendChild(table);
@@ -206,6 +195,49 @@ function earningsTd(value) {
   var el = document.createElement('td');
   el.textContent = (value === null || value === undefined) ? '' : String(value);
   return el;
+}
+
+function _loadChannelEvents(campaignId, targetEl) {
+  var sql = "SELECT TYPE, AMOUNT, TIMESTAMP"
+          + " FROM REWARD_EVENTS"
+          + " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')"
+          + " AND UPPER(USER_ADDRESS) = UPPER('" + escapeSql(MY_ADDRESS) + "')"
+          + " ORDER BY TIMESTAMP ASC";
+  sqlQuery(sql, function(err, rows) {
+    if (!targetEl) { return; }
+    targetEl.innerHTML = '';
+    if (err || !rows || !rows.length) {
+      var p = document.createElement('p');
+      p.style.cssText = 'margin:.25rem 0;font-size:.85em;color:#888;';
+      p.textContent = 'No events recorded for this channel.';
+      targetEl.appendChild(p);
+      return;
+    }
+    var table = document.createElement('table');
+    table.style.cssText = 'width:100%;font-size:.85em;margin:0;';
+    var thead = document.createElement('thead');
+    var hRow = document.createElement('tr');
+    var headers = ['Type', 'Amount', 'Date'];
+    for (var h = 0; h < headers.length; h++) {
+      var th = document.createElement('th');
+      th.textContent = headers[h];
+      hRow.appendChild(th);
+    }
+    thead.appendChild(hRow);
+    table.appendChild(thead);
+    var tbody = document.createElement('tbody');
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      var tr = document.createElement('tr');
+      var date = r.TIMESTAMP ? new Date(parseInt(r.TIMESTAMP)).toLocaleString() : '';
+      tr.appendChild(earningsTd(r.TYPE));
+      tr.appendChild(earningsTd(parseFloat(r.AMOUNT || 0).toFixed(6)));
+      tr.appendChild(earningsTd(date));
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    targetEl.appendChild(table);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -249,7 +281,10 @@ function _renderChannelRewardRows(rows, container) {
       var txHex      = row.LATEST_TX_HEX;
 
       var item = document.createElement('div');
-      item.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:1rem;margin:.5rem 0;padding:.5rem;border:1px solid #e0e0e0;border-radius:4px;';
+      item.style.cssText = 'margin:.5rem 0;padding:.5rem;border:1px solid #e0e0e0;border-radius:4px;';
+
+      var mainRow = document.createElement('div');
+      mainRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:1rem;';
 
       var infoDiv = document.createElement('div');
       var campName = row.TITLE || (campaignId.substring(0, 8) + '…');
@@ -274,8 +309,29 @@ function _renderChannelRewardRows(rows, container) {
         _runSettlement(campaignId, viewerKey, role, txHex, btn, parseFloat(row.CUMULATIVE_EARNED));
       });
 
-      item.appendChild(infoDiv);
-      item.appendChild(btn);
+      mainRow.appendChild(infoDiv);
+      mainRow.appendChild(btn);
+      item.appendChild(mainRow);
+
+      var details = document.createElement('details');
+      details.style.cssText = 'margin-top:.5rem;font-size:.9em;';
+      var summary = document.createElement('summary');
+      summary.textContent = 'Detall';
+      summary.style.cssText = 'cursor:pointer;color:#777;user-select:none;';
+      details.appendChild(summary);
+      var detailBody = document.createElement('div');
+      detailBody.style.cssText = 'margin-top:.4rem;padding:.4rem .5rem;background:var(--pico-card-sectionning-background-color,#f8f8f8);border-radius:4px;';
+      detailBody.textContent = 'Loading…';
+      details.appendChild(detailBody);
+      var loaded = false;
+      details.addEventListener('toggle', function() {
+        if (details.open && !loaded) {
+          loaded = true;
+          _loadChannelEvents(campaignId, detailBody);
+        }
+      });
+
+      item.appendChild(details);
       container.appendChild(item);
     })(rows[i]);
   }
@@ -447,12 +503,6 @@ function onSettleConfirmed(parsed) {
         summaryTarget.appendChild(todayArticle);
         _loadTodayEarnedSummary();
       }
-    });
-  }
-  var histTarget = document.getElementById('ma-earnings-history');
-  if (histTarget && MY_ADDRESS) {
-    getUserRewards(MY_ADDRESS, function(err, rewards) {
-      if (!err) { histTarget.innerHTML = ''; renderRewardHistory(histTarget, rewards || []); }
     });
   }
 }

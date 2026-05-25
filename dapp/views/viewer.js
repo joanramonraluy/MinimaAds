@@ -1,15 +1,12 @@
-// T10 — Viewer view.
-// Loads one ad via the SDK, renders it via the renderer (T11), and wires the
+// Viewer view.
+// Loads one ad via the SDK, renders it via the renderer, and wires the
 // view timer and CTA click to the SDK tracking calls.
 // Creator-is-viewer exclusion is enforced by selectAd (core/selection.js) and
 // re-checked by MinimaAds.trackView / trackClick (sdk/index.js).
-// "My campaigns" mode bypasses selectAd to let creators preview their own ads
-// without earning rewards.
 // Channel settlement and signal handlers (onChannelOpened, onVoucherReceived,
 // onAutoSettle, onSettleConfirmed) live in dapp/views/earnings.js.
 
 var _viewerState = { ad: null, viewTimerId: 0, viewTracked: false };
-var _previewMode = false;
 
 function renderViewer(root) {
   root.innerHTML = '';
@@ -18,53 +15,28 @@ function renderViewer(root) {
   h2.textContent = 'View Ads';
   root.appendChild(h2);
 
-  var footer = document.createElement('footer');
-  footer.innerHTML = 'Today earned: <span id="ma-earned">0</span> MINIMA';
-  root.appendChild(footer);
-
-  var toolbar = document.createElement('div');
-  toolbar.style.cssText = 'display:flex;gap:.5rem;margin-bottom:.5rem;';
-
-  var allBtn = document.createElement('button');
-  allBtn.id = 'ma-btn-all';
-  allBtn.textContent = 'All ads';
-  allBtn.addEventListener('click', function() { setPreviewMode(false); });
-
-  var ownBtn = document.createElement('button');
-  ownBtn.id = 'ma-btn-own';
-  ownBtn.textContent = 'My campaigns';
-  ownBtn.setAttribute('class', 'outline');
-  ownBtn.addEventListener('click', function() { setPreviewMode(true); });
-
-  toolbar.appendChild(allBtn);
-  toolbar.appendChild(ownBtn);
-  root.appendChild(toolbar);
-
   var slot = document.createElement('section');
   slot.id = 'ma-ad-slot';
   root.appendChild(slot);
 
+  var earnedBadge = document.createElement('p');
+  earnedBadge.id = 'ma-earned-badge';
+  earnedBadge.style.cssText = 'font-size:0.82rem;opacity:0.75;margin:0.25rem 0 0.5rem;text-align:right;';
+  earnedBadge.innerHTML = 'Today earned: <span id="ma-earned">0</span> MINIMA';
+  root.appendChild(earnedBadge);
+
   var status = document.createElement('p');
   status.id = 'ma-viewer-status';
   status.setAttribute('role', 'status');
+  status.textContent = 'Press "See ad" to start.';
   root.appendChild(status);
 
   var nextBtn = document.createElement('button');
-  nextBtn.textContent = 'Next ad';
+  nextBtn.textContent = 'See ad';
   nextBtn.addEventListener('click', loadNextAd);
   root.appendChild(nextBtn);
 
   loadTodayEarned();
-  loadNextAd();
-}
-
-function setPreviewMode(on) {
-  _previewMode = on;
-  var allBtn = document.getElementById('ma-btn-all');
-  var ownBtn = document.getElementById('ma-btn-own');
-  if (allBtn) { allBtn.className = on ? 'outline' : ''; }
-  if (ownBtn) { ownBtn.className = on ? '' : 'outline'; }
-  loadNextAd();
 }
 
 function loadNextAd() {
@@ -81,11 +53,6 @@ function loadNextAd() {
   slot.innerHTML = '';
   status.textContent = 'Loading ad…';
 
-  if (_previewMode) {
-    loadOwnCampaignAd(status, slot);
-    return;
-  }
-
   if (typeof MinimaAds === 'undefined' || typeof MinimaAds.getAd !== 'function') {
     status.textContent = 'SDK not loaded.';
     return;
@@ -97,37 +64,17 @@ function loadNextAd() {
 
     MinimaAds.getAd(MY_ADDRESS, interests, function(err2, ad) {
       if (err2 || !ad) {
-        status.textContent = 'No ad available right now.';
+        status.textContent = 'No ads available right now. Try again later.';
         return;
       }
-      renderAdInSlot(ad, status, false);
+      renderAdInSlot(ad, status);
     });
   });
 }
 
-function loadOwnCampaignAd(status, slot) {
-  var sql = "SELECT c.ID, c.TITLE, c.STATUS, c.BUDGET_REMAINING, c.REWARD_VIEW, c.REWARD_CLICK,"
-    + " a.ID AS AD_ID, a.TITLE AS AD_TITLE, a.BODY AS AD_BODY,"
-    + " a.CTA_LABEL AS AD_CTA_LABEL, a.CTA_URL AS AD_CTA_URL, a.INTERESTS AS AD_INTERESTS"
-    + " FROM CAMPAIGNS c JOIN ADS a ON UPPER(a.CAMPAIGN_ID) = UPPER(c.ID)"
-    + " WHERE UPPER(c.CREATOR_ADDRESS) = UPPER('" + escapeSql(MY_ADDRESS) + "')"
-    + " AND c.STATUS = 'active' LIMIT 10";
-
-  sqlQuery(sql, function(err, rows) {
-    if (err || !rows || rows.length === 0) {
-      status.textContent = 'No own campaigns found.';
-      return;
-    }
-    var row = rows[Math.floor(Math.random() * rows.length)];
-    renderAdInSlot(row, status, true);
-  });
-}
-
-function renderAdInSlot(ad, status, isPreview) {
+function renderAdInSlot(ad, status) {
   _viewerState.ad = ad;
-  if (isPreview) {
-    status.textContent = '[Preview — rewards not tracked]';
-  } else if (ad.ALREADY_SEEN) {
+  if (ad.ALREADY_SEEN) {
     status.textContent = 'Already viewed this session — rewards may not apply.';
   } else {
     status.textContent = '';
@@ -141,12 +88,10 @@ function renderAdInSlot(ad, status, isPreview) {
     cta_url: ad.AD_CTA_URL
   }, 'ma-ad-slot');
 
-  if (!isPreview) {
-    wireAdInteractions(ad);
-    _viewerState.viewTimerId = setTimeout(function() {
-      trackAdView(ad);
-    }, LIMITS.MIN_VIEW_DURATION_MS);
-  }
+  wireAdInteractions(ad);
+  _viewerState.viewTimerId = setTimeout(function() {
+    trackAdView(ad);
+  }, LIMITS.MIN_VIEW_DURATION_MS);
 }
 
 function trackAdView(ad) {
@@ -205,4 +150,3 @@ function onRewardConfirmed(parsed) {
 function onCampaignsChanged() {
   if (!_viewerState.ad) { loadNextAd(); }
 }
-

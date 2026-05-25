@@ -152,3 +152,21 @@ function getUserProfile(userAddress, cb) {
     cb(null, (rows && rows.length > 0) ? rows[0] : null);
   });
 }
+
+function updateUserProfile(userAddress, fields, cb) {
+  var interests = (fields.interests !== null && fields.interests !== undefined)
+    ? "'" + escapeSql(fields.interests) + "'"
+    : "NULL";
+  var sql = "MERGE INTO USER_PROFILE (ADDRESS, INTERESTS) KEY (ADDRESS) VALUES ("
+    + "'" + escapeSql(userAddress) + "',"
+    + interests
+    + ")";
+  sqlQuery(sql, function(err) {
+    if (err) {
+      MDS.log("[REWARD] updateUserProfile error: " + err);
+      if (cb) { cb(err); }
+      return;
+    }
+    if (cb) { cb(null); }
+  });
+}

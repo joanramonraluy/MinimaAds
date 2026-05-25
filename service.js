@@ -195,6 +195,8 @@ function onComms(msg) {
     handleGetAd(payload);
   } else if (payload.type === "MA_TRACK_VIEW") {
     handleTrackView(payload);
+  } else if (payload.type === "MA_TRACK_CLICK") {
+    handleTrackClick(payload);
   } else if (payload.type === "MA_OPEN_PUBLISHER_CHANNELS") {
     handleOpenPublisherChannels(payload);
   }

@@ -1,7 +1,6 @@
-// T10 — Stats view.
-// Campaign table (from getCampaigns) + user reward summary (from getUserRewards).
-// Uses textContent / DOM methods rather than innerHTML for user-supplied strings
-// (T11 will add DOMPurify for rich ad content).
+// Stats view.
+// Campaign table (from getCampaigns). Badge marks campaigns created by the current user.
+// Uses textContent / DOM methods rather than innerHTML for user-supplied strings.
 
 function renderStats(root) {
   root.innerHTML = '';
@@ -9,10 +8,6 @@ function renderStats(root) {
   var h2 = document.createElement('h2');
   h2.textContent = 'Stats';
   root.appendChild(h2);
-
-  var rewardsSection = document.createElement('section');
-  rewardsSection.id = 'ma-stats-rewards';
-  root.appendChild(rewardsSection);
 
   var campaignsSection = document.createElement('section');
   campaignsSection.id = 'ma-stats-campaigns';
@@ -34,20 +29,6 @@ function loadStats() {
     }
     renderCampaignsTable(target, rows || []);
   });
-
-  if (!MY_ADDRESS) { return; }
-  getUserRewards(MY_ADDRESS, function(err, rewards) {
-    var target = document.getElementById('ma-stats-rewards');
-    if (!target) { return; }
-    target.innerHTML = '';
-    if (err) {
-      var p = document.createElement('p');
-      p.textContent = 'Rewards error: ' + err;
-      target.appendChild(p);
-      return;
-    }
-    renderRewardsSummary(target, rewards || []);
-  });
 }
 
 function renderCampaignsTable(target, campaigns) {
@@ -57,7 +38,8 @@ function renderCampaignsTable(target, campaigns) {
 
   if (!campaigns.length) {
     var p = document.createElement('p');
-    p.textContent = 'No campaigns yet.';
+    p.style.cssText = 'color:var(--pico-muted-color,#6c757d);';
+    p.textContent = 'No active campaigns in the system.';
     target.appendChild(p);
     return;
   }
@@ -78,7 +60,17 @@ function renderCampaignsTable(target, campaigns) {
   for (var j = 0; j < campaigns.length; j++) {
     var c = campaigns[j];
     var tr = document.createElement('tr');
-    tr.appendChild(td(c.TITLE));
+
+    var titleTd = document.createElement('td');
+    titleTd.textContent = c.TITLE;
+    if (MY_ADDRESS && c.CREATOR_ADDRESS && c.CREATOR_ADDRESS.toUpperCase() === MY_ADDRESS.toUpperCase()) {
+      var badge = document.createElement('mark');
+      badge.textContent = 'Mine';
+      badge.style.cssText = 'display:inline;margin-left:.4rem;font-size:.75em;vertical-align:middle;';
+      titleTd.appendChild(badge);
+    }
+    tr.appendChild(titleTd);
+
     tr.appendChild(td(c.STATUS));
     tr.appendChild(td(shortAddr(c.CREATOR_ADDRESS)));
     tr.appendChild(td(parseFloat(c.BUDGET_REMAINING || 0)));
@@ -88,25 +80,6 @@ function renderCampaignsTable(target, campaigns) {
   }
   table.appendChild(tbody);
   target.appendChild(table);
-}
-
-function renderRewardsSummary(target, rewards) {
-  var total = 0;
-  var views = 0;
-  var clicks = 0;
-  for (var i = 0; i < rewards.length; i++) {
-    total += parseFloat(rewards[i].AMOUNT || 0);
-    if (rewards[i].TYPE === 'view') { views++; }
-    else if (rewards[i].TYPE === 'click') { clicks++; }
-  }
-  var article = document.createElement('article');
-  var strong = document.createElement('strong');
-  strong.textContent = 'You earned: ';
-  article.appendChild(strong);
-  article.appendChild(document.createTextNode(
-    total.toFixed(6) + ' MINIMA — ' + views + ' views / ' + clicks + ' clicks'
-  ));
-  target.appendChild(article);
 }
 
 function td(value) {

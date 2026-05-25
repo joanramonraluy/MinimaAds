@@ -88,7 +88,7 @@ selection.js : selectAd(userAddress, userInterests, campaigns)
 validation.js: validateView(campaignId, userAddress, cb), validateClick(campaignId, userAddress, cb),
                isDuplicate(eventId, cb)
 rewards.js   : createRewardEvent(params, cb), getUserRewards(userAddress, cb),
-               getUserProfile(userAddress, cb)
+               getUserProfile(userAddress, cb), updateUserProfile(userAddress, fields, cb)
 minima.js    : sqlQuery(query, cb), broadcastMaxima(payload, cb), signalFE(type, data)
 ```
 
@@ -194,6 +194,106 @@ For verification procedures, see `docs/VERIFICATION.md`.
 ---
 
 ## 8) Current Handoff Notes
+
+2026-05-25 (Sessió 13 — Responsivitat: poliment):
+- **Scope**: UI only — `dapp/views/viewer.js`. Cap canvi a `creator.js`, DB, SW, SDK, core o protocols.
+- **1B-1 "Today earned"**: Eliminat el `<footer>` que contenia el badge "Today earned" del top de `renderViewer`. Afegit en el seu lloc un `<p id="ma-earned-badge">` amb `style.cssText = 'font-size:0.82rem;opacity:0.75;margin:0.25rem 0 0.5rem;text-align:right;'` inserit immediatament *després* de `#ma-ad-slot`. L'element `<span id="ma-earned">` conserva el mateix ID — `loadTodayEarned()` i `onRewardConfirmed()` no requereixen cap canvi.
+- **1B-2 Touch events**: `_attachImagePositioner` i `_attachDivider` a `creator.js` **ja tenien** handlers `touchstart`/`touchmove`/`touchend` complets des de sessions anteriors. Cap canvi necessari.
+- No nous senyals SW. No noves Maxima messages. No canvis d'esquema.
+
+2026-05-25 (Sessió 12 — Responsivitat crítica):
+- **Scope**: UI only — `public/index.html` (CSS) + `dapp/views/creator.js`. Cap canvi a DB, SW, SDK, core o protocols.
+- **`public/index.html`** — tres blocs CSS afegits al `<style>`:
+  - **1A-1 Nav**: `@media (max-width:479px)` — `header nav { flex-wrap:wrap }` + `order` per organitzar dues files: fila 1 = logo + perfil, fila 2 = mode-switcher, fila 3 = nav-links. `#ma-mode-switcher` i `#ma-nav-links` passen a `flex: 0 0 100%` (amplada completa).
+  - **1A-2 Taules**: `#app table { display:block; overflow-x:auto; -webkit-overflow-scrolling:touch }` — totes les taules de l'app fan scroll horitzontal sense modificar els fitxers de vista individuals.
+  - **1A-3 Creator mòbil**: `#ma-creator-preview-open-btn { display:none }` (ocult per defecte, visible sota 480px) + `@media (max-width:479px)` que oculta `#ma-creator-preview`, `#ma-preview-btn-mobile`, `#ma-preview-btn-desktop`, i mostra `#ma-creator-preview-open-btn`.
+- **`dapp/views/creator.js`** — canvis en 4 punts:
+  1. **HTML del formulari**: Afegit `flex-wrap:wrap` al header de la secció preview. Afegit botó `#ma-creator-preview-open-btn` ("View preview") inline. Afegit `<div id="ma-creator-mobile-controls">` (ocult per defecte) amb tres range inputs: `#ma-img-pos-x` (0–100), `#ma-img-pos-y` (0–100), `#ma-img-width-pct` (20–70).
+  2. **Setup de `renderCreator`**: Crea `<dialog id="ma-creator-preview-dialog">` (Pico CSS article pattern, tanca per clic sobre backdrop) i l'afegeix a `root`. Handler del botó "View preview": copia `innerHTML` de `#ma-creator-preview` (ja renderitzat però ocult) al `#ma-creator-preview-modal-body` i obre el dialog. Listeners dels tres range inputs criden `_onMobilePosInput` → actualitzen els inputs ocults `image_position` i `image_width_pct` → criden `updateCreatorPreview`.
+  3. **`_syncMobileControls(form)`** (nova funció): llegeix `image_position` (format `"XX% YY%"`) i `image_width_pct` dels inputs ocults i n'actualitza els range inputs. Usada per mantenir els controls sincronitzats quan es carrega un nou preview.
+  4. **`updateCreatorPreview`** (final de la funció): afegit branching `window.innerWidth < 480`. Branca mòbil: detach `_detachPositioner` si existeix, mostra/oculta `#ma-creator-mobile-controls` si `_pendingImageData`, crida `_syncMobileControls`. Branca desktop: comportament existent (`_attachImagePositioner` + `_attachDivider`).
+- No nous senyals SW. No noves Maxima messages. No canvis d'esquema.
+- **Nota implementació 1A-2**: S'ha usat CSS (`display:block; overflow-x:auto` sobre `table`) en lloc de wrappers `<div>` individuals a cada vista, ja que aconsegueix el mateix resultat sense modificar fitxers fora d'escope.
+
+2026-05-25 (Sessió 11 — Estats buits):
+- **Scope**: UI only — quatre vistes. Cap canvi a DB, SW, SDK, core o protocols.
+- **`dapp/views/viewer.js`**: missatge de no-ad actualitzat de `'No ad available right now.'` a `'No hi ha anuncis disponibles ara. Torna-ho a intentar més tard.'`
+- **`dapp/views/earnings.js`** (`loadEarnings`): afegit bloc condicional `if (totalEarned === 0)` que renderitza un `<p>` amb text i un link `<a href="#viewer">Vés a View Ads per començar.</a>` al target `#ma-earnings-summary`.
+- **`dapp/views/stats.js`** (`renderCampaignsTable`): missatge d'empty state actualitzat de `'No campaigns yet.'` a `'No hi ha campanyes actives al sistema.'`; afegit `style.cssText` per usar `--pico-muted-color`.
+- **`dapp/views/frames.js`** (`_renderFramesList`): missatge d'empty state ampliat per explicar el concepte de Frame i orientar l'usuari cap al formulari de creació. Dos paràgrafs: el primer explica el concepte, el segon (en muted color) informa sobre el Frame integrat i el formulari.
+- **`dapp/views/mycampaigns.js`**: sense canvis — ja tenia el missatge correcte des de la Sessió 7.
+- **`docs/UI_ROADMAP.md`**: Sessió 11 marcada ✅ Fet.
+- No nous senyals SW. No noves Maxima messages. No canvis d'esquema.
+
+2026-05-24 (Sessió 10 — Indicador de creator online):
+- **New Maxima messages**: `CREATOR_LIVENESS_PING` (§8.13) and `CREATOR_LIVENESS_PONG` (§8.14).
+- **SW — `campaign.handler.js`**: Added `handleCreatorLivenessPing(payload, senderPk)` — responds immediately with a PONG via `sendMaxima(senderPk, null, pong, cb)`. Added `handleCreatorLivenessPong(payload)` — calls `signalFE("CREATOR_LIVENESS_PONG", {campaign_id})`.
+- **SW — `maxima.handler.js`**: Added routing for `CREATOR_LIVENESS_PING` (passes `msg.data.from` as senderPk) and `CREATOR_LIVENESS_PONG`.
+- **SDK — `sdk/index.js`**: Added module-level `_livenessCache`, `_pendingPings`, `LIVENESS_CACHE_MS=120000`, `LIVENESS_TIMEOUT_MS=3000`. Added `_sendLivenessPing(creatorRoute, campaignId, cb)` — unicast Maxima with `poll:false`. Added `_checkCreatorLiveness(campaign, cb)` — checks cache, deduplicates concurrent calls, sets 3s timeout. Added `_onCreatorLivenessPong(campaignId)` — resolves pending callbacks, updates cache. Modified `getAd` — filters out campaigns with cached `alive:false` before `selectAd`. Modified `_trackEvent` — before `createRewardEvent`, checks if a channel exists; if not, calls `_checkCreatorLiveness`; if creator offline, returns `{ confirmed:false, reason:'creator offline' }`. Added `CREATOR_LIVENESS_PONG` branch in `handleMdsEvent` (host-MiniDapp path). Exposed `_onCreatorLivenessPong` as `window.MinimaAds.onCreatorLivenessPong` and as `window.onCreatorLivenessPong` global.
+- **FE — `dapp/app.js`**: Added `CREATOR_LIVENESS_PONG` case in `handleMdsComms` → calls `window.onCreatorLivenessPong(parsed.campaign_id)`.
+- **`MinimaAds.md §8`**: Added §8.13 `CREATOR_LIVENESS_PING` schema, §8.14 `CREATOR_LIVENESS_PONG` schema, `CREATOR_LIVENESS_PONG` signal row in §8.15 table. Old §8.13 (SW→FE Signal Contract) is now §8.15.
+- No DB schema changes. No new on-chain transactions. No SDK public API changes.
+- **Liveness flow summary**: Viewer SDK sends PING (poll:false) → Creator SW responds with PONG → Viewer SW relays via MDSCOMMS → FE calls `window.onCreatorLivenessPong` → SDK resolves pending cb and caches result for 2 min. If no PONG within 3s → campaign marked offline → `getAd` filters it out on next call.
+
+2026-05-24 (fix VAL-1 — cooldown global bloqueja campanyes noves):
+- **Bug**: `validateView`/`validateClick` a `core/validation.js` comparaven `USER_PROFILE.LAST_REWARD_AT` (timestamp global per usuari) amb `campaign.COOLDOWN_MS` de la campanya objectiu. Guanyar d'una campanya A resetejava el clock global, bloquejant qualsevol campanya B amb cooldown més llarg durant tot el seu `COOLDOWN_MS` — fins i tot si el viewer no hi havia interaccionat mai. Observat als logs (2026-05-24): viewer guanya de campanya vella a 17:42:44; tots els intents de veure la nova campanya (COOLDOWN_MS=300 000 ms) rebutjats fins les 17:47:44.
+- **Fix**: eliminada la segona query a `USER_PROFILE`. La query existent de comptatge diari s'amplia amb `MAX(TIMESTAMP) AS LAST_AT` filtrant per `CAMPAIGN_ID + TYPE`. El cooldown ara és per-campanya: `now - LAST_AT < COOLDOWN_MS`. Si `LAST_AT` és null (cap view en les últimes 24 h per aquesta campanya), cooldown expirat per definició.
+- Fitxers modificats: `core/validation.js` (únic). Documentat a `docs/KNOWN_ISSUES.md` Closed/Fixed VAL-1.
+- No canvis d'esquema, no canvis de protocol, no canvis de SW ni SDK.
+
+2026-05-24 (Sessió 9 — Chart.js a detall de campanya):
+- `dapp/views/mycampaigns.js`: added three module-level vars (`_autoRefreshTimer`, `_expandedCampaignId`, `_expandedChart`). `renderMyCampaigns` now clears any existing timer and chart state before rendering, then calls `_startAutoRefresh()`. `_startAutoRefresh()` sets a 30s `setInterval`; on each tick it checks if `#ma-mycampaigns-section` still exists in DOM — if not, it self-clears (handles navigation-away without any hook into app.js). `loadMyCampaigns()` saves `savedExpandedId`, destroys the existing Chart instance, resets `_expandedCampaignId` to null, rebuilds the table, and re-opens the detail panel for `savedExpandedId` if that campaign row is still present (survives refresh while detail is open). `_buildMyCampaignRow` sets `data-campaign-id` attribute on the `<tr>` and adds a clickable title cell with a `▶`/`▼` indicator; click calls `_toggleDetailPanel(tr, c.ID)`. `_toggleDetailPanel`: if same campaign → collapse; otherwise collapse the previous panel first, then expand the new one. `_collapseDetailPanel(tr, campaignId)`: resets indicator, removes the detail `<tr>` by ID (`ma-detail-<id>`), destroys the Chart instance. `_expandDetailPanel(tbody, tr, campaignId)`: creates a detail `<tr>` with `colspan=9`, inserts after the campaign row, shows loading text, calls `_loadChartData`. `_loadChartData(campaignId, detailEl)`: queries `REWARD_EVENTS (TYPE, TIMESTAMP)` for the campaign; groups by calendar day in JavaScript (`TIMESTAMP` is BIGINT Unix ms — no H2 date function used); empty-state message if no rows; otherwise renders a `<canvas>` and a `new Chart(canvas, ...)` (line chart, two datasets: Views green + Clicks amber, responsive, y-axis integers). Guard: if `_expandedCampaignId !== campaignId` on callback return, no-op (concurrent expansion). `_appendMyCampaignActions` unchanged.
+- No DB schema changes. No SW changes. No SDK changes. No Maxima protocol changes. No new signals.
+- `docs/UI_ROADMAP.md`: Sessió 9 marked ✅ Fet.
+
+2026-05-24 (fix: creator-side REWARD_EVENT on viewer voucher):
+- **Root cause**: Creator's chart (Session 9) showed no events because `swBuildAndExportVoucherTx` in `channel.handler.js` never wrote a `REWARD_EVENT` to the creator's DB when sending viewer vouchers. Viewer's own SW already wrote one via `MA_TRACK_VIEW` (comms.handler.js), but the creator had no record.
+- **Fix pattern**: Mirrors PUB-5 (publisher gets a REWARD_EVENT in `handleRewardVoucher`). After the `sendMaxima` call succeeds, if `role === 'viewer'` and `ctx.rewardAmount > 0`: look up the AD ID from the campaign, then call `createRewardEvent({type:'view', ...})` on the creator's SW. Fully fire-and-forget (does not block `afterSend`).
+- `_swDispatchVoucher` (Edit 1): computes `rewardAmount = (role === 'viewer') ? parseFloat(campaign.REWARD_VIEW) : 0` and adds it to the ctx object passed to `swBuildAndExportVoucherTx`.
+- `swBuildAndExportVoucherTx` (Edit 2): inside the `sendMaxima` callback, after the log line, checks `role === 'viewer' && ctx.rewardAmount > 0` → `sqlQuery` for AD ID → `createRewardEvent`. Uses `escapeSql`, `var`, `function()`, no arrow functions, no template literals — Rhino-safe.
+- Files modified: `public/service-workers/handlers/channel.handler.js` only.
+- No DB schema changes. No new Maxima message types. No new signals. No SDK changes. No UI changes.
+
+2026-05-23 (Sessió 8 — Earnings: historial desplegable + ajustos nav):
+- `dapp/views/earnings.js`: removed `#ma-earnings-history` section from `renderEarnings()`. Removed `getUserRewards` call and the flat `renderRewardHistory` function from `loadEarnings()`. Removed the `histTarget` / `renderRewardHistory` block from `onSettleConfirmed()`. Added `_loadChannelEvents(campaignId, targetEl)` — queries `REWARD_EVENTS` by `campaign_id` + `MY_ADDRESS`, renders a compact table (Type / Amount / Date) into the given element; shows "No events" text when empty. Modified `_renderChannelRewardRows()`: each pending channel card now wraps info+settle in a `mainRow` div, with a `<details>`/`<summary>Detall</summary>` block below; events are lazy-loaded on first open via `toggle` event, guarded by a `loaded` flag. Modified `renderSettlementHistory()`: added 5th column (empty header); each data row has a `▶`/`▼` button that toggles a hidden `<tr>` below (colspan=5); events lazy-loaded on first expand, same `loaded` guard. All desplegables default-closed.
+- `dapp/app.js`: changed `currentRoute()` default return from `'stats'` to `'viewer'`. `aria-current` was already correct (set in `renderNav()` which is called by `doRender()` on every `hashchange`).
+- No DB schema changes. No SW changes. No SDK changes. No Maxima protocol changes. No new signals.
+
+2026-05-23 (Sessió 7 — Vista "My Campaigns"):
+- `dapp/views/mycampaigns.js` (nou): vista dedicada al creador a la ruta `#mycampaigns`. `renderMyCampaigns(root)` crea la secció i crida `loadMyCampaigns()`. `loadMyCampaigns()` fa un SELECT `c.*` + dues subqueries correlades (`VIEW_COUNT`, `CLICK_COUNT` de `REWARD_EVENTS`) filtrades per `CREATOR_ADDRESS`. Renderitza una taula de 9 columnes: títol, estat (badge), pressupost total, restant, reward/view, reward/click, views, clicks, accions. Accions migrades de `loadCreatorCampaigns()`: Pausar → `CAMPAIGN_PAUSE` + `setCampaignStatus('paused')`; Reprendre → `CAMPAIGN_RESUME` + `setCampaignStatus('active')`; Finalitzar → `confirm()` + `CAMPAIGN_FINISH` + `setCampaignStatus('finished')`. Campanyes sense events mostren VIEW_COUNT/CLICK_COUNT a zero (subquery retorna 0, no NULL).
+- `dapp/app.js`: `currentRoute()` afegeix `'mycampaigns'` com a ruta vàlida. `MODE_VIEWS.creator` passa de `['creator','stats']` a `['creator','mycampaigns','stats']`. `renderNav()` linkDefs afegeix `mycampaigns: { href:'#mycampaigns', label:'My Campaigns' }`. `doRender()` afegeix branca `route === 'mycampaigns' → renderMyCampaigns(root)`. `handleMdsComms` bloc `CAMPAIGN_UPDATED`: substituïda la crida a `loadCreatorCampaigns()` (route==='creator') per `loadMyCampaigns()` (route==='mycampaigns').
+- `dapp/views/creator.js`: eliminats `var _myCampaignsSection = null`, la funció completa `loadCreatorCampaigns()` i el bloc de creació de la secció provisional a `renderCreator()`. Cap altra modificació al formulari ni al flux de creació.
+- `public/index.html`: afegit `<script src="dapp/views/mycampaigns.js"></script>` just després de `stats.js`, abans del devtools console.
+- No DB schema changes. No SW changes. No SDK changes. No Maxima protocol changes. No new signals.
+
+2026-05-23 (Sessió 6 — Neteja Stats i Viewer):
+- `dapp/views/stats.js`: removed `rewardsSection` (`#ma-stats-rewards`) from `renderStats()`. Removed `getUserRewards` call and `renderRewardsSummary()` function from `loadStats()`. Stats now shows only the global campaigns table. In `renderCampaignsTable`, title cell is built manually: if `c.CREATOR_ADDRESS.toUpperCase() === MY_ADDRESS.toUpperCase()`, a `<mark>` badge "Teva" is appended to the cell. No changes to DB, core, SW, or SDK.
+- `dapp/views/viewer.js`: removed `var _previewMode = false`. Removed toolbar (allBtn `All ads`, ownBtn `My campaigns`). Removed `setPreviewMode(on)` function. Removed `loadOwnCampaignAd(status, slot)` function. `loadNextAd()` no longer has the `_previewMode` branch. `renderAdInSlot` no longer accepts `isPreview` param — always wires interactions and starts the view timer. Header comment updated to remove reference to preview mode.
+- No DB schema changes. No SW changes. No SDK changes. No Maxima protocol changes. No new signals.
+
+2026-05-23 (Sessió 5 — Gestió de campanyes):
+- `dapp/views/creator.js`: added module-level `_myCampaignsSection` var. Added `loadCreatorCampaigns()` — queries `CAMPAIGNS WHERE UPPER(CREATOR_ADDRESS) = UPPER(MY_ADDRESS)`, renders a table with title/status badge/budget/action buttons. Pause → `CAMPAIGN_PAUSE` broadcast + local `setCampaignStatus('paused')`; Resume → `CAMPAIGN_RESUME` broadcast + local `setCampaignStatus('active')`; Finish → `confirm()` dialog + `CAMPAIGN_FINISH` broadcast + local `setCampaignStatus('finished')`. Stale-ref guard: if `section !== _myCampaignsSection` (user navigated away mid-query), callback is a no-op. Added `_myCampaignsSection = null` at top of `renderCreator` to reset on re-render. Section appended to `root` after `_renderThemeSwatches` (before preview buttons setup, which are inside the form; no interference).
+- `dapp/app.js`: in `handleMdsComms` CAMPAIGN_UPDATED block added `loadCreatorCampaigns()` call when `currentRoute() === 'creator'`. This ensures the list auto-refreshes when the SW signals a status change (triggered by the creator's own broadcast looping back via sendall).
+- `public/service-workers/handlers/campaign.handler.js`: added `handleCampaignResume(payload)` — calls `applyStatusChange(campaignId, "active")`. Rhino-safe (var, function(), no arrows, no template literals, no trailing commas).
+- `public/service-workers/handlers/maxima.handler.js`: added `CAMPAIGN_RESUME` routing branch after `CAMPAIGN_FINISH`.
+- `MinimaAds.md §8.5`: added `CAMPAIGN_RESUME` schema and note. `MinimaAds.md §11.3`: added `CAMPAIGN_RESUME` row in handler table.
+- No DB schema changes. No new FE signals. No new SW signals.
+
+2026-05-23 (Sessió 4 — Perfil d'usuari):
+- `public/index.html`: added `.ma-profile-btn` CSS (circular button). Added `<ul>` with `#ma-profile-btn` (button "P") at nav right. Added `<dialog id="ma-profile-modal">` with Pico CSS `<article>` pattern; backdrop click closes via inline `onclick`. No new scripts added.
+- `dapp/app.js`: added `_profileInterestsSaveTimer = 0` module-level var. Added `openProfileModal()` — builds modal body via DOM (address row with copy-to-clipboard via `execCommand`, interests input with 800ms debounce to `updateUserProfile`, total earned box loaded async via `getUserProfile`). Added `closeProfileModal()` — removes `open` attribute and clears debounce timer. No changes to routing, DB schema, core, SW, or SDK.
+- `dapp/views/viewer.js`: removed `_interestsSaveTimer` var, the `<details>`/`<summary>` interests block, and the `getUserProfile` callback that loaded interests into `#ma-interests`. Backend (DB + `updateUserProfile`) unchanged — same call site, now in modal.
+
+2026-05-23 (Sessió 3 — Selector de mode):
+- `public/index.html`: replaced static nav links `<ul>` with two new elements: `<ul id="ma-mode-switcher">` (3 static buttons with `onclick="setMode(...)"`) and `<ul id="ma-nav-links">` (empty, populated by JS). Added `.ma-mode-btn` CSS and `#ma-mode-switcher` gap rule. Mode buttons use `aria-selected` to toggle primary/secondary background via CSS.
+- `dapp/app.js`: added `_activeMode = 'viewer'` and `MODE_VIEWS` map (`viewer: ['viewer','earnings']`, `creator: ['creator','stats']`, `publisher: ['frames','earnings']`). Added `renderNav()` (updates button `aria-selected`, rebuilds nav links with `aria-current`). Added `setMode(mode)` (validates mode, persists to keypair `USER_MODE`, calls `doRender()`). Modified `doRender()`: calls `renderNav()` at entry, then after loading guards checks if `currentRoute()` belongs to active mode — if not, redirects to `views[0]` via `window.location.hash`. Modified `onInited()`: reads keypair `USER_MODE` before rendering; sets `_activeMode` if valid; calls `renderNav()` before `probeDb()` + `doRender()`.
+- No SW, DB schema, core, or SDK changes — purely UI/routing layer.
+
+2026-05-23 (Sessió 2 — Viewer interests):
+- `core/rewards.js`: added `updateUserProfile(userAddress, fields, cb)`. Uses `MERGE INTO USER_PROFILE (ADDRESS, INTERESTS) KEY (ADDRESS)` — only touches INTERESTS, never resets TOTAL_EARNED or LAST_REWARD_AT. Creates profile row with defaults if none exists. Rhino-safe (var, no arrows, no template literals).
+- `dapp/views/viewer.js`: added `_interestsSaveTimer` module-level var. In `renderViewer`, added a `<details>` element ("My interests") with a text input after the toolbar. Input value is loaded from `getUserProfile` on render. Changes debounce 800 ms then call `updateUserProfile`. The `loadNextAd` flow already reads `profile.INTERESTS` and passes it to `MinimaAds.getAd()` — no change needed there.
+- DB: `USER_PROFILE.INTERESTS VARCHAR(1024)` already exists in SW `db-init.js` CREATE TABLE — no migration added.
+- `MinimaAds.md §7.4` and `AGENTS.md §3`: added `updateUserProfile` signature.
 
 2026-05-23 (Responsive banner layout + UI cleanup):
 - `renderer/renderAd.js`: two-mode layout based on `container.offsetWidth` at render time. ≥480px → row layout (image left, text right, max-height:160px). <480px with image → image-only (height:140px, clickable). <480px without image → text column. `baseFs` formula scales text block font size with image column width (`clamp(0.70rem … 0.95rem)`); child elements use `em` units. `isMobile` check uses container width, NOT a device media query — a slot in a ≥480px panel always uses desktop layout.

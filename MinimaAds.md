@@ -716,6 +716,12 @@ getUserRewards(userAddress, callback)
 
 getUserProfile(userAddress, callback)
 // Returns: callback(UserProfile | null)
+
+updateUserProfile(userAddress, fields, callback)
+// fields: { interests: string | null }
+// MERGE INTO USER_PROFILE (ADDRESS, INTERESTS) — never touches TOTAL_EARNED or LAST_REWARD_AT.
+// Creates profile row with default values if none exists.
+// Returns: callback(err)
 ```
 
 ### 7.6 channels.js
@@ -881,14 +887,17 @@ Reward processing (view and click events) is handled entirely within the FE runt
 4. UPDATE USER_PROFILE (TOTAL_EARNED, LAST_REWARD_AT)
 5. `signalFE('REWARD_CONFIRMED', { event_id, amount, reward_type })`
 
-### 8.5 CAMPAIGN_PAUSE / CAMPAIGN_FINISH
+### 8.5 CAMPAIGN_PAUSE / CAMPAIGN_FINISH / CAMPAIGN_RESUME
 
-**Direction**: Creator SW → all Maxima contacts
+**Direction**: Creator FE → all Maxima contacts (via `broadcastMaxima` / `sendall`)
 
 ```json
-{ "type": "CAMPAIGN_PAUSE",  "campaign_id": "uuid" }
-{ "type": "CAMPAIGN_FINISH", "campaign_id": "uuid" }
+{ "type": "CAMPAIGN_PAUSE",   "campaign_id": "uuid" }
+{ "type": "CAMPAIGN_FINISH",  "campaign_id": "uuid" }
+{ "type": "CAMPAIGN_RESUME",  "campaign_id": "uuid" }
 ```
+
+> `CAMPAIGN_RESUME` sets `STATUS = 'active'` on all receiving nodes. Only the campaign creator should broadcast this — there is no creator-identity check at the protocol level; enforcement relies on the creator being the one holding the UI controls.
 
 ### 8.6 REQUEST_CAMPAIGN_DATA
 
@@ -1011,7 +1020,37 @@ Sent on reconnection when the viewer has a channel open but is missing or unsure
 
 Creator responds with the latest `REWARD_VOUCHER` it has for this pair, or with `CHANNEL_OPEN` if no voucher has been issued yet.
 
-### 8.13 SW → FE Signal Contract
+### 8.13 CREATOR_LIVENESS_PING
+
+**Direction**: Viewer SDK (FE) → Creator SW (unicast via `publickey:<creator_address>`, **`poll:false`**)
+
+Sent by the viewer SDK before opening a new payment channel to check whether the creator's node is reachable. Uses `poll:false` — a queued ping would cause a false "alive" response when the creator eventually comes back online.
+
+```json
+{
+  "type": "CREATOR_LIVENESS_PING",
+  "campaign_id": "uuid"
+}
+```
+
+> If no `CREATOR_LIVENESS_PONG` is received within 3 s, the campaign is considered inaccessible for this session and the viewer does not earn from it. The result is cached per campaign for 2 min (`LIVENESS_CACHE_MS`).
+
+### 8.14 CREATOR_LIVENESS_PONG
+
+**Direction**: Creator SW → Viewer SW (unicast via `publickey:<senderPk>`, **`poll:false`**)
+
+Sent immediately by the creator's SW upon receiving a `CREATOR_LIVENESS_PING`. Signals the viewer's SDK that the creator is online and can issue vouchers.
+
+```json
+{
+  "type": "CREATOR_LIVENESS_PONG",
+  "campaign_id": "uuid"
+}
+```
+
+> The viewer's SW relays this to the FE via `signalFE('CREATOR_LIVENESS_PONG', { campaign_id })`. The SDK resolves the pending liveness callback and caches the result.
+
+### 8.15 SW → FE Signal Contract
 
 | Signal type | Payload | Fired by | Trigger |
 |---|---|---|---|
@@ -1032,6 +1071,7 @@ Creator responds with the latest `REWARD_VOUCHER` it has for this pair, or with 
 | `PUBLISHER_REWARD_CONFIRMED` | `{ event_id, amount, frame_id, campaign_id }` | `core/rewards.js` (FE) | Publisher reward persisted — update Frame earnings UI |
 | `DO_PUBLISHER_CHANNEL_OPEN` | `{ campaign_id, publisher_key, publisher_mx, frame_id, max_amount }` | `channel.handler.js` (SW) | Creator FE creates publisher channel coin on-chain |
 | `DO_PUBLISHER_REWARD_VOUCHER` | `{ campaign_id, publisher_key, publisher_mx, frame_id, event_id, cumulative }` | `channel.handler.js` (SW) | Creator FE builds publisher voucher tx and sends REWARD_VOUCHER |
+| `CREATOR_LIVENESS_PONG` | `{ campaign_id }` | `campaign.handler.js` (SW) | CREATOR_LIVENESS_PONG received — SDK resolves pending liveness check |
 
 ---
 
@@ -1165,6 +1205,7 @@ MDS.init(function(msg) {
 | `CAMPAIGN_ANNOUNCE` | `campaign.handler.js` | MERGE CAMPAIGNS + ADS | `NEW_CAMPAIGN` |
 | `CAMPAIGN_PAUSE` | `campaign.handler.js` | UPDATE CAMPAIGNS STATUS='paused' | `CAMPAIGN_UPDATED` |
 | `CAMPAIGN_FINISH` | `campaign.handler.js` | UPDATE CAMPAIGNS STATUS='finished' | `CAMPAIGN_UPDATED` |
+| `CAMPAIGN_RESUME` | `campaign.handler.js` | UPDATE CAMPAIGNS STATUS='active' | `CAMPAIGN_UPDATED` |
 | `REQUEST_CAMPAIGN_DATA` | `campaign.handler.js` | read only | — (sends CAMPAIGN_DATA_RESPONSE) |
 | `CAMPAIGN_DATA_RESPONSE` | `campaign.handler.js` | MERGE CAMPAIGNS + ADS | `NEW_CAMPAIGN` |
 | `CHANNEL_OPEN_REQUEST` | `channel.handler.js` | MERGE CHANNEL_STATE (creator) | — (sends CHANNEL_OPEN; FE handles coin creation) |

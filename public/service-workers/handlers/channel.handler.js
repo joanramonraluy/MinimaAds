@@ -1205,6 +1205,9 @@ function _swDispatchVoucher(campaignId, viewerKey, viewerMx, eventId, cumulative
       MDS.log("[CHANNEL] _swDispatchVoucher: VIEWER_WALLET_ADDR missing. campaign: " + campaignId + " role: " + role);
       return;
     }
+    // rewardAmount passed to the voucher builder so it can create a creator-side
+    // REWARD_EVENT after the voucher is sent (viewer role only).
+    var rewardAmount = (role === 'viewer') ? (parseFloat(campaign.REWARD_VIEW) || 0) : 0;
     swBuildAndExportVoucherTx({
       campaignId:      campaignId,
       viewerKey:       viewerKey,
@@ -1216,7 +1219,8 @@ function _swDispatchVoucher(campaignId, viewerKey, viewerMx, eventId, cumulative
       creatorWalletPK: campaign.ESCROW_WALLET_PK,
       viewerAddr:      viewerAddr,
       role:            role || 'viewer',
-      frameId:         frameId || ''
+      frameId:         frameId || '',
+      rewardAmount:    rewardAmount
     }, afterSend || null);
   });
 }
@@ -1325,6 +1329,27 @@ function swBuildAndExportVoucherTx(ctx, afterSend) {
               }
               sendMaxima(ctx.viewerKey, ctx.viewerMx, voucherMsg, function(ok) {
                 MDS.log("[CHANNEL] SW REWARD_VOUCHER sent cumulative: " + ctx.cumulative + " role: " + role + " ok=" + ok);
+                if (role === 'viewer' && ctx.rewardAmount > 0) {
+                  sqlQuery(
+                    "SELECT ID FROM ADS WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(ctx.campaignId) + "')",
+                    function(adErr, adRows) {
+                      var adId = (adRows && adRows.length > 0) ? adRows[0].ID : '';
+                      createRewardEvent({
+                        campaign_id:  ctx.campaignId,
+                        ad_id:        adId,
+                        user_address: ctx.viewerKey,
+                        type:         'view',
+                        amount:       ctx.rewardAmount
+                      }, function(evtErr, evt) {
+                        if (evtErr || !evt) {
+                          MDS.log("[CHANNEL] SW creator view event failed: " + evtErr);
+                        } else {
+                          MDS.log("[CHANNEL] SW creator view event created. campaign: " + ctx.campaignId + " amount: " + ctx.rewardAmount);
+                        }
+                      });
+                    }
+                  );
+                }
                 if (afterSend) { afterSend(); }
               });
             });

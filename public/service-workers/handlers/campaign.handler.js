@@ -88,6 +88,14 @@ function handleCampaignFinish(payload) {
   applyStatusChange(payload.campaign_id, "finished");
 }
 
+function handleCampaignResume(payload) {
+  if (!payload.campaign_id) {
+    MDS.log("[CAMPAIGN] RESUME missing campaign_id");
+    return;
+  }
+  applyStatusChange(payload.campaign_id, "active");
+}
+
 // Returns the data value for a given port in coin.state (array of {port, data} objects).
 // Pattern from official Minima mds.js getStateVariable utility.
 function getStateVar(states, port) {
@@ -378,4 +386,28 @@ function applyStatusChange(campaignId, status) {
       });
     });
   });
+}
+
+// CREATOR_LIVENESS_PING — received on creator's node from a viewer SDK.
+// Responds immediately with CREATOR_LIVENESS_PONG to the sender.
+// MinimaAds.md §8.14. Rhino-safe: var, function(), no arrows, no template literals.
+function handleCreatorLivenessPing(payload, senderPk) {
+  if (!senderPk) {
+    MDS.log("[LIVENESS] PING missing senderPk — ignoring");
+    return;
+  }
+  MDS.log("[LIVENESS] PING from " + senderPk.substring(0, 10) + "...");
+  var pong = {type: "CREATOR_LIVENESS_PONG", campaign_id: payload.campaign_id || ''};
+  sendMaxima(senderPk, null, pong, function(ok) {
+    MDS.log("[LIVENESS] PONG sent ok:" + (ok ? "true" : "false"));
+  });
+}
+
+// CREATOR_LIVENESS_PONG — received on viewer's node from the creator.
+// Signals the FE so the SDK can resolve the pending liveness check.
+// MinimaAds.md §8.15.
+function handleCreatorLivenessPong(payload) {
+  var campaignId = payload.campaign_id || '';
+  MDS.log("[LIVENESS] PONG received for campaign: " + campaignId);
+  signalFE("CREATOR_LIVENESS_PONG", {campaign_id: campaignId});
 }

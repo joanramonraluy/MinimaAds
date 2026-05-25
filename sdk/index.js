@@ -31,6 +31,13 @@
   var _activeFrameId = null;
   var _myMx = '';
 
+  // Creator liveness check — cache per campaignId, timeout 2 min.
+  // _pendingPings: campaignId → { cbs: [fn], timer }
+  var _livenessCache = {};
+  var _pendingPings = {};
+  var LIVENESS_CACHE_MS = 120000;
+  var LIVENESS_TIMEOUT_MS = 3000;
+
   function _completeInit(cb) {
     MDS.cmd('maxima action:info', function(mxRes) {
       if (mxRes && mxRes.status && mxRes.response && mxRes.response.contact) {
@@ -165,7 +172,15 @@
   function getAd(userAddress, interests, cb) {
     getCampaigns(function(err, campaigns) {
       if (err) { cb(err, null); return; }
-      _enrichWithAds(campaigns || [], function(err2, enriched) {
+      // Filter out campaigns whose creators are known to be offline (cached result).
+      // This avoids showing ads the viewer cannot be rewarded for on subsequent calls.
+      // First-time calls (empty cache) pass all campaigns through.
+      var now = Date.now();
+      var visible = (campaigns || []).filter(function(c) {
+        var cached = _livenessCache[c.ID];
+        return !(cached && !cached.alive && (now - cached.ts) < LIVENESS_CACHE_MS);
+      });
+      _enrichWithAds(visible, function(err2, enriched) {
         if (err2) { cb(err2, null); return; }
         var ad = selectAd(userAddress, interests, enriched);
         cb(null, ad);
@@ -465,6 +480,68 @@
         if (cb) { cb(); }
       });
     });
+  }
+
+  // --- Creator liveness check -----------------------------------------
+
+  // Sends a CREATOR_LIVENESS_PING (poll:false) directly to the creator's PK.
+  // poll:false is critical — a queued ping would cause a false "alive" response
+  // when the creator eventually comes back online.
+  function _sendLivenessPing(creatorRoute, campaignId, cb) {
+    if (!creatorRoute) { if (cb) { cb(false); } return; }
+    var payload = { type: 'CREATOR_LIVENESS_PING', campaign_id: campaignId };
+    var hex = '0x' + utf8ToHex(JSON.stringify(payload)).toUpperCase();
+    var isMx = (creatorRoute.substring(0, 2).toUpperCase() === 'MX');
+    var routeParam = isMx ? ('to:' + creatorRoute) : ('publickey:' + creatorRoute);
+    var cmd = 'maxima action:send ' + routeParam
+            + ' application:' + APP_NAME
+            + ' data:' + hex
+            + ' poll:false';
+    MDS.cmd(cmd, function(res) {
+      if (cb) { cb(!!(res && res.status)); }
+    });
+  }
+
+  // Checks whether the creator for a given campaign is reachable via Maxima.
+  // Returns cb(true) if a PONG arrives within LIVENESS_TIMEOUT_MS, cb(false) otherwise.
+  // Results are cached for LIVENESS_CACHE_MS (2 min) — no repeated pings within that window.
+  // Multiple concurrent calls for the same campaign share a single ping.
+  function _checkCreatorLiveness(campaign, cb) {
+    var campaignId = campaign.ID;
+    var now = Date.now();
+    var cached = _livenessCache[campaignId];
+    if (cached && (now - cached.ts) < LIVENESS_CACHE_MS) {
+      cb(cached.alive);
+      return;
+    }
+    if (_pendingPings[campaignId]) {
+      _pendingPings[campaignId].cbs.push(cb);
+      return;
+    }
+    var cbs = [cb];
+    var timer = setTimeout(function() {
+      if (!_pendingPings[campaignId]) { return; }
+      delete _pendingPings[campaignId];
+      _livenessCache[campaignId] = { alive: false, ts: Date.now() };
+      console.log('[SDK] liveness timeout — creator offline for campaign:', campaignId);
+      for (var i = 0; i < cbs.length; i++) { cbs[i](false); }
+    }, LIVENESS_TIMEOUT_MS);
+    _pendingPings[campaignId] = { cbs: cbs, timer: timer };
+    _resolveCreatorRoute(campaign, function(creatorRoute) {
+      _sendLivenessPing(creatorRoute, campaignId, function() {});
+    });
+  }
+
+  // Called when the viewer's SW relays a CREATOR_LIVENESS_PONG via MDSCOMMS.
+  // Resolves the pending ping callback(s) for the given campaign.
+  function _onCreatorLivenessPong(campaignId) {
+    var pending = _pendingPings[campaignId];
+    if (!pending) { return; }
+    clearTimeout(pending.timer);
+    delete _pendingPings[campaignId];
+    _livenessCache[campaignId] = { alive: true, ts: Date.now() };
+    console.log('[SDK] liveness PONG — creator online for campaign:', campaignId);
+    for (var i = 0; i < pending.cbs.length; i++) { pending.cbs[i](true); }
   }
 
   // --- Channel flow orchestration --------------------------------------
@@ -778,16 +855,39 @@
             amount: amount,
             publisher_id: _activeFrameId || null
           };
-          createRewardEvent(params, function(err3, evt) {
-            if (err3) { cb(err3, null); return; }
-            if (!evt) { cb(null, { confirmed: false }); return; }
-            // Fire-and-forget viewer channel flow.
-            _channelFlow(campaign, evt.id, amount, function() {});
-            // Fire-and-forget publisher reward flow when R_p > 0 and frame is set.
-            if (parseFloat(campaign.PUBLISHER_REWARD_VIEW) > 0 && type === 'view' && _activeFrameId) {
-              _publisherChannelFlow(campaign, _activeFrameId, parseFloat(campaign.PUBLISHER_REWARD_VIEW), function() {});
+
+          // Liveness check — only needed when no open/pending channel exists.
+          // Existing channels: creator was reachable at open time; reward requests
+          // will be queued and flushed when they come back online.
+          function doCreateReward() {
+            createRewardEvent(params, function(err3, evt) {
+              if (err3) { cb(err3, null); return; }
+              if (!evt) { cb(null, { confirmed: false }); return; }
+              // Fire-and-forget viewer channel flow.
+              _channelFlow(campaign, evt.id, amount, function() {});
+              // Fire-and-forget publisher reward flow when R_p > 0 and frame is set.
+              if (parseFloat(campaign.PUBLISHER_REWARD_VIEW) > 0 && type === 'view' && _activeFrameId) {
+                _publisherChannelFlow(campaign, _activeFrameId, parseFloat(campaign.PUBLISHER_REWARD_VIEW), function() {});
+              }
+              cb(null, { confirmed: true, event: evt });
+            });
+          }
+
+          _getMyChannel(campaignId, function(chErr, existingChannel) {
+            var channelExists = !chErr && existingChannel &&
+              (existingChannel.STATUS === 'open' || existingChannel.STATUS === 'pending');
+            if (channelExists) {
+              doCreateReward();
+              return;
             }
-            cb(null, { confirmed: true, event: evt });
+            _checkCreatorLiveness(campaign, function(alive) {
+              if (!alive) {
+                console.log('[SDK] creator offline — skipping reward for campaign:', campaignId);
+                cb(null, { confirmed: false, reason: 'creator offline' });
+                return;
+              }
+              doCreateReward();
+            });
           });
         });
       });
@@ -895,6 +995,9 @@
           _publisherChannelFlow(campaign, payload.frame_id, parseFloat(campaign.PUBLISHER_REWARD_VIEW) || 0, function() {});
         }
       });
+    } else if (payload.type === 'CREATOR_LIVENESS_PONG') {
+      // Host MiniDapp path: MAXIMA arrives directly (app.js path uses MDSCOMMS signal instead).
+      _onCreatorLivenessPong(payload.campaign_id || '');
     }
   }
 
@@ -909,7 +1012,9 @@
       // Exposed so viewer.js (T-CH6) can compose UI updates on top of the
       // channel bookkeeping without re-implementing it.
       onChannelOpened:  _onChannelOpenedCore,
-      onVoucherReceived: _onVoucherReceivedCore
+      onVoucherReceived: _onVoucherReceivedCore,
+      // Exposed so app.js can forward MDSCOMMS CREATOR_LIVENESS_PONG signals.
+      onCreatorLivenessPong: _onCreatorLivenessPong
     };
 
     // app.js dispatches MDSCOMMS signals to global onChannelOpened /
@@ -922,6 +1027,9 @@
     }
     if (typeof window.onVoucherReceived !== 'function') {
       window.onVoucherReceived = _onVoucherReceivedCore;
+    }
+    if (typeof window.onCreatorLivenessPong !== 'function') {
+      window.onCreatorLivenessPong = _onCreatorLivenessPong;
     }
   }
 })();

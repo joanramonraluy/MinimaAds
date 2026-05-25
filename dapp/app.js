@@ -23,6 +23,14 @@ var LIMITS = {
 var MY_ADDRESS = '';
 var MY_MX_ADDRESS = '';
 var _dbReady = false;
+var _activeMode = 'viewer';
+var _profileInterestsSaveTimer = 0;
+
+var MODE_VIEWS = {
+  viewer:    ['viewer', 'earnings'],
+  creator:   ['creator', 'mycampaigns', 'stats'],
+  publisher: ['frames', 'earnings']
+};
 // Tracks in-flight channel-related pending txns. Keyed by pendinguid.
 // Mirrored to keypair (PENDING_CHANNEL_<uid>) so FE reloads don't lose context.
 var _pendingChannelOps = {};
@@ -33,8 +41,50 @@ function generateUID() {
 
 function currentRoute() {
   var h = (window.location.hash || '').replace(/^#/, '');
-  if (h === 'creator' || h === 'stats' || h === 'viewer' || h === 'earnings' || h === 'frames') { return h; }
-  return 'stats';
+  if (h === 'creator' || h === 'mycampaigns' || h === 'stats' || h === 'viewer' || h === 'earnings' || h === 'frames') { return h; }
+  return 'viewer';
+}
+
+function renderNav() {
+  var modeNames = ['viewer', 'creator', 'publisher'];
+  for (var i = 0; i < modeNames.length; i++) {
+    var btn = document.getElementById('ma-mode-btn-' + modeNames[i]);
+    if (btn) {
+      btn.setAttribute('aria-selected', modeNames[i] === _activeMode ? 'true' : 'false');
+    }
+  }
+  var linksEl = document.getElementById('ma-nav-links');
+  if (!linksEl) { return; }
+  var views = MODE_VIEWS[_activeMode] || MODE_VIEWS.viewer;
+  var route = currentRoute();
+  var linkDefs = {
+    viewer:   { href: '#viewer',   label: 'View Ads' },
+    earnings: { href: '#earnings', label: 'Earnings' },
+    creator:     { href: '#creator',      label: 'Create' },
+    mycampaigns: { href: '#mycampaigns',  label: 'My Campaigns' },
+    stats:       { href: '#stats',        label: 'Stats' },
+    frames:   { href: '#frames',   label: 'Frames' }
+  };
+  linksEl.innerHTML = '';
+  for (var j = 0; j < views.length; j++) {
+    var view = views[j];
+    var def = linkDefs[view];
+    if (!def) { continue; }
+    var li = document.createElement('li');
+    var a = document.createElement('a');
+    a.href = def.href;
+    a.textContent = def.label;
+    if (route === view) { a.setAttribute('aria-current', 'page'); }
+    li.appendChild(a);
+    linksEl.appendChild(li);
+  }
+}
+
+function setMode(mode) {
+  if (!MODE_VIEWS[mode]) { return; }
+  _activeMode = mode;
+  MDS.keypair.set('USER_MODE', mode, function() {});
+  doRender();
 }
 
 function setStatus(text) {
@@ -48,6 +98,7 @@ function setStatus(text) {
 }
 
 function doRender() {
+  renderNav();
   var root = document.getElementById('app');
   if (!root) { return; }
   if (!_dbReady) {
@@ -58,8 +109,13 @@ function doRender() {
     setStatus('Resolving Maxima identity…');
     return;
   }
-  root.innerHTML = '';
+  var views = MODE_VIEWS[_activeMode] || MODE_VIEWS.viewer;
   var route = currentRoute();
+  if (views.indexOf(route) === -1) {
+    window.location.hash = views[0];
+    return;
+  }
+  root.innerHTML = '';
   if (route === 'creator' && typeof renderCreator === 'function') {
     renderCreator(root);
   } else if (route === 'earnings' && typeof renderEarnings === 'function') {
@@ -68,6 +124,8 @@ function doRender() {
     renderStats(root);
   } else if (route === 'frames' && typeof renderFrames === 'function') {
     renderFrames(root);
+  } else if (route === 'mycampaigns' && typeof renderMyCampaigns === 'function') {
+    renderMyCampaigns(root);
   } else if (typeof renderViewer === 'function') {
     renderViewer(root);
   } else {
@@ -93,6 +151,9 @@ function handleMdsComms(parsed) {
     }
     if (currentRoute() === 'viewer' && typeof onCampaignsChanged === 'function') {
       onCampaignsChanged();
+    }
+    if (currentRoute() === 'mycampaigns' && typeof loadMyCampaigns === 'function') {
+      loadMyCampaigns();
     }
     if (parsed.type === 'NEW_CAMPAIGN' && currentRoute() === 'creator') {
       var msgEl2 = document.getElementById('ma-creator-msg');
@@ -149,6 +210,12 @@ function handleMdsComms(parsed) {
     }
     if (currentRoute() === 'earnings' && typeof loadEarnings === 'function') {
       loadEarnings();
+    }
+    return;
+  }
+  if (parsed.type === 'CREATOR_LIVENESS_PONG') {
+    if (typeof window.onCreatorLivenessPong === 'function') {
+      window.onCreatorLivenessPong(parsed.campaign_id || '');
     }
     return;
   }
@@ -1209,6 +1276,94 @@ function handleFePending(msg) {
   });
 }
 
+function openProfileModal() {
+  var modal = document.getElementById('ma-profile-modal');
+  if (!modal) { return; }
+  var body = document.getElementById('ma-profile-modal-body');
+  if (!body) { return; }
+  body.innerHTML = '';
+
+  var addrLabel = document.createElement('label');
+  addrLabel.textContent = 'Maxima address';
+  var addrRow = document.createElement('div');
+  addrRow.style.cssText = 'display:flex;gap:.4rem;align-items:center;margin-bottom:1rem;';
+  var addrInput = document.createElement('input');
+  addrInput.type = 'text';
+  addrInput.readOnly = true;
+  addrInput.value = MY_MX_ADDRESS || '—';
+  addrInput.style.cssText = 'flex:1;font-size:.75rem;font-family:monospace;margin:0;';
+  var copyBtn = document.createElement('button');
+  copyBtn.textContent = 'Copy';
+  copyBtn.style.cssText = 'width:auto;margin:0;padding:.2rem .5rem;font-size:.8rem;';
+  copyBtn.addEventListener('click', function() {
+    if (!MY_MX_ADDRESS) { return; }
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = MY_MX_ADDRESS;
+      ta.style.cssText = 'position:fixed;left:-9999px;';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      copyBtn.textContent = 'Copied!';
+      setTimeout(function() { copyBtn.textContent = 'Copy'; }, 1500);
+    } catch (e) {}
+  });
+  addrRow.appendChild(addrInput);
+  addrRow.appendChild(copyBtn);
+  body.appendChild(addrLabel);
+  body.appendChild(addrRow);
+
+  var intLabel = document.createElement('label');
+  intLabel.textContent = 'My interests';
+  var intInput = document.createElement('input');
+  intInput.type = 'text';
+  intInput.id = 'ma-profile-interests';
+  intInput.placeholder = 'e.g. technology, sport, music';
+  intInput.addEventListener('input', function() {
+    clearTimeout(_profileInterestsSaveTimer);
+    var val = intInput.value.trim();
+    _profileInterestsSaveTimer = setTimeout(function() {
+      updateUserProfile(MY_ADDRESS, { interests: val || null }, function() {});
+    }, 800);
+  });
+  body.appendChild(intLabel);
+  body.appendChild(intInput);
+
+  var earnedBox = document.createElement('div');
+  earnedBox.style.cssText = 'margin-top:1rem;padding:.5rem .75rem;background:var(--pico-card-sectionning-background-color,#f0f4f8);border-radius:.3rem;display:flex;justify-content:space-between;align-items:center;';
+  var earnedLbl = document.createElement('small');
+  earnedLbl.textContent = 'Total earned';
+  var earnedVal = document.createElement('strong');
+  earnedVal.id = 'ma-profile-total-earned';
+  earnedVal.textContent = '—';
+  earnedBox.appendChild(earnedLbl);
+  earnedBox.appendChild(earnedVal);
+  body.appendChild(earnedBox);
+
+  if (MY_ADDRESS && typeof getUserProfile === 'function') {
+    getUserProfile(MY_ADDRESS, function(err, profile) {
+      var inp = document.getElementById('ma-profile-interests');
+      var earnEl = document.getElementById('ma-profile-total-earned');
+      if (!err && profile) {
+        if (profile.INTERESTS && inp) { inp.value = profile.INTERESTS; }
+        var total = parseFloat(profile.TOTAL_EARNED) || 0;
+        if (earnEl) { earnEl.textContent = total.toFixed(6) + ' MINIMA'; }
+      } else {
+        if (earnEl) { earnEl.textContent = '0.000000 MINIMA'; }
+      }
+    });
+  }
+
+  modal.setAttribute('open', '');
+}
+
+function closeProfileModal() {
+  var modal = document.getElementById('ma-profile-modal');
+  if (modal) { modal.removeAttribute('open'); }
+  clearTimeout(_profileInterestsSaveTimer);
+}
+
 function probeDb() {
   sqlQuery('SELECT 1 AS PROBE FROM CAMPAIGNS LIMIT 1', function(err) {
     if (!err) {
@@ -1300,16 +1455,22 @@ function onInited() {
       if (kpRes && kpRes.status && kpRes.value) {
         PLATFORM_KEY = kpRes.value;
       }
-      MDS.cmd('maxima action:info', function(res) {
-        if (res && res.status && res.response) {
-          if (res.response.publickey) { MY_ADDRESS    = res.response.publickey.toUpperCase(); }
-          if (res.response.contact)   { MY_MX_ADDRESS = res.response.contact; }
+      MDS.keypair.get('USER_MODE', function(modeRes) {
+        if (modeRes && modeRes.status && modeRes.value && MODE_VIEWS[modeRes.value]) {
+          _activeMode = modeRes.value;
         }
-        initFEFrames(function() {
-          initFEChannelState(function() {
-            initFEChannelHistory(function() {
-              probeDb();
-              doRender();
+        MDS.cmd('maxima action:info', function(res) {
+          if (res && res.status && res.response) {
+            if (res.response.publickey) { MY_ADDRESS    = res.response.publickey.toUpperCase(); }
+            if (res.response.contact)   { MY_MX_ADDRESS = res.response.contact; }
+          }
+          initFEFrames(function() {
+            initFEChannelState(function() {
+              initFEChannelHistory(function() {
+                renderNav();
+                probeDb();
+                doRender();
+              });
             });
           });
         });

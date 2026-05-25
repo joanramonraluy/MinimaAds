@@ -29,7 +29,11 @@ function validateView(campaignId, userAddress, cb) {
 
     var now = Date.now();
     var dayAgo = now - 86400000;
-    var viewSql = "SELECT COUNT(*) AS CNT FROM REWARD_EVENTS"
+    // Single query: daily count + last view timestamp for THIS campaign.
+    // Cooldown is per-campaign: a reward from another campaign does not block
+    // this one. USER_PROFILE.LAST_REWARD_AT is global and intentionally not
+    // used here — it was causing cross-campaign cooldown interference.
+    var viewSql = "SELECT COUNT(*) AS CNT, MAX(TIMESTAMP) AS LAST_AT FROM REWARD_EVENTS"
       + " WHERE UPPER(USER_ADDRESS) = UPPER('" + escapeSql(userAddress) + "')"
       + " AND UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')"
       + " AND TYPE = 'view'"
@@ -46,28 +50,17 @@ function validateView(campaignId, userAddress, cb) {
         cb({ valid: false, reason: 'daily view limit reached' });
         return;
       }
-
-      var profileSql = "SELECT LAST_REWARD_AT FROM USER_PROFILE"
-        + " WHERE UPPER(ADDRESS) = UPPER('" + escapeSql(userAddress) + "')";
-
-      sqlQuery(profileSql, function(err2, profileRows) {
-        if (err2) {
-          cb({ valid: false, reason: 'db error' });
+      var lastAt = (rows && rows[0] && rows[0].LAST_AT !== null && rows[0].LAST_AT !== undefined)
+        ? parseInt(rows[0].LAST_AT, 10) : null;
+      if (lastAt !== null) {
+        var cooldown = (campaign.COOLDOWN_MS !== null && campaign.COOLDOWN_MS !== undefined)
+          ? parseInt(campaign.COOLDOWN_MS, 10) : LIMITS.COOLDOWN_BETWEEN_REWARDS_MS;
+        if (now - lastAt < cooldown) {
+          cb({ valid: false, reason: 'cooldown active' });
           return;
         }
-        if (profileRows && profileRows.length > 0) {
-          var lastRewardAt = profileRows[0].LAST_REWARD_AT;
-          if (lastRewardAt !== null && lastRewardAt !== undefined) {
-            var cooldown = (campaign.COOLDOWN_MS !== null && campaign.COOLDOWN_MS !== undefined)
-              ? parseInt(campaign.COOLDOWN_MS, 10) : LIMITS.COOLDOWN_BETWEEN_REWARDS_MS;
-            if (now - parseInt(lastRewardAt, 10) < cooldown) {
-              cb({ valid: false, reason: 'cooldown active' });
-              return;
-            }
-          }
-        }
-        cb({ valid: true, reason: null });
-      });
+      }
+      cb({ valid: true, reason: null });
     });
   });
 }
@@ -97,7 +90,9 @@ function validateClick(campaignId, userAddress, cb) {
 
     var now = Date.now();
     var dayAgo = now - 86400000;
-    var clickSql = "SELECT COUNT(*) AS CNT FROM REWARD_EVENTS"
+    // Single query: daily count + last click timestamp for THIS campaign.
+    // Cooldown is per-campaign (see validateView comment above).
+    var clickSql = "SELECT COUNT(*) AS CNT, MAX(TIMESTAMP) AS LAST_AT FROM REWARD_EVENTS"
       + " WHERE UPPER(USER_ADDRESS) = UPPER('" + escapeSql(userAddress) + "')"
       + " AND UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')"
       + " AND TYPE = 'click'"
@@ -114,28 +109,17 @@ function validateClick(campaignId, userAddress, cb) {
         cb({ valid: false, reason: 'daily click limit reached' });
         return;
       }
-
-      var profileSql = "SELECT LAST_REWARD_AT FROM USER_PROFILE"
-        + " WHERE UPPER(ADDRESS) = UPPER('" + escapeSql(userAddress) + "')";
-
-      sqlQuery(profileSql, function(err2, profileRows) {
-        if (err2) {
-          cb({ valid: false, reason: 'db error' });
+      var lastAt = (rows && rows[0] && rows[0].LAST_AT !== null && rows[0].LAST_AT !== undefined)
+        ? parseInt(rows[0].LAST_AT, 10) : null;
+      if (lastAt !== null) {
+        var cooldown = (campaign.COOLDOWN_MS !== null && campaign.COOLDOWN_MS !== undefined)
+          ? parseInt(campaign.COOLDOWN_MS, 10) : LIMITS.COOLDOWN_BETWEEN_REWARDS_MS;
+        if (now - lastAt < cooldown) {
+          cb({ valid: false, reason: 'cooldown active' });
           return;
         }
-        if (profileRows && profileRows.length > 0) {
-          var lastRewardAt = profileRows[0].LAST_REWARD_AT;
-          if (lastRewardAt !== null && lastRewardAt !== undefined) {
-            var cooldown = (campaign.COOLDOWN_MS !== null && campaign.COOLDOWN_MS !== undefined)
-              ? parseInt(campaign.COOLDOWN_MS, 10) : LIMITS.COOLDOWN_BETWEEN_REWARDS_MS;
-            if (now - parseInt(lastRewardAt, 10) < cooldown) {
-              cb({ valid: false, reason: 'cooldown active' });
-              return;
-            }
-          }
-        }
-        cb({ valid: true, reason: null });
-      });
+      }
+      cb({ valid: true, reason: null });
     });
   });
 }

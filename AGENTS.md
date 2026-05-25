@@ -195,6 +195,13 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 ## 8) Current Handoff Notes
 
+2026-05-25 (fix CLK-1 — click no registrat al publisher frame):
+- **Bug**: El publisher frame (generat per `dapp/views/frames.js`) rastrejava visualitzacions via `MA_TRACK_VIEW` comms però NO rastrejava clicks. Quan l'usuari feia click al CTA (imatge o botó de text), l'URL s'obria però cap `MA_TRACK_CLICK` s'enviava. A més, el SW (`service.js` + `comms.handler.js`) no tenia cap handler per a `MA_TRACK_CLICK`, de manera que fins i tot si el frame hagués enviat el missatge, hauria estat descartat silenciosament. **El cooldown NO era el problema**: `validateClick` filtra per `TYPE = 'click'` de forma independent de `validateView` — una visualització recent no bloqueja el primer click.
+- **Fix — `public/service-workers/handlers/comms.handler.js`**: Afegit `handleTrackClick(payload)` (Rhino-safe: var, function(), cap arrow, cap template literal, cap trailing comma). Crida `validateClick` → `getCampaign` → `createRewardEvent(type:'click')` → `_triggerChannelPayment` (reusa la mateixa funció que `handleTrackView`). Actualitzat el comentari de capçalera per incloure `MA_TRACK_CLICK` al protocol.
+- **Fix — `service.js`**: Afegit cas `MA_TRACK_CLICK → handleTrackClick(payload)` a `onComms()`.
+- **Fix — `dapp/views/frames.js`**: Afegida funció `_trackClick(campaignId)` (paral·lela a `_trackView`). Afegits event listeners `click` als tres punts clickables del frame render: imatge mobile (`mobLink`), imatge desktop (`imgLink`), i botó CTA de text (`a`). Cada listener: `e.preventDefault()` → `_trackClick(ad.campaign_id)` → `window.open(url, '_blank')`. S'usa `ctaUrl`/`mobCtaUrl`/`imgCtaUrl` per pre-avaluar la URL segura (evita `javascript:`).
+- No canvis d'esquema DB. No nous missatges Maxima. No canvis de SDK. No canvis de UI (viewer.js, earnings.js, etc.).
+
 2026-05-25 (Sessió 13 — Responsivitat: poliment):
 - **Scope**: UI only — `dapp/views/viewer.js`. Cap canvi a `creator.js`, DB, SW, SDK, core o protocols.
 - **1B-1 "Today earned"**: Eliminat el `<footer>` que contenia el badge "Today earned" del top de `renderViewer`. Afegit en el seu lloc un `<p id="ma-earned-badge">` amb `style.cssText = 'font-size:0.82rem;opacity:0.75;margin:0.25rem 0 0.5rem;text-align:right;'` inserit immediatament *després* de `#ma-ad-slot`. L'element `<span id="ma-earned">` conserva el mateix ID — `loadTodayEarned()` i `onRewardConfirmed()` no requereixen cap canvi.

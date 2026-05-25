@@ -2,10 +2,11 @@
 // Called from service.js onComms(). Rhino-safe syntax.
 //
 // Protocol (cross-dapp):
-//   MA_GET_AD    {userAddress, interests[]}  → MA_AD_RESPONSE {found, ad?}
-//   MA_TRACK_VIEW {campaignId, userAddress}  → MA_TRACK_RESULT {confirmed, amount?, reason?}
+//   MA_GET_AD     {userAddress, interests[]}             → MA_AD_RESPONSE  {found, ad?}
+//   MA_TRACK_VIEW {campaignId, userAddress, publisherKey} → MA_TRACK_RESULT {confirmed, amount?, reason?}
+//   MA_TRACK_CLICK {campaignId, userAddress, publisherKey} → MA_TRACK_RESULT {confirmed, amount?, reason?}
 //
-// After a confirmed view, _triggerChannelPayment initiates the payment channel:
+// After a confirmed view or click, _triggerChannelPayment initiates the payment channel:
 //   - No channel: sends CHANNEL_OPEN_REQUEST via Maxima to creator
 //   - Channel open: sends REWARD_REQUEST via Maxima to creator
 
@@ -129,6 +130,58 @@ function handleTrackView(payload) {
               return;
             }
             MDS.log("[COMMS] MA_TRACK_VIEW confirmed: campaign=" + campaignId + " amount=" + amount);
+            MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: true, amount: amount}), function() {});
+            _triggerChannelPayment(campaignId, campaign, userAddress, amount, evt.id, publisherKey);
+          });
+        }
+      );
+    });
+  });
+}
+
+function handleTrackClick(payload) {
+  var campaignId   = payload.campaignId || "";
+  var userAddress  = payload.userAddress || "";
+  var publisherKey = payload.publisherKey || "";
+
+  if (!campaignId || !userAddress) {
+    MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "missing fields"}), function() {});
+    return;
+  }
+
+  validateClick(campaignId, userAddress, function(result) {
+    if (!result.valid) {
+      MDS.log("[COMMS] MA_TRACK_CLICK rejected: " + result.reason);
+      MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: result.reason}), function() {});
+      return;
+    }
+    getCampaign(campaignId, function(err, campaign) {
+      if (err || !campaign) {
+        MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "campaign not found"}), function() {});
+        return;
+      }
+      if (campaign.CREATOR_ADDRESS.toUpperCase() === userAddress.toUpperCase()) {
+        MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "creator cannot earn"}), function() {});
+        return;
+      }
+      sqlQuery(
+        "SELECT ID FROM ADS WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')",
+        function(err2, rows) {
+          var adId   = (rows && rows.length > 0) ? rows[0].ID : "";
+          var amount = parseFloat(campaign.REWARD_CLICK) || 0;
+          createRewardEvent({
+            campaign_id:  campaignId,
+            ad_id:        adId,
+            user_address: userAddress,
+            type:         "click",
+            amount:       amount,
+            publisher_id: publisherKey || null
+          }, function(err3, evt) {
+            if (err3 || !evt) {
+              MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "reward event failed"}), function() {});
+              return;
+            }
+            MDS.log("[COMMS] MA_TRACK_CLICK confirmed: campaign=" + campaignId + " amount=" + amount);
             MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: true, amount: amount}), function() {});
             _triggerChannelPayment(campaignId, campaign, userAddress, amount, evt.id, publisherKey);
           });

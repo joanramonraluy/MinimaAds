@@ -470,8 +470,7 @@ var LIMITS = {
 5.  Campaign created locally: status='active', budget_remaining=budget_total,
     publisher_reward_view, max_publisher_budget, publisher_budget_spent=0
 6.  Ad object created and linked to campaign
-7.  SW broadcasts CAMPAIGN_ANNOUNCE via Maxima to all contacts (poll:false)
-8.  SW schedules periodic re-broadcast every ~10 min via MDS_TIMER_10SECONDS
+    (Campaign propagates to other nodes automatically via on-chain discovery — §8.1)
 ```
 
 **Network-side validation** (mandatory on every receiving node, in `campaign.handler.js`):
@@ -802,11 +801,9 @@ signalFE(type, data)
 
 ### 8.1 Distribution Model
 
-**Dual mechanism**: on-chain discovery (primary) + Maxima push broadcast (secondary).
+**Single mechanism**: on-chain discovery via `NEWBLOCK`.
 
-#### On-chain discovery (reaches all DApp nodes)
-
-Every node with the DApp installed registers the ESCROW_SCRIPT with `trackall:true` at startup. This means every DApp node independently tracks all coins at `ESCROW_ADDRESS`.
+Every node with the DApp installed registers the ESCROW_SCRIPT at startup and independently tracks all coins at `ESCROW_ADDRESS`.
 
 - On `NEWBLOCK` → SW queries `coins address:<ESCROW_ADDRESS>` → finds coins from all creators
 - Each coin has STATE(3)=campaign_id_hex and STATE(4)=creator_mx_address
@@ -814,12 +811,7 @@ Every node with the DApp installed registers the ESCROW_SCRIPT with `trackall:tr
 - Creator responds with `CAMPAIGN_DATA_RESPONSE` containing full campaign + ad JSON
 - Receiving node persists via `MERGE INTO CAMPAIGNS` + `MERGE INTO ADS`
 
-#### Maxima broadcast (reaches contacts only)
-
-- On campaign creation → SW broadcasts `CAMPAIGN_ANNOUNCE` to all contacts via `sendall`
-- Every ~10 min → SW re-broadcasts all active campaigns
-- Receiving nodes persist via `MERGE INTO CAMPAIGNS` and `MERGE INTO ADS`
-- Once cached, campaigns are fully operational offline
+`CAMPAIGN_ANNOUNCE` is still accepted as inbound message type (backward-compat with older nodes) but is no longer broadcast by the creator on campaign creation.
 
 ### 8.2 Application Name
 
@@ -1692,7 +1684,7 @@ All ad fields must be sanitized with `DOMPurify.sanitize()` before DOM injection
 #### Creator (`dapp/views/creator.js`)
 - Form: campaign name, ad title, description, image URL, target interests (tags), budget (Minima), reward per view, reward per click, expiry (blocks)
 - Inline validation before submit
-- On submit: escrow creation flow + `CAMPAIGN_ANNOUNCE` broadcast
+- On submit: escrow creation flow (on-chain discovery propagates campaign automatically)
 - Clear success/error feedback
 
 #### Stats (`dapp/views/stats.js`)

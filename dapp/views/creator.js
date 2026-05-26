@@ -5,10 +5,10 @@ var _pendingImageData = null;
 var _detachPositioner = null;
 // Cleanup function for the split divider drag listeners.
 var _detachDivider = null;
-// Renders the campaign creation form, funds the KissVM escrow, persists
-// the campaign locally via saveCampaign(), and broadcasts CAMPAIGN_ANNOUNCE.
-// Escrow flow: MinimaAds.md §6.3 step 4 / Appendix B.
-// CAMPAIGN_ANNOUNCE schema: MinimaAds.md §8.3.
+// Renders the campaign creation form, funds the KissVM escrow, and persists
+// the campaign locally via saveCampaign(). Campaign propagates to other nodes
+// automatically via on-chain discovery (MinimaAds.md §8.1).
+// Escrow flow: MinimaAds.md §6.3 / Appendix B.
 
 // ~1728 blocks per day at ~50 s/block.
 var BLOCKS_PER_DAY = 1728;
@@ -1323,34 +1323,8 @@ function saveCampaignAndBroadcast(campaign, ad, form, submitBtn, msgEl) {
       return;
     }
     console.log('[CREATOR] campaign saved locally:', campaign.id);
-    var payload = { type: 'CAMPAIGN_ANNOUNCE', campaign: campaign, ad: ad };
-    if (campaign.max_viewer_reward !== null && campaign.max_viewer_reward !== undefined) {
-      payload.max_viewer_reward = campaign.max_viewer_reward;
-    }
-    if (campaign.publisher_reward_view > 0) {
-      payload.publisher_reward_view = campaign.publisher_reward_view;
-      payload.max_publisher_budget  = campaign.max_publisher_budget;
-    }
-    if (campaign.max_daily_views !== null && campaign.max_daily_views !== undefined) {
-      payload.max_daily_views = campaign.max_daily_views;
-    }
-    if (campaign.max_daily_clicks !== null && campaign.max_daily_clicks !== undefined) {
-      payload.max_daily_clicks = campaign.max_daily_clicks;
-    }
-    if (campaign.cooldown_ms !== null && campaign.cooldown_ms !== undefined) {
-      payload.cooldown_ms = campaign.cooldown_ms;
-    }
-    if (typeof PLATFORM_KEY !== 'undefined' && PLATFORM_KEY) {
-      payload.platform_key = PLATFORM_KEY;
-    }
-    broadcastMaxima(payload, function(ok) {
-      if (submitBtn) { submitBtn.removeAttribute('disabled'); }
-      if (!ok) {
-        if (msgEl) { msgEl.textContent = 'Campaign published. (Maxima broadcast failed — on-chain discovery still active.)'; }
-        return;
-      }
-      if (msgEl) { msgEl.textContent = 'Campaign published. ID: ' + campaign.id; }
-      if (form) { form.reset(); }
-    });
+    if (submitBtn) { submitBtn.removeAttribute('disabled'); }
+    if (msgEl) { msgEl.textContent = 'Campaign published. ID: ' + campaign.id; }
+    if (form) { form.reset(); }
   });
 }

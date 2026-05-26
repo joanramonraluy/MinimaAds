@@ -370,7 +370,7 @@ Update:
 | T9 | SDK | `sdk/index.js` | Done |
 | T10 | UI | `dapp/app.js`, `dapp/views/*.js` | Done |
 | T11 | UI | `renderer/renderAd.js`, `public/index.html`, `public/dapp.conf` | Done |
-| T12 | SW + UI | `creator.js`, `main.js` | Pending |
+| T12 | SW + UI | `creator.js`, `service.js` | Done ✅ |
 | **T-CH1** | **DB** | `db-init.js` (×2 runtimes) | Done |
 | **T-CH2** | **Core** | `core/channels.js` (nou) | Done |
 | **T-CH3** | **SW** | `handlers/channel.handler.js` (nou) + `maxima.handler.js` | Done |

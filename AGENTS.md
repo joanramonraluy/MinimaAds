@@ -195,6 +195,17 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 ## 8) Current Handoff Notes
 
+2026-05-26 (T12 — Remove CAMPAIGN_ANNOUNCE broadcast):
+- **Scope**: `dapp/views/creator.js` + `service.js` + `MinimaAds.md §8.1` + `§6.3` + `§15.4`.
+- **`dapp/views/creator.js`** (`saveCampaignAndBroadcast`): eliminat tot el bloc de construcció del payload `CAMPAIGN_ANNOUNCE` i la crida a `broadcastMaxima`. Ara, un cop `saveCampaign` confirma èxit, la funció activa el botó, mostra el missatge de confirmació i reseteja el formulari directament. Pas d'estar pendent de cap callback de xarxa.
+- **`service.js`**: eliminades les variables `_timerTicks` i `REBROADCAST_EVERY_TICKS`, les funcions `onTimer()` i `rebroadcastActiveCampaigns()`, i el handler `MDS_TIMER_10SECONDS` del `MDS.init`. L'event `MDS_TIMER_10SECONDS` ja no és escoltat.
+- **`MinimaAds.md §8.1`**: reescrit de "Dual mechanism" (on-chain + broadcast) a "Single mechanism" (on-chain discovery via NEWBLOCK). Nota de backward-compat: `CAMPAIGN_ANNOUNCE` segueix acceptat com a inbound (nodes antics) però ja no s'emet.
+- **`MinimaAds.md §6.3`**: eliminats els passos 7 i 8 (broadcast + re-broadcast timer). La nota de propagació apunta a §8.1.
+- **`MinimaAds.md §15.4`**: actualitzada la descripció del formulari Creator.
+- **`CAMPAIGN_PAUSE` / `RESUME` / `FINISH`** a `mycampaigns.js`: **mantinguts** — són l'únic mecanisme de propagació de canvis d'estat (no hi ha model pull per a pausar/finalitzar).
+- `docs/TASKS.md`: T12 marcat Done ✅.
+- No canvis d'esquema DB. No nous missatges Maxima. No canvis de SDK ni de handlers SW.
+
 2026-05-25 (fix CLK-1 — click no registrat al publisher frame):
 - **Bug**: El publisher frame (generat per `dapp/views/frames.js`) rastrejava visualitzacions via `MA_TRACK_VIEW` comms però NO rastrejava clicks. Quan l'usuari feia click al CTA (imatge o botó de text), l'URL s'obria però cap `MA_TRACK_CLICK` s'enviava. A més, el SW (`service.js` + `comms.handler.js`) no tenia cap handler per a `MA_TRACK_CLICK`, de manera que fins i tot si el frame hagués enviat el missatge, hauria estat descartat silenciosament. **El cooldown NO era el problema**: `validateClick` filtra per `TYPE = 'click'` de forma independent de `validateView` — una visualització recent no bloqueja el primer click.
 - **Fix — `public/service-workers/handlers/comms.handler.js`**: Afegit `handleTrackClick(payload)` (Rhino-safe: var, function(), cap arrow, cap template literal, cap trailing comma). Crida `validateClick` → `getCampaign` → `createRewardEvent(type:'click')` → `_triggerChannelPayment` (reusa la mateixa funció que `handleTrackView`). Actualitzat el comentari de capçalera per incloure `MA_TRACK_CLICK` al protocol.

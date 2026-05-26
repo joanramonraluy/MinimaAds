@@ -34,10 +34,6 @@ var CHANNEL_SCRIPT_ADDRESS = '';
 // Tracks which escrow coinIds have already triggered a REQUEST to avoid re-asking
 var _knownEscrowCoins = {};
 
-// Timer tick counter for re-broadcast throttle (AGENTS.md §5.3)
-var _timerTicks = 0;
-var REBROADCAST_EVERY_TICKS = 60; // 60 × 10s = 600s = 10 min
-
 var ESCROW_SCRIPT = 'LET creatorkey=PREVSTATE(1) ASSERT SIGNEDBY(creatorkey) LET payout=STATE(10) LET change=@AMOUNT-payout IF change GT 0 THEN ASSERT VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE) ENDIF RETURN TRUE';
 
 var ESCROW_SCRIPT_V2 =
@@ -157,32 +153,6 @@ function _scanAddress(addr) {
   });
 }
 
-function onTimer() {
-  if (!ESCROW_ADDRESS) {
-    MDS.log("[TIMER] ESCROW_ADDRESS not set — retrying init");
-    MDS.cmd("maxima action:info", function(resp) {
-      if (!resp.status || !resp.response) { return; }
-      MY_MAXIMA_PK  = resp.response.publickey ? resp.response.publickey.toUpperCase() : "";
-      MY_MX_ADDRESS = resp.response.contact || "";
-      MDS.log("[ADS] Maxima PK (retry): " + MY_MAXIMA_PK);
-      registerEscrowScript();
-    });
-    return;
-  }
-  _timerTicks++;
-  if (_timerTicks >= REBROADCAST_EVERY_TICKS) {
-    _timerTicks = 0;
-    rebroadcastActiveCampaigns();
-  }
-}
-
-function rebroadcastActiveCampaigns() {
-  MDS.log("[TIMER] Re-broadcast active campaigns (not yet fully implemented)");
-  if (typeof logPendingChannelState === "function") {
-    logPendingChannelState();
-  }
-}
-
 function onComms(msg) {
   var raw = msg.data && msg.data.message ? msg.data.message : null;
   if (!raw) { return; }
@@ -203,10 +173,9 @@ function onComms(msg) {
 }
 
 MDS.init(function(msg) {
-  if (msg.event === "inited")              { onInited(); }
-  if (msg.event === "MAXIMA")              { onMaxima(msg); }
-  if (msg.event === "MDS_TIMER_10SECONDS") { onTimer(); }
-  if (msg.event === "NEWBLOCK")            { scanEscrowCoins(); checkPendingChannelOpens(); checkPendingVouchers(); }
+  if (msg.event === "inited")   { onInited(); }
+  if (msg.event === "MAXIMA")   { onMaxima(msg); }
+  if (msg.event === "NEWBLOCK") { scanEscrowCoins(); checkPendingChannelOpens(); checkPendingVouchers(); }
   if (msg.event === "MDS_PENDING")         { onPending(msg); }
   if (msg.event === "MDSCOMMS")            { onComms(msg); }
 });

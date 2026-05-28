@@ -33,6 +33,45 @@ Each module uses a bracketed prefix in `MDS.log` calls. Use these to filter:
 | `[TIMER]` | `main.js` — timer ticks |
 | `[VALIDATION]` | `core/validation.js` — isDuplicate errors |
 
+### Status Coin (T-SC) verification
+
+**Prerequisites**: T-SC1 → T-SC6 all Done ✅. Two nodes running with MinimaAds installed.
+
+#### Test 1 — New campaign lands at V3 with port:7 = hex('active')
+
+1. Node A: create a campaign via the Creator form.
+2. In node A's console: `coins address:<ESCROW_ADDRESS_V3>`
+3. Find the new coin. Its `prevstate` array must include `{ port: 7, data: "0x616374697665" }` (hex of `"active"`).
+4. Expected SW log line: `[ADS] ESCROW_ADDRESS_V3: 0x...` (distinct from V1/V2 addresses).
+
+#### Test 2 — Viewer picks up on-chain pause without Maxima
+
+1. Node B: discover the campaign (wait for DISCOVERY scan on NEWBLOCK).
+2. Take Node B **offline** (disconnect from network).
+3. Node A: click **Pause** on the campaign → approve the pending tx in Minima Hub → wait for confirmation (~1–2 blocks).
+4. Bring Node B back **online**.
+5. Within ≤ 2 NEWBLOCKs: Node B SW log must show `[DISCOVERY] on-chain status sync: <id> active -> paused`.
+6. Node B FE: campaign card must reflect `paused` status without any Maxima message received.
+
+#### Test 3 — On-chain finish propagation
+
+1. Continuing from Test 2 (campaign paused on both nodes).
+2. Take Node B offline again.
+3. Node A: click **Finish** → approve → wait for confirmation.
+4. Bring Node B online.
+5. Within ≤ 2 NEWBLOCKs: Node B SW log: `[DISCOVERY] on-chain status sync: <id> paused -> finished`.
+6. Node B DB: `SELECT STATUS FROM CAMPAIGNS WHERE ID = '<id>'` → `finished`.
+
+#### Test 4 — Regression: legacy V2 campaign skipped silently
+
+1. Create a campaign before T-SC3 was deployed (or manually insert a row with `ESCROW_ADDRESS_V2` coinid).
+2. On any node, NEWBLOCK fires and `processEscrowCoin` processes the V2 coin.
+3. Expected: **no** `[DISCOVERY] on-chain status sync` log line for this coin.
+4. Pause the V2 campaign: `MA_LOCAL_STATUS` Maxima broadcast fires as before; viewer receives `CAMPAIGN_UPDATED` via the Maxima fast-path.
+5. Expected node A log: `[ADS] buildAndPostStatusUpdateTx: campaign <id> not at V3 — skipped` (or equivalent warning).
+
+---
+
 ### Verification steps for T-CH3 (channel.handler.js)
 
 To verify `handleChannelOpenRequest`:

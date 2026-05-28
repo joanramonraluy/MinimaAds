@@ -26,8 +26,8 @@ T-SC3, T-SC4 and T-SC5 can run in parallel once T-SC2 is done. All three must be
 | **T-SC3** | FE | Sonnet | `dapp/views/creator.js`, `dapp/app.js` | Done ✅ |
 | **T-SC4** | SW | Sonnet | `public/service-workers/handlers/campaign.handler.js` | Done ✅ |
 | **T-SC5** | Core | Sonnet | `core/campaigns.js` | Done ✅ |
-| **T-SC6** | FE | Opus | `dapp/app.js`, `dapp/views/mycampaigns.js` | Pending ⬜ |
-| **T-SC7** | Docs | Sonnet | `docs/KNOWN_ISSUES.md`, `docs/VERIFICATION.md`, `AGENTS.md` | Pending ⬜ |
+| **T-SC6** | FE | Opus | `dapp/app.js`, `dapp/views/mycampaigns.js` | Done ✅ |
+| **T-SC7** | Docs | Sonnet | `docs/KNOWN_ISSUES.md`, `docs/VERIFICATION.md`, `AGENTS.md` | Done ✅ |
 
 ---
 
@@ -336,7 +336,7 @@ Provide the standard handoff note (CLAUDE.md §10) when done.
 
 | Camp | Valor |
 |---|---|
-| **Status** | Pending ⬜ (depends on T-SC3, T-SC4, T-SC5) |
+| **Status** | Done ✅ |
 | **Agent** | Opus |
 | **Fitxers** | `dapp/app.js`, `dapp/views/mycampaigns.js` |
 | **Spec** | MinimaAds.md §6.10, §8.15, Appendix B.5 |

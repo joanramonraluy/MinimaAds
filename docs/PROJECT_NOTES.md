@@ -316,8 +316,9 @@ PRIMARY KEY: `(CAMPAIGN_ID, VIEWER_KEY, ROLE, CREATED_AT)` — distinct channel 
 | Maxima Type | Direction | Handler | DB Impact | FE Signal |
 |---|---|---|---|---|
 | `CAMPAIGN_ANNOUNCE` | Creator SW → all contacts | `campaign.handler.js` | `MERGE INTO CAMPAIGNS` + `MERGE INTO ADS` | `NEW_CAMPAIGN` | Optional fields `max_viewer_reward`, `publisher_reward_view`, `max_publisher_budget`, `platform_key`. Receiver MUST validate `platform_key` matches local `PLATFORM_KEY` constant AND escrow coin PREVSTATE(5); mismatch → silent drop. When local `PLATFORM_KEY` is null: skip validation (MVP). |
-| `CAMPAIGN_PAUSE` | Creator SW → all contacts | `campaign.handler.js` | `UPDATE CAMPAIGNS SET STATUS='paused'` | `CAMPAIGN_UPDATED` |
-| `CAMPAIGN_FINISH` | Creator SW → all contacts | `campaign.handler.js` | `UPDATE CAMPAIGNS SET STATUS='finished'` | `CAMPAIGN_UPDATED` |
+| `CAMPAIGN_PAUSE` | Creator SW → all contacts | `campaign.handler.js` | `UPDATE CAMPAIGNS SET STATUS='paused'` | `CAMPAIGN_UPDATED` | **Fast-path only** — authoritative state is `ESCROW_V3 PREVSTATE(7)`. Handler retained for back-compat. |
+| `CAMPAIGN_FINISH` | Creator SW → all contacts | `campaign.handler.js` | `UPDATE CAMPAIGNS SET STATUS='finished'` | `CAMPAIGN_UPDATED` | **Fast-path only** — authoritative state is `ESCROW_V3 PREVSTATE(7)`. Handler retained for back-compat. |
+| `CAMPAIGN_RESUME` | Creator SW → all contacts | `campaign.handler.js` | `UPDATE CAMPAIGNS SET STATUS='active'` | `CAMPAIGN_UPDATED` | **DEPRECATED** — resume is on-chain only (offline-creator cannot Maxima). Handler retained for inbound back-compat only. |
 | `REQUEST_CAMPAIGN_DATA` | Viewer SW → Creator SW (unicast `to:Mx...`) | `campaign.handler.js` | None (read-only lookup) | None |
 | `CAMPAIGN_DATA_RESPONSE` | Creator SW → Viewer SW (unicast `to:Mx...`) | `campaign.handler.js` | `MERGE INTO CAMPAIGNS` + `MERGE INTO ADS` | `NEW_CAMPAIGN` |
 | `CHANNEL_OPEN_REQUEST` | Viewer/Publisher FE → Creator FE (unicast, `poll:true`) | `channel.handler.js` | `MERGE INTO CHANNEL_STATE` (creator, incl. `VIEWER_WALLET_ADDR`) | — (triggers coin creation in FE) | + Optional fields `role` (`viewer`\|`publisher`, default `viewer`) and `frame_id` (required when `role='publisher'`). Routes to viewer or publisher channel-open flow. |
@@ -360,6 +361,7 @@ PRIMARY KEY: `(CAMPAIGN_ID, VIEWER_KEY, ROLE, CREATED_AT)` — distinct channel 
 | `PUBLISHER_REWARD_CONFIRMED` | `{ event_id, amount, frame_id, campaign_id }` | `core/rewards.js` (FE) | Publisher reward persisted; update Frame earnings display |
 | `DO_PUBLISHER_CHANNEL_OPEN` | `{ campaign_id, publisher_key, publisher_mx, frame_id, max_amount }` | `channel.handler.js` (SW) | Creator FE creates publisher channel coin (same tx structure as viewer channel) |
 | `DO_PUBLISHER_REWARD_VOUCHER` | `{ campaign_id, publisher_key, publisher_mx, frame_id, event_id, cumulative }` | `channel.handler.js` (SW) | Creator FE builds publisher partial tx and sends REWARD_VOUCHER with role='publisher' |
+| `STATUS_TX_PENDING` | `{ campaign_id, status, pending_uid }` | `dapp/app.js` (FE, self-route via `MDS.comms.solo`) | mycampaigns.js shows "(awaiting on-chain confirm: \<status\>)" on campaign row; cleared on next CAMPAIGN_UPDATED |
 
 **Rule**: Every new signal type fired by SW must be registered in the FE `MDSCOMMS` handler (`dapp/app.js`). Missing registrations cause silent UI failures. The payload is at `event.data.message` (not `event.data`) — see section 5.1.
 

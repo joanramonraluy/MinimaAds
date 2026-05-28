@@ -1096,30 +1096,68 @@ var ESCROW_SCRIPT_V2 =
   "ENDIF " +
   "RETURN TRUE";
 
+// V3 — current escrow script (T-SC2). Adds on-chain campaign status at PREVSTATE(7).
+// Byte-identical to the SW constant in service.js. All NEW campaigns use this script.
+// See MinimaAds.md §B.2.1 and §4.7.
+var ESCROW_SCRIPT_V3 =
+  "LET creatorkey=PREVSTATE(1) " +
+  "LET platformkey=PREVSTATE(5) " +
+  "LET maxpubbudget=PREVSTATE(6) " +
+  "LET status=PREVSTATE(7) " +
+  "ASSERT SIGNEDBY(creatorkey) " +
+  "LET payout=STATE(10) " +
+  "LET feeflag=STATE(11) " +
+  "LET change=@AMOUNT-payout " +
+  "IF feeflag EQ 1 THEN " +
+  "LET feeamount=STATE(12) " +
+  "ASSERT VERIFYOUT(STATE(13) platformkey feeamount @TOKENID FALSE) " +
+  "ENDIF " +
+  "IF change GT 0 THEN " +
+  "ASSERT VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE) " +
+  "ENDIF " +
+  "RETURN TRUE";
+
 var CHANNEL_SCRIPT_FE = 'IF @COINAGE GT (40*1728) AND SIGNEDBY(PREVSTATE(1)) THEN RETURN TRUE ENDIF RETURN MULTISIG(2 PREVSTATE(1) PREVSTATE(2))';
 
-// Resolves the V2 escrow address (used by all new campaigns from T-PUB4 onward).
-// Cached under 'ESCROW_ADDRESS_V2' — independent from V1 'ESCROW_ADDRESS'
-// so legacy campaigns can still be spent from the V1 address.
+// Resolves the escrow address for new campaigns (T-SC3).
+// Tries V3 first (ESCROW_ADDRESS_V3); registers via newscript if missing.
+// Falls back to V2 only if V3 newscript fails (logs a warning).
 function resolveEscrowAddress(cb) {
-  MDS.keypair.get('ESCROW_ADDRESS_V2', function(addrRes) {
-    var cached = addrRes && addrRes.status ? addrRes.value : '';
-    if (cached) {
-      console.log('[CREATOR] ESCROW_ADDRESS_V2 from keypair:', cached);
-      cb(cached);
+  MDS.keypair.get('ESCROW_ADDRESS_V3', function(addrResV3) {
+    var cachedV3 = addrResV3 && addrResV3.status ? addrResV3.value : '';
+    if (cachedV3) {
+      console.log('[CREATOR] ESCROW_ADDRESS_V3 from keypair:', cachedV3);
+      cb(cachedV3);
       return;
     }
-    console.log('[CREATOR] ESCROW_ADDRESS_V2 not in keypair — registering via newscript');
-    MDS.cmd('newscript script:"' + ESCROW_SCRIPT_V2 + '" trackall:false', function(res) {
-      if (!res.status) {
-        console.error('[CREATOR] newscript V2 failed:', res.error);
-        cb('');
+    console.log('[CREATOR] ESCROW_ADDRESS_V3 not in keypair — registering via newscript');
+    MDS.cmd('newscript script:"' + ESCROW_SCRIPT_V3 + '" trackall:false', function(resV3) {
+      if (!resV3.status) {
+        console.warn('[CREATOR] newscript V3 failed — falling back to V2:', resV3.error);
+        MDS.keypair.get('ESCROW_ADDRESS_V2', function(addrResV2) {
+          var cachedV2 = addrResV2 && addrResV2.status ? addrResV2.value : '';
+          if (cachedV2) {
+            console.log('[CREATOR] ESCROW_ADDRESS_V2 from keypair (V3 fallback):', cachedV2);
+            cb(cachedV2);
+            return;
+          }
+          MDS.cmd('newscript script:"' + ESCROW_SCRIPT_V2 + '" trackall:false', function(resV2) {
+            if (!resV2.status) {
+              console.error('[CREATOR] newscript V2 also failed:', resV2.error);
+              cb('');
+              return;
+            }
+            var addrV2 = resV2.response.address;
+            MDS.keypair.set('ESCROW_ADDRESS_V2', addrV2, function() {});
+            cb(addrV2);
+          });
+        });
         return;
       }
-      var addr = res.response.address;
-      console.log('[CREATOR] ESCROW_ADDRESS_V2 derived:', addr);
-      MDS.keypair.set('ESCROW_ADDRESS_V2', addr, function() {});
-      cb(addr);
+      var addrV3 = resV3.response.address;
+      console.log('[CREATOR] ESCROW_ADDRESS_V3 derived:', addrV3);
+      MDS.keypair.set('ESCROW_ADDRESS_V3', addrV3, function() {});
+      cb(addrV3);
     });
   });
 }
@@ -1220,6 +1258,9 @@ function fundEscrowAndPublish(campaign, ad, form, submitBtn, msgEl, campaignDura
                         + ',"12":"' + feeAmount
                         + '","13":"' + feeOutputIndex + '"}';
             }
+
+            // V3: initial campaign status at port 7 — always 'active' at launch.
+            stateJson = stateJson.slice(0, -1) + ',"7":"0x' + utf8ToHex('active').toUpperCase() + '"}';
 
             campaign.escrow_wallet_pk = walletPK;
 

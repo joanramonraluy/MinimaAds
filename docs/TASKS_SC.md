@@ -24,8 +24,8 @@ T-SC3, T-SC4 and T-SC5 can run in parallel once T-SC2 is done. All three must be
 | **T-SC1** | Spec | Opus | `MinimaAds.md`, `AGENTS.md` | Done ✅ |
 | **T-SC2** | SW | Sonnet | `service.js` | Done ✅ |
 | **T-SC3** | FE | Sonnet | `dapp/views/creator.js`, `dapp/app.js` | Done ✅ |
-| **T-SC4** | SW | Sonnet | `public/service-workers/handlers/campaign.handler.js` | Pending ⬜ |
-| **T-SC5** | Core | Sonnet | `core/campaigns.js` | Pending ⬜ |
+| **T-SC4** | SW | Sonnet | `public/service-workers/handlers/campaign.handler.js` | Done ✅ |
+| **T-SC5** | Core | Sonnet | `core/campaigns.js` | Done ✅ |
 | **T-SC6** | FE | Opus | `dapp/app.js`, `dapp/views/mycampaigns.js` | Pending ⬜ |
 | **T-SC7** | Docs | Sonnet | `docs/KNOWN_ISSUES.md`, `docs/VERIFICATION.md`, `AGENTS.md` | Pending ⬜ |
 

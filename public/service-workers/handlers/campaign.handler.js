@@ -178,6 +178,33 @@ function processEscrowCoin(coin) {
           }
         );
       }
+      // V3 only — sync local STATUS from PREVSTATE(7). Silently skipped for V1/V2
+      // coins (no port 7). Terminal-state guard prevents re-activating a finished
+      // campaign from an older coin read. Runs once per coinId per session.
+      var onChainStatusHex = getStateVar(states, 7);
+      if (onChainStatusHex) {
+        var onChainStatus = '';
+        try { onChainStatus = hexToUtf8(onChainStatusHex); } catch (ex) {
+          MDS.log("[DISCOVERY] could not decode PREVSTATE(7) for " + campaignId + ": " + ex);
+        }
+        if (onChainStatus === 'active' || onChainStatus === 'paused' || onChainStatus === 'finished') {
+          var localStatus = (campaign.STATUS || '').toLowerCase();
+          if (localStatus === 'finished' && onChainStatus !== 'finished') {
+            MDS.log("[DISCOVERY] ignoring on-chain status " + onChainStatus + " for finished campaign: " + campaignId);
+          } else if (onChainStatus !== localStatus) {
+            MDS.log("[DISCOVERY] on-chain status sync: " + campaignId + " " + localStatus + " -> " + onChainStatus);
+            setCampaignStatus(campaignId, onChainStatus, function(stErr) {
+              if (stErr) {
+                MDS.log("[DISCOVERY] setCampaignStatus failed: " + stErr);
+                return;
+              }
+              signalFE("CAMPAIGN_UPDATED", { campaign_id: campaignId, status: onChainStatus });
+            });
+          }
+        } else {
+          MDS.log("[DISCOVERY] unknown on-chain status value '" + onChainStatus + "' for " + campaignId);
+        }
+      }
       return;
     }
 

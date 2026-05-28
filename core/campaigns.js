@@ -134,3 +134,27 @@ function setCampaignStatus(campaignId, status, cb) {
     cb(null, true);
   });
 }
+
+// Returns '0x' + hex(status) or '' if status is not a valid campaign status.
+function encodeStatusForTx(status) {
+  if (status !== 'active' && status !== 'paused' && status !== 'finished') {
+    return '';
+  }
+  return '0x' + utf8ToHex(status).toUpperCase();
+}
+
+// Builds the ordered array of { port, value } pairs for a status-update tx.
+// currentEscrow = { walletPk, campaignIdHex, creatorMxHex, platformKeyHex, maxPubBudget, feeflag }
+// newStatusHex  = encodeStatusForTx(newStatus)
+function buildStatusUpdateStatePorts(currentEscrow, newStatusHex) {
+  return [
+    { port: 1,  value: currentEscrow.walletPk },
+    { port: 3,  value: currentEscrow.campaignIdHex },
+    { port: 4,  value: currentEscrow.creatorMxHex },
+    { port: 5,  value: currentEscrow.platformKeyHex },
+    { port: 6,  value: currentEscrow.maxPubBudget },
+    { port: 7,  value: newStatusHex },
+    { port: 10, value: '0' },
+    { port: 11, value: '0' }
+  ];
+}

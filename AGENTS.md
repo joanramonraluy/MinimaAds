@@ -195,13 +195,26 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 ## 8) Current Handoff Notes
 
+2026-05-28 (T-SC5: Core — buildStatusUpdateStatePorts + encodeStatusForTx):
+- **Scope**: `core/campaigns.js` only. Two pure helper functions appended at end of file.
+- **encodeStatusForTx(status)**: validates `status` ∈ `{active, paused, finished}`; returns `'0x' + utf8ToHex(status).toUpperCase()` or `''` for any other value. Uses `utf8ToHex` from `core/minima.js` (loaded first).
+- **buildStatusUpdateStatePorts(currentEscrow, newStatusHex)**: returns ordered array of `{port, value}` objects for a V3 status-update tx: ports 1 (walletPk), 3 (campaignIdHex), 4 (creatorMxHex), 5 (platformKeyHex), 6 (maxPubBudget), 7 (newStatusHex), 10='0' (payout=0, full change-back), 11='0' (no fee). `currentEscrow.feeflag` is present in the param signature but always overridden to '0' — status-update txs never carry a platform fee.
+- **Rhino-safe**: `var`, `function()`, array/object literals only. No MDS.cmd, no MDS.sql, no side effects.
+- **Next**: T-SC6 (FE: buildAndPostStatusUpdateTx + mycampaigns.js integration — Opus task).
+
+2026-05-28 (T-SC4: SW DISCOVERY — read PREVSTATE(7) and sync local status):
+- **Scope**: `public/service-workers/handlers/campaign.handler.js` only.
+- **processEscrowCoin** `if (campaign)` branch: added status-sync block after the existing budget-sync block. Reads `getStateVar(states, 7)` → decodes via `hexToUtf8` → validates against `{active, paused, finished}` → on transition calls `setCampaignStatus` + `signalFE("CAMPAIGN_UPDATED", { campaign_id, status })`.
+- **Terminal-state guard**: if `localStatus === 'finished'` and `onChainStatus !== 'finished'`, the sync is skipped with a log warning. Prevents resurrecting a finished campaign from a stale coin reading.
+- **V1/V2 backwards compat**: coins without port 7 return `null` from `getStateVar`; the outer `if (onChainStatusHex)` guard silently skips those coins.
+- **Rhino-safe**: `var`, `function()`, `MDS.log`, string concat, no trailing commas.
+
 2026-05-28 (T-SC3: FE — V3 script address + new campaigns use V3 + channel-open port:7 passthrough):
 - **Scope**: `dapp/views/creator.js`, `dapp/app.js`. No SW files touched.
 - **creator.js**: Added `ESCROW_SCRIPT_V3` FE constant (byte-identical to SW). Replaced `resolveEscrowAddress()`: now tries `ESCROW_ADDRESS_V3` first (keypair lookup, then newscript); falls back to V2 only if V3 newscript fails (warns and delegates to previous V2 logic). Added `port:7 = hex('active')` to `stateJson` after the hasPlatformKey branch — applied regardless of feeflag so all new campaigns land at V3 with initial status on-chain.
 - **app.js** `handleDoChannelOpen`: added `ESCROW_ADDRESS_V3` keypair lookup (V3 > V2 > V1 preference chain). The resolved `escrowAddr` is a safety fallback only — actual output address is taken from the input coin.
 - **app.js** `buildAndPostChannelTx`: after `txninput`, reads `r2.response.transaction.inputs[0].address` as `coinAddr` (used for split and change outputs, replacing hard-coded `ctx.escrowAddr`). Reads `r2.response.transaction.inputs[0].state` (JSONArray `{port,data}`) to extract port 7; defaults to `hex('active')` when absent (V1/V2 coins). Adds `txnstate port:7 value:<statusHex>` to `stateCmds`. Port:7 on V1/V2 spends is harmless extra state (V1/V2 scripts ignore it).
 - **Backwards compat**: V1/V2 channel-open continues to work — `coinAddr` matches the original escrow address; `statusHex` defaults to `hex('active')`; no V1/V2 script assertion is affected.
-- **Next**: T-SC4 (SW DISCOVERY: read PREVSTATE(7) and sync local status in processEscrowCoin).
 
 2026-05-28 (T-SC2: ESCROW_SCRIPT_V3 registration + scanEscrowCoins V3):
 - **Scope**: `service.js` only. No other files touched.

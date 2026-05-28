@@ -334,6 +334,18 @@ A campaign whose escrow does not embed the canonical `PLATFORM_KEY` is silently 
 
 For MVP testing, `PLATFORM_KEY = null`. When null, the on-chain enforcement is skipped. This is MVP-only and must be set to a real key before any mainnet release.
 
+### 4.7 Campaign Status as On-chain State
+
+Campaign status (`active` | `paused` | `finished`) is stored as a mutable state variable on the campaign escrow coin, at `STATE(7)` / `PREVSTATE(7)` of `ESCROW_SCRIPT_V3` (see Appendix B.2.1). This removes the dependency on creator-online Maxima broadcasts for pause/finish/resume propagation.
+
+- **Source of truth**: every node reads `PREVSTATE(7)` from the on-chain escrow coin during its `NEWBLOCK` discovery scan. No Maxima message is required to learn the current campaign status — the chain itself carries it.
+- **Manual status change**: when the creator clicks Pause / Resume / Finish, the UI applies the change locally for immediate UX feedback (`applyStatusChange`) and posts a `Status Update Transaction` (Appendix B.5) that spends the current V3 escrow coin and produces a same-amount change coin at `ESCROW_ADDRESS_V3` carrying the new `STATE(7)`.
+- **Propagation**: once the status-update tx confirms, every node — including those that were offline at the time — discovers the new change coin on its next `NEWBLOCK` scan and updates its local `CAMPAIGNS.STATUS` to `PREVSTATE(7)`. Channel-open and partial-refund spends also carry `STATE(7)` forward unchanged.
+- **Backwards compatibility**: V1/V2 escrow coins (created before T-SC1) have no `STATE(7)` and continue to rely on the legacy Maxima fast-path (§8.5) for status propagation. The on-chain status mechanism only applies to coins held at `ESCROW_ADDRESS_V3`.
+- **Enforcement scope**: the V3 KissVM script does **not** enforce status — `STATE(7)` is read-only with respect to the script (no `ASSERT` on its value). Enforcement of "no rewards on non-active campaigns" lives in the SW handlers (`selectAd` filters by `STATUS === 'active'`, `validateView`/`validateClick` and `handleRewardRequest` reject non-active campaigns).
+
+See §6.10 for the full Status Update flow and Appendix B.2.1 for the V3 script.
+
 ### 4.4 Unidirectional Payment Channels
 
 Per-event on-chain transactions would saturate the Minima network and are economically unviable for micropayments (0.01 MINIMA per view).
@@ -517,6 +529,8 @@ Triggered the first time a viewer wants to earn rewards from a campaign. The vie
 
 **Failure handling**: if creator does not respond within a configurable timeout (default: 5 min), viewer stores pending rewards in keypair and retries on next app open.
 
+> **V3 status passthrough**: when the campaign is funded by an `ESCROW_SCRIPT_V3` coin, the channel-open spend (step 6c) MUST carry `STATE(7)` forward on the escrow change output — set `txnstate port:7 value:<current_PREVSTATE(7)>` (or the UTF-8-hex of `"active"` for newly-created V3 campaigns that have not yet been paused). This preserves the on-chain status on the new change coin so subsequent NEWBLOCK scans on other nodes still resolve the correct status. See Appendix B.5 Channel Open template and §4.7.
+
 ### 6.6 Channel Reward Flow
 
 Runs after every successful `createRewardEvent` call for a campaign with an open channel.
@@ -624,6 +638,51 @@ Third-party SDK integration:
 3.  Subsequent trackView calls include frame_id; the SDK tags REWARD_EVENTS.PUBLISHER_ID
 4.  The SDK fires a publisher REWARD_REQUEST (role='publisher') only if PUBLISHER_REWARD_VIEW > 0
 ```
+
+### 6.10 Campaign Status Update Flow (on-chain)
+
+Triggered when the creator changes a campaign's status (Pause / Resume / Finish) and the campaign is funded by an `ESCROW_SCRIPT_V3` coin. Combines an immediate local UX update with an on-chain status-change tx whose change coin propagates the new status to every node via `NEWBLOCK` discovery — no creator-online Maxima required.
+
+```
+1.  Creator clicks Pause / Resume / Finish on a campaign row in mycampaigns.js.
+
+2.  FE applies the local status immediately:
+    - mycampaigns.js broadcasts MA_LOCAL_STATUS { campaign_id, status } via MDS.comms.
+    - SW receives MA_LOCAL_STATUS → handleLocalStatusChange → applyStatusChange
+      → setCampaignStatus updates the local CAMPAIGNS row and signals
+        CAMPAIGN_UPDATED to the FE for instant UI feedback.
+
+3.  FE runs buildAndPostStatusUpdateTx (Appendix B.5):
+    - Reads CAMPAIGNS.ESCROW_COINID (V3 coin) and CAMPAIGNS.ESCROW_WALLET_PK.
+    - Spends the current escrow coin in full and outputs the same amount back
+      to ESCROW_ADDRESS_V3 with storestate:true.
+    - Sets txnstate port:7 value:<status_hex> to the new UTF-8-hex of "active",
+      "paused" or "finished".
+    - Carries ports 1, 3, 4, 5, 6, 11 forward (creator key, campaign id, creator
+      mx, platform key, max publisher budget, fee flag = 0). Ports 10 = 0 and
+      11 = 0 so the V3 script reads payout=0 and skips the fee branch.
+    - Posts the tx via txnpost mine:true auto:true; the FE marks the campaign
+      as STATUS_TX_PENDING and signals STATUS_TX_PENDING { campaign_id, status,
+      pending_uid } to mycampaigns.js for "awaiting confirmation" UX.
+
+4.  On Minima Hub approve → tx confirms on-chain. The new change coin appears at
+    ESCROW_ADDRESS_V3 with PREVSTATE(7) = new status.
+
+5.  All nodes — including viewers/publishers that were offline at the time —
+    pick up the change coin on their next NEWBLOCK discovery scan
+    (campaign.handler.js scanEscrowCoins → processEscrowCoin reads PREVSTATE(7)
+    and calls setCampaignStatus when it differs from the local row). The
+    creator's own node also re-reads PREVSTATE(7) on confirmation and clears
+    the pending marker.
+
+6.  Each node signals CAMPAIGN_UPDATED { campaign_id, status } to its FE.
+    Viewer SDKs invalidate _livenessCache[campaign_id] so the next getAd ->
+    selectAd filters out non-active campaigns and stops serving the ad. Open
+    payment channels remain unchanged on-chain; settlement still works via the
+    existing voucher held by each viewer (see §6.7).
+```
+
+**Failure handling**: if the status-update tx is rejected at the Hub or fails to confirm, the local DB still reflects the new status (applied at step 2). The creator may retry the tx; until a new change coin appears at `ESCROW_ADDRESS_V3`, other nodes do not see the change. Manual reversal (Pause then Resume) is supported because each status change posts a fresh tx — the latest confirmed change coin wins.
 
 ### 6.4 Ad Selection Algorithm
 
@@ -881,15 +940,20 @@ Reward processing (view and click events) is handled entirely within the FE runt
 
 ### 8.5 CAMPAIGN_PAUSE / CAMPAIGN_FINISH / CAMPAIGN_RESUME
 
-**Direction**: Creator FE → all Maxima contacts (via `broadcastMaxima` / `sendall`)
+**Direction**: Creator FE → all Maxima contacts (via `broadcastMaxima` / `sendall`) — **fast-path only, optional**.
 
 ```json
 { "type": "CAMPAIGN_PAUSE",   "campaign_id": "uuid" }
 { "type": "CAMPAIGN_FINISH",  "campaign_id": "uuid" }
-{ "type": "CAMPAIGN_RESUME",  "campaign_id": "uuid" }
+{ "type": "CAMPAIGN_RESUME",  "campaign_id": "uuid" }   // DEPRECATED
 ```
 
-> `CAMPAIGN_RESUME` sets `STATUS = 'active'` on all receiving nodes. Only the campaign creator should broadcast this — there is no creator-identity check at the protocol level; enforcement relies on the creator being the one holding the UI controls.
+**Authoritative source: ESCROW_SCRIPT_V3 `PREVSTATE(7)` (on-chain)**. See §4.7 and §6.10. These Maxima messages remain accepted as inbound legacy/fast-path notifications so that nodes whose creator is currently in their Maxima contacts list can update their local `CAMPAIGNS.STATUS` row before the next `NEWBLOCK` scan picks up the status-update change coin. They are **not** required for correctness — every receiving node will independently reconcile its local status from `PREVSTATE(7)` on the next escrow scan.
+
+- **CAMPAIGN_PAUSE / CAMPAIGN_FINISH**: optional fast-path. Creator FE may emit these alongside the on-chain status-update tx for snappier propagation to currently-online contacts. Receiving handlers call `setCampaignStatus`; the on-chain reconciliation pass is idempotent against this.
+- **CAMPAIGN_RESUME** — **DEPRECATED**. Do not emit. Resume is on-chain only, because the typical resume scenario is "creator's node was offline and now comes back" — in that case Maxima cannot deliver the message to viewers that are currently offline. Use the on-chain status-update tx (§6.10) instead. Existing inbound handlers are retained for backward-compat with older creator nodes.
+
+> Only the campaign creator should broadcast PAUSE/FINISH. There is no creator-identity check at the protocol level; enforcement relies on the creator being the one holding the UI controls and on the authoritative `PREVSTATE(7)` reconciliation that will overwrite any spoofed Maxima broadcast on the next `NEWBLOCK` scan.
 
 ### 8.6 REQUEST_CAMPAIGN_DATA
 
@@ -1014,24 +1078,27 @@ Creator responds with the latest `REWARD_VOUCHER` it has for this pair, or with 
 
 ### 8.13 CREATOR_LIVENESS_PING
 
-**Direction**: Viewer SDK (FE) → Creator SW (unicast via `publickey:<creator_address>`, **`poll:false`**)
+**Direction**: Viewer SW (periodic) or Viewer SDK (FE) → Creator SW (unicast, **`poll:false`**)
 
-Sent by the viewer SDK before opening a new payment channel to check whether the creator's node is reachable. Uses `poll:false` — a queued ping would cause a false "alive" response when the creator eventually comes back online.
+Sent either by the viewer SDK before opening a new payment channel, or periodically by the viewer SW (~every 20 blocks) for each locally-active campaign without an open viewer channel. Uses `poll:false` — a queued ping would cause a false "alive" response when the creator eventually comes back online.
 
 ```json
 {
   "type": "CREATOR_LIVENESS_PING",
-  "campaign_id": "uuid"
+  "campaign_id": "uuid",
+  "viewer_mx": "Mx..."
 }
 ```
 
-> If no `CREATOR_LIVENESS_PONG` is received within 3 s, the campaign is considered inaccessible for this session and the viewer does not earn from it. The result is cached per campaign for 2 min (`LIVENESS_CACHE_MS`).
+`viewer_mx` — the sender's own Maxima address. Included so the creator can route the PONG back even when the viewer is not in the creator's Maxima contacts list.
+
+> SDK path: if no `CREATOR_LIVENESS_PONG` arrives within 3 s, the campaign is considered inaccessible and the result is cached for 2 min (`LIVENESS_CACHE_MS`). SW periodic path: PONG arrives asynchronously and syncs local status via `handleCreatorLivenessPong`.
 
 ### 8.14 CREATOR_LIVENESS_PONG
 
-**Direction**: Creator SW → Viewer SW (unicast via `publickey:<senderPk>`, **`poll:false`**)
+**Direction**: Creator SW → Viewer SW (unicast via `publickey:<senderPk>` with `to:<viewer_mx>` fallback, **`poll:false`**)
 
-Sent immediately by the creator's SW upon receiving a `CREATOR_LIVENESS_PING`. Signals the viewer's SDK that the creator is online and can issue vouchers.
+Sent immediately by the creator's SW upon receiving a `CREATOR_LIVENESS_PING`. Uses `viewer_mx` from the PING payload as the Mx-address fallback so delivery succeeds even when the viewer is not in the creator's contacts. Signals the viewer's SDK that the creator is online and can issue vouchers.
 
 ```json
 {
@@ -1042,13 +1109,44 @@ Sent immediately by the creator's SW upon receiving a `CREATOR_LIVENESS_PING`. S
 
 > The viewer's SW relays this to the FE via `signalFE('CREATOR_LIVENESS_PONG', { campaign_id })`. The SDK resolves the pending liveness callback and caches the result.
 
+### 8.16 REWARD_REJECTED
+
+**Direction**: Creator SW → Viewer node (unicast Maxima, `publickey:` routing, `poll:false`)
+
+**Trigger**: Creator's `handleRewardRequest` rejects a `REWARD_REQUEST` because `campaign.STATUS !== 'active'`.
+
+**Purpose**: Propagates pause/finish status to the viewer without relying on the liveness ping mechanism (which is bypassed once a channel is open). On receiving this message the viewer's SW updates its local campaign status and signals the FE to refresh the SDK liveness cache.
+
+```json
+{
+  "type": "REWARD_REJECTED",
+  "campaign_id": "uuid",
+  "reason": "paused | finished"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `type` | string | Always `"REWARD_REJECTED"` |
+| `campaign_id` | string | Campaign UUID |
+| `reason` | string | `"paused"` or `"finished"` — the current campaign STATUS on the creator's node |
+
+**Handler (viewer node)**: `handleRewardRejected(payload)` in `channel.handler.js`
+
+**Effect**:
+1. If viewer's local `campaign.STATUS !== reason` → calls `setCampaignStatus(campaignId, reason)`
+2. Calls `signalFE("CAMPAIGN_UPDATED", { campaign_id, status: reason })`
+3. FE SDK sets `_livenessCache[campaignId] = { alive: false, ts: Date.now() }`
+4. Next `getAd()` → `selectAd()` filters out the campaign (`STATUS !== 'active'`)
+5. Next `_trackEvent()` → `validateView()` rejects the event
+
 ### 8.15 SW → FE Signal Contract
 
 | Signal type | Payload | Fired by | Trigger |
 |---|---|---|---|
 | `DB_READY` | `{}` | `db-init.js` (SW) | All tables created — FE may begin DB access |
 | `REWARD_CONFIRMED` | `{ event_id, amount, reward_type }` | `core/rewards.js` (FE) | Successful reward persisted in callback chain |
-| `CAMPAIGN_UPDATED` | `{ campaign_id, status, budget_remaining }` | `campaign.handler.js` (SW) | Status changed via Maxima |
+| `CAMPAIGN_UPDATED` | `{ campaign_id, status, budget_remaining? }` | `campaign.handler.js` / `channel.handler.js` (SW) | Status changed via MA_LOCAL_STATUS, CAMPAIGN_PAUSE/FINISH Maxima, or REWARD_REJECTED |
 | `NEW_CAMPAIGN` | `{ campaign_id }` | `campaign.handler.js` (SW) | CAMPAIGN_ANNOUNCE received and persisted |
 | `CHANNEL_OPENED` | `{ campaign_id, channel_coinid, max_amount }` | `channel.handler.js` (SW) | Channel coin confirmed on-chain, viewer can earn |
 | `VOUCHER_RECEIVED` | `{ campaign_id, cumulative }` | `channel.handler.js` (SW) | New REWARD_VOUCHER stored; viewer balance updated |
@@ -1064,6 +1162,7 @@ Sent immediately by the creator's SW upon receiving a `CREATOR_LIVENESS_PING`. S
 | `DO_PUBLISHER_CHANNEL_OPEN` | `{ campaign_id, publisher_key, publisher_mx, frame_id, max_amount }` | `channel.handler.js` (SW) | Creator FE creates publisher channel coin on-chain |
 | `DO_PUBLISHER_REWARD_VOUCHER` | `{ campaign_id, publisher_key, publisher_mx, frame_id, event_id, cumulative }` | `channel.handler.js` (SW) | Creator FE builds publisher voucher tx and sends REWARD_VOUCHER |
 | `CREATOR_LIVENESS_PONG` | `{ campaign_id }` | `campaign.handler.js` (SW) | CREATOR_LIVENESS_PONG received — SDK resolves pending liveness check |
+| `STATUS_TX_PENDING` | `{ campaign_id, status, pending_uid }` | `dapp/views/mycampaigns.js` (FE) | Status-change tx awaiting Hub approval — UI shows "awaiting confirmation" until the V3 change coin is confirmed on-chain |
 
 ---
 
@@ -1392,7 +1491,9 @@ The escrow contract locks campaign budget on-chain, providing:
 
 **MVP limitation**: The script does not auto-distribute rewards or enforce per-reward deductions. Budget accounting is off-chain (H2 DB). The escrow is a commitment + audit mechanism, not an automated payment engine.
 
-### B.2 Script
+### B.2 Script (V2, legacy)
+
+> **Status**: legacy. Used by campaigns created before T-SC1. New campaigns use the V3 script (§B.2.1). Both scripts coexist; the SW registers both addresses and scans coins at each.
 
 ```
 LET creatorkey = PREVSTATE(1)
@@ -1424,7 +1525,47 @@ RETURN TRUE
 
 When `PLATFORM_KEY = null` in `config.js`: campaign launch tx sets PREVSTATE(5) = `0x00` and STATE(11) = 0. The fee assertion never fires. This is the MVP default.
 
-This script replaces the previous V1 script. The address changes — store as `ESCROW_ADDRESS_V2` in keypair to avoid clobbering V1 (used by campaigns created before T-PUB4).
+This script replaces the previous V1 script. The address is persisted as `ESCROW_ADDRESS_V2` in keypair to avoid clobbering V1 (used by campaigns created before T-PUB4).
+
+### B.2.1 Script (V3, current — on-chain campaign status)
+
+V3 introduces an on-chain campaign status variable at `PREVSTATE(7)` / `STATE(7)`. The script reads it but does **not** assert on its value — enforcement of "no rewards on non-active campaigns" lives in the SW handlers (`selectAd`, `validateView`/`validateClick`, `handleRewardRequest`). See §4.7 and §6.10.
+
+```
+LET creatorkey=PREVSTATE(1)
+LET platformkey=PREVSTATE(5)
+LET maxpubbudget=PREVSTATE(6)
+LET status=PREVSTATE(7)
+ASSERT SIGNEDBY(creatorkey)
+LET payout=STATE(10)
+LET feeflag=STATE(11)
+LET change=@AMOUNT-payout
+IF feeflag EQ 1 THEN
+  LET feeamount=STATE(12)
+  ASSERT VERIFYOUT(STATE(13) platformkey feeamount @TOKENID FALSE)
+ENDIF
+IF change GT 0 THEN
+  ASSERT VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE)
+ENDIF
+RETURN TRUE
+```
+
+**Differences from V2**:
+- Adds three `LET` reads with no `ASSERT` against their values: `platformkey = PREVSTATE(5)` (already present in V2 — kept verbatim), `maxpubbudget = PREVSTATE(6)`, and `status = PREVSTATE(7)`. The `maxpubbudget` and `status` reads are **no-ops with respect to script semantics** — they exist purely to make the V3 script byte-different from V2 so that `newscript` yields a new address (`ESCROW_ADDRESS_V3`), distinct from `ESCROW_ADDRESS_V2`.
+- All enforcement (signer, fee branch, change to same address) is identical to V2. A spend that would succeed under V2 succeeds under V3 with the same inputs/outputs.
+
+**What this enforces** (same as V2):
+- Only the creator (wallet signing key in PREVSTATE(1)) can spend this coin.
+- When `STATE(11) = 1` (fee branch): the tx must include an output paying `STATE(12)` MINIMA to `platformkey` (PREVSTATE(5)) at output index `STATE(13)`. Any other fee recipient → tx rejected on-chain.
+- If partial spend (change > 0): change MUST return to `@ADDRESS` (same script address) with `keepstate:true`.
+- Full spend (change = 0): allowed — used for campaign close / full refund.
+
+**What this does NOT enforce**:
+- `STATE(7)` is read but never asserted. The script will sign any value (`"active"`, `"paused"`, `"finished"`, or any other hex). Status is enforced **off-chain** by the SW (selectAd, validateView/validateClick, handleRewardRequest reject when `STATUS !== 'active'`). The on-chain mechanism is a propagation channel, not a security boundary — the security boundary remains "only the creator can spend the escrow" (`SIGNEDBY(creatorkey)`).
+- The script does not constrain `STATE(7)` to be one of the three valid values. Receiving nodes treat unknown values as `'paused'` for safety.
+- `PREVSTATE(6)` (max publisher budget) is read but not enforced — kept for future use and audit visibility.
+
+**Registration**: register once per install via `newscript script:"<V3 script>" trackall:true` and persist the returned address as `ESCROW_ADDRESS_V3` in keypair. V2 and V3 addresses coexist; the SW scans coins at both addresses on every `NEWBLOCK` until V2 campaigns are fully settled out.
 
 ### B.3 State Variables
 
@@ -1436,6 +1577,8 @@ This script replaces the previous V1 script. The address changes — store as `E
 | 4 | `PREVSTATE(4)` | Creator Mx address | `Mx...` string | Enables on-chain discovery: viewer nodes send REQUEST_CAMPAIGN_DATA to this address |
 | **5** | `PREVSTATE(5)` | **PLATFORM_KEY** | `0x` hex or `0x00` | Fee recipient — validated by network; `0x00` = fee disabled (MVP) |
 | **6** | `PREVSTATE(6)` | Max publisher budget | number string | Bound on cumulative publisher payouts; for on-chain audit |
+| **7** | `PREVSTATE(7)` | Campaign status (V3 only) | hex string — UTF-8 of `"active"` / `"paused"` / `"finished"` | Read by DISCOVERY on every node — propagates pause/finish without creator online. V1/V2 coins have no port 7. |
+| **7** | `STATE(7)` | New status set by spending tx (V3 only) | hex string — same encoding as PREVSTATE(7) | Set on the status-update tx (§6.10, B.5); passed through unchanged on channel-open and partial-refund spends. |
 | 10 | `STATE(10)` | Payout amount (set in spending tx) | number string | Used by script to compute required change |
 | **11** | `STATE(11)` | Fee flag (0 \| 1) | integer string | When 1: triggers PLATFORM_KEY fee output assertion |
 | **12** | `STATE(12)` | Fee amount | number string | Asserted in fee output when feeflag=1 |
@@ -1502,7 +1645,11 @@ txnstate  id:<txnid> port:1  value:<creator_wallet_pk>
 txnstate  id:<txnid> port:2  value:<expiry_block>
 txnstate  id:<txnid> port:3  value:<campaign_id_hex>
 txnstate  id:<txnid> port:4  value:<creator_mx_address>
+txnstate  id:<txnid> port:5  value:<platform_key_or_0x00>
+txnstate  id:<txnid> port:6  value:<max_pub_budget_or_0>
+txnstate  id:<txnid> port:7  value:<current_status_hex>
 txnstate  id:<txnid> port:10 value:<max_per_viewer>
+txnstate  id:<txnid> port:11 value:0
 txnsign   id:<txnid> publickey:<creator_wallet_pk>
 txnpost   id:<txnid> mine:true auto:true
 txndelete id:<txnid>
@@ -1512,6 +1659,35 @@ Notes:
 - `STATE(10)` = `max_per_viewer` → script sees `change = @AMOUNT - max_per_viewer` → verifies output[1] returns to `@ADDRESS`
 - Output[0] goes to `CHANNEL_SCRIPT_ADDRESS` — the script does not constrain this output
 - After posting: update `CAMPAIGNS.ESCROW_COINID` to new change coinid; save channel coinid in `CHANNEL_STATE.CHANNEL_COINID`
+- **V3 only — port:7 passthrough**: `STATE(7)` MUST be set to the current `PREVSTATE(7)` of the spent escrow coin (or the UTF-8-hex of `"active"` for newly-created V3 campaigns that have not been paused). This preserves the on-chain status on the change coin so other nodes' NEWBLOCK scans continue to read the correct status. Ports 5, 6, 11 are similarly carried forward unchanged. V2 spends omit ports 5, 6, 7 (V2 fee path is controlled by STATE(11) alone).
+
+#### Status Update Transaction (V3 only)
+
+Used when the creator changes a campaign's status (Pause / Resume / Finish — see §6.10). Spends the current V3 escrow coin in full and outputs the same amount back to `ESCROW_ADDRESS_V3` with the new `STATE(7)`.
+
+```
+txncreate id:<txnid>
+txninput  id:<txnid> coinid:<ESCROW_COINID_V3> scriptmmr:true
+txnoutput id:<txnid> storestate:true amount:<full_amount> address:<ESCROW_ADDRESS_V3>
+txnstate  id:<txnid> port:1  value:<creator_wallet_pk>
+txnstate  id:<txnid> port:3  value:<campaign_id_hex>
+txnstate  id:<txnid> port:4  value:<creator_mx_hex>
+txnstate  id:<txnid> port:5  value:<platform_key_or_0x00>
+txnstate  id:<txnid> port:6  value:<max_pub_budget_or_0>
+txnstate  id:<txnid> port:7  value:<new_status_hex>
+txnstate  id:<txnid> port:10 value:0
+txnstate  id:<txnid> port:11 value:0
+txnsign   id:<txnid> publickey:<creator_wallet_pk>
+txnpost   id:<txnid> mine:true auto:true
+txndelete id:<txnid>
+```
+
+Notes:
+- `STATE(10) = 0` so the V3 script reads `payout = 0` → `change = @AMOUNT - 0 = @AMOUNT > 0` → the `IF change GT 0` branch fires and asserts that the change output goes back to `@ADDRESS` (= `ESCROW_ADDRESS_V3`) with `keepstate:true`. The single output[0] satisfies this assertion.
+- `STATE(11) = 0` so the fee branch is skipped — no fee output is required.
+- `STATE(7) = <new_status_hex>` is the UTF-8 hex of `"active"`, `"paused"` or `"finished"`. The script reads it (`LET status = PREVSTATE(7)`) but does not assert on its value — see §B.2.1.
+- Ports 1, 3, 4, 5, 6 are carried forward unchanged from the prior coin's `PREVSTATE` values so the new change coin remains discoverable and validates against the receiving node's `PLATFORM_KEY` check.
+- After confirmation: update `CAMPAIGNS.ESCROW_COINID` to the new change coinid on the creator's node (the existing `processEscrowCoin` discovery path also handles this on every other node). The status-tx-pending marker (FE-only) is cleared on `CAMPAIGN_UPDATED` signal for this campaign.
 
 #### Campaign Close / Refund
 
@@ -1547,6 +1723,7 @@ These are **different keys**. Do not substitute one for the other.
 | Prevents silent fund redirection | ✅ | Any spend is an auditable on-chain tx |
 | Automatic per-reward budget deduction | ⚠️ | Off-chain only; channel MAX_AMOUNT is on-chain cap |
 | Trustless payout without creator online | ✅ | Viewer holds signed voucher; settles independently |
+| Status survives creator offline | ✅ (V3 only) | Campaign status lives in `PREVSTATE(7)`; all nodes reconcile from chain on NEWBLOCK. V1/V2 still require creator-online Maxima broadcasts (§8.5) to propagate pause/finish. |
 | Budget floor per individual payout | ❌ | Not script-enforced; channel cap is the boundary |
 
 ---

@@ -389,25 +389,137 @@ function applyStatusChange(campaignId, status) {
 }
 
 // CREATOR_LIVENESS_PING — received on creator's node from a viewer SDK.
-// Responds immediately with CREATOR_LIVENESS_PONG to the sender.
+// Responds with CREATOR_LIVENESS_PONG including the current campaign status.
+// If EXPIRES_AT has passed, reports 'finished' regardless of DB STATUS.
 // MinimaAds.md §8.14. Rhino-safe: var, function(), no arrows, no template literals.
 function handleCreatorLivenessPing(payload, senderPk) {
   if (!senderPk) {
     MDS.log("[LIVENESS] PING missing senderPk — ignoring");
     return;
   }
+  var campaignId = payload.campaign_id || '';
+  var viewerMx   = payload.viewer_mx   || null;
   MDS.log("[LIVENESS] PING from " + senderPk.substring(0, 10) + "...");
-  var pong = {type: "CREATOR_LIVENESS_PONG", campaign_id: payload.campaign_id || ''};
-  sendMaxima(senderPk, null, pong, function(ok) {
-    MDS.log("[LIVENESS] PONG sent ok:" + (ok ? "true" : "false"));
+  if (!campaignId) {
+    var pong = {type: "CREATOR_LIVENESS_PONG", campaign_id: ''};
+    sendMaxima(senderPk, viewerMx, pong, function(ok) {
+      MDS.log("[LIVENESS] PONG sent ok:" + (ok ? "true" : "false"));
+    });
+    return;
+  }
+  getCampaign(campaignId, function(err, campaign) {
+    var status = '';
+    if (!err && campaign) {
+      var now = Date.now();
+      var expiresAt = (campaign.EXPIRES_AT !== null && campaign.EXPIRES_AT !== undefined && campaign.EXPIRES_AT !== '')
+        ? parseInt(campaign.EXPIRES_AT, 10) : 0;
+      if (expiresAt > 0 && now > expiresAt) {
+        status = 'finished';
+      } else {
+        status = campaign.STATUS || '';
+      }
+    }
+    var pong2 = {type: "CREATOR_LIVENESS_PONG", campaign_id: campaignId, status: status};
+    sendMaxima(senderPk, viewerMx, pong2, function(ok2) {
+      MDS.log("[LIVENESS] PONG sent ok:" + (ok2 ? "true" : "false") + " status:" + status);
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// checkCampaignStatuses — called periodically from NEWBLOCK (throttled).
+// For each locally-active campaign that has NO open viewer channel, sends a
+// CREATOR_LIVENESS_PING to the creator. The reply (CREATOR_LIVENESS_PONG via
+// handleCreatorLivenessPong) syncs the local status if the creator has paused
+// or finished the campaign. Includes viewer_mx so the creator can route the
+// PONG back even if the viewer is not in the creator's Maxima contacts.
+// Rhino-safe: var, function(), string concat, MDS.log, no trailing commas.
+// ---------------------------------------------------------------------------
+function checkCampaignStatuses() {
+  var sql = "SELECT DISTINCT c.ID, c.CREATOR_ADDRESS FROM CAMPAIGNS c" +
+    " WHERE c.STATUS = 'active'" +
+    " AND NOT EXISTS (" +
+    "   SELECT 1 FROM CHANNEL_STATE cs" +
+    "   WHERE UPPER(cs.CAMPAIGN_ID) = UPPER(c.ID)" +
+    "   AND cs.STATUS = 'open'" +
+    "   AND cs.ROLE = 'viewer'" +
+    " )";
+  sqlQuery(sql, function(err, rows) {
+    if (err || !rows || rows.length === 0) { return; }
+    for (var i = 0; i < rows.length; i++) {
+      (function(row) {
+        var campaignId = row.ID;
+        var creatorPk  = row.CREATOR_ADDRESS || '';
+        MDS.keypair.get("CREATOR_MX_" + campaignId, function(kpRes) {
+          var creatorMx = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : null;
+          if (!creatorPk && !creatorMx) { return; }
+          var ping = {
+            type:        "CREATOR_LIVENESS_PING",
+            campaign_id: campaignId,
+            viewer_mx:   MY_MX_ADDRESS
+          };
+          sendMaxima(creatorPk, creatorMx, ping, function(ok) {
+            MDS.log("[LIVENESS] auto-ping campaign: " + campaignId + " ok=" + ok);
+          });
+        });
+      })(rows[i]);
+    }
   });
 }
 
 // CREATOR_LIVENESS_PONG — received on viewer's node from the creator.
-// Signals the FE so the SDK can resolve the pending liveness check.
-// MinimaAds.md §8.15.
+// Syncs the local campaign STATUS from the creator's authoritative value,
+// then signals the FE so the SDK can resolve the pending liveness check.
+// MinimaAds.md §8.15. Rhino-safe: var, function(), no arrows, no template literals.
 function handleCreatorLivenessPong(payload) {
   var campaignId = payload.campaign_id || '';
-  MDS.log("[LIVENESS] PONG received for campaign: " + campaignId);
-  signalFE("CREATOR_LIVENESS_PONG", {campaign_id: campaignId});
+  var status = payload.status || '';
+  MDS.log("[LIVENESS] PONG received for campaign: " + campaignId + " status: " + status);
+  if (campaignId && status) {
+    getCampaign(campaignId, function(err, campaign) {
+      if (!err && campaign && campaign.STATUS !== status) {
+        setCampaignStatus(campaignId, status, function(err2) {
+          if (!err2) {
+            MDS.log("[LIVENESS] local campaign status synced: " + campaignId + " -> " + status);
+            signalFE("CAMPAIGN_UPDATED", {campaign_id: campaignId, status: status});
+          }
+        });
+      }
+    });
+  }
+  signalFE("CREATOR_LIVENESS_PONG", {campaign_id: campaignId, status: status});
+}
+
+// MA_LOCAL_STATUS — sent by the creator's FE (mycampaigns.js) via MDS.comms.broadcast.
+// Updates the campaign STATUS on the creator's own SW DB without needing Maxima.
+// Valid statuses: 'active', 'paused', 'finished'.
+// Rhino-safe: var, function(), no arrows, no template literals.
+function handleLocalStatusChange(payload) {
+  if (!payload.campaign_id || !payload.status) {
+    MDS.log("[CAMPAIGN] MA_LOCAL_STATUS missing fields");
+    return;
+  }
+  var s = payload.status;
+  if (s !== 'active' && s !== 'paused' && s !== 'finished') {
+    MDS.log("[CAMPAIGN] MA_LOCAL_STATUS invalid status: " + s);
+    return;
+  }
+  applyStatusChange(payload.campaign_id, s);
+}
+
+// checkExpiredCampaigns — called on every NEWBLOCK from service.js.
+// Marks any active campaign whose EXPIRES_AT has passed as 'finished'.
+// Only runs on the local node — other nodes learn the status via the liveness ping.
+// Rhino-safe: var, function(), no arrows, no template literals.
+function checkExpiredCampaigns() {
+  var now = Date.now();
+  sqlQuery(
+    "SELECT ID FROM CAMPAIGNS WHERE STATUS = 'active' AND EXPIRES_AT IS NOT NULL AND EXPIRES_AT < " + now,
+    function(err, rows) {
+      if (err || !rows || rows.length === 0) { return; }
+      for (var i = 0; i < rows.length; i++) {
+        applyStatusChange(rows[i].ID, 'finished');
+      }
+    }
+  );
 }

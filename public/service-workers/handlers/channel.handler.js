@@ -157,6 +157,16 @@ function handleChannelOpenRequest(payload, senderPk) {
       }
       if (campaign.STATUS !== 'active') {
         MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: campaign not active: " + campaignId + " status: " + campaign.STATUS);
+        if (viewerKey && viewerMx) {
+          var _rejStat = campaign.STATUS;
+          sendMaxima(viewerKey, viewerMx, {
+            type:        "REWARD_REJECTED",
+            campaign_id: campaignId,
+            reason:      _rejStat
+          }, function(ok) {
+            MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: REWARD_REJECTED sent ok=" + ok + " status=" + _rejStat);
+          });
+        }
         return;
       }
       if (parseFloat(campaign.BUDGET_REMAINING) < maxAmount) {
@@ -334,7 +344,7 @@ function handleChannelOpen(payload) {
   });
 }
 
-function handleRewardRequest(payload) {
+function handleRewardRequest(payload, senderPk) {
   if (!payload.campaign_id || !payload.viewer_key || !payload.event_id || payload.cumulative === undefined) {
     MDS.log("[CHANNEL] REWARD_REQUEST missing required fields");
     return;
@@ -344,6 +354,76 @@ function handleRewardRequest(payload) {
   var viewerKey    = payload.viewer_key;
   var eventId      = payload.event_id;
   var cumulative   = parseFloat(payload.cumulative);
+  var sndrPk       = senderPk || '';
+
+  getCampaign(campaignId, function(campErr, campaign) {
+    if (campErr || !campaign) {
+      MDS.log("[CHANNEL] REWARD_REQUEST: campaign not found: " + campaignId);
+      return;
+    }
+    if (campaign.STATUS !== 'active') {
+      MDS.log("[CHANNEL] REWARD_REQUEST: campaign not active (" + campaign.STATUS + "), rejecting: " + campaignId);
+      if (sndrPk) {
+        var _rejStatus = campaign.STATUS;
+        var _rejRole   = payload.role || 'viewer';
+        getChannelState(campaignId, viewerKey, _rejRole, function(chErr, ch) {
+          var _viewerMx = (!chErr && ch && ch.CREATOR_MX) ? ch.CREATOR_MX : null;
+          sendMaxima(sndrPk, _viewerMx, {
+            type:        "REWARD_REJECTED",
+            campaign_id: campaignId,
+            reason:      _rejStatus
+          }, function(ok) {
+            MDS.log("[CHANNEL] REWARD_REJECTED sent ok=" + ok + " mx=" + (_viewerMx ? 'yes' : 'no') + " status=" + _rejStatus);
+          });
+        });
+      }
+      return;
+    }
+    _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumulative);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// handleRewardRejected — runs on the VIEWER node.
+// Received when the creator rejects a REWARD_REQUEST because the campaign is
+// paused or finished. Updates the local campaign status so selectAd() and
+// validateView() stop serving and tracking the campaign. Signals the FE so
+// the SDK can refresh the liveness cache immediately.
+// Rhino-safe: var, function(), string concat, MDS.log, no trailing commas.
+// ---------------------------------------------------------------------------
+function handleRewardRejected(payload) {
+  if (!payload.campaign_id || !payload.reason) {
+    MDS.log("[CHANNEL] REWARD_REJECTED missing fields");
+    return;
+  }
+  var campaignId = payload.campaign_id;
+  var reason     = payload.reason;
+  if (reason !== 'paused' && reason !== 'finished') {
+    MDS.log("[CHANNEL] REWARD_REJECTED unknown reason: " + reason);
+    return;
+  }
+  MDS.log("[CHANNEL] REWARD_REJECTED received for campaign: " + campaignId + " reason: " + reason);
+  getCampaign(campaignId, function(err, campaign) {
+    if (err || !campaign) {
+      MDS.log("[CHANNEL] REWARD_REJECTED: campaign not found locally: " + campaignId);
+      return;
+    }
+    if (campaign.STATUS === reason) {
+      signalFE("CAMPAIGN_UPDATED", {campaign_id: campaignId, status: reason});
+      return;
+    }
+    setCampaignStatus(campaignId, reason, function(err2) {
+      if (err2) {
+        MDS.log("[CHANNEL] REWARD_REJECTED: setCampaignStatus failed: " + err2);
+        return;
+      }
+      MDS.log("[CHANNEL] REWARD_REJECTED: campaign synced to " + reason + " id: " + campaignId);
+      signalFE("CAMPAIGN_UPDATED", {campaign_id: campaignId, status: reason});
+    });
+  });
+}
+
+function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumulative) {
   var role         = payload.role || 'viewer';
   var frameId      = payload.frame_id || '';
   var publisherKey = payload.publisher_key || '';

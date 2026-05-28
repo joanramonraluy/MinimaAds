@@ -195,6 +195,66 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 ## 8) Current Handoff Notes
 
+2026-05-28 (T-SC2: ESCROW_SCRIPT_V3 registration + scanEscrowCoins V3):
+- **Scope**: `service.js` only. No other files touched.
+- **Changes**: added `ESCROW_SCRIPT_V3` constant (byte-different from V2 — adds no-op `LET maxpubbudget=PREVSTATE(6)` and `LET status=PREVSTATE(7)`); added `ESCROW_ADDRESS_V3 = ''` global; inserted V3 `newscript` call in `registerEscrowScript()` between V2 and CHANNEL_SCRIPT; extended `scanEscrowCoins()` with `_scanAddress(ESCROW_ADDRESS_V3)`.
+- **Safety**: V3 `newscript` failure is non-fatal — init chain continues to CHANNEL_SCRIPT and `scanEscrowCoins()` regardless. `_scanAddress` guards `if (!addr) return` so an empty `ESCROW_ADDRESS_V3` is silently skipped.
+- **Conflict note**: `MinimaAds.md §B.2.1` specifies `trackall:true` for V3 registration, but the T-SC2 task prompt and existing V1/V2 registrations use `trackall:false`. Used `trackall:false` (consistent with V1/V2). Maintainer should confirm intent — `trackall:true` would add V3 coins to `relevant:true` set, but `_scanAddress` uses `coins address:...` so tracking does not affect discovery.
+- **Next**: T-SC3 (FE: new campaigns funded to ESCROW_ADDRESS_V3 with port:7 = hex("active")).
+
+2026-05-28 (T-SC1 spec: on-chain campaign status via ESCROW_SCRIPT_V3):
+- **Scope**: spec-only. No JS files touched. Updated `MinimaAds.md` and `AGENTS.md`.
+- **Design**: campaign status (`active` | `paused` | `finished`) becomes a mutable state variable on the escrow coin at `PREVSTATE(7)` / `STATE(7)` of a new `ESCROW_SCRIPT_V3` (Appendix B.2.1). Every node reads `PREVSTATE(7)` during its `NEWBLOCK` discovery scan and reconciles its local `CAMPAIGNS.STATUS` row — no creator-online Maxima required for propagation. Resume of an offline-creator campaign now works without any Maxima fallback.
+- **Script V3**: byte-different from V2 (adds no-op `LET maxpubbudget=PREVSTATE(6)` and `LET status=PREVSTATE(7)`) so `newscript` yields a new address, `ESCROW_ADDRESS_V3`. Script does NOT enforce status; enforcement remains in SW handlers (`selectAd`, `validateView`/`validateClick`, `handleRewardRequest`). Both V2 and V3 addresses coexist; SW scans both on every NEWBLOCK.
+- **Protocol Matrix update**: in MinimaAds.md §8.5, `CAMPAIGN_PAUSE` / `CAMPAIGN_FINISH` are now documented as **optional fast-path** notifications — authoritative status is `ESCROW_V3 PREVSTATE(7)`. `CAMPAIGN_RESUME` is **DEPRECATED** (resume is on-chain only because the offline-creator case cannot Maxima). All three handlers are retained for inbound back-compat.
+- **New transaction template**: Appendix B.5 `Status Update Transaction` — full-amount spend back to `ESCROW_ADDRESS_V3` with `STATE(7) = <new_status_hex>`, `STATE(10) = 0`, `STATE(11) = 0`. Channel-open template updated to carry `port:7` (current status) forward on the change output.
+- **New SW→FE signal**: `STATUS_TX_PENDING { campaign_id, status, pending_uid }` — fired by `mycampaigns.js` while the status-update tx awaits Hub approval. Defined in §8.15.
+- **New spec sections**: MinimaAds.md §4.7 "Campaign Status as On-chain State", §6.10 "Campaign Status Update Flow (on-chain)", Appendix B.2.1, Appendix B.3 PREVSTATE(7)/STATE(7) rows, Appendix B.5 Status Update Transaction + Channel Open port:7 row, Appendix B.7 "Status survives creator offline" row updated from ❌ to ✅ (V3 only).
+- **Files modified**: `MinimaAds.md`, `AGENTS.md`. **No JS files touched** (subsequent tasks T-SC2 → T-SC7 will implement the SW/SDK/UI changes).
+- **No conflicts found**: existing spec sections (§4.4, §6.3, §6.5, §8.1, §8.5, §8.15, Appendix B.1–B.7) are consistent with the V3 design — V3 is additive (new address, new port, new tx template) with full V2 backward-compat.
+
+2026-05-28 (fix: REWARD_REJECTED delivery failures + campaign status sync for channelless campaigns):
+- **Root cause 1**: `sendMaxima(sndrPk, null, ...)` in `handleRewardRequest` always used `publickey:` routing, which requires the viewer to be in the creator's Maxima contacts. `addcontact` on CHANNEL_OPEN_REQUEST fails → viewer not in contacts → `ok=false` on every REWARD_REJECTED → viewer's local status never updated. Same bug in CHANNEL_OPEN_REQUEST rejection path.
+- **Fix 1 (open-channel case)**: `handleRewardRequest` now calls `getChannelState(campaignId, viewerKey, role, cb)` to look up `CHANNEL_STATE.CREATOR_MX` (which on the creator node stores the viewer's Mx address). Passes it as `mxAddress` fallback to `sendMaxima(sndrPk, _viewerMx, ...)`. Delivery now succeeds via Mx routing.
+- **Fix 2 (no-channel case)**: `handleChannelOpenRequest` (viewer path) now sends `REWARD_REJECTED` when campaign is not active. Uses `viewerKey`/`viewerMx` from the payload directly — no lookup needed.
+- **Root cause 2**: Campaigns from prior sessions (STATUS='active' in viewer DB, no open channel) were never synced because (a) REWARD_REJECTED only fires if REWARD_REQUEST or CHANNEL_OPEN_REQUEST is sent, (b) view tracking is rate-limited so `_triggerChannelPayment` may never fire, (c) the liveness ping (SDK) only runs from the FE when the MiniDapp is open.
+- **Fix 3 (periodic SW liveness check)**: Added `checkCampaignStatuses()` in `campaign.handler.js`. Called every 20 NEWBLOCK events from `service.js`. For each locally-active campaign without an open viewer channel, sends `CREATOR_LIVENESS_PING` via `sendMaxima` using stored `CREATOR_MX_<campaignId>` keypair. Creator responds with PONG; `handleCreatorLivenessPong` syncs local status.
+- **Fix 4 (PONG routing)**: `CREATOR_LIVENESS_PING` now includes `viewer_mx` field. `handleCreatorLivenessPing` passes it as `mxAddress` fallback to `sendMaxima` for the PONG, so the reply is delivered even when the viewer is not in creator's contacts.
+- **Files modified**: `public/service-workers/handlers/channel.handler.js`, `public/service-workers/handlers/campaign.handler.js`, `service.js`, `sdk/index.js`, `MinimaAds.md`.
+- **Schema changes**: `CREATOR_LIVENESS_PING` §8.13 — added optional `viewer_mx` field. `CREATOR_LIVENESS_PONG` §8.14 — updated routing note.
+
+2026-05-27 (fix: REWARD_REJECTED — propagate pause/finish status to viewer on rejection):
+- **Root cause of remaining viewer problem**: After the first REWARD_REQUEST is accepted (channel open), `_trackEvent` in `sdk/index.js` never calls `_checkCreatorLiveness` again. The liveness cache TTL is irrelevant once a channel exists. The viewer's local campaign status is never updated on pause/finish because (a) CAMPAIGN_PAUSE/FINISH Maxima broadcast was removed in T12, and (b) CREATOR_LIVENESS_PING only fires when no channel is open.
+- **Fix**: `REWARD_REJECTED` Maxima message. When the creator rejects a REWARD_REQUEST due to non-active campaign status, it now sends `REWARD_REJECTED` back to the viewer (unicast via `msg.data.from`). The viewer's SW receives it, calls `setCampaignStatus` to sync the local DB, and signals `CAMPAIGN_UPDATED` to the FE. The SDK and `app.js` update `_livenessCache[campaignId] = { alive: false }` immediately.
+- **Files modified**: `public/service-workers/handlers/maxima.handler.js`, `public/service-workers/handlers/channel.handler.js`, `sdk/index.js`, `dapp/app.js`.
+- **`maxima.handler.js`**: `handleRewardRequest(payload)` → `handleRewardRequest(payload, msg.data.from || '')`. Added `REWARD_REJECTED` routing → `handleRewardRejected(payload)`.
+- **`channel.handler.js`**: `handleRewardRequest(payload, senderPk)` — on rejection, calls `sendMaxima(sndrPk, null, {type:'REWARD_REJECTED', campaign_id, reason:campaign.STATUS}, cb)`. Added `handleRewardRejected(payload)` (viewer side) — validates reason ('paused'|'finished'), calls `getCampaign` → `setCampaignStatus` if different → `signalFE("CAMPAIGN_UPDATED", {campaign_id, status})`.
+- **`sdk/index.js`**: Added `_onCampaignUpdatedCore(parsed)` — sets `_livenessCache[campaignId] = { alive: (status==='active'), ts: now }`. Added `CAMPAIGN_UPDATED` dispatch in MDSCOMMS branch of `handleMdsEvent`. Exposed as `MinimaAds.onCampaignUpdated` and `window.onCampaignUpdated`.
+- **`dapp/app.js`**: In `handleMdsComms` `CAMPAIGN_UPDATED` branch, added call to `window.onCampaignUpdated(parsed)` if defined. This ensures the internal MiniDapp's SDK liveness cache is also updated.
+- **New Maxima message**: `REWARD_REJECTED` — see schema at MinimaAds.md §8.16.
+- **Effect**: After a campaign is paused or finished, the first rejected REWARD_REQUEST causes the viewer to sync its local DB status. Subsequent calls to `getAd` → `selectAd` (filters `STATUS='active'`) and `_trackEvent` → `validateView` (checks `STATUS='active'`) will correctly reject the paused/finished campaign without any further interaction with the creator.
+
+2026-05-26 (fix: REWARD_REQUEST bypass on paused campaigns + liveness cache TTL):
+- **Bug 1 (critical)**: `handleRewardRequest` in `channel.handler.js` did not check campaign status. The creator's SW was issuing REWARD_VOUCHERs for paused/finished campaigns as long as the channel coin was still open. Confirmed in logs: creator's DB set to 'paused' at 12:01:07, yet REWARD_VOUCHER for cumulative 3 (viewer) and 20 (publisher) sent at 12:01:29–12:01:32.
+- **Fix**: Refactored `handleRewardRequest` into two functions. The outer `handleRewardRequest` calls `getCampaign` first — if `campaign.STATUS !== 'active'`, rejects with `[CHANNEL] REWARD_REQUEST: campaign not active (paused), rejecting`. If active, delegates to `_handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumulative)` which contains the original channel-state logic unchanged.
+- **Bug 2 (UX)**: Viewer's liveness cache TTL was 120 seconds. After a creator pauses, the viewer re-uses the cached `alive:true` for up to 2 minutes, continuing to serve ads and confirm clicks. Confirmed in logs: viewer at 12:01:23 (16s after pause) still serving MA_GET_AD and at 12:01:29 confirming MA_TRACK_CLICK.
+- **Fix**: Reduced `LIVENESS_CACHE_MS` from `120000` to `30000` in `sdk/index.js`. Maximum propagation delay after pause is now ~30 seconds.
+- **Files modified**: `public/service-workers/handlers/channel.handler.js`, `sdk/index.js`.
+- No schema changes. No new Maxima messages. No new SW signals.
+
+2026-05-26 (Campaign lifecycle — status authority redesign):
+- **Scope**: `dapp/views/mycampaigns.js`, `service.js`, `public/service-workers/handlers/campaign.handler.js`, `core/selection.js`, `sdk/index.js`, `dapp/app.js`.
+- **Motivation**: `broadcastMaxima(sendall)` per a PAUSE/RESUME/FINISH era poc fiable (no arriba al propi node creador, i no tots els viewers eren contactes Maxima). El creador és ara l'autoritat d'estat; els viewers s'actualitzen via liveness ping.
+- **`dapp/views/mycampaigns.js`**: substituïts els tres blocs `broadcastMaxima + setCampaignStatus` (Pausar / Reprendre / Finalitzar) per `MDS.comms.broadcast({ type: 'MA_LOCAL_STATUS', campaign_id, status })`. El re-render de la UI es produeix via el senyal `CAMPAIGN_UPDATED` que arriba del SW.
+- **`service.js`** `onComms`: afegit routing `MA_LOCAL_STATUS → handleLocalStatusChange`. `NEWBLOCK`: afegit `checkExpiredCampaigns()`.
+- **`campaign.handler.js`** `handleCreatorLivenessPing`: ara llegeix la campanya del DB, comprova `EXPIRES_AT`, i retorna `status` al PONG. `handleCreatorLivenessPong`: ara llegeix `payload.status`, actualitza la DB local si difereix i emet `CAMPAIGN_UPDATED`. Noves funcions: `handleLocalStatusChange(payload)` (valida i crida `applyStatusChange`), `checkExpiredCampaigns()` (SELECT campaigns actives amb EXPIRES_AT passat i les marca 'finished').
+- **`core/selection.js`** `selectAd`: afegit filtre `(!c.EXPIRES_AT || parseInt(c.EXPIRES_AT, 10) > Date.now())` com a capa defensiva local.
+- **`sdk/index.js`** `_onCreatorLivenessPong(campaignId, status)`: ara accepta `status` com a segon paràmetre. `alive = !status || status === 'active'`. Si no hi ha ping pendent (PONG no sol·licitat), actualitza la cache igualment si `status` present.
+- **`dapp/app.js`**: `window.onCreatorLivenessPong` ara rep `(campaign_id, status)` passant `parsed.status`.
+- **Protocol CREATOR_LIVENESS_PONG**: afegit camp `status` (`'active'|'paused'|'finished'|''`). El PING ara requereix `campaign_id` per obtenir l'estat; si absent respon igualment sense camp `status`. MinimaAds.md §8.14–§8.15 cal actualitzar (pendent).
+- **`CAMPAIGN_PAUSE`/`RESUME`/`FINISH` via Maxima**: eliminats com a mecanisme de propagació. Els handlers al SW (`handleCampaignPause`, `handleCampaignResume`, `handleCampaignFinish`) es mantenen com a fallback per a missatges antics entrants.
+- **`EXPIRES_AT`**: ara comprovat activament al NEWBLOCK (creador) i a `selectAd` (local defensiu). Anteriorment era un camp mort.
+
 2026-05-26 (T12 — Remove CAMPAIGN_ANNOUNCE broadcast):
 - **Scope**: `dapp/views/creator.js` + `service.js` + `MinimaAds.md §8.1` + `§6.3` + `§15.4`.
 - **`dapp/views/creator.js`** (`saveCampaignAndBroadcast`): eliminat tot el bloc de construcció del payload `CAMPAIGN_ANNOUNCE` i la crida a `broadcastMaxima`. Ara, un cop `saveCampaign` confirma èxit, la funció activa el botó, mostra el missatge de confirmació i reseteja el formulari directament. Pas d'estar pendent de cap callback de xarxa.

@@ -35,7 +35,7 @@
   // _pendingPings: campaignId → { cbs: [fn], timer }
   var _livenessCache = {};
   var _pendingPings = {};
-  var LIVENESS_CACHE_MS = 120000;
+  var LIVENESS_CACHE_MS = 30000;
   var LIVENESS_TIMEOUT_MS = 3000;
 
   function _completeInit(cb) {
@@ -489,7 +489,7 @@
   // when the creator eventually comes back online.
   function _sendLivenessPing(creatorRoute, campaignId, cb) {
     if (!creatorRoute) { if (cb) { cb(false); } return; }
-    var payload = { type: 'CREATOR_LIVENESS_PING', campaign_id: campaignId };
+    var payload = { type: 'CREATOR_LIVENESS_PING', campaign_id: campaignId, viewer_mx: _myMx };
     var hex = '0x' + utf8ToHex(JSON.stringify(payload)).toUpperCase();
     var isMx = (creatorRoute.substring(0, 2).toUpperCase() === 'MX');
     var routeParam = isMx ? ('to:' + creatorRoute) : ('publickey:' + creatorRoute);
@@ -534,14 +534,34 @@
 
   // Called when the viewer's SW relays a CREATOR_LIVENESS_PONG via MDSCOMMS.
   // Resolves the pending ping callback(s) for the given campaign.
-  function _onCreatorLivenessPong(campaignId) {
+  // status: 'active' | 'paused' | 'finished' | '' (empty = unknown, treat as alive).
+  // alive = true only when status is 'active' or absent (unknown).
+  function _onCreatorLivenessPong(campaignId, status) {
+    var alive = !status || status === 'active';
     var pending = _pendingPings[campaignId];
-    if (!pending) { return; }
-    clearTimeout(pending.timer);
-    delete _pendingPings[campaignId];
-    _livenessCache[campaignId] = { alive: true, ts: Date.now() };
-    console.log('[SDK] liveness PONG — creator online for campaign:', campaignId);
-    for (var i = 0; i < pending.cbs.length; i++) { pending.cbs[i](true); }
+    if (pending) {
+      clearTimeout(pending.timer);
+      delete _pendingPings[campaignId];
+      _livenessCache[campaignId] = { alive: alive, ts: Date.now() };
+      console.log('[SDK] liveness PONG — campaign:', campaignId, 'status:', status || '(unknown)', 'alive:', alive);
+      for (var i = 0; i < pending.cbs.length; i++) { pending.cbs[i](alive); }
+    } else {
+      // Unsolicited PONG (e.g. after cache expiry) — refresh cache if status present.
+      if (status) {
+        _livenessCache[campaignId] = { alive: alive, ts: Date.now() };
+      }
+    }
+  }
+
+  // Called when the viewer's SW signals CAMPAIGN_UPDATED (e.g. after receiving
+  // REWARD_REJECTED from the creator). Updates the liveness cache immediately
+  // so getAd() stops serving a paused/finished campaign without waiting for the
+  // DB round-trip on the next getCampaigns() call.
+  function _onCampaignUpdatedCore(parsed) {
+    if (!parsed || !parsed.campaign_id || !parsed.status) { return; }
+    var alive = (parsed.status === 'active');
+    _livenessCache[parsed.campaign_id] = { alive: alive, ts: Date.now() };
+    console.log('[SDK] CAMPAIGN_UPDATED campaign:' + parsed.campaign_id + ' status:' + parsed.status + ' alive:' + alive);
   }
 
   // --- Channel flow orchestration --------------------------------------
@@ -974,6 +994,7 @@
       if (!parsed || !parsed.type) { return; }
       if (parsed.type === 'CHANNEL_OPENED') { _onChannelOpenedCore(parsed); }
       if (parsed.type === 'VOUCHER_RECEIVED') { _onVoucherReceivedCore(parsed); }
+      if (parsed.type === 'CAMPAIGN_UPDATED') { _onCampaignUpdatedCore(parsed); }
       return;
     }
 
@@ -1014,7 +1035,9 @@
       onChannelOpened:  _onChannelOpenedCore,
       onVoucherReceived: _onVoucherReceivedCore,
       // Exposed so app.js can forward MDSCOMMS CREATOR_LIVENESS_PONG signals.
-      onCreatorLivenessPong: _onCreatorLivenessPong
+      onCreatorLivenessPong: _onCreatorLivenessPong,
+      // Exposed so app.js can forward MDSCOMMS CAMPAIGN_UPDATED signals.
+      onCampaignUpdated: _onCampaignUpdatedCore
     };
 
     // app.js dispatches MDSCOMMS signals to global onChannelOpened /
@@ -1030,6 +1053,9 @@
     }
     if (typeof window.onCreatorLivenessPong !== 'function') {
       window.onCreatorLivenessPong = _onCreatorLivenessPong;
+    }
+    if (typeof window.onCampaignUpdated !== 'function') {
+      window.onCampaignUpdated = _onCampaignUpdatedCore;
     }
   }
 })();

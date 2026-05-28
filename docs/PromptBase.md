@@ -84,9 +84,14 @@ Entry points: `service.js` (SW) · `dapp/app.js` (FE) · `sdk/index.js` (SDK)
 
 ## 6) Current Task
 
-Read `docs/TASKS.md` and find the task indicated by the maintainer. That task entry is your complete specification: files to modify, relevant spec sections, constraints, and definition of done.
+If the maintainer has specified a task ID (e.g. "T-SC2"), find that exact entry in `docs/TASKS.md`.
+If no task ID is given, find the **first task marked `Pending ⬜`** in `docs/TASKS.md` — that is your task.
 
-Do not start implementing until you have read the full task entry in `docs/TASKS.md`.
+Before starting, check the **Agent** field of the task:
+- `Opus` → this task requires the Opus model. If you are not Opus, stop and inform the maintainer before writing any code.
+- `Sonnet` → proceed normally.
+
+That task entry is your complete specification: files to modify, relevant spec sections, constraints, and definition of done. Do not start implementing until you have read the full task entry.
 
 ---
 

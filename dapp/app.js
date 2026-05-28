@@ -146,6 +146,9 @@ function handleMdsComms(parsed) {
     return;
   }
   if (parsed.type === 'NEW_CAMPAIGN' || parsed.type === 'CAMPAIGN_UPDATED') {
+    if (parsed.type === 'CAMPAIGN_UPDATED' && typeof window.onCampaignUpdated === 'function') {
+      window.onCampaignUpdated(parsed);
+    }
     if (currentRoute() === 'stats' && typeof renderStats === 'function') {
       renderStats(document.getElementById('app'));
     }
@@ -215,7 +218,7 @@ function handleMdsComms(parsed) {
   }
   if (parsed.type === 'CREATOR_LIVENESS_PONG') {
     if (typeof window.onCreatorLivenessPong === 'function') {
-      window.onCreatorLivenessPong(parsed.campaign_id || '');
+      window.onCreatorLivenessPong(parsed.campaign_id || '', parsed.status || '');
     }
     return;
   }

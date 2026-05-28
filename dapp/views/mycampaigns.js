@@ -347,18 +347,14 @@ function _appendMyCampaignActions(tdActions, c) {
   if (c.STATUS === 'active') {
     tdActions.appendChild(_makeBtn('Pausar', false, function() {
       _disableAll();
-      broadcastMaxima({ type: 'CAMPAIGN_PAUSE', campaign_id: c.ID }, function() {
-        setCampaignStatus(c.ID, 'paused', function() { loadMyCampaigns(); });
-      });
+      MDS.comms.broadcast(JSON.stringify({ type: 'MA_LOCAL_STATUS', campaign_id: c.ID, status: 'paused' }), function() {});
     }));
   }
 
   if (c.STATUS === 'paused') {
     tdActions.appendChild(_makeBtn('Reprendre', false, function() {
       _disableAll();
-      broadcastMaxima({ type: 'CAMPAIGN_RESUME', campaign_id: c.ID }, function() {
-        setCampaignStatus(c.ID, 'active', function() { loadMyCampaigns(); });
-      });
+      MDS.comms.broadcast(JSON.stringify({ type: 'MA_LOCAL_STATUS', campaign_id: c.ID, status: 'active' }), function() {});
     }));
   }
 
@@ -366,9 +362,7 @@ function _appendMyCampaignActions(tdActions, c) {
     tdActions.appendChild(_makeBtn('Finalitzar', true, function() {
       if (!confirm('Finalitzar la campanya "' + c.TITLE + '"?\nAquesta acció no es pot desfer.')) { return; }
       _disableAll();
-      broadcastMaxima({ type: 'CAMPAIGN_FINISH', campaign_id: c.ID }, function() {
-        setCampaignStatus(c.ID, 'finished', function() { loadMyCampaigns(); });
-      });
+      MDS.comms.broadcast(JSON.stringify({ type: 'MA_LOCAL_STATUS', campaign_id: c.ID, status: 'finished' }), function() {});
     }));
   }
 }

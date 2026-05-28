@@ -23,9 +23,13 @@ var MY_MAXIMA_PK   = '';
 var MY_MX_ADDRESS  = '';
 var MY_ADDRESS     = '';
 
+// Liveness-check throttle: run checkCampaignStatuses every 20 blocks (~5 min)
+var _livenessCheckBlock = 0;
+
 // Escrow script address — deterministic, same for all nodes with this DApp
 var ESCROW_ADDRESS    = '';
 var ESCROW_ADDRESS_V2 = '';
+var ESCROW_ADDRESS_V3 = '';
 
 // Channel script: time-locked creator-only exit OR 2-of-2 MULTISIG(creator, viewer/publisher)
 var CHANNEL_SCRIPT         = 'IF @COINAGE GT (40*1728) AND SIGNEDBY(PREVSTATE(1)) THEN RETURN TRUE ENDIF RETURN MULTISIG(2 PREVSTATE(1) PREVSTATE(2))';
@@ -44,6 +48,24 @@ var ESCROW_SCRIPT_V2 =
   "LET change=@AMOUNT-payout " +
   "IF feeflag EQ 1 THEN " +
   "LET platformkey=PREVSTATE(5) " +
+  "LET feeamount=STATE(12) " +
+  "ASSERT VERIFYOUT(STATE(13) platformkey feeamount @TOKENID FALSE) " +
+  "ENDIF " +
+  "IF change GT 0 THEN " +
+  "ASSERT VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE) " +
+  "ENDIF " +
+  "RETURN TRUE";
+
+var ESCROW_SCRIPT_V3 =
+  "LET creatorkey=PREVSTATE(1) " +
+  "LET platformkey=PREVSTATE(5) " +
+  "LET maxpubbudget=PREVSTATE(6) " +
+  "LET status=PREVSTATE(7) " +
+  "ASSERT SIGNEDBY(creatorkey) " +
+  "LET payout=STATE(10) " +
+  "LET feeflag=STATE(11) " +
+  "LET change=@AMOUNT-payout " +
+  "IF feeflag EQ 1 THEN " +
   "LET feeamount=STATE(12) " +
   "ASSERT VERIFYOUT(STATE(13) platformkey feeamount @TOKENID FALSE) " +
   "ENDIF " +
@@ -113,21 +135,30 @@ function registerEscrowScript() {
         }
         ESCROW_ADDRESS_V2 = res2.response.address;
         MDS.log("[ADS] ESCROW_ADDRESS_V2: " + ESCROW_ADDRESS_V2);
-        MDS.cmd("newscript script:\"" + CHANNEL_SCRIPT + "\" trackall:false", function(res3) {
-          if (res3 && res3.status && res3.response && res3.response.address) {
-            CHANNEL_SCRIPT_ADDRESS = res3.response.address;
-            MDS.keypair.set("CHANNEL_SCRIPT_ADDRESS", CHANNEL_SCRIPT_ADDRESS, function() {});
-            MDS.log("[ADS] CHANNEL_SCRIPT_ADDRESS: " + CHANNEL_SCRIPT_ADDRESS);
+        MDS.cmd("newscript script:\"" + ESCROW_SCRIPT_V3 + "\" trackall:false", function(resV3) {
+          if (!resV3.status) {
+            MDS.log("[ADS] newscript V3 failed: " + resV3.error);
           } else {
-            MDS.log("[ADS] CHANNEL_SCRIPT newscript failed — will fallback to keypair");
-            MDS.keypair.get("CHANNEL_SCRIPT_ADDRESS", function(kpRes) {
-              if (kpRes && kpRes.status && kpRes.value) {
-                CHANNEL_SCRIPT_ADDRESS = kpRes.value;
-                MDS.log("[ADS] CHANNEL_SCRIPT_ADDRESS from keypair: " + CHANNEL_SCRIPT_ADDRESS);
-              }
-            });
+            ESCROW_ADDRESS_V3 = resV3.response.address;
+            MDS.log("[ADS] ESCROW_ADDRESS_V3: " + ESCROW_ADDRESS_V3);
+            MDS.keypair.set("ESCROW_ADDRESS_V3", ESCROW_ADDRESS_V3, function() {});
           }
-          scanEscrowCoins();
+          MDS.cmd("newscript script:\"" + CHANNEL_SCRIPT + "\" trackall:false", function(res3) {
+            if (res3 && res3.status && res3.response && res3.response.address) {
+              CHANNEL_SCRIPT_ADDRESS = res3.response.address;
+              MDS.keypair.set("CHANNEL_SCRIPT_ADDRESS", CHANNEL_SCRIPT_ADDRESS, function() {});
+              MDS.log("[ADS] CHANNEL_SCRIPT_ADDRESS: " + CHANNEL_SCRIPT_ADDRESS);
+            } else {
+              MDS.log("[ADS] CHANNEL_SCRIPT newscript failed — will fallback to keypair");
+              MDS.keypair.get("CHANNEL_SCRIPT_ADDRESS", function(kpRes) {
+                if (kpRes && kpRes.status && kpRes.value) {
+                  CHANNEL_SCRIPT_ADDRESS = kpRes.value;
+                  MDS.log("[ADS] CHANNEL_SCRIPT_ADDRESS from keypair: " + CHANNEL_SCRIPT_ADDRESS);
+                }
+              });
+            }
+            scanEscrowCoins();
+          });
         });
       });
     });
@@ -137,6 +168,7 @@ function registerEscrowScript() {
 function scanEscrowCoins() {
   _scanAddress(ESCROW_ADDRESS);
   _scanAddress(ESCROW_ADDRESS_V2);
+  _scanAddress(ESCROW_ADDRESS_V3);
 }
 
 function _scanAddress(addr) {
@@ -169,13 +201,19 @@ function onComms(msg) {
     handleTrackClick(payload);
   } else if (payload.type === "MA_OPEN_PUBLISHER_CHANNELS") {
     handleOpenPublisherChannels(payload);
+  } else if (payload.type === "MA_LOCAL_STATUS") {
+    handleLocalStatusChange(payload);
   }
 }
 
 MDS.init(function(msg) {
   if (msg.event === "inited")   { onInited(); }
   if (msg.event === "MAXIMA")   { onMaxima(msg); }
-  if (msg.event === "NEWBLOCK") { scanEscrowCoins(); checkPendingChannelOpens(); checkPendingVouchers(); }
+  if (msg.event === "NEWBLOCK") {
+    scanEscrowCoins(); checkPendingChannelOpens(); checkPendingVouchers(); checkExpiredCampaigns();
+    _livenessCheckBlock++;
+    if (_livenessCheckBlock % 20 === 0) { checkCampaignStatuses(); }
+  }
   if (msg.event === "MDS_PENDING")         { onPending(msg); }
   if (msg.event === "MDSCOMMS")            { onComms(msg); }
 });

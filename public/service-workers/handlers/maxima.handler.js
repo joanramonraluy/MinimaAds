@@ -42,7 +42,9 @@ function onMaxima(msg) {
   } else if (payload.type === "CHANNEL_OPEN") {
     handleChannelOpen(payload);
   } else if (payload.type === "REWARD_REQUEST") {
-    handleRewardRequest(payload);
+    handleRewardRequest(payload, msg.data.from || '');
+  } else if (payload.type === "REWARD_REJECTED") {
+    handleRewardRejected(payload);
   } else if (payload.type === "REWARD_VOUCHER") {
     handleRewardVoucher(payload);
   } else if (payload.type === "VOUCHER_SYNC_REQUEST") {

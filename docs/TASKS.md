@@ -12,6 +12,7 @@
 T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9 → T10 → T11 → T12
 T-CH1 → T-CH2 → T-CH3 → T-CH4 → T-CH5 → T-CH6 → T-CH7 → T-CH8 → T-CH9
 T-PUB1 → T-PUB2 → T-PUB3 → T-PUB4 → T-PUB5 → T-PUB6 → T-PUB7 → T-PUB8
+T-SC1 → T-SC2 → T-SC3 → T-SC4 → T-SC5 → T-SC6 → T-SC7
 ```
 
 Never start a task before all previous tasks are marked **Done**.
@@ -388,6 +389,13 @@ Update:
 | **T-PUB6** | **UI** | `dapp/views/creator.js` | Done ✅ |
 | **T-PUB7** | **UI + SW** | `dapp/views/frames.js` (new), `dapp/app.js`, `service.js` | Done ✅ |
 | **T-PUB8** | **SW + FE** | `channel.handler.js`, `core/channels.js`, `dapp/app.js` | Done ✅ |
+| **T-SC1** | **Spec** | `MinimaAds.md`, `AGENTS.md` | Done ✅ |
+| **T-SC2** | **SW** | `service.js` | Done ✅ |
+| **T-SC3** | **FE** | `dapp/views/creator.js`, `dapp/app.js` | Pending ⬜ |
+| **T-SC4** | **SW** | `public/service-workers/handlers/campaign.handler.js` | Pending ⬜ |
+| **T-SC5** | **Core** | `core/campaigns.js` | Pending ⬜ |
+| **T-SC6** | **FE** | `dapp/app.js`, `dapp/views/mycampaigns.js` | Pending ⬜ |
+| **T-SC7** | **Docs** | `docs/KNOWN_ISSUES.md`, `docs/VERIFICATION.md`, `AGENTS.md` | Pending ⬜ |
 
 ---
 
@@ -1453,3 +1461,577 @@ Definition of done:
 
 Provide the standard handoff note (CLAUDE.md §10) when done.
 ```
+
+---
+
+## Status Coin — On-chain Campaign Status (T-SC1 → T-SC7)
+
+> Implementation of campaign status as a mutable state variable on the escrow coin (ESCROW_SCRIPT_V3), removing the dependency on creator-online Maxima broadcasts for pause/finish/resume propagation.
+> Mandatory order: T-SC1 → T-SC2 → T-SC3 → T-SC4 → T-SC5 → T-SC6 → T-SC7.
+> Read MinimaAds.md §4.4 §6.5 §8.5 Appendix B fully, plus current processEscrowCoin in `public/service-workers/handlers/campaign.handler.js`, before starting any task.
+
+---
+
+### T-SC1 — Spec: MinimaAds.md updates for V3 escrow + on-chain status
+
+| Camp | Valor |
+|---|---|
+| **Status** | Pending ⬜ |
+| **Agent** | Opus |
+| **Fitxers** | `MinimaAds.md`, `AGENTS.md` |
+| **Spec** | MinimaAds.md §4 §6 §8 Appendix B |
+
+**Context:** Spec must land before any code so subsequent agents have an unambiguous contract. No code is written in this task.
+
+**Prompt:**
+```
+You are implementing T-SC1 for MinimaAds. Read CLAUDE.md, MinimaAds.md §4.4 §6.3 §6.5 §8.1 §8.5 §8.15 Appendix B, and AGENTS.md fully before writing any spec text.
+
+Task: Add the on-chain campaign-status spec. No code changes — only MinimaAds.md and AGENTS.md.
+
+MinimaAds.md edits:
+
+1. New subsection §4.7 "Campaign Status as On-chain State" — explain:
+   - Status (active|paused|finished) lives in ESCROW_SCRIPT_V3 coin STATE(7)
+   - Every node reads PREVSTATE(7) during NEWBLOCK discovery scan → no Maxima needed
+   - Manual creator action: applyStatusChange locally → buildAndPostStatusUpdateTx → V3 escrow change coin carries new STATE(7)
+   - Old V1/V2 coins unchanged; status sync only triggers on V3 coins
+
+2. New §6.10 "Campaign Status Update Flow (on-chain)" — narrative steps:
+   step 1: Creator clicks Pause/Resume/Finish in mycampaigns.js
+   step 2: FE applies local status via MA_LOCAL_STATUS (immediate UX)
+   step 3: FE runs buildAndPostStatusUpdateTx — spends current escrow coin, outputs same amount to ESCROW_ADDRESS_V3, txnstate port:7 value:<status_hex>, carries ports 1,3,4,5,6,11 forward
+   step 4: On Minima Hub approve → tx confirms on-chain
+   step 5: All nodes (including offline-then-online ones) see the change coin via NEWBLOCK scan, read PREVSTATE(7), call setCampaignStatus
+   step 6: signalFE("CAMPAIGN_UPDATED", { campaign_id, status }) → viewer SDKs invalidate liveness cache, stop serving the ad
+
+3. §6.5 Channel Open Flow — add note: channel-open spends MUST carry STATE(7) forward (= current PREVSTATE(7) or "active" default) so the new escrow change coin preserves the campaign status.
+
+4. §8.5 (CAMPAIGN_PAUSE/FINISH/RESUME) — change "Direction" line to note these are now optional fast-path notifications. Add subsection "Authoritative source: ESCROW_SCRIPT_V3 PREVSTATE(7) (on-chain)" pointing to §6.10. Mark CAMPAIGN_RESUME as DEPRECATED — resume is on-chain only since the offline-creator case cannot Maxima.
+
+5. §8.15 SW→FE Signal Contract — add row:
+   STATUS_TX_PENDING | { campaign_id, status, pending_uid } | mycampaigns.js (FE) | Status-change tx awaiting Hub approval
+
+6. Appendix B — split into B.2 (V2 script, "legacy") and new B.2.1 (V3 script). V3 script string:
+     LET creatorkey=PREVSTATE(1)
+     LET platformkey=PREVSTATE(5)
+     LET maxpubbudget=PREVSTATE(6)
+     LET status=PREVSTATE(7)
+     ASSERT SIGNEDBY(creatorkey)
+     LET payout=STATE(10)
+     LET feeflag=STATE(11)
+     LET change=@AMOUNT-payout
+     IF feeflag EQ 1 THEN
+       LET feeamount=STATE(12)
+       ASSERT VERIFYOUT(STATE(13) platformkey feeamount @TOKENID FALSE)
+     ENDIF
+     IF change GT 0 THEN
+       ASSERT VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE)
+     ENDIF
+     RETURN TRUE
+   The status/platformkey/maxpubbudget reads are no-ops — purely byte-different from V2 so that newscript yields a new address. The script does NOT enforce status; enforcement is in SW handlers (selectAd ignores non-active campaigns).
+
+7. Appendix B.3 — add rows:
+   | 7 | PREVSTATE(7) | Campaign status (hex-encoded UTF-8 of "active"/"paused"/"finished") | hex string | Read by DISCOVERY on every node — propagates pause/finish without creator online |
+   | 7 | STATE(7) | New status set by spending tx | hex string | Set on status-update tx; passed through on channel-open and refund spends |
+
+8. Appendix B.5 — add new subsection "Status Update Transaction":
+     txncreate id:<txnid>
+     txninput  id:<txnid> coinid:<ESCROW_COINID_V3> scriptmmr:true
+     txnoutput id:<txnid> storestate:true amount:<full_amount> address:<ESCROW_ADDRESS_V3>
+     txnstate  id:<txnid> port:1  value:<creator_wallet_pk>
+     txnstate  id:<txnid> port:3  value:<campaign_id_hex>
+     txnstate  id:<txnid> port:4  value:<creator_mx_hex>
+     txnstate  id:<txnid> port:5  value:<platform_key_or_0x00>
+     txnstate  id:<txnid> port:6  value:<max_pub_budget_or_0>
+     txnstate  id:<txnid> port:7  value:<new_status_hex>
+     txnstate  id:<txnid> port:10 value:0
+     txnstate  id:<txnid> port:11 value:0
+     txnsign   id:<txnid> publickey:<creator_wallet_pk>
+     txnpost   id:<txnid> mine:true auto:true
+     txndelete id:<txnid>
+   Note: payout=0, change=@AMOUNT — script's IF change GT 0 branch runs, asserting same-address change. STATE(10)=0 is intentional so the script reads payout=0.
+
+9. Appendix B.5 — update "Channel Open" template to add port:7 (carry current status forward).
+
+10. Appendix B.7 — change row "Status survives creator offline" from ❌ to ✅ (V3 only) with note "V1/V2 still require creator-online Maxima broadcasts".
+
+AGENTS.md edits:
+
+11. §9 Protocol Matrix (or wherever the message list lives) — add note next to CAMPAIGN_PAUSE/FINISH/RESUME: "Fast-path only; authoritative status is ESCROW_V3 PREVSTATE(7)".
+
+12. Append handoff entry in §8/§16 (whichever is the current history section) describing the V3 script registration and status-coin design.
+
+Do NOT modify any other file. Do NOT write any JS code. This task is spec-only.
+
+Definition of done:
+- [ ] MinimaAds.md §4.7, §6.10, §8.15 STATUS_TX_PENDING row, Appendix B.2.1 (V3 script), B.3 (PREVSTATE(7) rows), B.5 (Status Update tx + channel-open port:7 passthrough) all written
+- [ ] §8.5 CAMPAIGN_PAUSE/FINISH/RESUME deprecation/fast-path note added
+- [ ] Appendix B.7 row updated
+- [ ] AGENTS.md updated with V3 protocol note + handoff entry
+- [ ] No JS files touched
+- [ ] CONFLICT REPORT: if any spec section conflicts with the planned implementation, stop and report — do NOT improvise
+
+Provide the standard handoff note (CLAUDE.md §10) when done.
+```
+
+**Definition of done:**
+- [ ] §4.7, §6.10, §8.15 row, Appendix B.2.1, B.3 rows, B.5 status-update tx, B.7 row all present
+- [ ] §8.5 fast-path/deprecation note added
+- [ ] AGENTS.md protocol matrix + handoff updated
+- [ ] No code changes
+
+---
+
+### T-SC2 — SW: ESCROW_SCRIPT_V3 registration + scanEscrowCoins V3
+
+| Camp | Valor |
+|---|---|
+| **Status** | Pending ⬜ (depends on T-SC1) |
+| **Agent** | Sonnet |
+| **Fitxers** | `service.js` |
+| **Spec** | MinimaAds.md Appendix B.2.1, §6.10 |
+
+**Context:** Add V3 script registration alongside V1/V2. The address must be cached under a NEW keypair entry so V2 (`ESCROW_ADDRESS_V2`) is not clobbered. The scan loop must include V3 coins so DISCOVERY runs on them.
+
+**Prompt:**
+```
+You are implementing T-SC2 for MinimaAds. T-SC1 must be Done. Read CLAUDE.md, MinimaAds.md Appendix B.2.1 and §6.10, AGENTS.md, and the current `registerEscrowScript()` and `scanEscrowCoins()` in service.js.
+
+Task: Add ESCROW_SCRIPT_V3 registration and include the V3 address in the discovery scan.
+
+Changes to service.js ONLY:
+
+1. Add a new constant at the top (alongside ESCROW_SCRIPT and ESCROW_SCRIPT_V2):
+
+   var ESCROW_ADDRESS_V3 = '';
+
+   var ESCROW_SCRIPT_V3 =
+     "LET creatorkey=PREVSTATE(1) " +
+     "LET platformkey=PREVSTATE(5) " +
+     "LET maxpubbudget=PREVSTATE(6) " +
+     "LET status=PREVSTATE(7) " +
+     "ASSERT SIGNEDBY(creatorkey) " +
+     "LET payout=STATE(10) " +
+     "LET feeflag=STATE(11) " +
+     "LET change=@AMOUNT-payout " +
+     "IF feeflag EQ 1 THEN " +
+     "LET feeamount=STATE(12) " +
+     "ASSERT VERIFYOUT(STATE(13) platformkey feeamount @TOKENID FALSE) " +
+     "ENDIF " +
+     "IF change GT 0 THEN " +
+     "ASSERT VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE) " +
+     "ENDIF " +
+     "RETURN TRUE";
+
+2. Inside `registerEscrowScript()`, after the V2 newscript callback succeeds and BEFORE the CHANNEL_SCRIPT newscript call, insert a V3 newscript registration:
+
+   MDS.cmd("newscript script:\"" + ESCROW_SCRIPT_V3 + "\" trackall:false", function(resV3) {
+     if (!resV3.status) {
+       MDS.log("[ADS] newscript V3 failed: " + resV3.error);
+       // proceed regardless — V3 features unavailable
+     } else {
+       ESCROW_ADDRESS_V3 = resV3.response.address;
+       MDS.log("[ADS] ESCROW_ADDRESS_V3: " + ESCROW_ADDRESS_V3);
+       MDS.keypair.set("ESCROW_ADDRESS_V3", ESCROW_ADDRESS_V3, function() {});
+     }
+     // ... existing CHANNEL_SCRIPT newscript chain continues here
+   });
+
+3. Update `scanEscrowCoins()` to scan V3 as well:
+
+   function scanEscrowCoins() {
+     _scanAddress(ESCROW_ADDRESS);
+     _scanAddress(ESCROW_ADDRESS_V2);
+     _scanAddress(ESCROW_ADDRESS_V3);
+   }
+
+Rules:
+- Rhino-safe: var, function(), string concat, MDS.log, no trailing commas, no arrow functions.
+- Do NOT touch processEscrowCoin (that's T-SC4).
+- Do NOT touch FE files.
+- Do NOT modify channel handlers.
+
+Definition of done:
+- [ ] ESCROW_SCRIPT_V3 and ESCROW_ADDRESS_V3 declared
+- [ ] registerEscrowScript registers V3 after V2 succeeds
+- [ ] scanEscrowCoins iterates V1, V2, V3 addresses
+- [ ] V3 newscript failure does NOT abort the init chain
+- [ ] AGENTS.md §8 handoff entry added
+
+Verification: install dapp on a fresh node; SW log should show `[ADS] ESCROW_ADDRESS_V3: 0x...` distinct from V1/V2 addresses. `coins address:<V3_ADDRESS>` returns [] until a V3 campaign is created.
+
+Provide the standard handoff note (CLAUDE.md §10) when done.
+```
+
+**Definition of done:**
+- [ ] V3 script + address constants declared
+- [ ] V3 newscript registered in init chain
+- [ ] Scan covers V1, V2, V3
+- [ ] No regression on V1/V2 init
+
+---
+
+### T-SC3 — FE: V3 script address + new campaigns use V3
+
+| Camp | Valor |
+|---|---|
+| **Status** | Pending ⬜ (depends on T-SC2) |
+| **Agent** | Sonnet |
+| **Fitxers** | `dapp/views/creator.js`, `dapp/app.js` |
+| **Spec** | MinimaAds.md Appendix B.2.1, B.5 |
+
+**Context:** New campaigns funded from creator.js must target V3 address. The funding tx must set port:7 = `"active"` (hex). Channel-open spends in app.js must pass through `STATE(7)` so the escrow change coin retains the status.
+
+**Prompt:**
+```
+You are implementing T-SC3 for MinimaAds. T-SC2 must be Done. Read CLAUDE.md, MinimaAds.md Appendix B.2.1 §B.5, and AGENTS.md before writing any code.
+
+Task: Wire creator.js to fund NEW campaigns to ESCROW_ADDRESS_V3 with port:7 = hex("active"), and update channel-open spends in app.js to carry STATE(7) forward.
+
+PART 1 — creator.js:
+
+1. Add ESCROW_SCRIPT_V3 FE constant (byte-identical to the SW one in T-SC2).
+
+2. Replace `resolveEscrowAddress()`:
+   - Now resolves V3 first (keypair 'ESCROW_ADDRESS_V3'); registers via newscript if missing; caches.
+   - Returns the V3 address. V2 fallback only if V3 newscript fails (log a warning).
+   - Rename existing function to `resolveEscrowAddressV3` if clearer, OR keep name and switch the version inside.
+
+3. In `fundEscrowAndPublish`, after stateJson is built, append port:7:
+     stateJson = stateJson.slice(0, -1) + ',"7":"' + utf8ToHex('active').toUpperCase() + '"}';
+   Apply this regardless of feeflag — port:7 is independent of fee branch.
+   (If feeflag=1 also appends ports 12/13, do port:7 BEFORE that append so JSON stays valid. Easiest: append port:7 unconditionally before any conditional appends.)
+
+4. Verify: campaign funding tx now lands at V3 address, and the coin has 7 PREVSTATE ports populated (1..7) plus port:11 (feeflag).
+
+PART 2 — dapp/app.js handleDoChannelOpen / buildAndPostChannelTx:
+
+5. The split tx state currently sets ports 1, 3, 4, 10, 11. Add port:7 passthrough:
+   - Before building stateCmds, fetch the current escrow coin's PREVSTATE(7) value.
+     One way: re-read the input coin's prevstate after `txninput` — `r2.response.transaction.inputs[0].state` (verify exact path against refs/Minima-1.0.45 — the input coin's state may live at `r2.response.transaction.inputs[0].state` or `.prevstate`). Use getStateVar(states, 7) to extract.
+   - If empty (legacy V1/V2 coin): set port:7 = hex('active') so going forward the change coin behaves as V3 status-bearing.
+   - If present: forward the same hex value to STATE(7).
+   - Add to stateCmds:
+       'txnstate id:' + txId + ' port:7 value:' + statusHex
+
+6. Also resolve ESCROW_ADDRESS_V3 in handleDoChannelOpen (alongside the existing V2/V1 lookup), and prefer V3 when the campaign's escrow coin lives at V3 (compare coin address against V3 first). The split-output address must match the input coin's address — use whatever resolveEscrowAddressV3() returned for new campaigns; legacy campaigns keep using their original V2/V1 address.
+
+PART 3 — Backwards compatibility check:
+
+7. A campaign created BEFORE T-SC3 (V2 coin) → channel-open still spends from V2 address → keep that path working unchanged. The port:7 line is fine to include on V2 spends too (the V2 script does not read it; harmless extra state).
+
+Rules:
+- FE code: arrow functions, let/const, template literals are FINE (browser context).
+- Do NOT modify SW files.
+- Do NOT change setCampaignStatus or processEscrowCoin (T-SC4 / T-SC5).
+- If r2.response shape for input prevstate is unclear: check refs/Minima-1.0.45/src/org/minima/system/commands/txn/txnoutput.java and txninput.java.
+
+Definition of done:
+- [ ] resolveEscrowAddress targets V3 first
+- [ ] Funding tx sets port:7 = hex('active')
+- [ ] New campaigns land at ESCROW_ADDRESS_V3 (verified on chain)
+- [ ] Channel-open split tx carries port:7 forward (status preserved on change coin)
+- [ ] Legacy V2 campaigns continue to channel-open without errors
+
+Verification: create a new campaign, then on the chain explorer (or via `coins address:<V3>`) confirm the coin has PREVSTATE(7) = hex('active'). Open a channel; the resulting escrow change coin should also have PREVSTATE(7) = hex('active').
+
+Provide the standard handoff note (CLAUDE.md §10) when done.
+```
+
+**Definition of done:**
+- [ ] V3 funding tx with port:7 active
+- [ ] Channel-open split preserves port:7
+- [ ] Legacy V1/V2 spends still work
+
+---
+
+### T-SC4 — SW DISCOVERY: read PREVSTATE(7) and sync local status
+
+| Camp | Valor |
+|---|---|
+| **Status** | Pending ⬜ (depends on T-SC2) |
+| **Agent** | Sonnet |
+| **Fitxers** | `public/service-workers/handlers/campaign.handler.js` |
+| **Spec** | MinimaAds.md §6.10, Appendix B.3 |
+
+**Context:** `processEscrowCoin()` already runs on every NEWBLOCK for every escrow address. Add a small block at the end of the known-campaign branch that reads PREVSTATE(7), compares to local STATUS, and calls setCampaignStatus when they differ.
+
+**Prompt:**
+```
+You are implementing T-SC4 for MinimaAds. T-SC2 must be Done. Read CLAUDE.md, MinimaAds.md §6.10 §8.15 Appendix B.3, AGENTS.md, and the current processEscrowCoin in public/service-workers/handlers/campaign.handler.js.
+
+Task: Extend processEscrowCoin to sync local campaign STATUS from on-chain PREVSTATE(7).
+
+Inside processEscrowCoin's `if (campaign) { ... }` branch (where it currently syncs BUDGET_REMAINING and MAX_PUBLISHER_BUDGET), add — AFTER the existing sync logic — a status sync block:
+
+  var onChainStatusHex = getStateVar(states, 7);
+  if (onChainStatusHex) {
+    var onChainStatus = '';
+    try { onChainStatus = hexToUtf8(onChainStatusHex); } catch (ex) {
+      MDS.log("[DISCOVERY] could not decode PREVSTATE(7) for " + campaignId + ": " + ex);
+    }
+    if (onChainStatus === 'active' || onChainStatus === 'paused' || onChainStatus === 'finished') {
+      var localStatus = (campaign.STATUS || '').toLowerCase();
+      // Terminal-state guard: do NOT resurrect a finished campaign from an older coin reading
+      if (localStatus === 'finished' && onChainStatus !== 'finished') {
+        MDS.log("[DISCOVERY] ignoring on-chain status " + onChainStatus + " for finished campaign: " + campaignId);
+      } else if (onChainStatus !== localStatus) {
+        MDS.log("[DISCOVERY] on-chain status sync: " + campaignId + " " + localStatus + " -> " + onChainStatus);
+        setCampaignStatus(campaignId, onChainStatus, function(stErr) {
+          if (stErr) {
+            MDS.log("[DISCOVERY] setCampaignStatus failed: " + stErr);
+            return;
+          }
+          signalFE("CAMPAIGN_UPDATED", { campaign_id: campaignId, status: onChainStatus });
+        });
+      }
+    } else {
+      MDS.log("[DISCOVERY] unknown on-chain status value '" + onChainStatus + "' for " + campaignId);
+    }
+  }
+
+Rules:
+- Rhino-safe: var, function(), string concat, MDS.log, no trailing commas, no arrow functions.
+- Place the new block AFTER the budget sync block but BEFORE `return;` inside the `if (campaign)` branch.
+- Do NOT touch the unknown-campaign branch (REQUEST_CAMPAIGN_DATA flow).
+- Do NOT remove or weaken the terminal-state guard — it prevents an older V3 coin (e.g. before the finish tx confirmed) from un-finishing the campaign if scanned later.
+- _knownEscrowCoins still caches by coinId; status sync runs only once per coin per session — which is correct because a status change creates a new change coin (new coinId).
+
+Definition of done:
+- [ ] PREVSTATE(7) decoded and validated against {active|paused|finished}
+- [ ] Terminal-state guard prevents resurrection of finished campaigns
+- [ ] setCampaignStatus + signalFE("CAMPAIGN_UPDATED") fires on transition
+- [ ] Legacy V1/V2 coins (no port:7) are silently skipped (getStateVar returns '')
+- [ ] AGENTS.md §16 entry added
+
+Verification: on viewer node A, run a campaign created on creator node B. Pause the campaign on B (T-SC5 not required yet — manually craft a status-update tx via console if needed, or wait for T-SC6). On A's NEWBLOCK following the tx confirmation, log should show "[DISCOVERY] on-chain status sync: ... active -> paused" and signalFE fires.
+
+Provide the standard handoff note (CLAUDE.md §10) when done.
+```
+
+**Definition of done:**
+- [ ] PREVSTATE(7) read and applied via setCampaignStatus
+- [ ] Terminal-state guard present
+- [ ] CAMPAIGN_UPDATED signalled to FE
+- [ ] Backwards compatible (V1/V2 coins skipped silently)
+
+---
+
+### T-SC5 — Core: buildStatusUpdateTxPlan + carry-forward helpers
+
+| Camp | Valor |
+|---|---|
+| **Status** | Pending ⬜ (depends on T-SC2) |
+| **Agent** | Sonnet |
+| **Fitxers** | `core/campaigns.js` |
+| **Spec** | MinimaAds.md Appendix B.5 (Status Update tx) |
+
+**Context:** Pure-data helpers used by T-SC6 to assemble the status-update tx. Keeping the tx-shape builder in core (no MDS calls) makes it testable and keeps app.js focused on the txncreate/sign/post sequence.
+
+**Prompt:**
+```
+You are implementing T-SC5 for MinimaAds. T-SC2 must be Done. Read CLAUDE.md, MinimaAds.md Appendix B.5 (Status Update tx), AGENTS.md §4, and the existing core/campaigns.js.
+
+Task: Add two pure helper functions to core/campaigns.js. No DOM, no MDS.cmd, no MDS.sql.
+
+Functions to add:
+
+  // Returns the list of port:value pairs to set on a status-update tx.
+  // Caller supplies the resolved on-chain state of the current escrow coin.
+  // statusHex must be already hex-encoded (e.g. '0x' + utf8ToHex('paused').toUpperCase()).
+  // Returns an array of { port, value } objects.
+  function buildStatusUpdateStatePorts(currentEscrow, newStatusHex) {
+    // currentEscrow = {
+    //   walletPk:        '0x...',          // PREVSTATE(1)
+    //   expiryBlock:     '1234567',        // PREVSTATE(2) — pass through if known
+    //   campaignIdHex:   '0x...',          // PREVSTATE(3)
+    //   creatorMxHex:    '0x...',          // PREVSTATE(4)
+    //   platformKeyHex:  '0x...' | '0x00', // PREVSTATE(5)
+    //   maxPubBudget:    '0' | '<num>',    // PREVSTATE(6)
+    //   feeflag:         '0' | '1'         // STATE(11) — pass through to preserve coin behavior
+    // }
+    // newStatusHex = '0x' + utf8ToHex('active' | 'paused' | 'finished').toUpperCase()
+    //
+    // Returns ports 1, 3, 4, 5, 6, 7, 10, 11 (port:2 omitted — script doesn't read it on status-update; if needed for downstream parity, include too).
+    // STATE(10) = 0 (payout=0; full change-back), STATE(11) = 0 (no fee output on status-update).
+  }
+
+  // Validates a status string and returns the hex encoding suitable for txnstate.
+  // Returns '' if invalid.
+  function encodeStatusForTx(status) {
+    // accept only 'active', 'paused', 'finished' (case-insensitive)
+    // returns '0x' + utf8ToHex(lowered).toUpperCase() or '' on invalid
+  }
+
+Implementation notes:
+- Use the existing utf8ToHex helper from core/minima.js (already loaded before campaigns.js).
+- Function declarations only — no const/let/arrow (kept consistent so SW load works if ever needed).
+- Plain objects in the returned array: { port: 7, value: '0x...' } etc.
+- The port:10 value should be the string '0' (txnstate expects strings).
+- The port:11 value should be the string '0' (no fee on status-update).
+
+Do NOT change any existing function signature in core/campaigns.js. Do NOT call MDS.cmd from these helpers.
+
+Definition of done:
+- [ ] buildStatusUpdateStatePorts returns the correct ordered array
+- [ ] encodeStatusForTx validates and hex-encodes the status string
+- [ ] No MDS.cmd / MDS.sql calls in either helper
+- [ ] AGENTS.md §16 updated
+
+Provide the standard handoff note (CLAUDE.md §10) when done.
+```
+
+**Definition of done:**
+- [ ] buildStatusUpdateStatePorts present, pure
+- [ ] encodeStatusForTx present, validates input
+- [ ] No side effects
+
+---
+
+### T-SC6 — FE: buildAndPostStatusUpdateTx + mycampaigns.js integration
+
+| Camp | Valor |
+|---|---|
+| **Status** | Pending ⬜ (depends on T-SC3, T-SC4, T-SC5) |
+| **Agent** | **Opus** |
+| **Fitxers** | `dapp/app.js`, `dapp/views/mycampaigns.js` |
+| **Spec** | MinimaAds.md §6.10 §8.15 Appendix B.5 |
+
+**Context:** Compose the on-chain status update from the creator's UI. Reuses the same MDS_PENDING approve/deny machinery already proven for channel-open spends. The local MA_LOCAL_STATUS broadcast remains as immediate-feedback path; the on-chain tx is the propagation mechanism for other nodes. This is the integration task — Opus because it touches the pending-approval ctx restore plus a multi-step tx flow.
+
+**Prompt:**
+```
+You are implementing T-SC6 for MinimaAds. T-SC3, T-SC4, and T-SC5 must all be Done. Read CLAUDE.md, MinimaAds.md §6.10 §8.15 Appendix B.5, AGENTS.md, the current handleDoChannelOpen / buildAndPostChannelTx / savePendingChannelOp / handleFePending in dapp/app.js, and the current pause/resume/finish buttons in dapp/views/mycampaigns.js.
+
+Task: Add buildAndPostStatusUpdateTx in app.js and wire mycampaigns.js buttons to call it AFTER the existing MA_LOCAL_STATUS broadcast.
+
+PART 1 — dapp/app.js, new functions:
+
+1. buildAndPostStatusUpdateTx(campaignId, newStatus, onResult)
+   - Validate newStatus is 'active'|'paused'|'finished' via encodeStatusForTx (returns hex or '')
+   - Load campaign: getCampaign(campaignId, ...)
+   - Extract: ESCROW_COINID, ESCROW_WALLET_PK, plus enough context to build state ports.
+     The platform key / max_pub_budget / feeflag values aren't kept in the local DB explicitly — read them from the current escrow coin's prevstate via:
+       MDS.cmd('coins coinid:' + escrowCoinId + ' relevant:false', function(res) {
+         var prevstate = res.response[0].prevstate;
+         // getStateVar to read ports 5, 6, then look at coin.state for 11 if needed
+       })
+     If prevstate(5) is missing or '0x00': this is a legacy V1/V2 coin OR a V3 coin without platform fee. The status-update will still work — pass values forward as-is.
+   - Resolve ESCROW_ADDRESS_V3 from keypair (must exist — T-SC2 set it). If missing, return error.
+   - Build the tx:
+       var txId = 'st_' + generateUID();
+       MDS.cmd('txncreate id:' + txId)
+       MDS.cmd('txninput id:' + txId + ' coinid:' + escrowCoinId + ' scriptmmr:true')
+       MDS.cmd('txnoutput id:' + txId + ' storestate:true amount:' + fullAmount + ' address:' + escrowAddrV3)
+       // for each port from buildStatusUpdateStatePorts(...):
+       MDS.cmd('txnstate id:' + txId + ' port:<p> value:<v>')
+       MDS.cmd('txnsign id:' + txId + ' publickey:' + walletPK)
+         → if pending: savePendingChannelOp(uid, { kind:'status_update_sign', ctx... }) ; signalFE('STATUS_TX_PENDING', { campaign_id, status, pending_uid })
+       MDS.cmd('txnpost id:' + txId + ' mine:true')
+         → if pending: savePendingChannelOp(uid, { kind:'status_update_post', ctx... }) ; signalFE('STATUS_TX_PENDING', ...)
+       MDS.cmd('txndelete id:' + txId)
+       onResult({ ok:true, new_escrow_coinid: ... })
+
+2. After successful post: extract the new escrow change coinid from txpow.body.txn.outputs (the one whose address === escrowAddrV3), and UPDATE CAMPAIGNS.ESCROW_COINID = newCoinId via sqlQuery. Then signalFE('CAMPAIGN_UPDATED', { campaign_id, status: newStatus }).
+
+3. Extend handleFePending (the MDS_PENDING resume in app.js) to recognise kind === 'status_update_sign' and kind === 'status_update_post' and resume the tx from the saved ctx (same pattern as channel_split_sign / channel_split_post).
+
+PART 2 — dapp/views/mycampaigns.js:
+
+4. After each `MDS.comms.broadcast(JSON.stringify({ type: 'MA_LOCAL_STATUS', ... }))` line (3 of them — paused / active / finished), add:
+     buildAndPostStatusUpdateTx(c.ID, '<paused|active|finished>', function(res) {
+       if (!res || !res.ok) {
+         alert('Status updated locally but on-chain propagation failed: ' + (res && res.error ? res.error : 'unknown'));
+       }
+     });
+   Use `window.buildAndPostStatusUpdateTx` if needed (app.js attaches it globally).
+
+5. Add a small visual indicator next to the row when STATUS_TX_PENDING fires for that campaign:
+   Listen for the 'STATUS_TX_PENDING' MDSCOMMS signal and append a "(awaiting on-chain confirm)" label.
+
+PART 3 — Rules and constraints:
+
+- FE code may use let/const/arrow (browser context).
+- Do NOT remove the MA_LOCAL_STATUS broadcast — it's still needed for immediate creator-UI feedback and for fast-path propagation to nodes currently online.
+- Do NOT make the UI wait for the on-chain tx to confirm — fire-and-forget; the user can move on. The local DB is already up-to-date via MA_LOCAL_STATUS handling on the creator's SW.
+- The status-update tx must NOT fire for legacy campaigns whose escrow coin is on V1/V2. In that case skip the on-chain tx silently and log a warning. Detect via: read the campaign's escrow coin address; if it doesn't equal ESCROW_ADDRESS_V3, skip the tx.
+
+Definition of done:
+- [ ] buildAndPostStatusUpdateTx exists, handles pending approve/deny
+- [ ] handleFePending recognises status_update_sign and status_update_post kinds
+- [ ] After successful tx, CAMPAIGNS.ESCROW_COINID updated to the new change coinid
+- [ ] mycampaigns.js Pause/Resume/Finish call the on-chain tx after MA_LOCAL_STATUS
+- [ ] STATUS_TX_PENDING signal fires while awaiting approval
+- [ ] Legacy V1/V2 campaigns: status-update tx silently skipped with log warning
+- [ ] No regression on existing MA_LOCAL_STATUS flow
+
+Verification: 2-node test. Node A creates a campaign (V3). Node B sees the campaign and the active status. Node A pauses → Minima Hub asks to approve. Approve. Wait 1–2 blocks. On node B (without any Maxima broadcast received): SW log shows "[DISCOVERY] on-chain status sync: <id> active -> paused" and the FE updates within the next NEWBLOCK. Repeat for finish → confirm status propagates without Maxima.
+
+Provide the standard handoff note (CLAUDE.md §10) when done.
+```
+
+**Definition of done:**
+- [ ] On-chain status-update tx posts cleanly
+- [ ] Pending approve/deny resumes correctly
+- [ ] mycampaigns.js wired
+- [ ] STATUS_TX_PENDING signal handled
+- [ ] Legacy campaigns skipped safely
+- [ ] 2-node propagation verified without Maxima
+
+---
+
+### T-SC7 — Tests + KNOWN_ISSUES entry + docs cleanup
+
+| Camp | Valor |
+|---|---|
+| **Status** | Pending ⬜ (depends on T-SC6) |
+| **Agent** | Sonnet |
+| **Fitxers** | `docs/KNOWN_ISSUES.md`, `docs/VERIFICATION.md`, `AGENTS.md` |
+| **Spec** | — |
+
+**Context:** Document the new fragility points and the verification procedure. No production code changes.
+
+**Prompt:**
+```
+You are implementing T-SC7 for MinimaAds. T-SC6 must be Done. Read CLAUDE.md, docs/KNOWN_ISSUES.md, docs/VERIFICATION.md, AGENTS.md.
+
+Task: Document the V3 status-coin design — its fragility points, verification steps, and update the project-wide protocol matrix.
+
+1. docs/KNOWN_ISSUES.md — append new numbered entries:
+
+   - On-chain status sync only triggers on a NEW coinid. Status-update txs always create a new change coin (different coinid), so _knownEscrowCoins[coinId] is fresh and DISCOVERY processes it. Do NOT add coinid de-dup before the status sync block.
+   - port:7 missing on V2/V1 coins: status sync is silently skipped (legacy campaigns continue to rely on Maxima broadcasts + liveness pings).
+   - Race condition: if the creator pauses AND the viewer's SW scans the OLD escrow coin in the same NEWBLOCK (before the change coin appears), the viewer still sees 'active'. Next NEWBLOCK after the status-update tx confirms resolves it. Acceptable: ≤1 block delay.
+   - Terminal-state guard in processEscrowCoin: a finished campaign is NEVER reverted to active/paused from on-chain reads. This protects against the creator accidentally re-broadcasting an older coin scan if multiple V3 coins ever existed for the same campaign.
+   - PREVSTATE(7) MUST be hex-encoded UTF-8 (e.g. '0x6163746976' for 'active'). KissVM stores text as hex; reads decode via hexToUtf8.
+
+2. docs/VERIFICATION.md — append a section "Status Coin (T-SC) verification":
+   - Setup: 2 nodes A (creator) and B (viewer), both online.
+   - Test 1: Create campaign on A → confirm on B that the escrow coin's address is ESCROW_ADDRESS_V3 (`coins address:<V3>`) and PREVSTATE(7) decodes to 'active'.
+   - Test 2: Take B offline. On A: pause campaign → approve pending tx → wait for confirmation. Bring B back online. Within 1–2 NEWBLOCKs on B, SW log shows "[DISCOVERY] on-chain status sync: <id> active -> paused", FE updates.
+   - Test 3: On A: finish campaign → repeat. Verify B's local STATUS = 'finished'.
+   - Test 4 (regression): Create a campaign with a legacy V2 address (revert creator.js temporarily, or use a pre-existing one). Pause it. Verify the on-chain tx is skipped with a log warning, and the Maxima broadcast still propagates.
+
+3. AGENTS.md §9 Protocol Matrix (or equivalent message list):
+   - Mark CAMPAIGN_PAUSE, CAMPAIGN_FINISH, CAMPAIGN_RESUME as "fast-path; authoritative state is ESCROW_V3 PREVSTATE(7)"
+   - Add STATUS_TX_PENDING signal to the SW→FE signal list (if not already added by T-SC1)
+   - Add new handoff entry in §8/§16 describing the T-SC implementation completion.
+
+Do NOT modify any JS files.
+
+Definition of done:
+- [ ] KNOWN_ISSUES.md has 5 new entries for V3 status coin
+- [ ] VERIFICATION.md has the 4-test status-coin section
+- [ ] AGENTS.md protocol matrix annotated + handoff entry added
+
+Provide the standard handoff note (CLAUDE.md §10) when done.
+```
+
+**Definition of done:**
+- [ ] KNOWN_ISSUES.md updated
+- [ ] VERIFICATION.md updated
+- [ ] AGENTS.md updated
+- [ ] No code changes
+
+---

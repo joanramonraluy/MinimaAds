@@ -168,7 +168,6 @@ function initDB(cb) {
                       if (chErr) { MDS.log("[DB] initDB: failed to create CHANNEL_HISTORY — " + chErr); return; }
                     sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS VIEWER_WALLET_PK VARCHAR(512) DEFAULT ''", function() {
                     sqlQuery("ALTER TABLE CAMPAIGNS ADD COLUMN IF NOT EXISTS COOLDOWN_MS BIGINT DEFAULT 300000", function() {
-                    sqlQuery("ALTER TABLE ADS DROP COLUMN IMAGE_URL", function() {
                     sqlQuery("ALTER TABLE ADS ADD COLUMN IF NOT EXISTS IMAGE_DATA CLOB DEFAULT NULL", function() {
                     sqlQuery("ALTER TABLE ADS ADD COLUMN IF NOT EXISTS SHOW_TITLE SMALLINT DEFAULT 1", function() {
                     sqlQuery("ALTER TABLE ADS ADD COLUMN IF NOT EXISTS SHOW_BODY SMALLINT DEFAULT 1", function() {
@@ -194,7 +193,6 @@ function initDB(cb) {
                     }); // end SHOW_BODY migration
                     }); // end SHOW_TITLE migration
                     }); // end IMAGE_DATA migration
-                    }); // end IMAGE_URL drop
                     }); // end COOLDOWN_MS migration
                     }); // end VIEWER_WALLET_PK migration
                     }); // end CHANNEL_HISTORY creation

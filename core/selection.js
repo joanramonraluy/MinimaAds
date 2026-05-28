@@ -9,7 +9,8 @@ function selectAd(userAddress, userInterests, campaigns) {
   var eligible = campaigns.filter(function(c) {
     return c.STATUS === "active"
       && parseFloat(c.BUDGET_REMAINING) >= parseFloat(c.REWARD_VIEW)
-      && c.CREATOR_ADDRESS.toUpperCase() !== userAddress.toUpperCase();
+      && c.CREATOR_ADDRESS.toUpperCase() !== userAddress.toUpperCase()
+      && (!c.EXPIRES_AT || parseInt(c.EXPIRES_AT, 10) > Date.now());
   });
 
   var matched = eligible.filter(function(c) {

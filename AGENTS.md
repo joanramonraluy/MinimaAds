@@ -195,6 +195,14 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 ## 8) Current Handoff Notes
 
+2026-05-28 (T-SC3: FE — V3 script address + new campaigns use V3 + channel-open port:7 passthrough):
+- **Scope**: `dapp/views/creator.js`, `dapp/app.js`. No SW files touched.
+- **creator.js**: Added `ESCROW_SCRIPT_V3` FE constant (byte-identical to SW). Replaced `resolveEscrowAddress()`: now tries `ESCROW_ADDRESS_V3` first (keypair lookup, then newscript); falls back to V2 only if V3 newscript fails (warns and delegates to previous V2 logic). Added `port:7 = hex('active')` to `stateJson` after the hasPlatformKey branch — applied regardless of feeflag so all new campaigns land at V3 with initial status on-chain.
+- **app.js** `handleDoChannelOpen`: added `ESCROW_ADDRESS_V3` keypair lookup (V3 > V2 > V1 preference chain). The resolved `escrowAddr` is a safety fallback only — actual output address is taken from the input coin.
+- **app.js** `buildAndPostChannelTx`: after `txninput`, reads `r2.response.transaction.inputs[0].address` as `coinAddr` (used for split and change outputs, replacing hard-coded `ctx.escrowAddr`). Reads `r2.response.transaction.inputs[0].state` (JSONArray `{port,data}`) to extract port 7; defaults to `hex('active')` when absent (V1/V2 coins). Adds `txnstate port:7 value:<statusHex>` to `stateCmds`. Port:7 on V1/V2 spends is harmless extra state (V1/V2 scripts ignore it).
+- **Backwards compat**: V1/V2 channel-open continues to work — `coinAddr` matches the original escrow address; `statusHex` defaults to `hex('active')`; no V1/V2 script assertion is affected.
+- **Next**: T-SC4 (SW DISCOVERY: read PREVSTATE(7) and sync local status in processEscrowCoin).
+
 2026-05-28 (T-SC2: ESCROW_SCRIPT_V3 registration + scanEscrowCoins V3):
 - **Scope**: `service.js` only. No other files touched.
 - **Changes**: added `ESCROW_SCRIPT_V3` constant (byte-different from V2 — adds no-op `LET maxpubbudget=PREVSTATE(6)` and `LET status=PREVSTATE(7)`); added `ESCROW_ADDRESS_V3 = ''` global; inserted V3 `newscript` call in `registerEscrowScript()` between V2 and CHANNEL_SCRIPT; extended `scanEscrowCoins()` with `_scanAddress(ESCROW_ADDRESS_V3)`.

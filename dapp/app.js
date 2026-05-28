@@ -353,26 +353,32 @@ function handleDoChannelOpen(data) {
 
     MDS.keypair.get('CHANNEL_SCRIPT_ADDRESS', function(chRes) {
       var channelAddr = chRes && chRes.status ? chRes.value : '';
-      MDS.keypair.get('ESCROW_ADDRESS_V2', function(esResV2) {
-        var escrowAddrV2 = esResV2 && esResV2.status ? esResV2.value : '';
-        MDS.keypair.get('ESCROW_ADDRESS', function(esRes) {
-          var escrowAddr = escrowAddrV2 || (esRes && esRes.status ? esRes.value : '');
-          if (!channelAddr || !escrowAddr) {
-            console.error('[CHANNEL] DO_CHANNEL_OPEN: missing script addresses',
-              'channel:', channelAddr, 'escrow:', escrowAddr);
-            return;
-          }
-          buildAndPostChannelTx({
-            campaignId:    campaignId,
-            viewerKey:     viewerKey,
-            viewerMx:      viewerMx,
-            viewerWalletPK: viewerWalletPK,
-            maxAmount:     maxAmount,
-            budgetLeft:    budgetLeft,
-            escrowCoinId:  escrowCoinId,
-            walletPK:      walletPK,
-            channelAddr:   channelAddr,
-            escrowAddr:    escrowAddr
+      MDS.keypair.get('ESCROW_ADDRESS_V3', function(esResV3) {
+        var escrowAddrV3 = esResV3 && esResV3.status ? esResV3.value : '';
+        MDS.keypair.get('ESCROW_ADDRESS_V2', function(esResV2) {
+          var escrowAddrV2 = esResV2 && esResV2.status ? esResV2.value : '';
+          MDS.keypair.get('ESCROW_ADDRESS', function(esRes) {
+            // Prefer V3 > V2 > V1. The actual output address is overridden in
+            // buildAndPostChannelTx from the input coin's address, so this is
+            // only a safety fallback for the error-log path.
+            var escrowAddr = escrowAddrV3 || escrowAddrV2 || (esRes && esRes.status ? esRes.value : '');
+            if (!channelAddr || !escrowAddr) {
+              console.error('[CHANNEL] DO_CHANNEL_OPEN: missing script addresses',
+                'channel:', channelAddr, 'escrow:', escrowAddr);
+              return;
+            }
+            buildAndPostChannelTx({
+              campaignId:    campaignId,
+              viewerKey:     viewerKey,
+              viewerMx:      viewerMx,
+              viewerWalletPK: viewerWalletPK,
+              maxAmount:     maxAmount,
+              budgetLeft:    budgetLeft,
+              escrowCoinId:  escrowCoinId,
+              walletPK:      walletPK,
+              channelAddr:   channelAddr,
+              escrowAddr:    escrowAddr
+            });
           });
         });
       });
@@ -399,11 +405,21 @@ function buildAndPostChannelTx(ctx) {
       var change = parseFloat((actualAmount - ctx.maxAmount).toFixed(6));
       console.log('[CHANNEL] escrow split actualAmount:', actualAmount, 'maxAmount:', ctx.maxAmount, 'change:', change);
 
-      // output[0] — split coin (max_amount → ESCROW_ADDRESS)
+      // Use the coin's actual address so V1/V2/V3 change coins return to their own script.
+      var coinAddr = r2.response.transaction.inputs[0].address || ctx.escrowAddr;
+      // Read PREVSTATE(7) for status passthrough (V3 coins only; V1/V2 coins have no port 7).
+      var coinStates = r2.response.transaction.inputs[0].state || [];
+      var statePort7 = null;
+      for (var si = 0; si < coinStates.length; si++) {
+        if (coinStates[si].port == 7) { statePort7 = coinStates[si]; break; }
+      }
+      var statusHex = (statePort7 && statePort7.data) || ('0x' + utf8ToHex('active').toUpperCase());
+
+      // output[0] — split coin (max_amount → coinAddr, matches input coin's script)
       MDS.cmd('txnoutput id:' + txId
             + ' storestate:true'
             + ' amount:' + ctx.maxAmount
-            + ' address:' + ctx.escrowAddr, function(r3) {
+            + ' address:' + coinAddr, function(r3) {
         if (!r3.status) { fail('txnoutput[split]', r3); return; }
 
         function afterChange(r4) {
@@ -412,6 +428,7 @@ function buildAndPostChannelTx(ctx) {
           // STATE for Split Tx: NO VIEWER KEY.
           // port:4 = creator Mx contact preserved so the change coin remains
           // discoverable by other nodes via processEscrowCoin (STATE 3+4 required).
+          // port:7 = status passthrough (V3 coins carry it forward; harmless on V1/V2).
           // port:5/6 intentionally omitted — ESCROW_SCRIPT_V2 only reads PREVSTATE(5)
           // inside the feeflag=1 branch, which is never taken on split/open spends.
           var creatorMxHex = '0x' + utf8ToHex(MY_MX_ADDRESS).toUpperCase();
@@ -419,6 +436,7 @@ function buildAndPostChannelTx(ctx) {
             'txnstate id:' + txId + ' port:1 value:' + ctx.walletPK,
             'txnstate id:' + txId + ' port:3 value:' + campaignIdHex,
             'txnstate id:' + txId + ' port:4 value:' + creatorMxHex,
+            'txnstate id:' + txId + ' port:7 value:' + statusHex,
             'txnstate id:' + txId + ' port:10 value:' + ctx.maxAmount,
             'txnstate id:' + txId + ' port:11 value:0'
           ];
@@ -482,7 +500,7 @@ function buildAndPostChannelTx(ctx) {
           MDS.cmd('txnoutput id:' + txId
                 + ' storestate:true'
                 + ' amount:' + change
-                + ' address:' + ctx.escrowAddr, afterChange);
+                + ' address:' + coinAddr, afterChange);
         } else {
           afterChange(null);
         }

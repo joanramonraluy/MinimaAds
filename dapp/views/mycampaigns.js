@@ -345,24 +345,102 @@ function _appendMyCampaignActions(tdActions, c) {
   }
 
   if (c.STATUS === 'active') {
-    tdActions.appendChild(_makeBtn('Pausar', false, function() {
+    tdActions.appendChild(_makeBtn('Pause', false, function() {
       _disableAll();
-      MDS.comms.broadcast(JSON.stringify({ type: 'MA_LOCAL_STATUS', campaign_id: c.ID, status: 'paused' }), function() {});
+      _applyStatusChange(c.ID, 'paused');
     }));
   }
 
   if (c.STATUS === 'paused') {
-    tdActions.appendChild(_makeBtn('Reprendre', false, function() {
+    tdActions.appendChild(_makeBtn('Resume', false, function() {
       _disableAll();
-      MDS.comms.broadcast(JSON.stringify({ type: 'MA_LOCAL_STATUS', campaign_id: c.ID, status: 'active' }), function() {});
+      _applyStatusChange(c.ID, 'active');
     }));
   }
 
   if (c.STATUS === 'active' || c.STATUS === 'paused') {
-    tdActions.appendChild(_makeBtn('Finalitzar', true, function() {
-      if (!confirm('Finalitzar la campanya "' + c.TITLE + '"?\nAquesta acció no es pot desfer.')) { return; }
+    tdActions.appendChild(_makeBtn('Finish', true, function() {
+      if (!confirm('Finish campaign "' + c.TITLE + '"?\nThis action cannot be undone.')) { return; }
       _disableAll();
-      MDS.comms.broadcast(JSON.stringify({ type: 'MA_LOCAL_STATUS', campaign_id: c.ID, status: 'finished' }), function() {});
+      _applyStatusChange(c.ID, 'finished');
     }));
   }
 }
+
+// Local fast-path broadcast + on-chain status-update tx (T-SC6).
+// 1. MA_LOCAL_STATUS broadcast triggers the creator's SW to flip the local
+//    CAMPAIGNS.STATUS row immediately — same UX as before T-SC6.
+// 2. buildAndPostStatusUpdateTx then posts a V3 status-update transaction.
+//    Other nodes pick up the change via processEscrowCoin's PREVSTATE(7) sync
+//    (T-SC4) without depending on the creator being online for Maxima.
+// Fire-and-forget: a failed/skipped on-chain tx does NOT roll back the local
+// status change — Maxima fast-path already propagated it for online viewers.
+function _applyStatusChange(campaignId, newStatus) {
+  MDS.comms.broadcast(JSON.stringify({
+    type:        'MA_LOCAL_STATUS',
+    campaign_id: campaignId,
+    status:      newStatus
+  }), function() {});
+
+  var postFn = (typeof window !== 'undefined' && typeof window.buildAndPostStatusUpdateTx === 'function')
+    ? window.buildAndPostStatusUpdateTx
+    : (typeof buildAndPostStatusUpdateTx === 'function' ? buildAndPostStatusUpdateTx : null);
+  if (!postFn) {
+    console.warn('[STATUS-TX] buildAndPostStatusUpdateTx not loaded; skipping on-chain propagation.');
+    return;
+  }
+
+  postFn(campaignId, newStatus, function(res) {
+    if (!res || !res.ok) {
+      var errMsg = (res && res.error) ? res.error : 'unknown error';
+      console.warn('[STATUS-TX] on-chain propagation failed for', campaignId, ':', errMsg);
+      alert('On-chain propagation failed: ' + errMsg);
+      return;
+    }
+    if (res.skipped) {
+      console.log('[STATUS-TX] on-chain propagation skipped (legacy V1/V2 escrow) for', campaignId);
+      return;
+    }
+    if (res.pending) {
+      console.log('[STATUS-TX] awaiting Hub approval for', campaignId, 'uid:', res.pending_uid);
+      // STATUS_TX_PENDING signal will be handled by onStatusTxPending below.
+      return;
+    }
+    console.log('[STATUS-TX] confirmed on-chain for', campaignId, 'new coinid:', res.new_coinid);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// STATUS_TX_PENDING — append an "awaiting confirm" label to the row.
+// ---------------------------------------------------------------------------
+// Tracks campaigns currently awaiting Hub approval for the status-update tx.
+// On CAMPAIGN_UPDATED (issued by finalizeStatusUpdate on success) the next
+// loadMyCampaigns() refresh rebuilds the table without the label.
+var _pendingStatusTxLabels = {};
+
+function onStatusTxPending(parsed) {
+  if (!parsed || !parsed.campaign_id) { return; }
+  _pendingStatusTxLabels[parsed.campaign_id] = parsed.status || '';
+  _renderPendingLabel(parsed.campaign_id, parsed.status || '');
+}
+
+function _renderPendingLabel(campaignId, status) {
+  var section = document.getElementById('ma-mycampaigns-section');
+  if (!section) { return; }
+  var tr = section.querySelector('tr[data-campaign-id="' + campaignId + '"]');
+  if (!tr) { return; }
+  // Remove any prior label first.
+  var existing = tr.querySelector('.ma-status-tx-pending');
+  if (existing && existing.parentNode) { existing.parentNode.removeChild(existing); }
+  var statusTd = tr.children[1];
+  if (!statusTd) { return; }
+  var lbl = document.createElement('small');
+  lbl.className = 'ma-status-tx-pending';
+  lbl.style.cssText = 'display:inline-block;margin-left:0.4rem;color:var(--pico-muted-color,#6c757d);font-size:0.72rem;font-style:italic;';
+  lbl.textContent = '(awaiting on-chain confirm' + (status ? ': ' + status : '') + ')';
+  statusTd.appendChild(lbl);
+}
+
+// app.js dispatcher (handleMdsComms) needs to call this on STATUS_TX_PENDING.
+// Exposed globally so app.js can pick it up without importing.
+window.onStatusTxPending = onStatusTxPending;

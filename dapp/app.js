@@ -216,6 +216,12 @@ function handleMdsComms(parsed) {
     }
     return;
   }
+  if (parsed.type === 'STATUS_TX_PENDING') {
+    if (typeof window.onStatusTxPending === 'function') {
+      window.onStatusTxPending(parsed);
+    }
+    return;
+  }
   if (parsed.type === 'CREATOR_LIVENESS_PONG') {
     if (typeof window.onCreatorLivenessPong === 'function') {
       window.onCreatorLivenessPong(parsed.campaign_id || '', parsed.status || '');
@@ -1127,6 +1133,243 @@ function handleDoResendChannelOpen(data) {
 }
 
 // ---------------------------------------------------------------------------
+// T-SC6 — buildAndPostStatusUpdateTx
+// ---------------------------------------------------------------------------
+//
+// Creator-side: spends the current V3 escrow coin and produces a same-amount
+// change coin at ESCROW_ADDRESS_V3 carrying STATE(7) = <new_status_hex>.
+// Ports 1,3,4,5,6 are carried forward from the prior coin; port 10=0 (full
+// change-back); port 11=0 (no fee on status update). See MinimaAds.md §6.10
+// and Appendix B.5.
+//
+// Fire-and-forget: never blocks the UI. The caller's onResult fires
+// asynchronously with { ok, skipped?, error?, new_coinid? } once the tx
+// reaches a final state for THIS function. MDS_PENDING resume is handled by
+// handleFePending which fires CAMPAIGN_UPDATED on its own completion path.
+function buildAndPostStatusUpdateTx(campaignId, newStatus, onResult) {
+  function done(res) {
+    if (typeof onResult === 'function') { onResult(res); }
+  }
+
+  if (typeof encodeStatusForTx !== 'function' || typeof buildStatusUpdateStatePorts !== 'function') {
+    done({ ok: false, error: 'status-update helpers not loaded' });
+    return;
+  }
+
+  var newStatusHex = encodeStatusForTx(newStatus);
+  if (!newStatusHex) {
+    done({ ok: false, error: 'invalid status: ' + newStatus });
+    return;
+  }
+
+  if (typeof getCampaign !== 'function') {
+    done({ ok: false, error: 'getCampaign not loaded' });
+    return;
+  }
+
+  getCampaign(campaignId, function(err, campaign) {
+    if (err || !campaign) {
+      done({ ok: false, error: 'campaign not found: ' + campaignId });
+      return;
+    }
+    var escrowCoinId = campaign.ESCROW_COINID;
+    var walletPK     = campaign.ESCROW_WALLET_PK;
+    if (!escrowCoinId || !walletPK) {
+      done({ ok: false, error: 'campaign missing escrow data' });
+      return;
+    }
+
+    MDS.keypair.get('ESCROW_ADDRESS_V3', function(esRes) {
+      var escrowAddrV3 = esRes && esRes.status ? (esRes.value || '') : '';
+      if (!escrowAddrV3) {
+        done({ ok: false, error: 'V3 address not found' });
+        return;
+      }
+
+      MDS.cmd('coins coinid:' + escrowCoinId + ' relevant:false', function(cRes) {
+        if (!cRes || !cRes.status || !cRes.response || cRes.response.length === 0) {
+          done({ ok: false, error: 'escrow coin not found on-chain: ' + escrowCoinId });
+          return;
+        }
+        var coin       = cRes.response[0];
+        var coinAddr   = coin.address || '';
+        var coinAmount = parseFloat(coin.amount || 0);
+        var prevstates = coin.prevstate || [];
+
+        if (!coinAddr || coinAddr.toUpperCase() !== escrowAddrV3.toUpperCase()) {
+          console.warn('[STATUS-TX] skip: campaign escrow coin is not at ESCROW_ADDRESS_V3 (legacy V1/V2 coin). campaign:', campaignId,
+            'coinAddr:', coinAddr, 'V3:', escrowAddrV3);
+          done({ ok: true, skipped: true });
+          return;
+        }
+        if (!(coinAmount > 0)) {
+          done({ ok: false, error: 'escrow coin amount is zero or invalid' });
+          return;
+        }
+
+        function ps(port) {
+          for (var i = 0; i < prevstates.length; i++) {
+            if (prevstates[i].port == port) { return prevstates[i].data; }
+          }
+          return '';
+        }
+
+        // Carry forward ports 1, 3, 4, 5, 6 from the previous escrow coin.
+        // Fallback to the campaign DB row / current FE identity when a port is
+        // missing (defensive — V3 coins set them at funding time).
+        var creatorMxHex = '0x' + utf8ToHex(MY_MX_ADDRESS).toUpperCase();
+        var campaignIdHex = '0x' + utf8ToHex(campaign.ID || campaignId).toUpperCase();
+        var currentEscrow = {
+          walletPk:       ps(1) || walletPK,
+          campaignIdHex:  ps(3) || campaignIdHex,
+          creatorMxHex:   ps(4) || creatorMxHex,
+          platformKeyHex: ps(5) || '0x00',
+          maxPubBudget:   ps(6) || '0',
+          feeflag:        '0'
+        };
+
+        var ports = buildStatusUpdateStatePorts(currentEscrow, newStatusHex);
+        var txId  = 'st_' + generateUID();
+
+        function buildCtx(extra) {
+          var base = {
+            txId:          txId,
+            campaignId:    campaignId,
+            newStatus:     newStatus,
+            walletPK:      walletPK,
+            escrowAddrV3:  escrowAddrV3,
+            escrowCoinId:  escrowCoinId,
+            coinAmount:    coinAmount
+          };
+          if (extra) {
+            for (var k in extra) {
+              if (extra.hasOwnProperty(k)) { base[k] = extra[k]; }
+            }
+          }
+          return base;
+        }
+
+        function fail(stage, res) {
+          console.error('[STATUS-TX] failed at', stage, res && (res.error || res));
+          MDS.cmd('txndelete id:' + txId, function() {});
+          done({ ok: false, error: 'tx failed at ' + stage });
+        }
+
+        MDS.cmd('txncreate id:' + txId, function(r1) {
+          if (!r1.status) { fail('txncreate', r1); return; }
+
+          MDS.cmd('txninput id:' + txId + ' coinid:' + escrowCoinId + ' scriptmmr:true', function(r2) {
+            if (!r2.status) { fail('txninput', r2); return; }
+
+            MDS.cmd('txnoutput id:' + txId
+                  + ' storestate:true'
+                  + ' amount:' + coinAmount
+                  + ' address:' + escrowAddrV3, function(r3) {
+              if (!r3.status) { fail('txnoutput', r3); return; }
+
+              var stateCmds = [];
+              for (var pi = 0; pi < ports.length; pi++) {
+                stateCmds.push('txnstate id:' + txId + ' port:' + ports[pi].port + ' value:' + ports[pi].value);
+              }
+
+              runSequential(stateCmds, 0, function(stateOk) {
+                if (!stateOk) { fail('txnstate', null); return; }
+
+                MDS.cmd('txnsign id:' + txId + ' publickey:' + walletPK, function(r5) {
+                  if (r5 && r5.pending) {
+                    var signCtx = buildCtx({ kind: 'status_update_sign' });
+                    savePendingChannelOp(r5.pendinguid, signCtx);
+                    console.log('[STATUS-TX] txnsign pending, uid:', r5.pendinguid);
+                    signalFE('STATUS_TX_PENDING', {
+                      campaign_id: campaignId,
+                      status:      newStatus,
+                      pending_uid: r5.pendinguid
+                    });
+                    done({ ok: true, pending: true, pending_uid: r5.pendinguid });
+                    return;
+                  }
+                  if (!r5.status) { fail('txnsign', r5); return; }
+
+                  MDS.cmd('txnpost id:' + txId + ' mine:true auto:true', function(r6) {
+                    if (r6 && r6.pending) {
+                      var postCtx = buildCtx({ kind: 'status_update_post' });
+                      savePendingChannelOp(r6.pendinguid, postCtx);
+                      console.log('[STATUS-TX] txnpost pending, uid:', r6.pendinguid);
+                      signalFE('STATUS_TX_PENDING', {
+                        campaign_id: campaignId,
+                        status:      newStatus,
+                        pending_uid: r6.pendinguid
+                      });
+                      done({ ok: true, pending: true, pending_uid: r6.pendinguid });
+                      return;
+                    }
+                    if (!r6.status) { fail('txnpost', r6); return; }
+
+                    MDS.cmd('txndelete id:' + txId, function() {});
+                    finalizeStatusUpdate(r6.response, buildCtx(null), done);
+                  });
+                });
+              });
+            });
+          });
+        });
+      });
+    });
+  });
+}
+
+function signalFE(type, data) {
+  // FE-side proxy of core/minima.js signalFE — emits MDSCOMMS to all this
+  // dapp's open contexts (including the SW). Self-route arrives via the same
+  // MDSCOMMS event handler in bootstrap().
+  var obj = { type: type };
+  if (data) {
+    for (var k in data) {
+      if (data.hasOwnProperty(k)) { obj[k] = data[k]; }
+    }
+  }
+  MDS.comms.solo(JSON.stringify(obj));
+}
+
+// Extracts the new V3 change coinid from the txpow response, updates the
+// CAMPAIGNS row, and signals CAMPAIGN_UPDATED. Shared by the synchronous
+// success path and the MDS_PENDING resume path.
+function finalizeStatusUpdate(txpowResponse, ctx, done) {
+  var outputs = null;
+  try { outputs = txpowResponse.body.txn.outputs; } catch (e) {}
+  if (!outputs || !outputs.length) {
+    console.error('[STATUS-TX] no outputs in tx response');
+    if (typeof done === 'function') { done({ ok: false, error: 'no outputs in tx response' }); }
+    return;
+  }
+  var newCoinId = '';
+  for (var i = 0; i < outputs.length; i++) {
+    if (outputs[i].address && outputs[i].address.toUpperCase() === ctx.escrowAddrV3.toUpperCase()) {
+      newCoinId = outputs[i].coinid;
+      break;
+    }
+  }
+  if (!newCoinId) {
+    console.error('[STATUS-TX] could not locate change output at ESCROW_ADDRESS_V3');
+    if (typeof done === 'function') { done({ ok: false, error: 'change output not found' }); }
+    return;
+  }
+
+  var sql = "UPDATE CAMPAIGNS SET ESCROW_COINID = '" + escapeSql(newCoinId) + "' "
+          + "WHERE UPPER(ID) = UPPER('" + escapeSql(ctx.campaignId) + "')";
+  sqlQuery(sql, function(err) {
+    if (err) { console.error('[STATUS-TX] CAMPAIGNS escrow update failed:', err); }
+    signalFE('CAMPAIGN_UPDATED', { campaign_id: ctx.campaignId, status: ctx.newStatus });
+    console.log('[STATUS-TX] confirmed. campaign:', ctx.campaignId, 'status:', ctx.newStatus, 'new coinId:', newCoinId);
+    if (typeof done === 'function') { done({ ok: true, new_coinid: newCoinId }); }
+  });
+}
+
+// Expose to mycampaigns.js explicitly (already global by virtue of being a
+// script-level function, but pinned to window for clarity and future bundling).
+window.buildAndPostStatusUpdateTx = buildAndPostStatusUpdateTx;
+
+// ---------------------------------------------------------------------------
 // MDS_PENDING (FE) — resume channel-open after user approval
 // ---------------------------------------------------------------------------
 function handleFePending(msg) {
@@ -1249,6 +1492,48 @@ function handleFePending(msg) {
     }
     if (ctx.kind === 'channel_open') {
       finalizeChannelOpen(resp, ctx);
+      clearPendingChannelOp(uid);
+      return;
+    }
+    if (ctx.kind === 'status_update_sign') {
+      // Hub approved the signing step — proceed to txnpost.
+      MDS.cmd('txnpost id:' + ctx.txId + ' mine:true auto:true', function(r6) {
+        if (r6 && r6.pending) {
+          var postCtx = {
+            kind:         'status_update_post',
+            txId:         ctx.txId,
+            campaignId:   ctx.campaignId,
+            newStatus:    ctx.newStatus,
+            walletPK:     ctx.walletPK,
+            escrowAddrV3: ctx.escrowAddrV3,
+            escrowCoinId: ctx.escrowCoinId,
+            coinAmount:   ctx.coinAmount
+          };
+          savePendingChannelOp(r6.pendinguid, postCtx);
+          console.log('[STATUS-TX] txnpost pending after sign approval, uid:', r6.pendinguid);
+          signalFE('STATUS_TX_PENDING', {
+            campaign_id: ctx.campaignId,
+            status:      ctx.newStatus,
+            pending_uid: r6.pendinguid
+          });
+          clearPendingChannelOp(uid);
+          return;
+        }
+        if (!r6.status) {
+          console.error('[STATUS-TX] txnpost failed after sign approval:', r6 && r6.error);
+          MDS.cmd('txndelete id:' + ctx.txId, function() {});
+          clearPendingChannelOp(uid);
+          return;
+        }
+        MDS.cmd('txndelete id:' + ctx.txId, function() {});
+        finalizeStatusUpdate(r6.response, ctx, null);
+        clearPendingChannelOp(uid);
+      });
+      return;
+    }
+    if (ctx.kind === 'status_update_post') {
+      // Hub approved the post step — resp is the txpow response.
+      finalizeStatusUpdate(resp, ctx, null);
       clearPendingChannelOp(uid);
       return;
     }

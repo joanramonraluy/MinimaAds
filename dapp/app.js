@@ -191,6 +191,9 @@ function handleMdsComms(parsed) {
   }
   if (parsed.type === 'VOUCHER_RECEIVED') {
     if (typeof onVoucherReceived === 'function') { onVoucherReceived(parsed); }
+    if (currentRoute() === 'earnings' && typeof loadEarnings === 'function') {
+      loadEarnings();
+    }
     return;
   }
   if (parsed.type === 'AUTO_SETTLE') {

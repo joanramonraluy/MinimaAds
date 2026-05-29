@@ -12,39 +12,58 @@ function renderEarnings(root) {
   h2.textContent = 'Earnings';
   root.appendChild(h2);
 
-  var summarySection = document.createElement('section');
-  summarySection.id = 'ma-earnings-summary';
-  root.appendChild(summarySection);
+  // 3 stat cards in a row
+  var summaryRow = document.createElement('div');
+  summaryRow.id = 'ma-earnings-summary';
+  summaryRow.style.cssText = 'display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1.5rem;';
 
-  var pendingSection = document.createElement('section');
-  pendingSection.style.cssText = 'margin-top:1.5rem;';
+  var totalCard = mkStatCard('Total earned', '—');
+  totalCard.id = 'ma-stat-total';
+  var todayCard = mkStatCard('Today', '—');
+  todayCard.id = 'ma-stat-today';
+  var channelsCard = mkStatCard('Open channels', '—');
+  channelsCard.id = 'ma-stat-channels';
 
-  var pendingH3 = document.createElement('h3');
-  pendingH3.textContent = 'Pending settlements';
-  pendingSection.appendChild(pendingH3);
+  summaryRow.appendChild(totalCard);
+  summaryRow.appendChild(todayCard);
+  summaryRow.appendChild(channelsCard);
+  root.appendChild(summaryRow);
 
+  // Settlement feedback (referenced by _runSettlement and signal handlers)
   var settleStatus = document.createElement('p');
   settleStatus.id = 'ma-channel-settle-status';
   settleStatus.setAttribute('role', 'status');
-  pendingSection.appendChild(settleStatus);
+  settleStatus.style.cssText = 'min-height:1.4rem;font-size:.875rem;';
+  root.appendChild(settleStatus);
 
+  // Pending settlements
+  var pendingSection = document.createElement('section');
+  pendingSection.style.cssText = 'margin-bottom:1.5rem;';
+  var pendingH3 = document.createElement('h3');
+  pendingH3.textContent = 'Pending settlements';
+  pendingSection.appendChild(pendingH3);
   var channelList = document.createElement('div');
   channelList.id = 'ma-channel-rewards-list';
   pendingSection.appendChild(channelList);
-
   root.appendChild(pendingSection);
 
-  var settleHistorySection = document.createElement('section');
-  settleHistorySection.id = 'ma-settlement-history';
-  settleHistorySection.style.cssText = 'margin-top:1.5rem;';
-  root.appendChild(settleHistorySection);
+  // Settlement history
+  var historySection = document.createElement('section');
+  historySection.id = 'ma-settlement-history';
+  root.appendChild(historySection);
 
   loadEarnings();
 }
 
+function _updateStatCard(id, value) {
+  var card = document.getElementById(id);
+  if (!card) { return; }
+  var s = card.querySelector('strong');
+  if (s) { s.textContent = value; }
+}
+
 function _loadTodayEarnedSummary() {
-  var el = document.getElementById('ma-today-earned');
-  if (!el) { return; }
+  if (!MY_ADDRESS) { return; }
   var role = (typeof _activeMode !== 'undefined') ? _activeMode : 'viewer';
   var types = (role === 'publisher') ? "'publisher_view'" : "'view','click'";
   var now = new Date();
@@ -54,10 +73,8 @@ function _loadTodayEarnedSummary() {
     + " AND TYPE IN (" + types + ")"
     + " AND TIMESTAMP >= " + startOfDay;
   sqlQuery(sql, function(err, rows) {
-    var target = document.getElementById('ma-today-earned');
-    if (!target) { return; }
     var total = (!err && rows && rows[0]) ? (parseFloat(rows[0].TOTAL) || 0) : 0;
-    target.textContent = total.toFixed(6);
+    _updateStatCard('ma-stat-today', total.toFixed(6) + ' MINIMA');
   });
 }
 
@@ -66,51 +83,50 @@ function loadEarnings() {
 
   var role = (typeof _activeMode !== 'undefined') ? _activeMode : 'viewer';
   var types = (role === 'publisher') ? "'publisher_view'" : "'view','click'";
+
+  // Total earned
   var totalSql = "SELECT SUM(AMOUNT) AS TOTAL FROM REWARD_EVENTS"
     + " WHERE UPPER(USER_ADDRESS) = UPPER('" + escapeSql(MY_ADDRESS) + "')"
     + " AND TYPE IN (" + types + ")";
-
   sqlQuery(totalSql, function(err, rows) {
-    var target = document.getElementById('ma-earnings-summary');
-    if (!target) { return; }
-    target.innerHTML = '';
-    var totalEarned = (!err && rows && rows[0]) ? (parseFloat(rows[0].TOTAL) || 0) : 0;
+    var total = (!err && rows && rows[0]) ? (parseFloat(rows[0].TOTAL) || 0) : 0;
+    _updateStatCard('ma-stat-total', total.toFixed(6) + ' MINIMA');
 
-    var article = document.createElement('article');
-    var strong = document.createElement('strong');
-    strong.textContent = 'Total earned: ';
-    article.appendChild(strong);
-    article.appendChild(document.createTextNode(totalEarned.toFixed(6) + ' MINIMA'));
-    target.appendChild(article);
-
-    var todayArticle = document.createElement('article');
-    var todayStrong = document.createElement('strong');
-    todayStrong.textContent = 'Today earned: ';
-    todayArticle.appendChild(todayStrong);
-    var todaySpan = document.createElement('span');
-    todaySpan.id = 'ma-today-earned';
-    todaySpan.textContent = '…';
-    todayArticle.appendChild(todaySpan);
-    todayArticle.appendChild(document.createTextNode(' MINIMA'));
-    target.appendChild(todayArticle);
-
-    if (totalEarned === 0) {
-      var hint = document.createElement('p');
-      hint.style.cssText = 'color:var(--pico-muted-color,#6c757d);margin-top:.5rem;';
-      hint.appendChild(document.createTextNode('Nothing earned yet. '));
-      var hintLink = document.createElement('a');
-      if (role === 'publisher') {
-        hintLink.href = '#frames';
-        hintLink.textContent = 'Go to Frames to get started.';
-      } else {
-        hintLink.href = '#viewer';
-        hintLink.textContent = 'Go to View Ads to get started.';
+    // Show hint below cards when nothing earned yet
+    var summaryEl = document.getElementById('ma-earnings-summary');
+    if (summaryEl) {
+      var prev = summaryEl.nextElementSibling;
+      if (prev && prev.className === 'ma-earnings-hint') { prev.remove(); }
+      if (total === 0) {
+        var hint = document.createElement('p');
+        hint.className = 'ma-earnings-hint';
+        hint.style.cssText = 'color:var(--pico-muted-color,#6c757d);margin-bottom:1rem;font-size:.875rem;';
+        hint.appendChild(document.createTextNode('Nothing earned yet. '));
+        var hintLink = document.createElement('a');
+        if (role === 'publisher') {
+          hintLink.href = '#frames';
+          hintLink.textContent = 'Go to Frames to get started.';
+        } else {
+          hintLink.href = '#viewer';
+          hintLink.textContent = 'Go to View Ads to get started.';
+        }
+        hint.appendChild(hintLink);
+        summaryEl.insertAdjacentElement('afterend', hint);
       }
-      hint.appendChild(hintLink);
-      target.appendChild(hint);
     }
+  });
 
-    _loadTodayEarnedSummary();
+  // Today earned
+  _loadTodayEarnedSummary();
+
+  // Open channels count
+  var roleFilter = (role === 'publisher')
+    ? " AND UPPER(ROLE) = 'PUBLISHER'"
+    : " AND UPPER(ROLE) = 'VIEWER'";
+  var channelSql = "SELECT COUNT(*) AS CNT FROM CHANNEL_STATE WHERE STATUS = 'open'" + roleFilter;
+  sqlQuery(channelSql, function(err, rows) {
+    var cnt = (!err && rows && rows[0]) ? (parseInt(rows[0].CNT) || 0) : 0;
+    _updateStatCard('ma-stat-channels', String(cnt));
   });
 
   _refreshSettlementHistory();
@@ -148,16 +164,14 @@ function renderSettlementHistory(target, settlements) {
   target.appendChild(h3);
 
   if (!settlements.length) {
-    var empty = document.createElement('p');
-    empty.textContent = 'No settled channels yet.';
-    target.appendChild(empty);
+    target.appendChild(mkEmptyState('No settled channels yet.'));
     return;
   }
 
   var table = document.createElement('table');
   var thead = document.createElement('thead');
   var headerRow = document.createElement('tr');
-  var headers = ['Campaign', 'Creator', 'Earned', 'Opened', ''];
+  var headers = ['Campaign', 'Status', 'Earned', 'Date', ''];
   for (var i = 0; i < headers.length; i++) {
     var th = document.createElement('th');
     th.textContent = headers[i];
@@ -170,18 +184,24 @@ function renderSettlementHistory(target, settlements) {
   for (var j = 0; j < settlements.length; j++) {
     (function(r) {
       var tr = document.createElement('tr');
-      var campName = r.TITLE || (r.CAMPAIGN_ID ? r.CAMPAIGN_ID.substring(0, 8) + '…' : '');
-      var creatorPk = r.CREATOR_ADDRESS ? r.CREATOR_ADDRESS.substring(0, 10) + '…' : '';
-      var date = r.CREATED_AT ? new Date(parseInt(r.CREATED_AT)).toLocaleDateString() : '';
+      var campName = r.TITLE || (r.CAMPAIGN_ID ? r.CAMPAIGN_ID.substring(0, 8) + '…' : '—');
+      var date = r.CREATED_AT
+        ? new Date(parseInt(r.CREATED_AT)).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+        : '—';
+
       tr.appendChild(earningsTd(campName));
-      tr.appendChild(earningsTd(creatorPk));
+
+      var statusTd = document.createElement('td');
+      statusTd.appendChild(mkStatusBadge('settled'));
+      tr.appendChild(statusTd);
+
       tr.appendChild(earningsTd(parseFloat(r.CUMULATIVE_EARNED || 0).toFixed(6) + ' MINIMA'));
       tr.appendChild(earningsTd(date));
 
       var toggleTd = document.createElement('td');
       var toggleBtn = document.createElement('button');
       toggleBtn.textContent = '▶';
-      toggleBtn.style.cssText = 'padding:.1rem .35rem;font-size:.75rem;';
+      toggleBtn.style.cssText = 'width:auto;margin:0;padding:.1rem .4rem;font-size:.75rem;';
       toggleTd.appendChild(toggleBtn);
       tr.appendChild(toggleTd);
       tbody.appendChild(tr);
@@ -199,11 +219,7 @@ function renderSettlementHistory(target, settlements) {
         if (detailTr.style.display === 'none') {
           detailTr.style.display = '';
           toggleBtn.textContent = '▼';
-          if (!loaded) {
-            loaded = true;
-            detailTd.textContent = 'Loading…';
-            _loadChannelEvents(r.CAMPAIGN_ID, detailTd);
-          }
+          if (!loaded) { loaded = true; _loadChannelEvents(r.CAMPAIGN_ID, detailTd); }
         } else {
           detailTr.style.display = 'none';
           toggleBtn.textContent = '▶';
@@ -232,7 +248,7 @@ function _loadChannelEvents(campaignId, targetEl) {
     targetEl.innerHTML = '';
     if (err || !rows || !rows.length) {
       var p = document.createElement('p');
-      p.style.cssText = 'margin:.25rem 0;font-size:.85em;color:#888;';
+      p.style.cssText = 'margin:.25rem 0;font-size:.85em;color:var(--pico-muted-color,#6c757d);';
       p.textContent = 'No events recorded for this channel.';
       targetEl.appendChild(p);
       return;
@@ -253,7 +269,9 @@ function _loadChannelEvents(campaignId, targetEl) {
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i];
       var tr = document.createElement('tr');
-      var date = r.TIMESTAMP ? new Date(parseInt(r.TIMESTAMP)).toLocaleString() : '';
+      var date = r.TIMESTAMP
+        ? new Date(parseInt(r.TIMESTAMP)).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
+        : '—';
       tr.appendChild(earningsTd(r.TYPE));
       tr.appendChild(earningsTd(parseFloat(r.AMOUNT || 0).toFixed(6)));
       tr.appendChild(earningsTd(date));
@@ -265,7 +283,7 @@ function _loadChannelEvents(campaignId, targetEl) {
 }
 
 // ---------------------------------------------------------------------------
-// Channel rewards (moved from viewer.js T-CH6)
+// Channel rewards (pending settlements)
 // ---------------------------------------------------------------------------
 
 function _refreshChannelRewards() {
@@ -286,24 +304,15 @@ function _refreshChannelRewards() {
           + " WHERE cs.STATUS = 'open' AND cs.LATEST_TX_HEX != ''"
           + roleFilter;
   sqlQuery(sql, function(err, rows) {
-    if (err) { console.error('[EARNINGS] _refreshChannelRewards query error:', err); return; }
-    var found = rows || [];
-    console.log('[EARNINGS] settleable channels:', found.length);
-    for (var i = 0; i < found.length; i++) {
-      var vk = found[i].VIEWER_KEY ? found[i].VIEWER_KEY.substring(0, 12) + '…' : '?';
-      console.log('[EARNINGS] pending — campaign:', found[i].CAMPAIGN_ID,
-        'role:', found[i].ROLE, 'cumulative:', found[i].CUMULATIVE_EARNED, 'viewer:', vk);
-    }
-    _renderChannelRewardRows(found, container);
+    if (err) { console.error('[EARNINGS] _refreshChannelRewards error:', err); return; }
+    _renderChannelRewardRows(rows || [], container);
   });
 }
 
 function _renderChannelRewardRows(rows, container) {
   container.innerHTML = '';
   if (rows.length === 0) {
-    var empty = document.createElement('p');
-    empty.innerHTML = '<em>No pending settlements.</em>';
-    container.appendChild(empty);
+    container.appendChild(mkEmptyState('No pending settlements.'));
     return;
   }
   for (var i = 0; i < rows.length; i++) {
@@ -312,49 +321,52 @@ function _renderChannelRewardRows(rows, container) {
       var viewerKey  = row.VIEWER_KEY;
       var role       = row.ROLE || 'viewer';
       var txHex      = row.LATEST_TX_HEX;
+      var campName   = row.TITLE || (campaignId.substring(0, 8) + '…');
+      var amount     = parseFloat(row.CUMULATIVE_EARNED || 0);
 
-      var item = document.createElement('div');
-      item.style.cssText = 'margin:.5rem 0;padding:.5rem;border:1px solid #e0e0e0;border-radius:4px;';
+      var card = document.createElement('article');
+      card.style.cssText = 'margin-bottom:1rem;';
 
-      var mainRow = document.createElement('div');
-      mainRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:1rem;';
+      // Card header: name + badge + settle button
+      var cardHeader = document.createElement('header');
+      cardHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:.75rem;';
 
-      var infoDiv = document.createElement('div');
-      var campName = row.TITLE || (campaignId.substring(0, 8) + '…');
-      var nameSpan = document.createElement('strong');
-      nameSpan.textContent = campName;
-      nameSpan.style.display = 'block';
-
-      var amountSpan = document.createElement('span');
-      amountSpan.textContent = parseFloat(row.CUMULATIVE_EARNED).toFixed(6) + ' MINIMA pending';
-      amountSpan.style.fontSize = '0.9em';
-      amountSpan.style.color = '#555';
-
-      infoDiv.appendChild(nameSpan);
-      infoDiv.appendChild(amountSpan);
+      var titleGroup = document.createElement('div');
+      titleGroup.style.cssText = 'display:flex;align-items:center;gap:.5rem;min-width:0;';
+      var nameEl = document.createElement('strong');
+      nameEl.textContent = campName;
+      titleGroup.appendChild(nameEl);
+      titleGroup.appendChild(mkStatusBadge('pending'));
+      cardHeader.appendChild(titleGroup);
 
       var btn = document.createElement('button');
       btn.textContent = 'Settle';
-      btn.style.cssText = 'padding:.25rem .75rem;';
+      btn.style.cssText = 'width:auto;margin:0;padding:.3rem .85rem;flex-shrink:0;';
       btn.addEventListener('click', function() {
         btn.disabled = true;
         btn.textContent = 'Settling…';
-        _runSettlement(campaignId, viewerKey, role, txHex, btn, parseFloat(row.CUMULATIVE_EARNED));
+        _runSettlement(campaignId, viewerKey, role, txHex, btn, amount);
       });
+      cardHeader.appendChild(btn);
+      card.appendChild(cardHeader);
 
-      mainRow.appendChild(infoDiv);
-      mainRow.appendChild(btn);
-      item.appendChild(mainRow);
+      // Amount stat card
+      var amountWrap = document.createElement('div');
+      amountWrap.style.cssText = 'margin:.75rem 0;';
+      var amountCard = mkStatCard('Pending', amount.toFixed(6) + ' MINIMA');
+      amountCard.style.flex = 'none';
+      amountWrap.appendChild(amountCard);
+      card.appendChild(amountWrap);
 
+      // Expandable event detail
       var details = document.createElement('details');
-      details.style.cssText = 'margin-top:.5rem;font-size:.9em;';
       var summary = document.createElement('summary');
-      summary.textContent = 'Detall';
-      summary.style.cssText = 'cursor:pointer;color:#777;user-select:none;';
+      summary.textContent = 'Show events';
+      summary.style.cssText = 'cursor:pointer;font-size:.875rem;color:var(--pico-muted-color,#6c757d);';
       details.appendChild(summary);
       var detailBody = document.createElement('div');
-      detailBody.style.cssText = 'margin-top:.4rem;padding:.4rem .5rem;background:var(--pico-card-sectionning-background-color,#f8f8f8);border-radius:4px;';
-      detailBody.textContent = 'Loading…';
+      detailBody.style.cssText = 'margin-top:.5rem;';
+      detailBody.appendChild(mkLoading('Loading events…'));
       details.appendChild(detailBody);
       var loaded = false;
       details.addEventListener('toggle', function() {
@@ -363,9 +375,9 @@ function _renderChannelRewardRows(rows, container) {
           _loadChannelEvents(campaignId, detailBody);
         }
       });
+      card.appendChild(details);
 
-      item.appendChild(details);
-      container.appendChild(item);
+      container.appendChild(card);
     })(rows[i]);
   }
 }

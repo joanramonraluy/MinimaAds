@@ -81,18 +81,25 @@ function createRewardEvent(params, cb) {
                   ? profileRows[0].INTERESTS : null)
               : null;
 
+            var isChanReward = (type === 'view' || type === 'click');
             var profileSql5;
             if (profileExists) {
-              profileSql5 = "UPDATE USER_PROFILE"
-                + " SET TOTAL_EARNED = COALESCE(TOTAL_EARNED, 0) + " + amount
-                + ", LAST_REWARD_AT = " + timestamp
-                + " WHERE UPPER(ADDRESS) = UPPER('" + escapeSql(userAddress) + "')";
+              if (isChanReward) {
+                profileSql5 = "UPDATE USER_PROFILE"
+                  + " SET LAST_REWARD_AT = " + timestamp
+                  + " WHERE UPPER(ADDRESS) = UPPER('" + escapeSql(userAddress) + "')";
+              } else {
+                profileSql5 = "UPDATE USER_PROFILE"
+                  + " SET TOTAL_EARNED = COALESCE(TOTAL_EARNED, 0) + " + amount
+                  + ", LAST_REWARD_AT = " + timestamp
+                  + " WHERE UPPER(ADDRESS) = UPPER('" + escapeSql(userAddress) + "')";
+              }
             } else {
               profileSql5 = "INSERT INTO USER_PROFILE"
                 + " (ADDRESS, INTERESTS, TOTAL_EARNED, LAST_REWARD_AT) VALUES ("
                 + "'" + escapeSql(userAddress) + "',"
                 + (interests ? "'" + escapeSql(interests) + "'" : "NULL") + ","
-                + amount + ","
+                + (isChanReward ? "0" : amount) + ","
                 + timestamp
                 + ")";
             }

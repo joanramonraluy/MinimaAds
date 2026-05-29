@@ -146,7 +146,10 @@ function encodeStatusForTx(status) {
 // Builds the ordered array of { port, value } pairs for a status-update tx.
 // currentEscrow = { walletPk, campaignIdHex, creatorMxHex, platformKeyHex, maxPubBudget, feeflag }
 // newStatusHex  = encodeStatusForTx(newStatus)
-function buildStatusUpdateStatePorts(currentEscrow, newStatusHex) {
+// coinAmount    = current escrow coin amount (sets port 10 = coinAmount so change = 0,
+//                 bypassing the VERIFYOUT(INC(@INPUT) @ADDRESS change ...) check in
+//                 ESCROW_SCRIPT_V3 — required because a status-update TX has only 1 output)
+function buildStatusUpdateStatePorts(currentEscrow, newStatusHex, coinAmount) {
   return [
     { port: 1,  value: currentEscrow.walletPk },
     { port: 3,  value: currentEscrow.campaignIdHex },
@@ -154,7 +157,7 @@ function buildStatusUpdateStatePorts(currentEscrow, newStatusHex) {
     { port: 5,  value: currentEscrow.platformKeyHex },
     { port: 6,  value: currentEscrow.maxPubBudget },
     { port: 7,  value: newStatusHex },
-    { port: 10, value: '0' },
+    { port: 10, value: coinAmount ? coinAmount.toString() : '0' },
     { port: 11, value: '0' }
   ];
 }

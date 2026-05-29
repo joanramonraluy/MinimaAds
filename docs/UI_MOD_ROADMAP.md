@@ -291,7 +291,7 @@ Stats és una taula plana amb poca informació escanejable. Frames barreja `inne
 |---|---|---|---|
 | M1 | Helpers compartits (design system lite) | Sonnet | ✅ Fet |
 | M2 | Viewer: redisseny visual | Sonnet | ✅ Fet |
-| M3 | Earnings: stat cards + settlement cards | Sonnet | ⬜ Pendent |
+| M3 | Earnings: stat cards + settlement cards | Sonnet | ✅ Fet |
 | M4 | My Campaigns: campaign cards | Sonnet | ⬜ Pendent |
 | M5 | Creator: UX del formulari | **Opus** ⚠️ | ⬜ Pendent |
 | M6 | Stats + Frames: poliment | Sonnet | ⬜ Pendent |

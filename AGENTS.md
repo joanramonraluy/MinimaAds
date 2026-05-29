@@ -195,6 +195,39 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 ## 8) Current Handoff Notes
 
+2026-05-29 (pending: UI-1 — Earnings page groups rewards incorrectly):
+- **Scope**: `dapp/views/earnings.js` — NOT touched this session, documented for next session.
+- **Symptom**: Both publisher and viewer "Settled channels" and "Pending settlements" sections show fragmented entries per reward event instead of one row per campaign. The wallet transactions are correct (confirmed on-chain). Pure UI/query issue.
+- **Starting point**: `_refreshSettlementHistory()` (queries CHANNEL_HISTORY) and `_refreshChannelRewards()` (queries CHANNEL_STATE). Likely missing GROUP BY campaign_id or a JOIN/aggregate issue. See KNOWN_ISSUES.md UI-1.
+
+2026-05-29 (fix: VW-3 — status-update TX loses state ports 5 and 6):
+- **Scope**: `dapp/app.js` only.
+- **Root cause**: `buildAndPostStatusUpdateTx` read `coin.prevstate` to carry forward ports 5 (platformKey) and 6 (maxPubBudget) into the new status TX output. `coins coinid:X` via MDS.cmd does NOT return `prevstate` as a populated array — it is empty. Result: after any PAUSE/RESUME/FINISH TX, the new escrow coin got `state[5]="0x00"` and `state[6]="0"`. If a new channel split was attempted after a status change, the split coin would inherit `platformKey=0x00` and `maxPubBudget=0`.
+- **Fix**: Changed `var prevstates = coin.prevstate || []` → `var coinStateArr = coin.state || []` and updated `ps()` to iterate `coinStateArr`. `coin.state` from the MDS `coins` API IS the array of `{port, type, data}` objects (confirmed by `refs/Minima-1.0.45/mds/mds.js:getStateVariable`). This correctly reads the current coin's own state, which has all ports set at split time.
+- **Port 2 (expiryBlock)**: not propagated (unchanged) — ESCROW_SCRIPT_V3 does not read `PREVSTATE(2)`, and no SW code reads it from the coin state.
+
+2026-05-28 (fix: VW-2 — earnings discrepancy + resume TX coin lookup):
+- **Scope**: `public/service-workers/handlers/comms.handler.js`, `public/service-workers/handlers/channel.handler.js`, `dapp/app.js`.
+- **Bug 1 — Earnings discrepancy (today vs total)**: `handleTrackView`/`handleTrackClick` in `comms.handler.js` were calling `createRewardEvent` at track time, inserting a REWARD_EVENTS row immediately. `_loadTodayEarnedSummary` (earnings.js) sums REWARD_EVENTS, while `TOTAL_EARNED` (USER_PROFILE) is only updated at voucher time. This caused `today earned > total earned`. Fix: removed `createRewardEvent` from `handleTrackView`/`handleTrackClick`; instead generate `eventId` locally and call `updateBudget` directly (budget still deducted at track time to prevent overspend). In `_continueRewardVoucher` viewer branch: added REWARD_EVENTS insert (type='view', USER_ADDRESS=viewerKey, AMOUNT=delta) at voucher time, mirroring the publisher branch pattern. Guard `delta > 0` prevents zero-amount rows on voucher resyncs.
+- **Bug 2 — Resume TX Script FAIL**: `buildStatusUpdateStatePorts` set `port:10 = 0` (payout=0). ESCROW_SCRIPT_V3 computes `change = @AMOUNT - STATE(10)`. With payout=0, `change = @AMOUNT > 0`, so the script asserts `VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE)` — output at index 1 must exist. But the status-update TX only has 1 output (index 0). Fix: `buildStatusUpdateStatePorts` now accepts `coinAmount` as 3rd param; sets `port:10 = coinAmount` so `change = 0` and the VERIFYOUT check is bypassed.
+- **Bug 2b — Coin lookup used `relevant:true` (wrong)**: `buildAndPostStatusUpdateTx` used `coins coinid:X relevant:true`, which only returns wallet-tracked coins. V3 escrow coins are script-address coins — NOT wallet-relevant — so `relevant:true` returned empty. Fix: removed `relevant:` parameter (Minima `coins` source: when `coinid` is provided without explicit `relevant`, the default is `false` = search all unpruned chain coins). The coin lookup now uses `coins coinid:X` without `relevant:` flag.
+
+2026-05-28 (fix: VW-1 follow-up — VIEWER_WALLET_ADDR blank + rejected-view in earnings + txnpost auto-burn conflict):
+- **Scope**: `public/service-workers/handlers/channel.handler.js`, `dapp/app.js`, `MinimaAds.md`.
+- **Bug 1 — `handleChannelOpen` VIEWER_WALLET_ADDR empty**: On the viewer's node, `handleChannelOpen` was creating the CHANNEL_STATE row with `VIEWER_WALLET_ADDR = ''` (hardcoded). Fix: added `MDS.keypair.get("VIEWER_WALLET_ADDR_" + campaignId, ...)` nested inside the existing `CREATOR_MX` keypair callback; the result is used in the MERGE VALUES instead of the literal `''`.
+- **Bug 2 — Rejected-view REWARD_EVENT lingers**: When a view is tracked optimistically (`createRewardEvent` in `comms.handler.js`) but the REWARD_REQUEST is later rejected (campaign paused/finished), the REWARD_EVENTS row was left, inflating `_loadTodayEarnedSummary` in `earnings.js`. Fix: `handleRewardRequest` now includes `event_id: eventId` in the REWARD_REJECTED payload (open-channel path only). `handleRewardRejected` deletes the REWARD_EVENTS row if `event_id` is present. Schema change: `REWARD_REJECTED §8.16` — added optional `event_id` field.
+- **Bug 3 — `txnpost auto:true` non-unique CoinIDs**: In `buildAndPostStatusUpdateTx` and the `status_update_sign` pending handler in `dapp/app.js`, `txnpost mine:true auto:true` caused Minima's burn coin picker to reuse the already-inputted V3 escrow coin (made wallet-relevant by `LET walletPK=PREVSTATE(1)` at top-level in ESCROW_SCRIPT_V3). TX rejected with "non unique CoinIDs". Fix: both call sites changed to `auto:false`.
+- **MinimaAds.md §8.16 updated**: REWARD_REJECTED schema now includes optional `event_id` field with description of when it is/isn't present.
+
+2026-05-28 (fix: VW-1 — TOTAL_EARNED false increment at view time):
+- **Scope**: `core/rewards.js`, `public/service-workers/handlers/channel.handler.js`, `dapp/views/viewer.js`, `dapp/views/earnings.js`.
+- **Root cause**: `createRewardEvent` updated `USER_PROFILE.TOTAL_EARNED` for all reward types including `'view'`/`'click'`. On a node acting as both creator and viewer, the resulting `REWARD_CONFIRMED` signal incremented the badge even when the channel never opened.
+- **Fix 1 — `core/rewards.js`**: `isChanReward = (type === 'view' || type === 'click')` flag. On `isChanReward`, the UPDATE only touches `LAST_REWARD_AT` (no `TOTAL_EARNED`); a new INSERT also starts with `TOTAL_EARNED=0`. Publisher-view type is unaffected.
+- **Fix 2 — `channel.handler.js`**: `handleRewardVoucher` (viewer role) now calls `getChannelState` first to capture `CUMULATIVE_EARNED` and `VIEWER_WALLET_ADDR` before calling `updateChannelVoucher`. After the voucher is stored, computes `delta = cumulative − oldCumulative` and runs `UPDATE USER_PROFILE SET TOTAL_EARNED += delta WHERE ADDRESS = viewerWalletAddr`. Logic extracted into `_continueRewardVoucher(...)` helper to keep the callback chain Rhino-safe (no cross-file closure). Publisher branch is unchanged.
+- **Fix 3 — `dapp/views/viewer.js`**: `onRewardConfirmed` removed (was the only place that incremented the badge at view time). `loadTodayEarned` now queries `USER_PROFILE.TOTAL_EARNED` instead of `SUM(REWARD_EVENTS)` — the former is only incremented at voucher time.
+- **Fix 4 — `dapp/views/earnings.js`**: `onVoucherReceived` now calls `loadTodayEarned()` to refresh the badge whenever a voucher arrives. `console.log` removed.
+- **See**: KNOWN_ISSUES VW-1.
+
 2026-05-28 (T-SC6: FE — buildAndPostStatusUpdateTx + mycampaigns.js integration):
 - **Scope**: `dapp/app.js`, `dapp/views/mycampaigns.js`. No SW, SDK, core, or DB changes.
 - **`dapp/app.js`** `buildAndPostStatusUpdateTx(campaignId, newStatus, onResult)`: builds and posts a V3 status-update tx (Appendix B.5). Validates via `encodeStatusForTx`; loads campaign via `getCampaign`; resolves `ESCROW_ADDRESS_V3` from keypair (returns `{ok:false, error:'V3 address not found'}` if missing); fetches the current escrow coin via `coins coinid:<id> relevant:false`; **skips** with `{ok:true, skipped:true}` if `coin.address !== ESCROW_ADDRESS_V3` (legacy V1/V2 campaigns); carries forward ports 1, 3, 4, 5, 6 from `coin.prevstate` (defensive fallback to campaign DB / `MY_MX_ADDRESS` / `'0x00'`); calls `buildStatusUpdateStatePorts` (core T-SC5) to assemble the port list; runs `txncreate → txninput → txnoutput(full amount, V3 addr, storestate:true) → txnstate×8 → txnsign → txnpost(auto:true) → txndelete`. **Fire-and-forget** — never blocks UI.
@@ -209,6 +242,14 @@ For verification procedures, see `docs/VERIFICATION.md`.
 - **Backwards compat**: a campaign whose `ESCROW_COINID` still references a V1/V2 coin (`address !== ESCROW_ADDRESS_V3`) triggers the early `skipped:true` branch — `MA_LOCAL_STATUS` propagation continues unchanged, no on-chain tx is built. Logged as warning.
 - **MinimaAds.md unchanged**: T-SC6 is implementation-only; the spec for the tx flow already landed in T-SC1.
 - **Verification**: 2-node test. Node A creates a V3 campaign; node B sees it active. Node A pauses → Hub approves → 1–2 NEWBLOCK later, node B's SW log shows `[DISCOVERY] on-chain status sync: <id> active -> paused` and the FE re-renders without Maxima.
+
+2026-05-28 (fix: swBuildAndPostChannelTx — wrong escrow address + missing state ports 5/6/7):
+- **Scope**: `public/service-workers/handlers/channel.handler.js` only.
+- **Root cause**: `var escrowAddr = ESCROW_ADDRESS_V2 || ESCROW_ADDRESS` → V3 coins spent via this path produced outputs at V2 address → `VERIFYOUT(@ADDRESS)` failed (V3 ≠ V2) → Script FAIL → tx rejected by peers, coin locked in creator node until restart.
+- **Fix 1 (address)**: after `txninput`, read `r2.response.transaction.inputs[0].address` as `coinAddr` and use it for both split and change `txnoutput` commands. Same pattern as T-SC3's fix in FE `buildAndPostChannelTx`.
+- **Fix 2 (state ports)**: extract ports 5, 6, 7 from `inputs[0].state` after `txninput`. Add port:7 (status carry-forward) unconditionally; add port:5 and port:6 if present (V3 coins only). These are PREVSTATE top-level reads in ESCROW_SCRIPT_V3 — missing would throw ExecutionException on the next spend of the change coin.
+- **Secondary finding**: `swBuildAndPostChannelOpenTx` (Tx2) doesn't need changes — it spends the split coin with payout=maxAmount so change=0 and VERIFYOUT is skipped; PREVSTATE(1/5/6/7) are now present thanks to Tx1's state fix.
+- **See**: KNOWN_ISSUES #45.
 
 2026-05-28 (T-SC7: Docs — Known Issues, Verification, Protocol Matrix cleanup):
 - **Scope**: `docs/KNOWN_ISSUES.md`, `docs/VERIFICATION.md`, `docs/PROJECT_NOTES.md`. No JS files touched.

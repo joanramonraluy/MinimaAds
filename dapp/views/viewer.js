@@ -126,25 +126,13 @@ function wireAdInteractions(ad) {
 function loadTodayEarned() {
   var earnedEl = document.getElementById('ma-earned');
   if (!earnedEl) { return; }
-  var now = new Date();
-  var startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  var sql = "SELECT SUM(AMOUNT) AS TOTAL FROM REWARD_EVENTS"
-    + " WHERE UPPER(USER_ADDRESS) = UPPER('" + escapeSql(MY_ADDRESS) + "')"
-    + " AND TYPE IN ('view', 'click')"
-    + " AND TIMESTAMP >= " + startOfDay;
+  var sql = "SELECT COALESCE(TOTAL_EARNED, 0) AS TOTAL FROM USER_PROFILE"
+    + " WHERE UPPER(ADDRESS) = UPPER('" + escapeSql(MY_ADDRESS) + "')";
   sqlQuery(sql, function(err, rows) {
     if (err || !rows || !rows[0]) { return; }
     var total = parseFloat(rows[0].TOTAL) || 0;
     earnedEl.textContent = total.toFixed(6);
   });
-}
-
-function onRewardConfirmed(parsed) {
-  var earnedEl = document.getElementById('ma-earned');
-  if (!earnedEl) { return; }
-  var curr = parseFloat(earnedEl.textContent) || 0;
-  var delta = parseFloat(parsed.amount) || 0;
-  earnedEl.textContent = (curr + delta).toFixed(6);
 }
 
 function onCampaignsChanged() {

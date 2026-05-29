@@ -1121,7 +1121,8 @@ Sent immediately by the creator's SW upon receiving a `CREATOR_LIVENESS_PING`. U
 {
   "type": "REWARD_REJECTED",
   "campaign_id": "uuid",
-  "reason": "paused | finished"
+  "reason": "paused | finished",
+  "event_id": "uuid-of-rejected-reward-event"
 }
 ```
 
@@ -1130,15 +1131,17 @@ Sent immediately by the creator's SW upon receiving a `CREATOR_LIVENESS_PING`. U
 | `type` | string | Always `"REWARD_REJECTED"` |
 | `campaign_id` | string | Campaign UUID |
 | `reason` | string | `"paused"` or `"finished"` — the current campaign STATUS on the creator's node |
+| `event_id` | string | *(optional)* ID of the `REWARD_EVENTS` row created on the viewer when the view was tracked. Present when rejection comes from `handleRewardRequest` (open-channel path). Absent when rejection comes from `handleChannelOpen` (channel-open-rejected path). |
 
 **Handler (viewer node)**: `handleRewardRejected(payload)` in `channel.handler.js`
 
 **Effect**:
-1. If viewer's local `campaign.STATUS !== reason` → calls `setCampaignStatus(campaignId, reason)`
-2. Calls `signalFE("CAMPAIGN_UPDATED", { campaign_id, status: reason })`
-3. FE SDK sets `_livenessCache[campaignId] = { alive: false, ts: Date.now() }`
-4. Next `getAd()` → `selectAd()` filters out the campaign (`STATUS !== 'active'`)
-5. Next `_trackEvent()` → `validateView()` rejects the event
+1. If `event_id` present → deletes the corresponding `REWARD_EVENTS` row (removes optimistic view record that will not be paid)
+2. If viewer's local `campaign.STATUS !== reason` → calls `setCampaignStatus(campaignId, reason)`
+3. Calls `signalFE("CAMPAIGN_UPDATED", { campaign_id, status: reason })`
+4. FE SDK sets `_livenessCache[campaignId] = { alive: false, ts: Date.now() }`
+5. Next `getAd()` → `selectAd()` filters out the campaign (`STATUS !== 'active'`)
+6. Next `_trackEvent()` → `validateView()` rejects the event
 
 ### 8.15 SW → FE Signal Contract
 

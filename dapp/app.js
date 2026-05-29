@@ -1186,7 +1186,7 @@ function buildAndPostStatusUpdateTx(campaignId, newStatus, onResult) {
         return;
       }
 
-      MDS.cmd('coins coinid:' + escrowCoinId + ' relevant:false', function(cRes) {
+      MDS.cmd('coins coinid:' + escrowCoinId, function(cRes) {
         if (!cRes || !cRes.status || !cRes.response || cRes.response.length === 0) {
           done({ ok: false, error: 'escrow coin not found on-chain: ' + escrowCoinId });
           return;
@@ -1194,7 +1194,7 @@ function buildAndPostStatusUpdateTx(campaignId, newStatus, onResult) {
         var coin       = cRes.response[0];
         var coinAddr   = coin.address || '';
         var coinAmount = parseFloat(coin.amount || 0);
-        var prevstates = coin.prevstate || [];
+        var coinStateArr = coin.state || [];
 
         if (!coinAddr || coinAddr.toUpperCase() !== escrowAddrV3.toUpperCase()) {
           console.warn('[STATUS-TX] skip: campaign escrow coin is not at ESCROW_ADDRESS_V3 (legacy V1/V2 coin). campaign:', campaignId,
@@ -1208,13 +1208,13 @@ function buildAndPostStatusUpdateTx(campaignId, newStatus, onResult) {
         }
 
         function ps(port) {
-          for (var i = 0; i < prevstates.length; i++) {
-            if (prevstates[i].port == port) { return prevstates[i].data; }
+          for (var i = 0; i < coinStateArr.length; i++) {
+            if (coinStateArr[i].port == port) { return coinStateArr[i].data || ''; }
           }
           return '';
         }
 
-        // Carry forward ports 1, 3, 4, 5, 6 from the previous escrow coin.
+        // Carry forward ports 1, 3, 4, 5, 6 from the current escrow coin's state.
         // Fallback to the campaign DB row / current FE identity when a port is
         // missing (defensive — V3 coins set them at funding time).
         var creatorMxHex = '0x' + utf8ToHex(MY_MX_ADDRESS).toUpperCase();
@@ -1228,7 +1228,7 @@ function buildAndPostStatusUpdateTx(campaignId, newStatus, onResult) {
           feeflag:        '0'
         };
 
-        var ports = buildStatusUpdateStatePorts(currentEscrow, newStatusHex);
+        var ports = buildStatusUpdateStatePorts(currentEscrow, newStatusHex, coinAmount);
         var txId  = 'st_' + generateUID();
 
         function buildCtx(extra) {
@@ -1290,7 +1290,7 @@ function buildAndPostStatusUpdateTx(campaignId, newStatus, onResult) {
                   }
                   if (!r5.status) { fail('txnsign', r5); return; }
 
-                  MDS.cmd('txnpost id:' + txId + ' mine:true auto:true', function(r6) {
+                  MDS.cmd('txnpost id:' + txId + ' mine:true auto:false', function(r6) {
                     if (r6 && r6.pending) {
                       var postCtx = buildCtx({ kind: 'status_update_post' });
                       savePendingChannelOp(r6.pendinguid, postCtx);
@@ -1497,7 +1497,7 @@ function handleFePending(msg) {
     }
     if (ctx.kind === 'status_update_sign') {
       // Hub approved the signing step — proceed to txnpost.
-      MDS.cmd('txnpost id:' + ctx.txId + ' mine:true auto:true', function(r6) {
+      MDS.cmd('txnpost id:' + ctx.txId + ' mine:true auto:false', function(r6) {
         if (r6 && r6.pending) {
           var postCtx = {
             kind:         'status_update_post',

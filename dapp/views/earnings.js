@@ -449,11 +449,11 @@ function onChannelOpened(parsed) {
 }
 
 function onVoucherReceived(parsed) {
-  console.log('[EARNINGS] onVoucherReceived campaign:', parsed && parsed.campaign_id, 'cumulative:', parsed && parsed.cumulative);
   if (typeof MinimaAds !== 'undefined' && typeof MinimaAds.onVoucherReceived === 'function') {
     MinimaAds.onVoucherReceived(parsed);
   }
   _refreshChannelRewards();
+  if (typeof loadTodayEarned === 'function') { loadTodayEarned(); }
 }
 
 function onAutoSettle(parsed) {

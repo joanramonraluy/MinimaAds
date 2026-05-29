@@ -290,24 +290,26 @@ function handleChannelOpen(payload) {
 
   MDS.keypair.get("CREATOR_MX_" + campaignId, function(kpRes) {
     var creatorMx = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : '';
-    var sql = "MERGE INTO CHANNEL_STATE " +
-      "(CAMPAIGN_ID, VIEWER_KEY, ROLE, FRAME_ID, CREATOR_MX, CHANNEL_COINID, MAX_AMOUNT, " +
-      "CUMULATIVE_EARNED, LATEST_TX_HEX, STATUS, CREATED_AT, VIEWER_WALLET_ADDR) " +
-      "KEY (CAMPAIGN_ID, VIEWER_KEY, ROLE) VALUES (" +
-      "'" + escapeSql(campaignId) + "'," +
-      "'" + escapeSql(viewerKey) + "'," +
-      "'" + escapeSql(role) + "'," +
-      "''," +
-      "'" + escapeSql(creatorMx) + "'," +
-      "'" + escapeSql(channelCoinId) + "'," +
-      maxAmount + "," +
-      "0," +
-      "''," +
-      "'open'," +
-      now + "," +
-      "''" +
-      ")";
-    sqlQuery(sql, function(err) {
+    MDS.keypair.get("VIEWER_WALLET_ADDR_" + campaignId, function(waRes) {
+      var viewerWalletAddr = (waRes && waRes.status && waRes.value) ? waRes.value : '';
+      var sql = "MERGE INTO CHANNEL_STATE " +
+        "(CAMPAIGN_ID, VIEWER_KEY, ROLE, FRAME_ID, CREATOR_MX, CHANNEL_COINID, MAX_AMOUNT, " +
+        "CUMULATIVE_EARNED, LATEST_TX_HEX, STATUS, CREATED_AT, VIEWER_WALLET_ADDR) " +
+        "KEY (CAMPAIGN_ID, VIEWER_KEY, ROLE) VALUES (" +
+        "'" + escapeSql(campaignId) + "'," +
+        "'" + escapeSql(viewerKey) + "'," +
+        "'" + escapeSql(role) + "'," +
+        "''," +
+        "'" + escapeSql(creatorMx) + "'," +
+        "'" + escapeSql(channelCoinId) + "'," +
+        maxAmount + "," +
+        "0," +
+        "''," +
+        "'open'," +
+        now + "," +
+        "'" + escapeSql(viewerWalletAddr) + "'" +
+        ")";
+      sqlQuery(sql, function(err) {
       if (err) {
         MDS.log("[CHANNEL] CHANNEL_OPEN: upsert failed: " + err);
         return;
@@ -341,6 +343,7 @@ function handleChannelOpen(payload) {
         });
       });
     });
+    });
   });
 }
 
@@ -371,7 +374,8 @@ function handleRewardRequest(payload, senderPk) {
           sendMaxima(sndrPk, _viewerMx, {
             type:        "REWARD_REJECTED",
             campaign_id: campaignId,
-            reason:      _rejStatus
+            reason:      _rejStatus,
+            event_id:    eventId || ''
           }, function(ok) {
             MDS.log("[CHANNEL] REWARD_REJECTED sent ok=" + ok + " mx=" + (_viewerMx ? 'yes' : 'no') + " status=" + _rejStatus);
           });
@@ -402,7 +406,11 @@ function handleRewardRejected(payload) {
     MDS.log("[CHANNEL] REWARD_REJECTED unknown reason: " + reason);
     return;
   }
+  var rejEventId = payload.event_id || '';
   MDS.log("[CHANNEL] REWARD_REJECTED received for campaign: " + campaignId + " reason: " + reason);
+  if (rejEventId) {
+    sqlQuery("DELETE FROM REWARD_EVENTS WHERE UPPER(ID) = UPPER('" + escapeSql(rejEventId) + "')", function() {});
+  }
   getCampaign(campaignId, function(err, campaign) {
     if (err || !campaign) {
       MDS.log("[CHANNEL] REWARD_REJECTED: campaign not found locally: " + campaignId);
@@ -501,20 +509,7 @@ function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumu
   });
 }
 
-function handleRewardVoucher(payload) {
-  if (!payload.campaign_id || !payload.viewer_key || !payload.event_id || payload.cumulative === undefined || !payload.tx_hex) {
-    MDS.log("[CHANNEL] REWARD_VOUCHER missing required fields");
-    return;
-  }
-
-  var campaignId = payload.campaign_id;
-  var viewerKey  = payload.viewer_key;
-  var eventId    = payload.event_id;
-  var cumulative = parseFloat(payload.cumulative);
-  var txHex      = payload.tx_hex;
-  var role       = payload.role || 'viewer';
-  var frameId    = payload.frame_id || '';
-
+function _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHex, role, frameId, oldCumulative, viewerWalletAddr) {
   updateChannelVoucher(campaignId, viewerKey, role, cumulative, txHex, function(err) {
     if (err) {
       MDS.log("[CHANNEL] REWARD_VOUCHER: updateChannelVoucher failed: " + err);
@@ -576,13 +571,85 @@ function handleRewardVoucher(payload) {
           );
         });
       } else {
-        signalFE("VOUCHER_RECEIVED", {
-          campaign_id: campaignId,
-          cumulative:  cumulative
-        });
+        var delta = cumulative - oldCumulative;
+        if (!(delta > 0)) {
+          signalFE("VOUCHER_RECEIVED", {
+            campaign_id: campaignId,
+            cumulative:  cumulative
+          });
+          return;
+        }
+        var reTimestamp = Date.now();
+        var reId = reTimestamp.toString(16) + '-' + Math.floor(Math.random() * 0xFFFFFFFF).toString(16);
+        sqlQuery(
+          "SELECT ID FROM ADS WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')",
+          function(adErr, adRows) {
+            var adId = (adRows && adRows.length > 0) ? adRows[0].ID : '';
+            var reSql = "MERGE INTO REWARD_EVENTS "
+              + "(ID, CAMPAIGN_ID, AD_ID, USER_ADDRESS, TYPE, AMOUNT, TIMESTAMP, PUBLISHER_ID) "
+              + "KEY (ID) VALUES ("
+              + "'" + escapeSql(reId) + "',"
+              + "'" + escapeSql(campaignId) + "',"
+              + "'" + escapeSql(adId) + "',"
+              + "'" + escapeSql(viewerKey) + "',"
+              + "'view',"
+              + delta + ","
+              + reTimestamp + ","
+              + "NULL"
+              + ")";
+            sqlQuery(reSql, function(reErr) {
+              if (reErr) { MDS.log("[CHANNEL] REWARD_VOUCHER: REWARD_EVENTS insert failed: " + reErr); }
+              if (viewerWalletAddr) {
+                var profileSql = "UPDATE USER_PROFILE"
+                  + " SET TOTAL_EARNED = COALESCE(TOTAL_EARNED, 0) + " + delta
+                  + ", LAST_REWARD_AT = " + reTimestamp
+                  + " WHERE UPPER(ADDRESS) = UPPER('" + escapeSql(viewerWalletAddr) + "')";
+                sqlQuery(profileSql, function(profErr) {
+                  if (profErr) {
+                    MDS.log("[CHANNEL] REWARD_VOUCHER: USER_PROFILE update failed: " + profErr);
+                  }
+                  signalFE("VOUCHER_RECEIVED", {
+                    campaign_id: campaignId,
+                    cumulative:  cumulative
+                  });
+                });
+              } else {
+                signalFE("VOUCHER_RECEIVED", {
+                  campaign_id: campaignId,
+                  cumulative:  cumulative
+                });
+              }
+            });
+          }
+        );
       }
     });
   });
+}
+
+function handleRewardVoucher(payload) {
+  if (!payload.campaign_id || !payload.viewer_key || !payload.event_id || payload.cumulative === undefined || !payload.tx_hex) {
+    MDS.log("[CHANNEL] REWARD_VOUCHER missing required fields");
+    return;
+  }
+
+  var campaignId = payload.campaign_id;
+  var viewerKey  = payload.viewer_key;
+  var eventId    = payload.event_id;
+  var cumulative = parseFloat(payload.cumulative);
+  var txHex      = payload.tx_hex;
+  var role       = payload.role || 'viewer';
+  var frameId    = payload.frame_id || '';
+
+  if (role !== 'publisher') {
+    getChannelState(campaignId, viewerKey, role, function(csErr, chState) {
+      var oldCumulative = chState ? (parseFloat(chState.CUMULATIVE_EARNED) || 0) : 0;
+      var viewerWalletAddr = chState ? (chState.VIEWER_WALLET_ADDR || '') : '';
+      _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHex, role, frameId, oldCumulative, viewerWalletAddr);
+    });
+    return;
+  }
+  _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHex, role, frameId, 0, '');
 }
 
 function handleVoucherSyncRequest(payload) {
@@ -1450,14 +1517,14 @@ function swBuildAndPostChannelTx(ctx) {
   var txId         = "sp_" + swGenerateUID();
   var campaignHex  = "0x" + utf8ToHex(ctx.campaignId).toUpperCase();
   var creatorMxHex = "0x" + utf8ToHex(MY_MX_ADDRESS).toUpperCase();
-  var escrowAddr   = ESCROW_ADDRESS_V2 || ESCROW_ADDRESS;
+  var escrowAddrFallback = ESCROW_ADDRESS_V3 || ESCROW_ADDRESS_V2 || ESCROW_ADDRESS;
 
   function fail(stage) {
     MDS.log("[CHANNEL] swBuildAndPostChannelTx failed at " + stage + " campaign: " + ctx.campaignId);
     MDS.cmd("txndelete id:" + txId, function() {});
   }
 
-  if (!escrowAddr) {
+  if (!escrowAddrFallback) {
     MDS.log("[CHANNEL] swBuildAndPostChannelTx: no escrow address. campaign: " + ctx.campaignId);
     return;
   }
@@ -1476,12 +1543,29 @@ function swBuildAndPostChannelTx(ctx) {
         return;
       }
 
+      // Use the coin's actual on-chain address so VERIFYOUT(@ADDRESS) passes
+      // regardless of escrow script version (V1/V2/V3).
+      var coinAddr = escrowAddrFallback;
+      try { coinAddr = r2.response.transaction.inputs[0].address || escrowAddrFallback; } catch(e) {}
+
+      // Carry forward ports 5 (platformKey), 6 (maxPubBudget), 7 (status) so
+      // ESCROW_SCRIPT_V3's top-level PREVSTATE reads don't throw on next spend.
+      var inputStates = [];
+      try { inputStates = r2.response.transaction.inputs[0].state || []; } catch(e) {}
+      var ps5 = ''; var ps6 = ''; var ps7 = '';
+      for (var si = 0; si < inputStates.length; si++) {
+        if (inputStates[si].port == 5) { ps5 = inputStates[si].data; }
+        if (inputStates[si].port == 6) { ps6 = inputStates[si].data; }
+        if (inputStates[si].port == 7) { ps7 = inputStates[si].data; }
+      }
+      if (!ps7) { ps7 = '0x' + utf8ToHex('active').toUpperCase(); }
+
       var actualAmount = 0;
       try { actualAmount = parseFloat(r2.response.transaction.inputs[0].amount); } catch(e) {}
       var change = parseFloat((actualAmount - ctx.maxAmount).toFixed(6));
       MDS.log("[CHANNEL] SW split: actual=" + actualAmount + " max=" + ctx.maxAmount + " change=" + change);
 
-      MDS.cmd("txnoutput id:" + txId + " storestate:true amount:" + ctx.maxAmount + " address:" + escrowAddr, function(r3) {
+      MDS.cmd("txnoutput id:" + txId + " storestate:true amount:" + ctx.maxAmount + " address:" + coinAddr, function(r3) {
         if (!r3 || !r3.status) { fail("txnoutput[split]"); return; }
 
         function afterChange(r4) {
@@ -1491,9 +1575,12 @@ function swBuildAndPostChannelTx(ctx) {
             "txnstate id:" + txId + " port:1 value:" + ctx.walletPK,
             "txnstate id:" + txId + " port:3 value:" + campaignHex,
             "txnstate id:" + txId + " port:4 value:" + creatorMxHex,
+            "txnstate id:" + txId + " port:7 value:" + ps7,
             "txnstate id:" + txId + " port:10 value:" + ctx.maxAmount,
             "txnstate id:" + txId + " port:11 value:0"
           ];
+          if (ps5) { stateCmds.push("txnstate id:" + txId + " port:5 value:" + ps5); }
+          if (ps6) { stateCmds.push("txnstate id:" + txId + " port:6 value:" + ps6); }
           swRunSequential(stateCmds, 0, function(stateOk) {
             if (!stateOk) { fail("txnstate"); return; }
 
@@ -1553,7 +1640,7 @@ function swBuildAndPostChannelTx(ctx) {
                   maxAmount:     ctx.maxAmount,
                   splitCoinId:   splitCoinId,
                   walletPK:      ctx.walletPK,
-                  escrowAddr:    escrowAddr,
+                  escrowAddr:    coinAddr,
                   role:          ctx.role,
                   frameId:       ctx.frameId
                 };
@@ -1564,7 +1651,7 @@ function swBuildAndPostChannelTx(ctx) {
         }
 
         if (change > 0) {
-          MDS.cmd("txnoutput id:" + txId + " storestate:true amount:" + change + " address:" + escrowAddr, afterChange);
+          MDS.cmd("txnoutput id:" + txId + " storestate:true amount:" + change + " address:" + coinAddr, afterChange);
         } else {
           afterChange(null);
         }

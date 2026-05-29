@@ -112,29 +112,17 @@ function handleTrackView(payload) {
         MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "creator cannot earn"}), function() {});
         return;
       }
-      sqlQuery(
-        "SELECT ID FROM ADS WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')",
-        function(err2, rows) {
-          var adId   = (rows && rows.length > 0) ? rows[0].ID : "";
-          var amount = parseFloat(campaign.REWARD_VIEW) || 0;
-          createRewardEvent({
-            campaign_id:  campaignId,
-            ad_id:        adId,
-            user_address: userAddress,
-            type:         "view",
-            amount:       amount,
-            publisher_id: publisherKey || null
-          }, function(err3, evt) {
-            if (err3 || !evt) {
-              MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "reward event failed"}), function() {});
-              return;
-            }
-            MDS.log("[COMMS] MA_TRACK_VIEW confirmed: campaign=" + campaignId + " amount=" + amount);
-            MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: true, amount: amount}), function() {});
-            _triggerChannelPayment(campaignId, campaign, userAddress, amount, evt.id, publisherKey);
-          });
+      var amount = parseFloat(campaign.REWARD_VIEW) || 0;
+      var eventId = Date.now().toString(16) + '-' + Math.floor(Math.random() * 0xFFFFFFFF).toString(16);
+      updateBudget(campaignId, amount, function(budErr) {
+        if (budErr) {
+          MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "budget update failed"}), function() {});
+          return;
         }
-      );
+        MDS.log("[COMMS] MA_TRACK_VIEW confirmed: campaign=" + campaignId + " amount=" + amount);
+        MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: true, amount: amount}), function() {});
+        _triggerChannelPayment(campaignId, campaign, userAddress, amount, eventId, publisherKey);
+      });
     });
   });
 }
@@ -164,29 +152,17 @@ function handleTrackClick(payload) {
         MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "creator cannot earn"}), function() {});
         return;
       }
-      sqlQuery(
-        "SELECT ID FROM ADS WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')",
-        function(err2, rows) {
-          var adId   = (rows && rows.length > 0) ? rows[0].ID : "";
-          var amount = parseFloat(campaign.REWARD_CLICK) || 0;
-          createRewardEvent({
-            campaign_id:  campaignId,
-            ad_id:        adId,
-            user_address: userAddress,
-            type:         "click",
-            amount:       amount,
-            publisher_id: publisherKey || null
-          }, function(err3, evt) {
-            if (err3 || !evt) {
-              MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "reward event failed"}), function() {});
-              return;
-            }
-            MDS.log("[COMMS] MA_TRACK_CLICK confirmed: campaign=" + campaignId + " amount=" + amount);
-            MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: true, amount: amount}), function() {});
-            _triggerChannelPayment(campaignId, campaign, userAddress, amount, evt.id, publisherKey);
-          });
+      var amount = parseFloat(campaign.REWARD_CLICK) || 0;
+      var eventId = Date.now().toString(16) + '-' + Math.floor(Math.random() * 0xFFFFFFFF).toString(16);
+      updateBudget(campaignId, amount, function(budErr) {
+        if (budErr) {
+          MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "budget update failed"}), function() {});
+          return;
         }
-      );
+        MDS.log("[COMMS] MA_TRACK_CLICK confirmed: campaign=" + campaignId + " amount=" + amount);
+        MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: true, amount: amount}), function() {});
+        _triggerChannelPayment(campaignId, campaign, userAddress, amount, eventId, publisherKey);
+      });
     });
   });
 }

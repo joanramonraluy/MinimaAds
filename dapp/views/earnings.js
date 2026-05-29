@@ -45,11 +45,13 @@ function renderEarnings(root) {
 function _loadTodayEarnedSummary() {
   var el = document.getElementById('ma-today-earned');
   if (!el) { return; }
+  var role = (typeof _activeMode !== 'undefined') ? _activeMode : 'viewer';
+  var types = (role === 'publisher') ? "'publisher_view'" : "'view','click'";
   var now = new Date();
   var startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   var sql = "SELECT SUM(AMOUNT) AS TOTAL FROM REWARD_EVENTS"
     + " WHERE UPPER(USER_ADDRESS) = UPPER('" + escapeSql(MY_ADDRESS) + "')"
-    + " AND TYPE IN ('view', 'click', 'publisher_view')"
+    + " AND TYPE IN (" + types + ")"
     + " AND TIMESTAMP >= " + startOfDay;
   sqlQuery(sql, function(err, rows) {
     var target = document.getElementById('ma-today-earned');
@@ -62,11 +64,17 @@ function _loadTodayEarnedSummary() {
 function loadEarnings() {
   if (!MY_ADDRESS) { return; }
 
-  getUserProfile(MY_ADDRESS, function(err, profile) {
+  var role = (typeof _activeMode !== 'undefined') ? _activeMode : 'viewer';
+  var types = (role === 'publisher') ? "'publisher_view'" : "'view','click'";
+  var totalSql = "SELECT SUM(AMOUNT) AS TOTAL FROM REWARD_EVENTS"
+    + " WHERE UPPER(USER_ADDRESS) = UPPER('" + escapeSql(MY_ADDRESS) + "')"
+    + " AND TYPE IN (" + types + ")";
+
+  sqlQuery(totalSql, function(err, rows) {
     var target = document.getElementById('ma-earnings-summary');
     if (!target) { return; }
     target.innerHTML = '';
-    var totalEarned = (!err && profile) ? parseFloat(profile.TOTAL_EARNED || 0) : 0;
+    var totalEarned = (!err && rows && rows[0]) ? (parseFloat(rows[0].TOTAL) || 0) : 0;
 
     var article = document.createElement('article');
     var strong = document.createElement('strong');
@@ -91,8 +99,13 @@ function loadEarnings() {
       hint.style.cssText = 'color:var(--pico-muted-color,#6c757d);margin-top:.5rem;';
       hint.appendChild(document.createTextNode('Nothing earned yet. '));
       var hintLink = document.createElement('a');
-      hintLink.href = '#viewer';
-      hintLink.textContent = 'Go to View Ads to get started.';
+      if (role === 'publisher') {
+        hintLink.href = '#frames';
+        hintLink.textContent = 'Go to Frames to get started.';
+      } else {
+        hintLink.href = '#viewer';
+        hintLink.textContent = 'Go to View Ads to get started.';
+      }
       hint.appendChild(hintLink);
       target.appendChild(hint);
     }
@@ -107,18 +120,20 @@ function loadEarnings() {
 function _refreshSettlementHistory() {
   var target = document.getElementById('ma-settlement-history');
   if (!target) { return; }
-  // VIEWER_KEY is an ephemeral signing key (never equals MY_ADDRESS = Maxima key).
-  // Show: (a) publisher channels (always personal earnings regardless of who created the campaign),
-  //        (b) viewer channels for campaigns this node did NOT create (own viewer earnings).
-  // This excludes ROLE='viewer' rows that the creator's SW wrote for other users' viewer channels.
-  // GROUP BY campaign so multiple settlement cycles (coin spent → reopened) show as one row.
+  var role = (typeof _activeMode !== 'undefined') ? _activeMode : 'viewer';
+  var roleFilter;
+  if (role === 'publisher') {
+    roleFilter = " WHERE UPPER(ch.ROLE) = 'PUBLISHER'";
+  } else {
+    roleFilter = " WHERE UPPER(ch.ROLE) = 'VIEWER'"
+      + " AND (UPPER(c.CREATOR_ADDRESS) != UPPER('" + escapeSql(MY_ADDRESS) + "')"
+      + " OR c.CREATOR_ADDRESS IS NULL)";
+  }
   var sql = "SELECT ch.CAMPAIGN_ID, ch.ROLE, SUM(ch.CUMULATIVE_EARNED) AS CUMULATIVE_EARNED,"
           + " MIN(ch.CREATED_AT) AS CREATED_AT, c.TITLE, c.CREATOR_ADDRESS"
           + " FROM CHANNEL_HISTORY ch"
           + " LEFT JOIN CAMPAIGNS c ON UPPER(ch.CAMPAIGN_ID) = UPPER(c.ID)"
-          + " WHERE (UPPER(ch.ROLE) = 'PUBLISHER'"
-          + "   OR UPPER(c.CREATOR_ADDRESS) != UPPER('" + escapeSql(MY_ADDRESS) + "')"
-          + "   OR c.CREATOR_ADDRESS IS NULL)"
+          + roleFilter
           + " GROUP BY ch.CAMPAIGN_ID, ch.ROLE, c.TITLE, c.CREATOR_ADDRESS"
           + " ORDER BY MIN(ch.CREATED_AT) ASC";
   sqlQuery(sql, function(err, rows) {
@@ -256,17 +271,20 @@ function _loadChannelEvents(campaignId, targetEl) {
 function _refreshChannelRewards() {
   var container = document.getElementById('ma-channel-rewards-list');
   if (!container) { return; }
-  // VIEWER_KEY is an ephemeral signing key (never equals MY_ADDRESS = Maxima key).
-  // Show: (a) publisher channels (always personal earnings regardless of who created the campaign),
-  //        (b) viewer channels for campaigns this node did NOT create (own viewer earnings).
-  // This excludes ROLE='viewer' rows that the creator's SW wrote for other users' viewer channels.
+  var role = (typeof _activeMode !== 'undefined') ? _activeMode : 'viewer';
+  var roleFilter;
+  if (role === 'publisher') {
+    roleFilter = " AND UPPER(cs.ROLE) = 'PUBLISHER'";
+  } else {
+    roleFilter = " AND UPPER(cs.ROLE) = 'VIEWER'"
+      + " AND (UPPER(c.CREATOR_ADDRESS) != UPPER('" + escapeSql(MY_ADDRESS) + "')"
+      + " OR c.CREATOR_ADDRESS IS NULL)";
+  }
   var sql = "SELECT cs.CAMPAIGN_ID, cs.VIEWER_KEY, cs.ROLE, cs.CUMULATIVE_EARNED, cs.LATEST_TX_HEX, c.TITLE"
           + " FROM CHANNEL_STATE cs"
           + " LEFT JOIN CAMPAIGNS c ON UPPER(cs.CAMPAIGN_ID) = UPPER(c.ID)"
           + " WHERE cs.STATUS = 'open' AND cs.LATEST_TX_HEX != ''"
-          + " AND (UPPER(cs.ROLE) = 'PUBLISHER'"
-          + "   OR UPPER(c.CREATOR_ADDRESS) != UPPER('" + escapeSql(MY_ADDRESS) + "')"
-          + "   OR c.CREATOR_ADDRESS IS NULL)";
+          + roleFilter;
   sqlQuery(sql, function(err, rows) {
     if (err) { console.error('[EARNINGS] _refreshChannelRewards query error:', err); return; }
     var found = rows || [];
@@ -492,32 +510,5 @@ function onSettleConfirmed(parsed) {
       ? 'Reward channel settled. Received: ' + amount + ' MINIMA'
       : 'Reward channel settled.';
   }
-  _refreshChannelRewards();
-  _refreshSettlementHistory();
-  var summaryTarget = document.getElementById('ma-earnings-summary');
-  if (summaryTarget && MY_ADDRESS) {
-    getUserProfile(MY_ADDRESS, function(err, profile) {
-      if (summaryTarget && !err) {
-        summaryTarget.innerHTML = '';
-        var totalEarned = profile ? parseFloat(profile.TOTAL_EARNED || 0) : 0;
-        var article = document.createElement('article');
-        var strong = document.createElement('strong');
-        strong.textContent = 'Total earned: ';
-        article.appendChild(strong);
-        article.appendChild(document.createTextNode(totalEarned.toFixed(6) + ' MINIMA'));
-        summaryTarget.appendChild(article);
-        var todayArticle = document.createElement('article');
-        var todayStrong = document.createElement('strong');
-        todayStrong.textContent = 'Today earned: ';
-        todayArticle.appendChild(todayStrong);
-        var todaySpan = document.createElement('span');
-        todaySpan.id = 'ma-today-earned';
-        todaySpan.textContent = '…';
-        todayArticle.appendChild(todaySpan);
-        todayArticle.appendChild(document.createTextNode(' MINIMA'));
-        summaryTarget.appendChild(todayArticle);
-        _loadTodayEarnedSummary();
-      }
-    });
-  }
+  loadEarnings();
 }

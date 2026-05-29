@@ -599,26 +599,33 @@ function _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHe
               + ")";
             sqlQuery(reSql, function(reErr) {
               if (reErr) { MDS.log("[CHANNEL] REWARD_VOUCHER: REWARD_EVENTS insert failed: " + reErr); }
-              if (viewerWalletAddr) {
-                var profileSql = "UPDATE USER_PROFILE"
-                  + " SET TOTAL_EARNED = COALESCE(TOTAL_EARNED, 0) + " + delta
-                  + ", LAST_REWARD_AT = " + reTimestamp
-                  + " WHERE UPPER(ADDRESS) = UPPER('" + escapeSql(viewerWalletAddr) + "')";
-                sqlQuery(profileSql, function(profErr) {
-                  if (profErr) {
-                    MDS.log("[CHANNEL] REWARD_VOUCHER: USER_PROFILE update failed: " + profErr);
+              // Use viewerKey as the profile identity so getUserProfile(MY_ADDRESS) on the FE
+              // finds the row. viewerKey = MY_MAXIMA_PK for comms-handler channels, which is
+              // the same key the FE uses as MY_ADDRESS. viewerWalletAddr (coinbase wallet) is a
+              // different key type and never matches what the FE queries.
+              var profKey = viewerKey;
+              sqlQuery(
+                "SELECT TOTAL_EARNED FROM USER_PROFILE WHERE UPPER(ADDRESS) = UPPER('" + escapeSql(profKey) + "')",
+                function(pErr, pRows) {
+                  var pSql;
+                  if (pRows && pRows.length > 0) {
+                    pSql = "UPDATE USER_PROFILE"
+                      + " SET TOTAL_EARNED = COALESCE(TOTAL_EARNED, 0) + " + delta
+                      + ", LAST_REWARD_AT = " + reTimestamp
+                      + " WHERE UPPER(ADDRESS) = UPPER('" + escapeSql(profKey) + "')";
+                  } else {
+                    pSql = "INSERT INTO USER_PROFILE (ADDRESS, INTERESTS, TOTAL_EARNED, LAST_REWARD_AT) VALUES ("
+                      + "'" + escapeSql(profKey) + "', NULL, " + delta + ", " + reTimestamp + ")";
                   }
-                  signalFE("VOUCHER_RECEIVED", {
-                    campaign_id: campaignId,
-                    cumulative:  cumulative
+                  sqlQuery(pSql, function(profErr) {
+                    if (profErr) { MDS.log("[CHANNEL] REWARD_VOUCHER: USER_PROFILE update failed: " + profErr); }
+                    signalFE("VOUCHER_RECEIVED", {
+                      campaign_id: campaignId,
+                      cumulative:  cumulative
+                    });
                   });
-                });
-              } else {
-                signalFE("VOUCHER_RECEIVED", {
-                  campaign_id: campaignId,
-                  cumulative:  cumulative
-                });
-              }
+                }
+              );
             });
           }
         );

@@ -2,16 +2,15 @@
 // Route: #mycampaigns (Creator mode only).
 // Shows per-campaign metrics (views, clicks) from REWARD_EVENTS and management actions.
 // Actions (pause/resume/finish) migrated here from the provisional section in creator.js (Sessió 5).
-// Sessió 9: Chart.js line chart (expand row to see detail), auto-refresh every 30s.
+// Sessió 9: Chart.js line chart inside a <details> per card, auto-refresh every 30s.
+// M4: table → campaign cards with status badge, stat cards, budget progress bar.
 
 var _autoRefreshTimer = 0;
-var _expandedCampaignId = null;
-var _expandedChart = null;
+var _expandedCharts   = {};   // campaignId → Chart instance
 
 function renderMyCampaigns(root) {
   if (_autoRefreshTimer) { clearInterval(_autoRefreshTimer); _autoRefreshTimer = 0; }
-  if (_expandedChart) { _expandedChart.destroy(); _expandedChart = null; }
-  _expandedCampaignId = null;
+  _destroyAllCharts();
 
   root.innerHTML = '';
   var h2 = document.createElement('h2');
@@ -22,6 +21,13 @@ function renderMyCampaigns(root) {
   root.appendChild(section);
   loadMyCampaigns();
   _startAutoRefresh();
+}
+
+function _destroyAllCharts() {
+  for (var id in _expandedCharts) {
+    if (_expandedCharts[id]) { _expandedCharts[id].destroy(); }
+  }
+  _expandedCharts = {};
 }
 
 function _startAutoRefresh() {
@@ -37,15 +43,9 @@ function loadMyCampaigns() {
   var section = document.getElementById('ma-mycampaigns-section');
   if (!section || !MY_ADDRESS) { return; }
 
-  var savedExpandedId = _expandedCampaignId;
-  if (_expandedChart) { _expandedChart.destroy(); _expandedChart = null; }
-  _expandedCampaignId = null;
-
+  _destroyAllCharts();
   section.innerHTML = '';
-  var loading = document.createElement('p');
-  loading.setAttribute('aria-busy', 'true');
-  loading.textContent = 'Loading…';
-  section.appendChild(loading);
+  section.appendChild(mkLoading('Loading campaigns…'));
 
   var sql = "SELECT c.*,"
     + " (SELECT COUNT(*) FROM REWARD_EVENTS re WHERE UPPER(re.CAMPAIGN_ID) = UPPER(c.ID) AND re.TYPE = 'view') AS VIEW_COUNT,"
@@ -67,163 +67,107 @@ function loadMyCampaigns() {
     }
 
     if (!rows || rows.length === 0) {
-      var emptyEl = document.createElement('p');
-      emptyEl.style.color = 'var(--pico-muted-color,#6c757d)';
-      emptyEl.textContent = 'No has creat cap campanya. Vés a Create per publicar la primera.';
-      target.appendChild(emptyEl);
+      target.appendChild(mkEmptyState(
+        'No campaigns yet.',
+        'Create your first campaign',
+        '#creator'
+      ));
       return;
     }
 
-    var table = document.createElement('table');
-    var thead = document.createElement('thead');
-    var headerRow = document.createElement('tr');
-    var headers = ['Títol', 'Estat', 'Pressupost total', 'Restant', 'View reward', 'Click reward', 'Views', 'Clicks', 'Accions'];
-    for (var h = 0; h < headers.length; h++) {
-      var th = document.createElement('th');
-      th.textContent = headers[h];
-      headerRow.appendChild(th);
-    }
-    thead.appendChild(headerRow);
-    table.appendChild(thead);
-
-    var tbody = document.createElement('tbody');
     for (var i = 0; i < rows.length; i++) {
-      tbody.appendChild(_buildMyCampaignRow(rows[i]));
-    }
-    table.appendChild(tbody);
-    target.appendChild(table);
-
-    // Re-open the detail panel that was open before the refresh
-    if (savedExpandedId) {
-      var savedRow = tbody.querySelector('tr[data-campaign-id="' + savedExpandedId + '"]');
-      if (savedRow) { _expandDetailPanel(tbody, savedRow, savedExpandedId); }
+      target.appendChild(_buildCampaignCard(rows[i]));
     }
   });
 }
 
-function _buildMyCampaignRow(c) {
-  var tr = document.createElement('tr');
-  tr.setAttribute('data-campaign-id', c.ID);
+function _buildCampaignCard(c) {
+  var budgetTotal     = parseFloat(c.BUDGET_TOTAL || 0);
+  var budgetRemaining = parseFloat(c.BUDGET_REMAINING || 0);
+  var budgetSpent     = budgetTotal - budgetRemaining;
+  var budgetPct       = budgetTotal > 0 ? (budgetSpent / budgetTotal) * 100 : 0;
+  var viewCount       = parseInt(c.VIEW_COUNT || 0, 10);
+  var clickCount      = parseInt(c.CLICK_COUNT || 0, 10);
 
-  // Clickable title cell — expands/collapses the detail chart panel
-  var tdTitle = document.createElement('td');
-  tdTitle.style.cursor = 'pointer';
-  tdTitle.title = 'Veure detall';
+  var card = document.createElement('article');
+  card.setAttribute('data-campaign-id', c.ID);
+  card.style.cssText = 'margin-bottom:1rem;';
 
-  var indicator = document.createElement('span');
-  indicator.className = 'ma-detail-indicator';
-  indicator.style.cssText = 'display:inline-block;width:0.75rem;margin-right:0.35rem;'
-    + 'font-size:0.75rem;color:var(--pico-muted-color,#6c757d);';
-  indicator.textContent = '▶';
-  tdTitle.appendChild(indicator);
-  tdTitle.appendChild(document.createTextNode(c.TITLE));
+  // ── Header: title + badge (left) | action buttons (right) ──────────────
+  var cardHeader = document.createElement('header');
+  cardHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap;';
 
-  tdTitle.addEventListener('click', function() {
-    _toggleDetailPanel(tr, c.ID);
+  var badgeGroup = document.createElement('div');
+  badgeGroup.className = 'ma-campaign-badge-group';
+  badgeGroup.style.cssText = 'display:flex;align-items:center;gap:.5rem;min-width:0;flex:1;';
+
+  var titleEl = document.createElement('strong');
+  titleEl.textContent = c.TITLE;
+  titleEl.style.cssText = 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:18rem;';
+  badgeGroup.appendChild(titleEl);
+  badgeGroup.appendChild(mkStatusBadge(c.STATUS));
+  cardHeader.appendChild(badgeGroup);
+
+  var actionsDiv = document.createElement('div');
+  actionsDiv.style.cssText = 'display:flex;gap:.35rem;flex-shrink:0;';
+  _appendCampaignActions(actionsDiv, c);
+  cardHeader.appendChild(actionsDiv);
+
+  card.appendChild(cardHeader);
+
+  // ── Stat cards row ──────────────────────────────────────────────────────
+  var statsRow = document.createElement('div');
+  statsRow.style.cssText = 'display:flex;gap:.6rem;flex-wrap:wrap;margin:.75rem 0 .5rem;';
+  statsRow.appendChild(mkStatCard('Views', String(viewCount)));
+  statsRow.appendChild(mkStatCard('Clicks', String(clickCount)));
+  statsRow.appendChild(mkStatCard('Budget left', budgetRemaining.toFixed(4) + ' M'));
+  statsRow.appendChild(mkStatCard('Reward/view', parseFloat(c.REWARD_VIEW || 0).toFixed(4) + ' M'));
+  card.appendChild(statsRow);
+
+  // ── Budget progress bar ─────────────────────────────────────────────────
+  var progressWrap = document.createElement('div');
+  progressWrap.style.cssText = 'margin-bottom:.75rem;';
+  progressWrap.appendChild(mkProgressBar(budgetPct, 'Budget used'));
+  var progressLbl = document.createElement('small');
+  progressLbl.style.cssText = 'color:var(--pico-muted-color,#6c757d);font-size:.72rem;';
+  progressLbl.textContent = budgetSpent.toFixed(4) + ' / ' + budgetTotal.toFixed(4) + ' MINIMA used';
+  progressWrap.appendChild(progressLbl);
+  card.appendChild(progressWrap);
+
+  // ── Activity chart (expandable) ─────────────────────────────────────────
+  var details = document.createElement('details');
+  var summary = document.createElement('summary');
+  summary.textContent = 'Activity chart';
+  summary.style.cssText = 'cursor:pointer;font-size:.875rem;color:var(--pico-muted-color,#6c757d);';
+  details.appendChild(summary);
+
+  var detailBody = document.createElement('div');
+  detailBody.id = 'ma-detail-' + c.ID;
+  detailBody.style.cssText = 'padding:.75rem 0 .25rem;';
+  details.appendChild(detailBody);
+
+  var chartLoaded = false;
+  details.addEventListener('toggle', function() {
+    if (details.open && !chartLoaded) {
+      chartLoaded = true;
+      detailBody.appendChild(mkLoading('Loading chart…'));
+      _loadChartData(c.ID, detailBody);
+    }
+    if (!details.open && _expandedCharts[c.ID]) {
+      _expandedCharts[c.ID].destroy();
+      delete _expandedCharts[c.ID];
+      detailBody.innerHTML = '';
+      chartLoaded = false;
+    }
   });
-  tr.appendChild(tdTitle);
 
-  var tdStatus = document.createElement('td');
-  var statusColor = c.STATUS === 'active' ? '#1a7a4a'
-    : c.STATUS === 'paused' ? '#c47c00' : '#6c757d';
-  var statusLabel = c.STATUS === 'active' ? 'Activa'
-    : c.STATUS === 'paused' ? 'Pausada' : 'Finalitzada';
-  var badge = document.createElement('span');
-  badge.style.cssText = 'display:inline-block;padding:0.1rem 0.4rem;border-radius:3px;'
-    + 'font-size:0.78rem;background:' + statusColor + ';color:#fff;font-weight:600;';
-  badge.textContent = statusLabel;
-  tdStatus.appendChild(badge);
-  tr.appendChild(tdStatus);
-
-  var tdBudgetTotal = document.createElement('td');
-  tdBudgetTotal.textContent = parseFloat(c.BUDGET_TOTAL || 0).toFixed(6);
-  tr.appendChild(tdBudgetTotal);
-
-  var tdBudgetLeft = document.createElement('td');
-  tdBudgetLeft.textContent = parseFloat(c.BUDGET_REMAINING || 0).toFixed(6);
-  tr.appendChild(tdBudgetLeft);
-
-  var tdRv = document.createElement('td');
-  tdRv.textContent = parseFloat(c.REWARD_VIEW || 0).toFixed(6);
-  tr.appendChild(tdRv);
-
-  var tdRc = document.createElement('td');
-  tdRc.textContent = parseFloat(c.REWARD_CLICK || 0).toFixed(6);
-  tr.appendChild(tdRc);
-
-  var tdViews = document.createElement('td');
-  tdViews.textContent = parseInt(c.VIEW_COUNT || 0, 10);
-  tr.appendChild(tdViews);
-
-  var tdClicks = document.createElement('td');
-  tdClicks.textContent = parseInt(c.CLICK_COUNT || 0, 10);
-  tr.appendChild(tdClicks);
-
-  var tdActions = document.createElement('td');
-  tdActions.style.whiteSpace = 'nowrap';
-  _appendMyCampaignActions(tdActions, c);
-  tr.appendChild(tdActions);
-
-  return tr;
+  card.appendChild(details);
+  return card;
 }
 
 // ---------------------------------------------------------------------------
-// Detail panel — Chart.js line chart per campaign
+// Chart.js line chart per campaign
 // ---------------------------------------------------------------------------
-
-function _toggleDetailPanel(tr, campaignId) {
-  if (_expandedCampaignId === campaignId) {
-    _collapseDetailPanel(tr, campaignId);
-    return;
-  }
-  // Collapse any currently open panel
-  if (_expandedCampaignId) {
-    var prevTr = tr.parentNode
-      ? tr.parentNode.querySelector('tr[data-campaign-id="' + _expandedCampaignId + '"]')
-      : null;
-    _collapseDetailPanel(prevTr, _expandedCampaignId);
-  }
-  if (!tr.parentNode) { return; }
-  _expandDetailPanel(tr.parentNode, tr, campaignId);
-}
-
-function _collapseDetailPanel(tr, campaignId) {
-  if (tr) {
-    var indicator = tr.querySelector('.ma-detail-indicator');
-    if (indicator) { indicator.textContent = '▶'; }
-  }
-  var detailRow = document.getElementById('ma-detail-' + campaignId);
-  if (detailRow && detailRow.parentNode) { detailRow.parentNode.removeChild(detailRow); }
-  if (_expandedChart) { _expandedChart.destroy(); _expandedChart = null; }
-  _expandedCampaignId = null;
-}
-
-function _expandDetailPanel(tbody, tr, campaignId) {
-  if (!tbody) { return; }
-  _expandedCampaignId = campaignId;
-
-  var indicator = tr.querySelector('.ma-detail-indicator');
-  if (indicator) { indicator.textContent = '▼'; }
-
-  var detailTr = document.createElement('tr');
-  detailTr.id = 'ma-detail-' + campaignId;
-
-  var detailTd = document.createElement('td');
-  detailTd.setAttribute('colspan', '9');
-  detailTd.style.cssText = 'background:var(--pico-card-sectionning-background-color,#f8f9fa);'
-    + 'padding:1rem 0.75rem;';
-
-  var loadingP = document.createElement('p');
-  loadingP.setAttribute('aria-busy', 'true');
-  loadingP.textContent = 'Carregant gràfic…';
-  detailTd.appendChild(loadingP);
-
-  detailTr.appendChild(detailTd);
-  // insertBefore(node, null) is equivalent to appendChild — handles last row correctly
-  tbody.insertBefore(detailTr, tr.nextSibling);
-
-  _loadChartData(campaignId, detailTd);
-}
 
 function _loadChartData(campaignId, detailEl) {
   var sql = "SELECT TYPE, TIMESTAMP"
@@ -232,28 +176,22 @@ function _loadChartData(campaignId, detailEl) {
     + " ORDER BY TIMESTAMP ASC";
 
   sqlQuery(sql, function(err, rows) {
-    // Guard: another campaign may have been expanded while this query was running
-    if (_expandedCampaignId !== campaignId) { return; }
-
     detailEl.innerHTML = '';
 
     if (err) {
       var errEl = document.createElement('p');
-      errEl.textContent = 'Error carregant dades: ' + err;
+      errEl.textContent = 'Error loading data: ' + err;
       detailEl.appendChild(errEl);
       return;
     }
 
     if (!rows || rows.length === 0) {
-      var emptyEl = document.createElement('p');
-      emptyEl.style.color = 'var(--pico-muted-color,#6c757d)';
-      emptyEl.textContent = 'Sense dades. Les interaccions apareixeran aquí un cop el primer viewer vegi l\'anunci.';
-      detailEl.appendChild(emptyEl);
+      detailEl.appendChild(mkEmptyState(
+        'No interactions yet. Data will appear here once the first viewer sees the ad.'
+      ));
       return;
     }
 
-    // Group by calendar day in JavaScript.
-    // REWARD_EVENTS.TIMESTAMP is BIGINT (Unix ms) — no H2 date functions needed.
     var dayMap = {};
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i];
@@ -269,7 +207,7 @@ function _loadChartData(campaignId, detailEl) {
     }
 
     var days = Object.keys(dayMap).sort();
-    var viewData = [];
+    var viewData  = [];
     var clickData = [];
     for (var j = 0; j < days.length; j++) {
       viewData.push(dayMap[days[j]].view);
@@ -277,14 +215,14 @@ function _loadChartData(campaignId, detailEl) {
     }
 
     var wrapper = document.createElement('div');
-    wrapper.style.cssText = 'max-width:600px;margin:0 auto;';
+    wrapper.style.cssText = 'max-width:560px;';
     var canvas = document.createElement('canvas');
     canvas.id = 'ma-chart-' + campaignId;
     wrapper.appendChild(canvas);
     detailEl.appendChild(wrapper);
 
-    if (_expandedChart) { _expandedChart.destroy(); }
-    _expandedChart = new Chart(canvas, {
+    if (_expandedCharts[campaignId]) { _expandedCharts[campaignId].destroy(); }
+    _expandedCharts[campaignId] = new Chart(canvas, {
       type: 'line',
       data: {
         labels: days,
@@ -292,8 +230,8 @@ function _loadChartData(campaignId, detailEl) {
           {
             label: 'Views',
             data: viewData,
-            borderColor: '#1a7a4a',
-            backgroundColor: 'rgba(26,122,74,0.1)',
+            borderColor: '#2ecc71',
+            backgroundColor: 'rgba(46,204,113,0.1)',
             tension: 0.3,
             fill: true,
             pointRadius: 4
@@ -301,8 +239,8 @@ function _loadChartData(campaignId, detailEl) {
           {
             label: 'Clicks',
             data: clickData,
-            borderColor: '#c47c00',
-            backgroundColor: 'rgba(196,124,0,0.1)',
+            borderColor: '#f39c12',
+            backgroundColor: 'rgba(243,156,18,0.1)',
             tension: 0.3,
             fill: true,
             pointRadius: 4
@@ -311,14 +249,9 @@ function _loadChartData(campaignId, detailEl) {
       },
       options: {
         responsive: true,
-        plugins: {
-          legend: { position: 'top' }
-        },
+        plugins: { legend: { position: 'top' } },
         scales: {
-          y: {
-            beginAtZero: true,
-            ticks: { stepSize: 1, precision: 0 }
-          }
+          y: { beginAtZero: true, ticks: { stepSize: 1, precision: 0 } }
         }
       }
     });
@@ -326,40 +259,40 @@ function _loadChartData(campaignId, detailEl) {
 }
 
 // ---------------------------------------------------------------------------
-// Campaign action buttons (Pausar / Reprendre / Finalitzar)
+// Campaign action buttons (Pause / Resume / Finish)
 // ---------------------------------------------------------------------------
 
-function _appendMyCampaignActions(tdActions, c) {
-  function _makeBtn(label, secondary, onClick) {
+function _appendCampaignActions(container, c) {
+  function _makeBtn(label, cls, onClick) {
     var btn = document.createElement('button');
     btn.textContent = label;
-    if (secondary) { btn.className = 'secondary'; }
-    btn.style.cssText = 'width:auto;margin:0 0.25rem 0 0;padding:0.15rem 0.45rem;font-size:0.78rem;';
+    btn.className = cls || '';
+    btn.style.cssText = 'width:auto;margin:0;padding:.2rem .55rem;font-size:.78rem;';
     btn.addEventListener('click', onClick);
     return btn;
   }
 
   function _disableAll() {
-    var btns = tdActions.querySelectorAll('button');
-    for (var b = 0; b < btns.length; b++) { btns[b].setAttribute('disabled', ''); }
+    var btns = container.querySelectorAll('button');
+    for (var b = 0; b < btns.length; b++) { btns[b].disabled = true; }
   }
 
   if (c.STATUS === 'active') {
-    tdActions.appendChild(_makeBtn('Pause', false, function() {
+    container.appendChild(_makeBtn('Pause', 'secondary outline', function() {
       _disableAll();
       _applyStatusChange(c.ID, 'paused');
     }));
   }
 
   if (c.STATUS === 'paused') {
-    tdActions.appendChild(_makeBtn('Resume', false, function() {
+    container.appendChild(_makeBtn('Resume', '', function() {
       _disableAll();
       _applyStatusChange(c.ID, 'active');
     }));
   }
 
   if (c.STATUS === 'active' || c.STATUS === 'paused') {
-    tdActions.appendChild(_makeBtn('Finish', true, function() {
+    container.appendChild(_makeBtn('Finish', 'secondary', function() {
       if (!confirm('Finish campaign "' + c.TITLE + '"?\nThis action cannot be undone.')) { return; }
       _disableAll();
       _applyStatusChange(c.ID, 'finished');
@@ -368,13 +301,6 @@ function _appendMyCampaignActions(tdActions, c) {
 }
 
 // Local fast-path broadcast + on-chain status-update tx (T-SC6).
-// 1. MA_LOCAL_STATUS broadcast triggers the creator's SW to flip the local
-//    CAMPAIGNS.STATUS row immediately — same UX as before T-SC6.
-// 2. buildAndPostStatusUpdateTx then posts a V3 status-update transaction.
-//    Other nodes pick up the change via processEscrowCoin's PREVSTATE(7) sync
-//    (T-SC4) without depending on the creator being online for Maxima.
-// Fire-and-forget: a failed/skipped on-chain tx does NOT roll back the local
-// status change — Maxima fast-path already propagated it for online viewers.
 function _applyStatusChange(campaignId, newStatus) {
   MDS.comms.broadcast(JSON.stringify({
     type:        'MA_LOCAL_STATUS',
@@ -403,7 +329,6 @@ function _applyStatusChange(campaignId, newStatus) {
     }
     if (res.pending) {
       console.log('[STATUS-TX] awaiting Hub approval for', campaignId, 'uid:', res.pending_uid);
-      // STATUS_TX_PENDING signal will be handled by onStatusTxPending below.
       return;
     }
     console.log('[STATUS-TX] confirmed on-chain for', campaignId, 'new coinid:', res.new_coinid);
@@ -411,11 +336,9 @@ function _applyStatusChange(campaignId, newStatus) {
 }
 
 // ---------------------------------------------------------------------------
-// STATUS_TX_PENDING — append an "awaiting confirm" label to the row.
+// STATUS_TX_PENDING — append an "awaiting confirm" label to the card badge group.
 // ---------------------------------------------------------------------------
-// Tracks campaigns currently awaiting Hub approval for the status-update tx.
-// On CAMPAIGN_UPDATED (issued by finalizeStatusUpdate on success) the next
-// loadMyCampaigns() refresh rebuilds the table without the label.
+
 var _pendingStatusTxLabels = {};
 
 function onStatusTxPending(parsed) {
@@ -427,20 +350,17 @@ function onStatusTxPending(parsed) {
 function _renderPendingLabel(campaignId, status) {
   var section = document.getElementById('ma-mycampaigns-section');
   if (!section) { return; }
-  var tr = section.querySelector('tr[data-campaign-id="' + campaignId + '"]');
-  if (!tr) { return; }
-  // Remove any prior label first.
-  var existing = tr.querySelector('.ma-status-tx-pending');
-  if (existing && existing.parentNode) { existing.parentNode.removeChild(existing); }
-  var statusTd = tr.children[1];
-  if (!statusTd) { return; }
+  var card = section.querySelector('article[data-campaign-id="' + campaignId + '"]');
+  if (!card) { return; }
+  var badgeGroup = card.querySelector('.ma-campaign-badge-group');
+  if (!badgeGroup) { return; }
+  var existing = badgeGroup.querySelector('.ma-status-tx-pending');
+  if (existing) { existing.remove(); }
   var lbl = document.createElement('small');
   lbl.className = 'ma-status-tx-pending';
-  lbl.style.cssText = 'display:inline-block;margin-left:0.4rem;color:var(--pico-muted-color,#6c757d);font-size:0.72rem;font-style:italic;';
+  lbl.style.cssText = 'color:var(--pico-muted-color,#6c757d);font-size:.72rem;font-style:italic;';
   lbl.textContent = '(awaiting on-chain confirm' + (status ? ': ' + status : '') + ')';
-  statusTd.appendChild(lbl);
+  badgeGroup.appendChild(lbl);
 }
 
-// app.js dispatcher (handleMdsComms) needs to call this on STATUS_TX_PENDING.
-// Exposed globally so app.js can pick it up without importing.
 window.onStatusTxPending = onStatusTxPending;

@@ -195,10 +195,10 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 ## 8) Current Handoff Notes
 
-2026-05-29 (pending: UI-1 — Earnings page groups rewards incorrectly):
-- **Scope**: `dapp/views/earnings.js` — NOT touched this session, documented for next session.
-- **Symptom**: Both publisher and viewer "Settled channels" and "Pending settlements" sections show fragmented entries per reward event instead of one row per campaign. The wallet transactions are correct (confirmed on-chain). Pure UI/query issue.
-- **Starting point**: `_refreshSettlementHistory()` (queries CHANNEL_HISTORY) and `_refreshChannelRewards()` (queries CHANNEL_STATE). Likely missing GROUP BY campaign_id or a JOIN/aggregate issue. See KNOWN_ISSUES.md UI-1.
+2026-05-29 (fix: UI-1 — Earnings page groups rewards incorrectly):
+- **Scope**: `dapp/views/earnings.js` only.
+- **Root cause**: Both `_refreshSettlementHistory` and `_refreshChannelRewards` filtered `WHERE UPPER(VIEWER_KEY) = UPPER(MY_ADDRESS)`. `VIEWER_KEY` is an ephemeral payment signing key (`keys action:new`); `MY_ADDRESS` is the Maxima public key — structurally incomparable, never equal. Both queries returned 0 rows for all users.
+- **Fix**: Replaced the broken filter with `WHERE (UPPER(cs.ROLE) = 'PUBLISHER' OR UPPER(c.CREATOR_ADDRESS) != UPPER(MY_ADDRESS) OR c.CREATOR_ADDRESS IS NULL)`. Publisher channels always shown (personal publisher earnings, even when user is also the creator); viewer channels shown only when the campaign was created by someone else (own viewer earnings). This correctly excludes ROLE='viewer' rows written by the creator's SW for other users' viewer channels. Added `GROUP BY ch.CAMPAIGN_ID, ch.ROLE, c.TITLE, c.CREATOR_ADDRESS` + `SUM(CUMULATIVE_EARNED)` to `_refreshSettlementHistory` so multiple settlement cycles aggregate to one row.
 
 2026-05-29 (fix: VW-3 — status-update TX loses state ports 5 and 6):
 - **Scope**: `dapp/app.js` only.

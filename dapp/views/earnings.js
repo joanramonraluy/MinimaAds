@@ -107,11 +107,20 @@ function loadEarnings() {
 function _refreshSettlementHistory() {
   var target = document.getElementById('ma-settlement-history');
   if (!target) { return; }
-  var sql = "SELECT ch.CAMPAIGN_ID, ch.CUMULATIVE_EARNED, ch.CREATED_AT, c.TITLE, c.CREATOR_ADDRESS"
+  // VIEWER_KEY is an ephemeral signing key (never equals MY_ADDRESS = Maxima key).
+  // Show: (a) publisher channels (always personal earnings regardless of who created the campaign),
+  //        (b) viewer channels for campaigns this node did NOT create (own viewer earnings).
+  // This excludes ROLE='viewer' rows that the creator's SW wrote for other users' viewer channels.
+  // GROUP BY campaign so multiple settlement cycles (coin spent → reopened) show as one row.
+  var sql = "SELECT ch.CAMPAIGN_ID, ch.ROLE, SUM(ch.CUMULATIVE_EARNED) AS CUMULATIVE_EARNED,"
+          + " MIN(ch.CREATED_AT) AS CREATED_AT, c.TITLE, c.CREATOR_ADDRESS"
           + " FROM CHANNEL_HISTORY ch"
           + " LEFT JOIN CAMPAIGNS c ON UPPER(ch.CAMPAIGN_ID) = UPPER(c.ID)"
-          + " WHERE UPPER(ch.VIEWER_KEY) = UPPER('" + escapeSql(MY_ADDRESS) + "')"
-          + " ORDER BY ch.CREATED_AT ASC";
+          + " WHERE (UPPER(ch.ROLE) = 'PUBLISHER'"
+          + "   OR UPPER(c.CREATOR_ADDRESS) != UPPER('" + escapeSql(MY_ADDRESS) + "')"
+          + "   OR c.CREATOR_ADDRESS IS NULL)"
+          + " GROUP BY ch.CAMPAIGN_ID, ch.ROLE, c.TITLE, c.CREATOR_ADDRESS"
+          + " ORDER BY MIN(ch.CREATED_AT) ASC";
   sqlQuery(sql, function(err, rows) {
     target.innerHTML = '';
     renderSettlementHistory(target, rows || []);
@@ -247,11 +256,17 @@ function _loadChannelEvents(campaignId, targetEl) {
 function _refreshChannelRewards() {
   var container = document.getElementById('ma-channel-rewards-list');
   if (!container) { return; }
+  // VIEWER_KEY is an ephemeral signing key (never equals MY_ADDRESS = Maxima key).
+  // Show: (a) publisher channels (always personal earnings regardless of who created the campaign),
+  //        (b) viewer channels for campaigns this node did NOT create (own viewer earnings).
+  // This excludes ROLE='viewer' rows that the creator's SW wrote for other users' viewer channels.
   var sql = "SELECT cs.CAMPAIGN_ID, cs.VIEWER_KEY, cs.ROLE, cs.CUMULATIVE_EARNED, cs.LATEST_TX_HEX, c.TITLE"
           + " FROM CHANNEL_STATE cs"
           + " LEFT JOIN CAMPAIGNS c ON UPPER(cs.CAMPAIGN_ID) = UPPER(c.ID)"
           + " WHERE cs.STATUS = 'open' AND cs.LATEST_TX_HEX != ''"
-          + " AND UPPER(cs.VIEWER_KEY) = UPPER('" + escapeSql(MY_ADDRESS) + "')";
+          + " AND (UPPER(cs.ROLE) = 'PUBLISHER'"
+          + "   OR UPPER(c.CREATOR_ADDRESS) != UPPER('" + escapeSql(MY_ADDRESS) + "')"
+          + "   OR c.CREATOR_ADDRESS IS NULL)";
   sqlQuery(sql, function(err, rows) {
     if (err) { console.error('[EARNINGS] _refreshChannelRewards query error:', err); return; }
     var found = rows || [];

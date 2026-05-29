@@ -22,6 +22,7 @@ var LIMITS = {
 
 var MY_ADDRESS = '';
 var MY_MX_ADDRESS = '';
+var MY_MX_NAME = '';
 var _dbReady = false;
 var _activeMode = 'viewer';
 var _profileInterestsSaveTimer = 0;
@@ -46,12 +47,15 @@ function currentRoute() {
 }
 
 function renderNav() {
+  var modeLabel = _activeMode.charAt(0).toUpperCase() + _activeMode.slice(1);
+  var hamburgerLabel = document.getElementById('ma-menu-role-label');
+  if (hamburgerLabel) { hamburgerLabel.textContent = modeLabel; }
+  var drawerRoleCurrent = document.getElementById('ma-drawer-role-current');
+  if (drawerRoleCurrent) { drawerRoleCurrent.textContent = modeLabel; }
   var modeNames = ['viewer', 'creator', 'publisher'];
   for (var i = 0; i < modeNames.length; i++) {
-    var btn = document.getElementById('ma-mode-btn-' + modeNames[i]);
-    if (btn) {
-      btn.setAttribute('aria-selected', modeNames[i] === _activeMode ? 'true' : 'false');
-    }
+    var btn = document.getElementById('ma-drawer-role-' + modeNames[i]);
+    if (btn) { btn.setAttribute('aria-selected', modeNames[i] === _activeMode ? 'true' : 'false'); }
   }
   var linksEl = document.getElementById('ma-nav-links');
   if (!linksEl) { return; }
@@ -1585,6 +1589,82 @@ function handleFePending(msg) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Drawer — hamburger side menu
+// ---------------------------------------------------------------------------
+
+function openDrawer() {
+  var overlay = document.getElementById('ma-drawer-overlay');
+  var drawer = document.getElementById('ma-drawer');
+  if (!overlay || !drawer) { return; }
+  var avatarEl = document.getElementById('ma-drawer-avatar-circle');
+  var mxEl = document.getElementById('ma-drawer-mx-text');
+  var name = MY_MX_NAME || '';
+  var addr = MY_MX_ADDRESS || '';
+  var displayName = name || (addr ? addr.substring(0, 14) + '…' : '—');
+  if (avatarEl) { avatarEl.textContent = displayName ? displayName.charAt(0).toUpperCase() : '?'; }
+  if (mxEl) { mxEl.textContent = displayName; }
+  var modeNames = ['viewer', 'creator', 'publisher'];
+  for (var i = 0; i < modeNames.length; i++) {
+    var btn = document.getElementById('ma-drawer-role-' + modeNames[i]);
+    if (btn) { btn.setAttribute('aria-selected', modeNames[i] === _activeMode ? 'true' : 'false'); }
+  }
+  overlay.classList.add('open');
+  drawer.classList.add('open');
+  document.addEventListener('keydown', _onDrawerEsc);
+}
+
+function closeDrawer() {
+  var overlay = document.getElementById('ma-drawer-overlay');
+  var drawer = document.getElementById('ma-drawer');
+  if (overlay) { overlay.classList.remove('open'); }
+  if (drawer) { drawer.classList.remove('open'); }
+  var submenu = document.getElementById('ma-drawer-role-submenu');
+  var arrow = document.getElementById('ma-drawer-role-arrow');
+  if (submenu) { submenu.hidden = true; }
+  if (arrow) { arrow.classList.remove('open'); }
+  document.removeEventListener('keydown', _onDrawerEsc);
+}
+
+function _onDrawerEsc(e) {
+  if (e.key === 'Escape') { closeDrawer(); }
+}
+
+function toggleRoleSubmenu() {
+  var submenu = document.getElementById('ma-drawer-role-submenu');
+  var arrow = document.getElementById('ma-drawer-role-arrow');
+  if (!submenu) { return; }
+  submenu.hidden = !submenu.hidden;
+  if (arrow) {
+    if (submenu.hidden) { arrow.classList.remove('open'); } else { arrow.classList.add('open'); }
+  }
+}
+
+function setModeFromDrawer(mode) {
+  closeDrawer();
+  setMode(mode);
+}
+
+function openProfileFromDrawer() {
+  closeDrawer();
+  openProfileModal();
+}
+
+function toggleTheme() {
+  var current = document.documentElement.getAttribute('data-theme') || 'light';
+  var next = current === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  MDS.keypair.set('UI_THEME', next, function() {});
+  _updateThemeBtn(next);
+}
+
+function _updateThemeBtn(theme) {
+  var btn = document.getElementById('ma-drawer-theme-btn');
+  if (!btn) { return; }
+  btn.textContent = theme === 'dark' ? 'Light' : 'Dark';
+  btn.title = theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
+}
+
 function openProfileModal() {
   var modal = document.getElementById('ma-profile-modal');
   if (!modal) { return; }
@@ -1768,10 +1848,15 @@ function onInited() {
         if (modeRes && modeRes.status && modeRes.value && MODE_VIEWS[modeRes.value]) {
           _activeMode = modeRes.value;
         }
-        MDS.cmd('maxima action:info', function(res) {
+        MDS.keypair.get('UI_THEME', function(themeRes) {
+          var savedTheme = themeRes && themeRes.status && themeRes.value ? themeRes.value : 'light';
+          document.documentElement.setAttribute('data-theme', savedTheme);
+          _updateThemeBtn(savedTheme);
+          MDS.cmd('maxima action:info', function(res) {
           if (res && res.status && res.response) {
             if (res.response.publickey) { MY_ADDRESS    = res.response.publickey.toUpperCase(); }
             if (res.response.contact)   { MY_MX_ADDRESS = res.response.contact; }
+            if (res.response.name)      { MY_MX_NAME    = res.response.name; }
           }
           initFEFrames(function() {
             initFEChannelState(function() {
@@ -1782,6 +1867,7 @@ function onInited() {
               });
             });
           });
+        });
         });
       });
     });

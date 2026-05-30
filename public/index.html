@@ -14,9 +14,13 @@
       --pico-border-radius: 0.5rem;
       --pico-line-height: 1.6;
     }
-    header { position: sticky; top: 0; z-index: 50; border-bottom: 1px solid var(--pico-muted-border-color, #e5e7eb); background: var(--pico-background-color, #fff); }
+    /* Glassmorphism header + gradient accent line */
+    header { position: sticky; top: 0; z-index: 50; background: rgba(255,255,255,.82); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 2px solid; border-image: linear-gradient(to right, transparent, var(--pico-primary,#6366f1) 50%, transparent) 1; }
+    [data-theme="dark"] header { background: rgba(18,18,24,.85); }
     button, [role="button"], input, select, textarea { transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease, color .15s ease, opacity .15s ease; }
     article { transition: box-shadow .15s ease; }
+    /* Glow on primary (submit) buttons */
+    button[type="submit"]:not([disabled]) { box-shadow: 0 2px 16px var(--pico-primary-focus, rgba(99,102,241,.25)); }
 
     /* ── Accent: Indigo (default) — [data-theme="light"] per guanyar a PicoCSS ── */
     :root, [data-theme="light"] { --pico-primary: #6366f1; --pico-primary-background: #6366f1; --pico-primary-hover-background: #4f46e5; --pico-primary-border: #6366f1; --pico-primary-focus: rgba(99,102,241,.25); --pico-primary-inverse: #fff; }

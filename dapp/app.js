@@ -59,6 +59,7 @@ function renderNav() {
   }
   var linksEl = document.getElementById('ma-nav-links');
   if (!linksEl) { return; }
+  if (currentRoute() === 'settings') { linksEl.innerHTML = ''; return; }
   var views = MODE_VIEWS[_activeMode] || MODE_VIEWS.viewer;
   var route = currentRoute();
   var linkDefs = {

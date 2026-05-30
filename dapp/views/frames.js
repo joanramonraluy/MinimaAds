@@ -13,10 +13,6 @@ function renderFrames(root) {
   listSection.id = 'ma-frames-list';
   root.appendChild(listSection);
 
-  var detailSection = document.createElement('div');
-  detailSection.id = 'ma-frame-detail';
-  root.appendChild(detailSection);
-
   var createSection = document.createElement('div');
   createSection.className = 'ma-section';
   createSection.innerHTML = '<p class="ma-section-title">Create new Frame</p>'
@@ -29,16 +25,23 @@ function renderFrames(root) {
     + '</form>';
   root.appendChild(createSection);
 
-  var helpSection = document.createElement('div');
-  helpSection.className = 'ma-section';
-  helpSection.innerHTML = '<p class="ma-section-title">Publisher SDK integration guide</p>'
-    + '<p>The snippet is fully self-contained and zero-config. Just paste it — no changes to your existing <code>MDS.init</code> required.</p>'
+  // Help guide collapsed by default
+  var helpDetails = document.createElement('details');
+  helpDetails.className = 'ma-section';
+  helpDetails.style.cssText = 'padding:.75rem 1rem;';
+  var helpSummary = document.createElement('summary');
+  helpSummary.style.cssText = 'font-weight:600;cursor:pointer;';
+  helpSummary.textContent = 'Publisher SDK integration guide';
+  helpDetails.appendChild(helpSummary);
+  var helpBody = document.createElement('div');
+  helpBody.innerHTML = '<p style="margin-top:.75rem;">The snippet is fully self-contained and zero-config. Just paste it — no changes to your existing <code>MDS.init</code> required.</p>'
     + '<ol>'
     + '<li>Click <strong>Snippet</strong> next to a frame and copy the generated code block.</li>'
     + '<li>Paste the code block inside the <code>&lt;head&gt;</code> of your MiniDapp page, <strong>after</strong> <code>mds.js</code> is loaded.</li>'
     + '<li>Done. The snippet auto-detects your Maxima key, loads the SDK, and shows ads with publisher rewards.</li>'
     + '</ol>';
-  root.appendChild(helpSection);
+  helpDetails.appendChild(helpBody);
+  root.appendChild(helpDetails);
 
   var form = document.getElementById('ma-frames-form');
   if (form) { form.addEventListener('submit', _onFrameSubmit); }
@@ -64,59 +67,113 @@ function _refreshFramesList() {
   });
 }
 
+function _safeId(fid) {
+  return String(fid).replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
 function _renderFramesList(rows) {
   var listEl = document.getElementById('ma-frames-list');
   if (!listEl) { return; }
+  listEl.innerHTML = '';
 
   if (rows.length === 0) {
-    listEl.innerHTML = '<div class="ma-section">'
-      + '<p>A <strong>Frame</strong> is an ad slot you embed in your MiniDapp. '
-      + 'When viewers see ads through your Frame, you earn publisher rewards.</p>'
-      + '<p style="color:var(--pico-muted-color,#6c757d)">'
-      + 'Your built-in Frame will appear here once the node initialises. '
-      + 'To create a custom Frame, use the form below.</p>'
-      + '</div>';
+    var emptyWrap = document.createElement('div');
+    emptyWrap.className = 'ma-section';
+    var intro = document.createElement('p');
+    intro.innerHTML = 'A <strong>Frame</strong> is an ad slot you embed in your MiniDapp. '
+      + 'When viewers see ads through your Frame, you earn publisher rewards.';
+    emptyWrap.appendChild(intro);
+    emptyWrap.appendChild(mkEmptyState(
+      'Your built-in Frame will appear here once the node initialises.',
+      'Create a custom Frame below',
+      '#ma-frames-form'
+    ));
+    listEl.appendChild(emptyWrap);
     return;
   }
 
-  var html = '<div class="ma-section">'
-    + '<p class="ma-section-title">My Frames</p>'
-    + '<div style="overflow-x:auto"><table role="grid" style="margin:0"><thead><tr>'
-    + '<th>Label</th><th>Type</th><th>Total earned</th><th></th>'
-    + '</tr></thead><tbody>';
+  var sectionTitle = document.createElement('p');
+  sectionTitle.className = 'ma-section-title';
+  sectionTitle.textContent = 'My Frames';
+  listEl.appendChild(sectionTitle);
 
   for (var i = 0; i < rows.length; i++) {
-    var r      = rows[i];
-    var label  = DOMPurify.sanitize(r.LABEL || '');
-    var fid    = DOMPurify.sanitize(r.FRAME_ID || '');
-    var isB    = (r.IS_BUILTIN === 'true' || r.IS_BUILTIN === true);
-    var earned = (parseFloat(r.TOTAL_EARNED) || 0).toFixed(6);
-    html += '<tr>'
-      + '<td>' + (label || '<em>—</em>') + '</td>'
-      + '<td>' + (isB ? 'Built-in' : 'Custom') + '</td>'
-      + '<td>' + earned + ' MINIMA</td>'
-      + '<td style="white-space:nowrap">'
-      + '<button class="outline" style="margin:0 0.25rem 0 0;padding:0.2rem 0.5rem"'
-      + ' data-fid="' + fid + '" data-action="snippet" type="button">Snippet</button>'
-      + '<button class="outline" style="margin:0;padding:0.2rem 0.5rem"'
-      + ' data-fid="' + fid + '" data-action="earnings" type="button">Earnings</button>'
-      + '</td>'
-      + '</tr>';
-  }
-  html += '</tbody></table></div></div>';
-  listEl.innerHTML = html;
+    (function(r) {
+      var fid    = r.FRAME_ID || '';
+      var label  = DOMPurify.sanitize(r.LABEL || '');
+      var isB    = (r.IS_BUILTIN === 'true' || r.IS_BUILTIN === true);
+      var earned = (parseFloat(r.TOTAL_EARNED) || 0).toFixed(6);
+      var sid    = _safeId(fid);
 
-  var table = listEl.querySelector('table');
-  if (table) {
-    table.addEventListener('click', function(e) {
-      var btn = e.target;
-      if (!btn || btn.tagName !== 'BUTTON') { return; }
-      var fid    = btn.getAttribute('data-fid');
-      var action = btn.getAttribute('data-action');
-      if (!fid) { return; }
-      if (action === 'snippet')  { _showSnippet(fid); }
-      if (action === 'earnings') { _showEarnings(fid); }
-    });
+      var card = document.createElement('article');
+      card.style.cssText = 'margin-bottom:1rem;';
+
+      // Card header: label + type badge (left) | earned stat card (right)
+      var cardHeader = document.createElement('header');
+      cardHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap;';
+
+      var titleGroup = document.createElement('div');
+      titleGroup.style.cssText = 'display:flex;align-items:center;gap:.5rem;';
+      var nameEl = document.createElement('strong');
+      nameEl.textContent = label || '—';
+      var typeMark = document.createElement('mark');
+      typeMark.style.cssText = 'padding:.1rem .4rem;border-radius:.2rem;font-size:.75rem;background:var(--pico-secondary-background,#5d6b89);color:#fff;';
+      typeMark.textContent = isB ? 'Built-in' : 'Custom';
+      titleGroup.appendChild(nameEl);
+      titleGroup.appendChild(typeMark);
+      cardHeader.appendChild(titleGroup);
+
+      var earnedCard = mkStatCard('Total earned', earned + ' MINIMA');
+      earnedCard.style.flex = 'none';
+      cardHeader.appendChild(earnedCard);
+      card.appendChild(cardHeader);
+
+      // Snippet <details>
+      var snippetDetails = document.createElement('details');
+      snippetDetails.id = 'ma-snippet-' + sid;
+      snippetDetails.style.cssText = 'margin-top:.75rem;';
+      var snippetSummary = document.createElement('summary');
+      snippetSummary.textContent = 'Snippet';
+      snippetSummary.style.cssText = 'cursor:pointer;font-size:.875rem;color:var(--pico-muted-color,#6c757d);';
+      snippetDetails.appendChild(snippetSummary);
+      var snippetBody = document.createElement('div');
+      snippetBody.id = 'ma-snippet-body-' + sid;
+      snippetBody.style.cssText = 'margin-top:.5rem;';
+      snippetDetails.appendChild(snippetBody);
+      var snippetLoaded = false;
+      snippetDetails.addEventListener('toggle', function() {
+        if (snippetDetails.open && !snippetLoaded) {
+          snippetLoaded = true;
+          snippetBody.appendChild(mkLoading('Loading snippet…'));
+          _showSnippet(fid);
+        }
+      });
+      card.appendChild(snippetDetails);
+
+      // Earnings <details>
+      var earningsDetails = document.createElement('details');
+      earningsDetails.id = 'ma-earnings-' + sid;
+      earningsDetails.style.cssText = 'margin-top:.4rem;';
+      var earningsSummary = document.createElement('summary');
+      earningsSummary.textContent = 'Earnings';
+      earningsSummary.style.cssText = 'cursor:pointer;font-size:.875rem;color:var(--pico-muted-color,#6c757d);';
+      earningsDetails.appendChild(earningsSummary);
+      var earningsBody = document.createElement('div');
+      earningsBody.id = 'ma-earnings-body-' + sid;
+      earningsBody.style.cssText = 'margin-top:.5rem;';
+      earningsDetails.appendChild(earningsBody);
+      var earningsLoaded = false;
+      earningsDetails.addEventListener('toggle', function() {
+        if (earningsDetails.open && !earningsLoaded) {
+          earningsLoaded = true;
+          earningsBody.appendChild(mkLoading('Loading earnings…'));
+          _showEarnings(fid);
+        }
+      });
+      card.appendChild(earningsDetails);
+
+      listEl.appendChild(card);
+    })(rows[i]);
   }
 }
 
@@ -129,11 +186,12 @@ function _escapeHtml(str) {
 }
 
 function _showSnippet(fid) {
-  var detailEl = document.getElementById('ma-frame-detail');
-  if (!detailEl) { return; }
+  var bodyEl = document.getElementById('ma-snippet-body-' + _safeId(fid));
+  if (!bodyEl) { return; }
   MDS.sql("SELECT PUBLISHER_KEY FROM FRAMES WHERE UPPER(FRAME_ID) = UPPER('" + fid.replace(/'/g, "''") + "') LIMIT 1", function(res) {
     var pubKey = (res && res.status && res.rows && res.rows.length > 0) ? (res.rows[0].PUBLISHER_KEY || '') : '';
-    _renderSnippet(detailEl, fid, pubKey);
+    bodyEl.innerHTML = '';
+    _renderSnippet(bodyEl, fid, pubKey);
   });
 }
 
@@ -372,24 +430,24 @@ function _renderSnippet(detailEl, fid, pubKey) {
 }
 
 function _showEarnings(fid) {
-  var detailEl = document.getElementById('ma-frame-detail');
-  if (!detailEl) { return; }
-  detailEl.innerHTML = '<div class="ma-section"><p aria-busy="true">Loading earnings…</p></div>';
+  var bodyEl = document.getElementById('ma-earnings-body-' + _safeId(fid));
+  if (!bodyEl) { return; }
 
   getFrameEarnings(fid, function(err, data) {
-    var el = document.getElementById('ma-frame-detail');
+    var el = document.getElementById('ma-earnings-body-' + _safeId(fid));
     if (!el) { return; }
+    el.innerHTML = '';
     if (err) {
-      el.innerHTML = '<div class="ma-section"><p>Error: ' + DOMPurify.sanitize(String(err)) + '</p></div>';
+      var errP = document.createElement('p');
+      errP.textContent = 'Error: ' + DOMPurify.sanitize(String(err));
+      el.appendChild(errP);
       return;
     }
-    el.innerHTML = '<div class="ma-section">'
-      + '<p class="ma-section-title">' + _frameEarningsTitle(fid) + '</p>'
-      + '<ul>'
-      + '<li>Total earned: <strong>' + (data.total_earned || 0).toFixed(6) + ' MINIMA</strong></li>'
-      + '<li>Publisher view events: <strong>' + (data.event_count || 0) + '</strong></li>'
-      + '</ul>'
-      + '</div>';
+    var statsRow = document.createElement('div');
+    statsRow.style.cssText = 'display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.25rem;';
+    statsRow.appendChild(mkStatCard('Total earned', (data.total_earned || 0).toFixed(6) + ' MINIMA'));
+    statsRow.appendChild(mkStatCard('Publisher views', String(data.event_count || 0)));
+    el.appendChild(statsRow);
   });
 }
 

@@ -42,7 +42,7 @@ function generateUID() {
 
 function currentRoute() {
   var h = (window.location.hash || '').replace(/^#/, '');
-  if (h === 'creator' || h === 'mycampaigns' || h === 'stats' || h === 'viewer' || h === 'earnings' || h === 'frames') { return h; }
+  if (h === 'creator' || h === 'mycampaigns' || h === 'stats' || h === 'viewer' || h === 'earnings' || h === 'frames' || h === 'settings') { return h; }
   return 'viewer';
 }
 
@@ -113,8 +113,14 @@ function doRender() {
     setStatus('Resolving Maxima identity…');
     return;
   }
-  var views = MODE_VIEWS[_activeMode] || MODE_VIEWS.viewer;
   var route = currentRoute();
+  // Settings is global — accessible from any mode
+  if (route === 'settings' && typeof renderSettings === 'function') {
+    root.innerHTML = '';
+    renderSettings(root);
+    return;
+  }
+  var views = MODE_VIEWS[_activeMode] || MODE_VIEWS.viewer;
   if (views.indexOf(route) === -1) {
     window.location.hash = views[0];
     return;
@@ -1623,10 +1629,6 @@ function closeDrawer() {
   var arrow = document.getElementById('ma-drawer-role-arrow');
   if (submenu) { submenu.hidden = true; }
   if (arrow) { arrow.classList.remove('open'); }
-  var settingsPanel = document.getElementById('ma-drawer-settings-panel');
-  var settingsArrow = document.getElementById('ma-drawer-settings-arrow');
-  if (settingsPanel) { settingsPanel.hidden = true; }
-  if (settingsArrow) { settingsArrow.classList.remove('open'); }
   document.removeEventListener('keydown', _onDrawerEsc);
 }
 
@@ -1654,15 +1656,9 @@ function openProfileFromDrawer() {
   openProfileModal();
 }
 
-function toggleSettingsSubmenu() {
-  var panel = document.getElementById('ma-drawer-settings-panel');
-  var arrow = document.getElementById('ma-drawer-settings-arrow');
-  if (!panel) { return; }
-  panel.hidden = !panel.hidden;
-  if (arrow) {
-    if (panel.hidden) { arrow.classList.remove('open'); } else { arrow.classList.add('open'); }
-  }
-  if (!panel.hidden) { _updateSettingsUI(); }
+function openSettingsView() {
+  closeDrawer();
+  window.location.hash = 'settings';
 }
 
 function setThemeMode(mode) {

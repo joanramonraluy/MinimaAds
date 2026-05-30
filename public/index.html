@@ -157,26 +157,10 @@
           </ul>
         </li>
         <li>
-          <button class="ma-drawer-menu-btn" onclick="toggleSettingsSubmenu()">
+          <button class="ma-drawer-menu-btn" onclick="openSettingsView()">
             Settings
-            <span class="ma-drawer-role-arrow" id="ma-drawer-settings-arrow">&#8250;</span>
+            <span style="font-size:.85rem;color:var(--pico-muted-color,#6c757d)">&#8250;</span>
           </button>
-          <div id="ma-drawer-settings-panel" hidden style="padding:.75rem 1rem;background:var(--pico-card-sectionning-background-color,#f0f4f8);">
-            <small style="display:block;margin-bottom:.4rem;color:var(--pico-muted-color,#6c757d);">Theme</small>
-            <div style="display:flex;gap:.5rem;margin-bottom:.85rem;">
-              <button class="ma-theme-mode-btn secondary" id="ma-settings-theme-light" onclick="setThemeMode('light')">Light</button>
-              <button class="ma-theme-mode-btn secondary" id="ma-settings-theme-dark" onclick="setThemeMode('dark')">Dark</button>
-            </div>
-            <small style="display:block;margin-bottom:.5rem;color:var(--pico-muted-color,#6c757d);">Accent</small>
-            <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.75rem;">
-              <button class="ma-accent-swatch" id="ma-accent-indigo"  onclick="setAccent('indigo')"  title="Indigo"  style="background:#6366f1;color:#6366f1;"></button>
-              <button class="ma-accent-swatch" id="ma-accent-emerald" onclick="setAccent('emerald')" title="Emerald" style="background:#059669;color:#059669;"></button>
-              <button class="ma-accent-swatch" id="ma-accent-orange"  onclick="setAccent('orange')"  title="Orange"  style="background:#ea580c;color:#ea580c;"></button>
-              <button class="ma-accent-swatch" id="ma-accent-slate"   onclick="setAccent('slate')"   title="Slate"   style="background:#475569;color:#475569;"></button>
-            </div>
-            <hr style="margin:.25rem 0 .6rem;">
-            <small style="color:var(--pico-muted-color,#6c757d);">Privacy — coming soon</small>
-          </div>
         </li>
         <li>
           <button class="ma-drawer-menu-btn" disabled>
@@ -235,6 +219,9 @@
   <script src="dapp/views/frames.js"></script>
   <script src="dapp/views/stats.js"></script>
   <script src="dapp/views/mycampaigns.js"></script>
+
+  <!-- Settings view -->
+  <script src="dapp/views/settings.js"></script>
 
   <!-- Dev SQL console (Ctrl+Shift+D) -->
   <script src="dapp/views/devtools.js"></script>

@@ -1623,6 +1623,10 @@ function closeDrawer() {
   var arrow = document.getElementById('ma-drawer-role-arrow');
   if (submenu) { submenu.hidden = true; }
   if (arrow) { arrow.classList.remove('open'); }
+  var settingsPanel = document.getElementById('ma-drawer-settings-panel');
+  var settingsArrow = document.getElementById('ma-drawer-settings-arrow');
+  if (settingsPanel) { settingsPanel.hidden = true; }
+  if (settingsArrow) { settingsArrow.classList.remove('open'); }
   document.removeEventListener('keydown', _onDrawerEsc);
 }
 
@@ -1650,21 +1654,15 @@ function openProfileFromDrawer() {
   openProfileModal();
 }
 
-function openSettingsFromDrawer() {
-  closeDrawer();
-  openSettingsModal();
-}
-
-function openSettingsModal() {
-  var modal = document.getElementById('ma-settings-modal');
-  if (!modal) { return; }
-  _updateSettingsUI();
-  modal.setAttribute('open', '');
-}
-
-function closeSettingsModal() {
-  var modal = document.getElementById('ma-settings-modal');
-  if (modal) { modal.removeAttribute('open'); }
+function toggleSettingsSubmenu() {
+  var panel = document.getElementById('ma-drawer-settings-panel');
+  var arrow = document.getElementById('ma-drawer-settings-arrow');
+  if (!panel) { return; }
+  panel.hidden = !panel.hidden;
+  if (arrow) {
+    if (panel.hidden) { arrow.classList.remove('open'); } else { arrow.classList.add('open'); }
+  }
+  if (!panel.hidden) { _updateSettingsUI(); }
 }
 
 function setThemeMode(mode) {

@@ -72,17 +72,6 @@ function renderSettings(root) {
 
   appearanceSection.appendChild(accentRow);
 
-  // Accent labels row
-  var accentNames = document.createElement('div');
-  accentNames.style.cssText = 'display:flex;gap:.75rem;flex-wrap:wrap;';
-  for (var j = 0; j < accentDefs.length; j++) {
-    var lbl = document.createElement('small');
-    lbl.style.cssText = 'width:2.2rem;text-align:center;color:var(--pico-muted-color,#6c757d);font-size:.68rem;';
-    lbl.textContent = accentDefs[j].label;
-    accentNames.appendChild(lbl);
-  }
-  appearanceSection.appendChild(accentNames);
-
   root.appendChild(appearanceSection);
 
   // ── Privacy ─────────────────────────────────────────────────────────────

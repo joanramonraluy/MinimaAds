@@ -7,6 +7,35 @@
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
   <style>
+    /* ── MinimaAds identity ──────────────────────────────────────────── */
+    :root {
+      --pico-font-family-sans-serif: ui-sans-serif, system-ui, -apple-system,
+        BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --pico-border-radius: 0.5rem;
+      --pico-line-height: 1.6;
+    }
+    header { position: sticky; top: 0; z-index: 50; border-bottom: 1px solid var(--pico-muted-border-color, #e5e7eb); background: var(--pico-background-color, #fff); }
+    button, [role="button"], input, select, textarea { transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease, color .15s ease, opacity .15s ease; }
+    article { transition: box-shadow .15s ease; }
+
+    /* ── Accent: Indigo (default) ─────────────────────────────────────── */
+    :root { --pico-primary: #6366f1; --pico-primary-background: #6366f1; --pico-primary-hover-background: #4f46e5; --pico-primary-border: #6366f1; --pico-primary-focus: rgba(99,102,241,.25); --pico-primary-inverse: #fff; }
+    [data-theme="dark"] { --pico-primary: #818cf8; --pico-primary-background: #818cf8; --pico-primary-hover-background: #6366f1; --pico-primary-border: #818cf8; --pico-primary-focus: rgba(129,140,248,.25); }
+    /* ── Accent: Emerald ──────────────────────────────────────────────── */
+    [data-accent="emerald"] { --pico-primary: #059669; --pico-primary-background: #059669; --pico-primary-hover-background: #047857; --pico-primary-border: #059669; --pico-primary-focus: rgba(5,150,105,.25); }
+    [data-accent="emerald"][data-theme="dark"] { --pico-primary: #34d399; --pico-primary-background: #34d399; --pico-primary-hover-background: #10b981; --pico-primary-border: #34d399; }
+    /* ── Accent: Orange ───────────────────────────────────────────────── */
+    [data-accent="orange"] { --pico-primary: #ea580c; --pico-primary-background: #ea580c; --pico-primary-hover-background: #c2410c; --pico-primary-border: #ea580c; --pico-primary-focus: rgba(234,88,12,.25); }
+    [data-accent="orange"][data-theme="dark"] { --pico-primary: #fb923c; --pico-primary-background: #fb923c; --pico-primary-hover-background: #f97316; --pico-primary-border: #fb923c; }
+    /* ── Accent: Slate ────────────────────────────────────────────────── */
+    [data-accent="slate"] { --pico-primary: #475569; --pico-primary-background: #475569; --pico-primary-hover-background: #334155; --pico-primary-border: #475569; --pico-primary-focus: rgba(71,85,105,.25); }
+    [data-accent="slate"][data-theme="dark"] { --pico-primary: #94a3b8; --pico-primary-background: #94a3b8; --pico-primary-hover-background: #cbd5e1; --pico-primary-border: #94a3b8; }
+    /* ── Settings UI ──────────────────────────────────────────────────── */
+    .ma-accent-swatch { width: 2.2rem; height: 2.2rem; border-radius: 50%; border: 2.5px solid transparent; cursor: pointer; padding: 0; margin: 0; flex-shrink: 0; }
+    .ma-accent-swatch.active { box-shadow: 0 0 0 3px var(--pico-background-color,#fff), 0 0 0 5.5px currentColor; }
+    .ma-theme-mode-btn { flex: 1; width: auto; margin: 0; }
+    .ma-theme-mode-btn.active { background: var(--pico-primary-background,#6366f1) !important; color: #fff !important; border-color: var(--pico-primary-border,#6366f1) !important; font-weight: 600; }
+
     body { max-width: 960px; margin: 0 auto; padding: 0 1rem; }
     nav ul { list-style: none; display: flex; gap: 1.5rem; padding: 0; }
     nav a { text-decoration: none; }
@@ -40,8 +69,6 @@
     .ma-drawer-identity { display: flex; align-items: center; gap: .75rem; min-width: 0; }
     .ma-drawer-avatar { width: 2.75rem; height: 2.75rem; border-radius: 50%; background: var(--pico-primary-background, #0172ad); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; font-weight: 700; flex-shrink: 0; margin: 0; }
     .ma-drawer-mx { font-size: .8rem; color: var(--pico-muted-color, #6c757d); font-family: monospace; word-break: break-all; min-width: 0; }
-    .ma-drawer-theme-btn { width: auto; margin: 0; padding: .35rem .55rem; font-size: .8rem; background: none; border: 1px solid #999; border-radius: .35rem; cursor: pointer; flex-shrink: 0; line-height: 1; color: #222; font-weight: 600; }
-    [data-theme="dark"] .ma-drawer-theme-btn { color: #ddd; border-color: #666; }
     .ma-drawer-menu { list-style: none; margin: 0; padding: 0; }
     .ma-drawer-menu > li { border-bottom: 1px solid var(--pico-muted-border-color, #eee); }
     .ma-drawer-menu > li:last-child { border-bottom: 0; }
@@ -102,13 +129,12 @@
 
   <!-- Drawer panel -->
   <aside id="ma-drawer">
-    <!-- Section 1: Avatar + name (left) + theme toggle (right) -->
+    <!-- Section 1: Avatar + name -->
     <div class="ma-drawer-section ma-drawer-header">
       <div class="ma-drawer-identity">
         <div class="ma-drawer-avatar" id="ma-drawer-avatar-circle">?</div>
         <div class="ma-drawer-mx" id="ma-drawer-mx-text">&#8212;</div>
       </div>
-      <button class="ma-drawer-theme-btn" id="ma-drawer-theme-btn" onclick="toggleTheme()" title="Toggle dark mode">Dark</button>
     </div>
     <!-- Section 2: Menu options -->
     <div style="flex:1">
@@ -131,6 +157,12 @@
           </ul>
         </li>
         <li>
+          <button class="ma-drawer-menu-btn" onclick="openSettingsFromDrawer()">
+            Settings
+            <span style="font-size:.85rem;color:var(--pico-muted-color,#6c757d)">&#8250;</span>
+          </button>
+        </li>
+        <li>
           <button class="ma-drawer-menu-btn" disabled>
             Help
             <span style="font-size:.75rem;color:var(--pico-muted-color,#6c757d)">Coming soon</span>
@@ -139,6 +171,35 @@
       </ul>
     </div>
   </aside>
+
+  <dialog id="ma-settings-modal" onclick="if(event.target===this)closeSettingsModal()">
+    <article style="max-width:380px">
+      <header>
+        <button aria-label="Close" rel="prev" onclick="closeSettingsModal()"></button>
+        <strong>Settings</strong>
+      </header>
+      <strong class="ma-section-title">Appearance</strong>
+      <div style="margin-bottom:1.25rem;">
+        <small style="display:block;margin-bottom:.5rem;color:var(--pico-muted-color,#6c757d);">Theme</small>
+        <div style="display:flex;gap:.5rem;">
+          <button class="ma-theme-mode-btn secondary" id="ma-settings-theme-light" onclick="setThemeMode('light')">Light</button>
+          <button class="ma-theme-mode-btn secondary" id="ma-settings-theme-dark" onclick="setThemeMode('dark')">Dark</button>
+        </div>
+      </div>
+      <div style="margin-bottom:1.5rem;">
+        <small style="display:block;margin-bottom:.6rem;color:var(--pico-muted-color,#6c757d);">Accent color</small>
+        <div style="display:flex;gap:.65rem;flex-wrap:wrap;">
+          <button class="ma-accent-swatch" id="ma-accent-indigo"  onclick="setAccent('indigo')"  title="Indigo"  style="background:#6366f1;color:#6366f1;"></button>
+          <button class="ma-accent-swatch" id="ma-accent-emerald" onclick="setAccent('emerald')" title="Emerald" style="background:#059669;color:#059669;"></button>
+          <button class="ma-accent-swatch" id="ma-accent-orange"  onclick="setAccent('orange')"  title="Orange"  style="background:#ea580c;color:#ea580c;"></button>
+          <button class="ma-accent-swatch" id="ma-accent-slate"   onclick="setAccent('slate')"   title="Slate"   style="background:#475569;color:#475569;"></button>
+        </div>
+      </div>
+      <hr style="margin:1rem 0;">
+      <strong class="ma-section-title">Privacy</strong>
+      <p style="color:var(--pico-muted-color,#6c757d);font-size:.875rem;margin:.5rem 0 0;">Coming soon.</p>
+    </article>
+  </dialog>
 
   <dialog id="ma-profile-modal" onclick="if(event.target===this)closeProfileModal()">
     <article style="max-width:420px">

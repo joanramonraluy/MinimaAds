@@ -1650,19 +1650,55 @@ function openProfileFromDrawer() {
   openProfileModal();
 }
 
-function toggleTheme() {
-  var current = document.documentElement.getAttribute('data-theme') || 'light';
-  var next = current === 'dark' ? 'light' : 'dark';
-  document.documentElement.setAttribute('data-theme', next);
-  MDS.keypair.set('UI_THEME', next, function() {});
-  _updateThemeBtn(next);
+function openSettingsFromDrawer() {
+  closeDrawer();
+  openSettingsModal();
 }
 
-function _updateThemeBtn(theme) {
-  var btn = document.getElementById('ma-drawer-theme-btn');
-  if (!btn) { return; }
-  btn.textContent = theme === 'dark' ? 'Light' : 'Dark';
-  btn.title = theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
+function openSettingsModal() {
+  var modal = document.getElementById('ma-settings-modal');
+  if (!modal) { return; }
+  _updateSettingsUI();
+  modal.setAttribute('open', '');
+}
+
+function closeSettingsModal() {
+  var modal = document.getElementById('ma-settings-modal');
+  if (modal) { modal.removeAttribute('open'); }
+}
+
+function setThemeMode(mode) {
+  document.documentElement.setAttribute('data-theme', mode);
+  MDS.keypair.set('UI_THEME', mode, function() {});
+  _updateSettingsUI();
+}
+
+function setAccent(name) {
+  if (name === 'indigo') {
+    document.documentElement.removeAttribute('data-accent');
+  } else {
+    document.documentElement.setAttribute('data-accent', name);
+  }
+  MDS.keypair.set('UI_ACCENT', name, function() {});
+  _updateSettingsUI();
+}
+
+function _updateSettingsUI() {
+  var theme  = document.documentElement.getAttribute('data-theme')  || 'light';
+  var accent = document.documentElement.getAttribute('data-accent') || 'indigo';
+
+  var lightBtn = document.getElementById('ma-settings-theme-light');
+  var darkBtn  = document.getElementById('ma-settings-theme-dark');
+  if (lightBtn) { lightBtn.className = 'ma-theme-mode-btn secondary' + (theme === 'light' ? ' active' : ''); }
+  if (darkBtn)  { darkBtn.className  = 'ma-theme-mode-btn secondary' + (theme === 'dark'  ? ' active' : ''); }
+
+  var accents = ['indigo', 'emerald', 'orange', 'slate'];
+  for (var i = 0; i < accents.length; i++) {
+    var sw = document.getElementById('ma-accent-' + accents[i]);
+    if (!sw) { continue; }
+    if (accents[i] === accent) { sw.classList.add('active'); }
+    else                       { sw.classList.remove('active'); }
+  }
 }
 
 function openProfileModal() {
@@ -1851,7 +1887,10 @@ function onInited() {
         MDS.keypair.get('UI_THEME', function(themeRes) {
           var savedTheme = themeRes && themeRes.status && themeRes.value ? themeRes.value : 'light';
           document.documentElement.setAttribute('data-theme', savedTheme);
-          _updateThemeBtn(savedTheme);
+          MDS.keypair.get('UI_ACCENT', function(accentRes) {
+          var savedAccent = accentRes && accentRes.status && accentRes.value ? accentRes.value : 'indigo';
+          if (savedAccent !== 'indigo') { document.documentElement.setAttribute('data-accent', savedAccent); }
+          _updateSettingsUI();
           MDS.cmd('maxima action:info', function(res) {
           if (res && res.status && res.response) {
             if (res.response.publickey) { MY_ADDRESS    = res.response.publickey.toUpperCase(); }
@@ -1867,6 +1906,7 @@ function onInited() {
               });
             });
           });
+        });
         });
         });
       });

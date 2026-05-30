@@ -1,6 +1,6 @@
 // Stats view.
 // Campaign table (from getCampaigns). Badge marks campaigns created by the current user.
-// Uses textContent / DOM methods rather than innerHTML for user-supplied strings.
+// M6: market summary stat cards + status badges on table rows.
 
 function renderStats(root) {
   root.innerHTML = '';
@@ -8,6 +8,11 @@ function renderStats(root) {
   var h2 = document.createElement('h2');
   h2.textContent = 'Stats';
   root.appendChild(h2);
+
+  var summaryRow = document.createElement('div');
+  summaryRow.id = 'ma-stats-summary';
+  summaryRow.style.cssText = 'display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1.25rem;';
+  root.appendChild(summaryRow);
 
   var campaignsSection = document.createElement('section');
   campaignsSection.id = 'ma-stats-campaigns';
@@ -27,7 +32,22 @@ function loadStats() {
       target.appendChild(p);
       return;
     }
-    renderCampaignsTable(target, rows || []);
+
+    var campaigns = rows || [];
+
+    // Market summary stat cards
+    var summaryEl = document.getElementById('ma-stats-summary');
+    if (summaryEl) {
+      summaryEl.innerHTML = '';
+      var active = campaigns.filter(function(c) { return c.STATUS === 'active'; });
+      var totalBudget = active.reduce(function(sum, c) {
+        return sum + (parseFloat(c.BUDGET_REMAINING) || 0);
+      }, 0);
+      summaryEl.appendChild(mkStatCard('Active campaigns', String(active.length)));
+      summaryEl.appendChild(mkStatCard('Total budget in market', totalBudget.toFixed(4) + ' MINIMA'));
+    }
+
+    renderCampaignsTable(target, campaigns);
   });
 }
 
@@ -37,10 +57,7 @@ function renderCampaignsTable(target, campaigns) {
   target.appendChild(h3);
 
   if (!campaigns.length) {
-    var p = document.createElement('p');
-    p.style.cssText = 'color:var(--pico-muted-color,#6c757d);';
-    p.textContent = 'No active campaigns in the system.';
-    target.appendChild(p);
+    target.appendChild(mkEmptyState('No active campaigns in the system.'));
     return;
   }
 
@@ -61,21 +78,26 @@ function renderCampaignsTable(target, campaigns) {
     var c = campaigns[j];
     var tr = document.createElement('tr');
 
+    // Title + "Mine" badge
     var titleTd = document.createElement('td');
     titleTd.textContent = c.TITLE;
     if (MY_ADDRESS && c.CREATOR_ADDRESS && c.CREATOR_ADDRESS.toUpperCase() === MY_ADDRESS.toUpperCase()) {
-      var badge = document.createElement('mark');
-      badge.textContent = 'Mine';
-      badge.style.cssText = 'display:inline;margin-left:.4rem;font-size:.75em;vertical-align:middle;';
-      titleTd.appendChild(badge);
+      var mineBadge = mkStatusBadge('active');
+      mineBadge.textContent = 'Mine';
+      mineBadge.style.marginLeft = '.4rem';
+      titleTd.appendChild(mineBadge);
     }
     tr.appendChild(titleTd);
 
-    tr.appendChild(td(c.STATUS));
+    // Status badge
+    var statusTd = document.createElement('td');
+    statusTd.appendChild(mkStatusBadge(c.STATUS));
+    tr.appendChild(statusTd);
+
     tr.appendChild(td(shortAddr(c.CREATOR_ADDRESS)));
-    tr.appendChild(td(parseFloat(c.BUDGET_REMAINING || 0)));
-    tr.appendChild(td(parseFloat(c.REWARD_VIEW || 0)));
-    tr.appendChild(td(parseFloat(c.REWARD_CLICK || 0)));
+    tr.appendChild(td(parseFloat(c.BUDGET_REMAINING || 0).toFixed(4)));
+    tr.appendChild(td(parseFloat(c.REWARD_VIEW || 0).toFixed(6)));
+    tr.appendChild(td(parseFloat(c.REWARD_CLICK || 0).toFixed(6)));
     tbody.appendChild(tr);
   }
   table.appendChild(tbody);

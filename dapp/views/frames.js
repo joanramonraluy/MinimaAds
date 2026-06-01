@@ -25,20 +25,22 @@ function renderFrames(root) {
     + '</form>';
   root.appendChild(createSection);
 
-  // Help guide collapsed by default
+
+  // SDK integration guide — only shown when there are custom frames
   var helpDetails = document.createElement('details');
+  helpDetails.id = 'ma-frames-help';
   helpDetails.className = 'ma-section';
   helpDetails.style.cssText = 'padding:.75rem 1rem;';
   var helpSummary = document.createElement('summary');
   helpSummary.style.cssText = 'font-weight:600;cursor:pointer;';
-  helpSummary.textContent = 'Publisher SDK integration guide';
+  helpSummary.textContent = 'How to embed a custom Frame';
   helpDetails.appendChild(helpSummary);
   var helpBody = document.createElement('div');
-  helpBody.innerHTML = '<p style="margin-top:.75rem;">The snippet is fully self-contained and zero-config. Just paste it — no changes to your existing <code>MDS.init</code> required.</p>'
+  helpBody.innerHTML = '<p style="margin-top:.75rem;">Create a custom Frame below, then click <strong>Snippet</strong> to get the embed code for your MiniDapp.</p>'
     + '<ol>'
-    + '<li>Click <strong>Snippet</strong> next to a frame and copy the generated code block.</li>'
-    + '<li>Paste the code block inside the <code>&lt;head&gt;</code> of your MiniDapp page, <strong>after</strong> <code>mds.js</code> is loaded.</li>'
-    + '<li>Done. The snippet auto-detects your Maxima key, loads the SDK, and shows ads with publisher rewards.</li>'
+    + '<li>Paste the full snippet (div + script) into your MiniDapp\'s <code>&lt;body&gt;</code>, right <strong>after</strong> the <code>&lt;script src="mds.js"&gt;</code> tag.</li>'
+    + '<li>The <code>&lt;div id="minimaads-slot"&gt;</code> marks where the ad renders — move it anywhere in your layout.</li>'
+    + '<li>The script hooks into your existing <code>MDS.init</code> automatically — no changes to your code needed.</li>'
     + '</ol>';
   helpDetails.appendChild(helpBody);
   root.appendChild(helpDetails);
@@ -77,18 +79,11 @@ function _renderFramesList(rows) {
   listEl.innerHTML = '';
 
   if (rows.length === 0) {
-    var emptyWrap = document.createElement('div');
-    emptyWrap.className = 'ma-section';
-    var intro = document.createElement('p');
-    intro.innerHTML = 'A <strong>Frame</strong> is an ad slot you embed in your MiniDapp. '
-      + 'When viewers see ads through your Frame, you earn publisher rewards.';
-    emptyWrap.appendChild(intro);
-    emptyWrap.appendChild(mkEmptyState(
+    listEl.appendChild(mkEmptyState(
       'Your built-in Frame will appear here once the node initialises.',
       'Create a custom Frame below',
       '#ma-frames-form'
     ));
-    listEl.appendChild(emptyWrap);
     return;
   }
 
@@ -96,6 +91,8 @@ function _renderFramesList(rows) {
   sectionTitle.className = 'ma-section-title';
   sectionTitle.textContent = 'My Frames';
   listEl.appendChild(sectionTitle);
+
+  var hasCustom = rows.some(function(r) { return !(r.IS_BUILTIN === 'true' || r.IS_BUILTIN === true); });
 
   for (var i = 0; i < rows.length; i++) {
     (function(r) {
@@ -128,27 +125,31 @@ function _renderFramesList(rows) {
       cardHeader.appendChild(earnedCard);
       card.appendChild(cardHeader);
 
-      // Snippet <details>
-      var snippetDetails = document.createElement('details');
-      snippetDetails.id = 'ma-snippet-' + sid;
-      snippetDetails.style.cssText = 'margin-top:.75rem;';
-      var snippetSummary = document.createElement('summary');
-      snippetSummary.textContent = 'Snippet';
-      snippetSummary.style.cssText = 'cursor:pointer;font-size:.875rem;color:var(--pico-muted-color,#6c757d);';
-      snippetDetails.appendChild(snippetSummary);
-      var snippetBody = document.createElement('div');
-      snippetBody.id = 'ma-snippet-body-' + sid;
-      snippetBody.style.cssText = 'margin-top:.5rem;';
-      snippetDetails.appendChild(snippetBody);
-      var snippetLoaded = false;
-      snippetDetails.addEventListener('toggle', function() {
-        if (snippetDetails.open && !snippetLoaded) {
-          snippetLoaded = true;
-          snippetBody.appendChild(mkLoading('Loading snippet…'));
-          _showSnippet(fid);
-        }
-      });
-      card.appendChild(snippetDetails);
+      // Snippet <details> — only for custom frames
+      if (!isB) {
+        var snippetDetails = document.createElement('details');
+        snippetDetails.id = 'ma-snippet-' + sid;
+        snippetDetails.style.cssText = 'margin-top:.75rem;';
+        var snippetSummary = document.createElement('summary');
+        snippetSummary.textContent = 'Snippet';
+        snippetSummary.style.cssText = 'cursor:pointer;font-size:.875rem;color:var(--pico-muted-color,#6c757d);';
+        snippetDetails.appendChild(snippetSummary);
+        var snippetBody = document.createElement('div');
+        snippetBody.id = 'ma-snippet-body-' + sid;
+        snippetBody.style.cssText = 'margin-top:.5rem;';
+        snippetDetails.appendChild(snippetBody);
+        var snippetLoaded = false;
+        (function(details, body, frameId) {
+          details.addEventListener('toggle', function() {
+            if (details.open && !snippetLoaded) {
+              snippetLoaded = true;
+              body.appendChild(mkLoading('Loading snippet…'));
+              _showSnippet(frameId);
+            }
+          });
+        })(snippetDetails, snippetBody, fid);
+        card.appendChild(snippetDetails);
+      }
 
       // Earnings <details>
       var earningsDetails = document.createElement('details');

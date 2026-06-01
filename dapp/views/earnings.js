@@ -40,6 +40,7 @@ function renderEarnings(root) {
   var pendingSection = document.createElement('section');
   pendingSection.style.cssText = 'margin-bottom:1.5rem;';
   var pendingH3 = document.createElement('h3');
+  pendingH3.id = 'ma-pending-settlements-title';
   pendingH3.textContent = 'Pending settlements';
   pendingSection.appendChild(pendingH3);
   var channelList = document.createElement('div');
@@ -310,6 +311,8 @@ function _refreshChannelRewards() {
 }
 
 function _renderChannelRewardRows(rows, container) {
+  var titleEl = document.getElementById('ma-pending-settlements-title');
+  if (titleEl) { titleEl.textContent = 'Pending settlements (' + rows.length + ')'; }
   container.innerHTML = '';
   if (rows.length === 0) {
     container.appendChild(mkEmptyState('No pending settlements.'));

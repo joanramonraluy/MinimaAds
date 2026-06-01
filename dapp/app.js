@@ -23,6 +23,7 @@ var LIMITS = {
 var MY_ADDRESS = '';
 var MY_MX_ADDRESS = '';
 var MY_MX_NAME = '';
+var MY_MX_ICON = '';
 var _dbReady = false;
 var _activeMode = 'viewer';
 var _profileInterestsSaveTimer = 0;
@@ -42,7 +43,7 @@ function generateUID() {
 
 function currentRoute() {
   var h = (window.location.hash || '').replace(/^#/, '');
-  if (h === 'creator' || h === 'mycampaigns' || h === 'stats' || h === 'viewer' || h === 'earnings' || h === 'frames' || h === 'settings') { return h; }
+  if (h === 'creator' || h === 'mycampaigns' || h === 'stats' || h === 'viewer' || h === 'earnings' || h === 'frames' || h === 'settings' || h === 'profile') { return h; }
   return 'viewer';
 }
 
@@ -59,7 +60,7 @@ function renderNav() {
   }
   var linksEl = document.getElementById('ma-nav-links');
   if (!linksEl) { return; }
-  if (currentRoute() === 'settings') { linksEl.innerHTML = ''; return; }
+  if (currentRoute() === 'settings' || currentRoute() === 'profile') { linksEl.innerHTML = ''; return; }
   var views = MODE_VIEWS[_activeMode] || MODE_VIEWS.viewer;
   var route = currentRoute();
   var linkDefs = {
@@ -89,6 +90,11 @@ function setMode(mode) {
   if (!MODE_VIEWS[mode]) { return; }
   _activeMode = mode;
   MDS.keypair.set('USER_MODE', mode, function() {});
+  var route = currentRoute();
+  if (route === 'settings' || route === 'profile') {
+    window.location.hash = MODE_VIEWS[mode][0];
+    return;
+  }
   doRender();
 }
 
@@ -115,10 +121,15 @@ function doRender() {
     return;
   }
   var route = currentRoute();
-  // Settings is global — accessible from any mode
+  // Global views — accessible from any mode
   if (route === 'settings' && typeof renderSettings === 'function') {
     root.innerHTML = '';
     renderSettings(root);
+    return;
+  }
+  if (route === 'profile' && typeof renderProfile === 'function') {
+    root.innerHTML = '';
+    renderProfile(root);
     return;
   }
   var views = MODE_VIEWS[_activeMode] || MODE_VIEWS.viewer;
@@ -1654,7 +1665,7 @@ function setModeFromDrawer(mode) {
 
 function openProfileFromDrawer() {
   closeDrawer();
-  openProfileModal();
+  window.location.hash = 'profile';
 }
 
 function openSettingsView() {
@@ -1696,93 +1707,6 @@ function _updateSettingsUI() {
   }
 }
 
-function openProfileModal() {
-  var modal = document.getElementById('ma-profile-modal');
-  if (!modal) { return; }
-  var body = document.getElementById('ma-profile-modal-body');
-  if (!body) { return; }
-  body.innerHTML = '';
-
-  var addrLabel = document.createElement('label');
-  addrLabel.textContent = 'Maxima address';
-  var addrRow = document.createElement('div');
-  addrRow.style.cssText = 'display:flex;gap:.4rem;align-items:center;margin-bottom:1rem;';
-  var addrInput = document.createElement('input');
-  addrInput.type = 'text';
-  addrInput.readOnly = true;
-  addrInput.value = MY_MX_ADDRESS || '—';
-  addrInput.style.cssText = 'flex:1;font-size:.75rem;font-family:monospace;margin:0;';
-  var copyBtn = document.createElement('button');
-  copyBtn.textContent = 'Copy';
-  copyBtn.style.cssText = 'width:auto;margin:0;padding:.2rem .5rem;font-size:.8rem;';
-  copyBtn.addEventListener('click', function() {
-    if (!MY_MX_ADDRESS) { return; }
-    try {
-      var ta = document.createElement('textarea');
-      ta.value = MY_MX_ADDRESS;
-      ta.style.cssText = 'position:fixed;left:-9999px;';
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      copyBtn.textContent = 'Copied!';
-      setTimeout(function() { copyBtn.textContent = 'Copy'; }, 1500);
-    } catch (e) {}
-  });
-  addrRow.appendChild(addrInput);
-  addrRow.appendChild(copyBtn);
-  body.appendChild(addrLabel);
-  body.appendChild(addrRow);
-
-  var intLabel = document.createElement('label');
-  intLabel.textContent = 'My interests';
-  var intInput = document.createElement('input');
-  intInput.type = 'text';
-  intInput.id = 'ma-profile-interests';
-  intInput.placeholder = 'e.g. technology, sport, music';
-  intInput.addEventListener('input', function() {
-    clearTimeout(_profileInterestsSaveTimer);
-    var val = intInput.value.trim();
-    _profileInterestsSaveTimer = setTimeout(function() {
-      updateUserProfile(MY_ADDRESS, { interests: val || null }, function() {});
-    }, 800);
-  });
-  body.appendChild(intLabel);
-  body.appendChild(intInput);
-
-  var earnedBox = document.createElement('div');
-  earnedBox.style.cssText = 'margin-top:1rem;padding:.5rem .75rem;background:var(--pico-card-sectionning-background-color,#f0f4f8);border-radius:.3rem;display:flex;justify-content:space-between;align-items:center;';
-  var earnedLbl = document.createElement('small');
-  earnedLbl.textContent = 'Total earned';
-  var earnedVal = document.createElement('strong');
-  earnedVal.id = 'ma-profile-total-earned';
-  earnedVal.textContent = '—';
-  earnedBox.appendChild(earnedLbl);
-  earnedBox.appendChild(earnedVal);
-  body.appendChild(earnedBox);
-
-  if (MY_ADDRESS && typeof getUserProfile === 'function') {
-    getUserProfile(MY_ADDRESS, function(err, profile) {
-      var inp = document.getElementById('ma-profile-interests');
-      var earnEl = document.getElementById('ma-profile-total-earned');
-      if (!err && profile) {
-        if (profile.INTERESTS && inp) { inp.value = profile.INTERESTS; }
-        var total = parseFloat(profile.TOTAL_EARNED) || 0;
-        if (earnEl) { earnEl.textContent = total.toFixed(6) + ' MINIMA'; }
-      } else {
-        if (earnEl) { earnEl.textContent = '0.000000 MINIMA'; }
-      }
-    });
-  }
-
-  modal.setAttribute('open', '');
-}
-
-function closeProfileModal() {
-  var modal = document.getElementById('ma-profile-modal');
-  if (modal) { modal.removeAttribute('open'); }
-  clearTimeout(_profileInterestsSaveTimer);
-}
 
 function probeDb() {
   sqlQuery('SELECT 1 AS PROBE FROM CAMPAIGNS LIMIT 1', function(err) {
@@ -1880,17 +1804,19 @@ function onInited() {
           _activeMode = modeRes.value;
         }
         MDS.keypair.get('UI_THEME', function(themeRes) {
-          var savedTheme = themeRes && themeRes.status && themeRes.value ? themeRes.value : 'light';
+          var savedTheme = themeRes && themeRes.status && themeRes.value ? themeRes.value : 'dark';
           document.documentElement.setAttribute('data-theme', savedTheme);
           MDS.keypair.get('UI_ACCENT', function(accentRes) {
-          var savedAccent = accentRes && accentRes.status && accentRes.value ? accentRes.value : 'indigo';
-          if (savedAccent !== 'indigo') { document.documentElement.setAttribute('data-accent', savedAccent); }
+          var savedAccent = accentRes && accentRes.status && accentRes.value ? accentRes.value : 'orange';
+          if (savedAccent === 'indigo') { document.documentElement.removeAttribute('data-accent'); }
+          else { document.documentElement.setAttribute('data-accent', savedAccent); }
           _updateSettingsUI();
           MDS.cmd('maxima action:info', function(res) {
           if (res && res.status && res.response) {
             if (res.response.publickey) { MY_ADDRESS    = res.response.publickey.toUpperCase(); }
             if (res.response.contact)   { MY_MX_ADDRESS = res.response.contact; }
             if (res.response.name)      { MY_MX_NAME    = res.response.name; }
+            if (res.response.icon && res.response.icon !== '0x00') { MY_MX_ICON = res.response.icon; }
           }
           initFEFrames(function() {
             initFEChannelState(function() {

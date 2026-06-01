@@ -195,6 +195,55 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 ## 8) Current Handoff Notes
 
+2026-06-01 (feat: help and about us view):
+- **Scope**: `dapp/views/help.js`, `public/index.html`, `dapp/app.js`.
+- **Change**: added a new Help and About view containing tabbed guides for the three roles (Viewer, Creator, Publisher) and an "About MinimaAds" section. The navigation drawer "Help" button was enabled and connected to the routing logic.
+- **Responsive Nav**: updated the sub-navigation tabs (`#ma-nav-links`) to display in a single scrollable row on mobile instead of wrapping to two lines. Implemented dynamic indicator chevrons (`#ma-nav-arrow-right` / `left`) that appear when there are off-screen options and disappear as the user scrolls. Added `flex-shrink: 0` to `li` elements and `white-space: nowrap` to `a` elements to prevent tabs from shrinking/wrapping internally.
+- **Help View Tabs**: removed inline styling overrides (`flex-wrap: wrap`) from the tab container in `help.js` to ensure the global stylesheet responsive `.ma-tabs` rules (which make them scroll horizontally on mobile screens) are correctly applied to the Help screen.
+- **Shared Scroll Indicator**: added `attachScrollIndicator` to `ui-helpers.js` and `.ma-tabs-container` / `.ma-tabs-arrow` styling to `index.html`. Refactored main navigation, Creator tabs, and Help tabs to use this shared utility, providing consistent visual left/right chevron indicators when tabs overflow. Clicking these arrows smoothly scrolls the tab container, and event propagation is stopped to prevent accidental tab switching. Restricted `.ma-tabs-container` and `#ma-nav-links` to `max-width: 100%` and `overflow: hidden` to prevent page-wide horizontal scrollbars.
+- **New files**: `dapp/views/help.js`.
+- **No contract changes**: UI changes only.
+
+2026-06-01 (feat: creator settled channels list):
+- **Scope**: `dapp/views/mycampaigns.js` only.
+- **Change**: added a lazy-loaded `Settled channels` details section to each `My Campaigns` card. It queries `CHANNEL_HISTORY` for `ROLE='publisher'` rows of the campaign, groups them by `VIEWER_KEY` (publisher PK), and shows contact name when available from `maxcontacts`, shortened PK, channel count, total earned, and last settled date. Each publisher row has a nested expander listing individual settlement events with status, earned amount, and settled date.
+- **New functions**: `_loadSettledChannels`, `_renderSettledChannelsTable`, `_groupSettledChannelsByPk`, `_renderSettledChannelEvents`. Reuses existing helpers `_loadMaximaContactsMap`, `_nodeTd`, `_shortNodePk`, and shared CSS classes `ma-campaign-details`, `ma-campaign-details-summary`, `ma-nested-table`, `ma-nested-detail`, `ma-expandable-row`.
+- **Data note**: `CHANNEL_HISTORY.VIEWER_KEY` for `ROLE='publisher'` is the publisher's Maxima PK. Names resolved opportunistically from local Maxima contacts.
+- **No contract changes**: no DB, SW, Maxima schema, SDK, or spec changes.
+
+2026-06-01 (feat: creator rewarded nodes list):
+- **Scope**: `dapp/views/mycampaigns.js`, `public/index.html`.
+- **Change**: added a lazy-loaded `Rewarded nodes` details section to each `My Campaigns` card. It groups `REWARD_EVENTS` by `USER_ADDRESS` and shows contact name when available from `maxcontacts`, shortened public key, reward count, total rewarded amount, and last rewarded date/time. Each node row has a nested expander listing individual reward events with type, amount, and reward date.
+- **UI follow-up**: nested reward detail rows now use `.ma-nested-detail`, with theme-aware light/dark backgrounds, instead of an inline light fallback that showed white in dark mode.
+- **UI follow-up 2**: `My Campaigns` top-level details (`Activity chart`, `Rewarded nodes`) now share `.ma-campaign-details` / `.ma-campaign-details-summary` styling for consistent spacing, borders, and theme-aware hover states.
+- **UI follow-up 3**: `Rewarded nodes` summary/detail tables now use `.ma-nested-table` for card-like row spacing, soft separators, and theme-aware hover backgrounds.
+- **UI follow-up 4**: grouped `Rewarded nodes` rows are now clickable across the full row, with a muted rotating `›` chevron instead of a primary-colour button. Avoided `role="button"` because Pico styles `[role=button]` as a primary button, which made the full row orange; rows keep `tabindex` and `aria-expanded`.
+- **Data note**: `USER_PROFILE` does not store Maxima display names; names are resolved opportunistically from local Maxima contacts. Unknown contacts display as `Unknown node`.
+- **No contract changes**: no DB, SW, Maxima schema, SDK, or spec changes.
+
+2026-06-01 (UX: settlement timing hint):
+- **Scope**: `dapp/views/earnings.js` only.
+- **Change**: added a short hint under `Pending settlements` explaining that settlement posts to L1 and is usually best done when the campaign ends or the channel reaches its reward cap, unless funds are needed sooner. The Earnings view is shared by viewer and publisher modes, so the hint appears in both.
+- **No contract changes**: UI copy only.
+
+2026-06-01 (fix: sticky header layering during scroll):
+- **Scope**: `public/index.html` only.
+- **Fix**: scoped sticky header CSS from global `header` selectors to `body > header`. Frame cards use internal `<header>` elements, and the global selector was accidentally making card headers sticky too (`Built-in viewer` / `Built-in` appeared above the app header while scrolling). App header keeps `z-index:90`; drawer overlay/panel remain above it at `100/101`.
+- **Follow-up**: made the header background opaque (`var(--pico-background-color)`) instead of semi-transparent rgba. The remaining visible issue was content showing through the translucent header, not a higher stacking layer.
+- **No contract changes**: UI CSS only.
+
+2026-06-01 (feat: publisher snippet copy button in summary):
+- **Scope**: `dapp/views/frames.js` only.
+- **Fix**: custom Frame `Snippet` summary now includes a compact `Copy` button beside the native expand control. The button copies the generated SDK snippet without opening/closing the details panel (`preventDefault` + `stopPropagation`).
+- **Follow-up**: styled the summary `Copy` button with the current theme primary colour and `--pico-primary-hover-background` hover effect, with padding/radius aligned to the page's existing small action buttons.
+- **Refactor**: snippet generation moved into `_loadSnippet()` and `_buildSnippet()` so both the summary copy button and expanded snippet panel use the same source. `_copySnippetText()` handles Clipboard API and textarea fallback.
+- **No contract changes**: no DB, SW, Maxima, SDK, or spec changes.
+
+2026-06-01 (fix: viewer campaign row hover colour):
+- **Scope**: `dapp/views/viewer.js` only.
+- **Fix**: `_buildCampaignRow` no longer uses `var(--pico-card-sectionning-background-color)` for hover. Added `_viewerRowHoverBackground()` with explicit neutral hover colours: `rgba(255,255,255,.06)` in dark mode and `rgba(15,23,42,.05)` in light mode. Normal row background now resets to `transparent`.
+- **No contract changes**: no DB, SW, Maxima, SDK, or spec changes.
+
 2026-05-29 (fix: UI-1 — Earnings page groups rewards incorrectly):
 - **Scope**: `dapp/views/earnings.js` only.
 - **Root cause**: Both `_refreshSettlementHistory` and `_refreshChannelRewards` filtered `WHERE UPPER(VIEWER_KEY) = UPPER(MY_ADDRESS)`. `VIEWER_KEY` is an ephemeral payment signing key (`keys action:new`); `MY_ADDRESS` is the Maxima public key — structurally incomparable, never equal. Both queries returned 0 rows for all users.
@@ -227,6 +276,15 @@ For verification procedures, see `docs/VERIFICATION.md`.
 - **Fix 3 — `dapp/views/viewer.js`**: `onRewardConfirmed` removed (was the only place that incremented the badge at view time). `loadTodayEarned` now queries `USER_PROFILE.TOTAL_EARNED` instead of `SUM(REWARD_EVENTS)` — the former is only incremented at voucher time.
 - **Fix 4 — `dapp/views/earnings.js`**: `onVoucherReceived` now calls `loadTodayEarned()` to refresh the badge whenever a voucher arrives. `console.log` removed.
 - **See**: KNOWN_ISSUES VW-1.
+
+2026-06-01 (feat: PROFILE_REQUEST/RESPONSE — creator avatar and name for non-contact campaigns):
+- **New Maxima messages**: `PROFILE_REQUEST` (§8.17) and `PROFILE_RESPONSE` (§8.18) in MinimaAds.md.
+- **New SW→FE signal**: `PROFILE_RECEIVED { publickey, name, icon }` — added to §8.15 signal table.
+- **`public/service-workers/handlers/campaign.handler.js`**: Added `handleProfileRequest(payload, senderPk)` — calls `maxima action:info`, reads `name` and `icon`, sends `PROFILE_RESPONSE` back via `sendMaxima(senderPk, null, ...)`. Added `handleProfileResponse(payload)` — calls `signalFE("PROFILE_RECEIVED", { publickey, name, icon })`.
+- **`public/service-workers/handlers/maxima.handler.js`**: Added two branches — `PROFILE_REQUEST` (passes `msg.data.from` as senderPk) and `PROFILE_RESPONSE`.
+- **`dapp/views/viewer.js`**: `_buildCampaignRow` now sets `data-creator-pk`, `class="ma-row-avatar"` (with `data-letter` fallback), and `class="ma-row-body"` on its DOM elements. `_loadAndRenderList` calls `_fetchNonContactProfiles(campaigns, contactsMap)` after rendering rows. New functions: `_fetchNonContactProfiles`, `_loadOrRequestProfile`, `_sendProfileRequest`, `_applyProfileToRow`, `onProfileReceived`. Profile cached in keypair as `CREATOR_PROFILE_<PK>`.
+- **`dapp/app.js`**: Added `PROFILE_RECEIVED` dispatch in `handleMdsComms` → `onProfileReceived(parsed)`.
+- **Flow**: viewer renders list → for each creator not in contacts, checks keypair cache → if cached applies immediately; if not, sends PROFILE_REQUEST (poll:false) → creator responds with PROFILE_RESPONSE → viewer SW signals PROFILE_RECEIVED → FE updates avatar/name in-place and caches to keypair. Graceful fallback: letter avatar shown until profile arrives or if creator is offline.
 
 2026-05-28 (T-SC6: FE — buildAndPostStatusUpdateTx + mycampaigns.js integration):
 - **Scope**: `dapp/app.js`, `dapp/views/mycampaigns.js`. No SW, SDK, core, or DB changes.

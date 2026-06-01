@@ -88,3 +88,52 @@ function mkSectionTitle(text) {
   el.textContent = text;
   return el;
 }
+
+function attachScrollIndicator(scrollEl, arrowRightEl, arrowLeftEl) {
+  if (!scrollEl) { return; }
+  
+  function updateIndicator() {
+    var hasOverflow = scrollEl.scrollWidth > scrollEl.clientWidth;
+    
+    // Right arrow
+    var isScrollAtEnd = scrollEl.scrollLeft + scrollEl.clientWidth >= scrollEl.scrollWidth - 5;
+    if (arrowRightEl) {
+      if (hasOverflow && !isScrollAtEnd) {
+        arrowRightEl.style.display = 'block';
+      } else {
+        arrowRightEl.style.display = 'none';
+      }
+    }
+    
+    // Left arrow
+    var isScrollAtStart = scrollEl.scrollLeft <= 5;
+    if (arrowLeftEl) {
+      if (hasOverflow && !isScrollAtStart) {
+        arrowLeftEl.style.display = 'block';
+      } else {
+        arrowLeftEl.style.display = 'none';
+      }
+    }
+  }
+
+  scrollEl.addEventListener('scroll', updateIndicator);
+  window.addEventListener('resize', updateIndicator);
+  
+  if (arrowRightEl) {
+    arrowRightEl.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      scrollEl.scrollBy({ left: 120, behavior: 'smooth' });
+    });
+  }
+  
+  if (arrowLeftEl) {
+    arrowLeftEl.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      scrollEl.scrollBy({ left: -120, behavior: 'smooth' });
+    });
+  }
+  
+  return updateIndicator;
+}

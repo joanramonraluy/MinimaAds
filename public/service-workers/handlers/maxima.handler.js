@@ -55,6 +55,10 @@ function onMaxima(msg) {
     handleCreatorLivenessPing(payload, msg.data.from || '');
   } else if (payload.type === "CREATOR_LIVENESS_PONG") {
     handleCreatorLivenessPong(payload);
+  } else if (payload.type === "PROFILE_REQUEST") {
+    handleProfileRequest(payload, msg.data.from || '');
+  } else if (payload.type === "PROFILE_RESPONSE") {
+    handleProfileResponse(payload);
   } else {
     MDS.log("[MAXIMA] unknown type: " + payload.type);
   }

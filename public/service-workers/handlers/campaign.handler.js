@@ -550,3 +550,63 @@ function checkExpiredCampaigns() {
     }
   );
 }
+
+// ---------------------------------------------------------------------------
+// PROFILE_REQUEST — received on creator's node from a viewer FE.
+// Reads own Maxima name and icon, responds with PROFILE_RESPONSE (poll:false).
+// MinimaAds.md §8.17. Rhino-safe: var, function(), no arrows, no template literals.
+// ---------------------------------------------------------------------------
+function handleProfileRequest(payload, senderPk) {
+  if (!senderPk) {
+    MDS.log("[PROFILE] REQUEST missing senderPk — ignoring");
+    return;
+  }
+  // requester_mx lets us route the response via to: when viewer is not in our contacts
+  var requesterMx = payload.requester_mx || null;
+  MDS.log("[PROFILE] REQUEST from " + senderPk.substring(0, 10) + "...");
+  MDS.cmd("maxima action:info", function(res) {
+    if (!res.status || !res.response) {
+      MDS.log("[PROFILE] maxima action:info failed — cannot respond");
+      return;
+    }
+    var name = res.response.name || "";
+    var rawIcon = (res.response.icon && res.response.icon !== "0x00") ? res.response.icon : "";
+    // The icon is stored URL-encoded (set via encodeURIComponent in profile.js).
+    // Decode it so the viewer can use it directly as img.src.
+    var icon = "";
+    if (rawIcon) {
+      try { icon = decodeURIComponent(rawIcon); } catch (e) { icon = rawIcon; }
+    }
+    MDS.log("[PROFILE] name:" + name + " icon:" + (icon ? "yes(" + icon.length + "b)" : "none"));
+    var response = {
+      type: "PROFILE_RESPONSE",
+      publickey: MY_MAXIMA_PK,
+      name: name,
+      icon: icon
+    };
+    sendMaxima(senderPk, requesterMx, response, function(ok) {
+      MDS.log("[PROFILE] RESPONSE sent ok:" + (ok ? "true" : "false"));
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// PROFILE_RESPONSE — received on viewer's node after a PROFILE_REQUEST.
+// Caches full profile (including large icon) to keypair, then signals FE with
+// only publickey + name to avoid MDS.comms.solo size limits on large icons.
+// FE reads the icon from keypair when applying the profile to the DOM.
+// MinimaAds.md §8.18. Rhino-safe: var, function(), no arrows, no template literals.
+// ---------------------------------------------------------------------------
+function handleProfileResponse(payload) {
+  if (!payload.publickey) {
+    MDS.log("[PROFILE] RESPONSE missing publickey — ignoring");
+    return;
+  }
+  var pk = payload.publickey.toUpperCase();
+  MDS.log("[PROFILE] RESPONSE received from " + pk.substring(0, 10) + "...");
+  var profileStr = JSON.stringify({name: payload.name || "", icon: payload.icon || ""});
+  // Cache full profile in keypair; signal FE with name only (icon read from keypair by FE)
+  MDS.keypair.set("CREATOR_PROFILE_" + pk, profileStr, function() {
+    signalFE("PROFILE_RECEIVED", {publickey: pk, name: payload.name || ""});
+  });
+}

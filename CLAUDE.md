@@ -5,19 +5,107 @@
 
 ---
 
-## 1) Mandatory Reading (before ANY task)
+## 1) Mandatory Reading (at session start)
 
-Before writing a single line of code, you MUST read:
+### First Prompt of This Session
 
-1. **`PROJECT_INDEX.md`** — navigation map, folder structure, playbooks, key decisions log
-2. **`MinimaAds.md`** — the system specification (source of truth for all behavior)
-3. **`AGENTS.md`** — Minima runtime rules, H2 gotchas, Rhino constraints, workflow
+Follow this sequence once, at the start:
 
-Read the sections relevant to the task. Do not skip this step.
+1. **Self-assess your overall task complexity** using the rubric in `CLAUDE.md §2`
+   - Classify: LOW / MEDIUM / HIGH / XHIGH
+   - Confirm you are the right model (Haiku/Sonnet/Opus)
+   - Decide if you need plan mode
+
+2. **If assessment says STOP → STOP**
+   - If task requires Opus and you're not Opus → tell maintainer
+   - If task requires plan mode and you haven't designed it → read `CLAUDE.md §4` first
+
+3. **Read `docs/DOCUMENTATION_INDEX.md`** — the complete menu of available documentation
+
+4. **Use the index to decide autonomously** what you need to consult for your task(s)
+
+You are not required to read all documentation. You decide what's relevant based on your task complexity and the menu.
+
+### Subsequent Tasks (same session)
+
+If you receive a new task within this session:
+
+1. **Quick re-assessment** using the rubric in `CLAUDE.md §2`
+   - Has the complexity level changed? (LOW → HIGH, for example)
+   - Are you still the right model?
+   - Do you now need plan mode?
+
+2. **If complexity jumps beyond your current model → STOP and tell maintainer**
+   - Do not attempt a task that requires Opus if you are Sonnet
+   - Do not attempt HIGH complexity without plan mode if you skipped it initially
+
+3. Otherwise, proceed with the documented approach from step 3 above (use DOCUMENTATION_INDEX for new docs if needed)
 
 ---
 
-## 2) Document Priority
+**`AGENTS.md` is mandatory if your task touches Core, SW, or Protocol** — it contains Key Decisions that explain why the system works this way.
+
+---
+
+## 2) Model Selection
+
+Before starting, assess task complexity and confirm you are the right model:
+
+| Model | Use for |
+|---|---|
+| **Haiku** | Copy changes, CSS tweaks, doc updates, renaming — no logic involved |
+| **Sonnet** | Most implementation: UI views, core logic, bug fixes, DB migrations |
+| **Opus** | Multi-file protocol changes, KissVM/escrow tx, complex reasoning across layers |
+
+### Self-assessment Rubric
+
+Before you start, **classify your task using this rubric**:
+
+**Complexity Level: LOW**
+- Single file, no business logic, <50 lines
+- Examples: copy change, CSS tweak, doc update, rename, simple fix
+- **Model: Haiku is sufficient**
+- **Plan mode: No**
+
+**Complexity Level: MEDIUM**
+- One layer (UI or Core), single feature, 50–500 lines
+- Examples: new UI view, bug fix in existing function, small DB migration, core function
+- **Model: Sonnet recommended**
+- **Plan mode: No, unless the change affects an important contract**
+
+**Complexity Level: HIGH**
+- Multiple layers or files, protocol involved, 500+ lines
+- Examples: new Maxima message type, channel implementation, escrow tx, refactor core flow
+- **Model: Opus recommended**
+- **Plan mode: YES — you must read `MinimaAds.md` and design the approach before coding**
+
+**Complexity Level: XHIGH/MAX**
+- Full system flow, protocol redesign, architectural decision
+- Examples: new payment model, new trust model, major protocol change
+- **Model: Opus required**
+- **Plan mode: YES — mandatory. Design review before coding.**
+
+### After Self-Assessment
+
+**If you are NOT the recommended model:**
+- If you're Haiku and the task is MEDIUM or higher → STOP and tell the maintainer
+- If you're Sonnet and the task is HIGH or higher → STOP and tell the maintainer
+- If you're Opus: you can handle any task
+
+**If the task requires plan mode and you haven't already:**
+→ Use `CLAUDE.md §4` (Task Execution Workflow, Step 1) to design your approach before coding
+
+**If this task could be done by a simpler model than you:**
+→ Say so at the start — the maintainer may want to switch to save cost
+
+---
+
+**If this task requires Opus and you are not Opus: STOP. Tell the maintainer before writing any code.**
+**If this task could be done by Haiku: say so at the start — the maintainer may want to switch.**
+
+---
+
+## 3) Document Priority
 
 | Document | Owns | Authority |
 |---|---|---|
@@ -29,7 +117,7 @@ Read the sections relevant to the task. Do not skip this step.
 
 ---
 
-## 3) Task Execution Workflow
+## 4) Task Execution Workflow
 
 For every task, follow this sequence in order:
 
@@ -66,13 +154,22 @@ Never implement a layer before its dependencies are ready.
 
 ### Step 4 — Update AGENTS.md
 
-If you added a Maxima message type → update AGENTS.md §9 and MinimaAds.md §8.
-If you added a SW signal → update AGENTS.md §10 and MinimaAds.md §8.6.
-If you changed the DB schema → update AGENTS.md §8 and MinimaAds.md §3.5.
+If you added a Maxima message type → update MinimaAds.md §8.
+If you added a SW signal → update MinimaAds.md §8.15 signal table.
+If you changed the DB schema → update MinimaAds.md §3.5.
+
+**Handoff note housekeeping (mandatory):**
+- Add your handoff entry at the top of `AGENTS.md §6`.
+- If `AGENTS.md §6` has more than 3 session entries after adding yours, move the oldest entry to `docs/HISTORY.md §17` before finishing.
+- This keeps `AGENTS.md §6` lean — it is loaded every session.
+
+**Task housekeeping:**
+- If a task you implemented is still marked `Pending ⬜` in `docs/TASKS.md` → mark it Done.
+- When a task block is fully complete → mark all its tasks Done in `docs/TASKS.md`.
 
 ---
 
-## 4) Stable Core API (DO NOT ALTER)
+## 5) Stable Core API (DO NOT ALTER)
 
 These signatures are contracts. Do not rename, reorder, or add parameters without updating MinimaAds.md §7 first.
 
@@ -100,7 +197,7 @@ minima.js    : sqlQuery(query, cb)
 
 ---
 
-## 5) Forbidden Actions
+## 6) Forbidden Actions
 
 You MUST NOT do any of the following, under any circumstances:
 
@@ -130,9 +227,16 @@ You MUST NOT do any of the following, under any circumstances:
 - ❌ Modify files unrelated to the current task
 - ❌ Refactor code outside the task scope
 
+### Versioning
+Format: `0.YY.M.W` — major . year . month . week-of-month
+Example: `0.26.6.1` = pre-release, 2026, June, week 1
+
+Update `dapp.conf` version when the maintainer requests a commit at the end of a session.
+Week of month: 1 = days 1–7, 2 = 8–14, 3 = 15–21, 4 = 22–28, 5 = 29–31.
+
 ---
 
-## 6) Minima Runtime Constraints (CRITICAL)
+## 7) Minima Runtime Constraints (CRITICAL)
 
 ### Service Worker (Rhino JS engine)
 ```
@@ -173,7 +277,7 @@ var payload = JSON.parse(hexToUtf8(msg.data.data));
 
 ---
 
-## 7) Multi-Agent Safety Rules
+## 8) Multi-Agent Safety Rules
 
 When working alongside other agents or in a multi-session context:
 
@@ -181,11 +285,11 @@ When working alongside other agents or in a multi-session context:
 - **Do not restructure or rename** existing functions or files
 - **Do not merge unrelated fixes** into the current patch
 - **All changes must be isolated and independently reviewable**
-- If you discover a bug outside your task scope → document it in AGENTS.md §14, do not fix it inline
+- If you discover a bug outside your task scope → document it in `docs/KNOWN_ISSUES.md`, do not fix it inline
 
 ---
 
-## 8) If Something Is Unclear
+## 9) If Something Is Unclear
 
 **STOP. Do not assume. Do not improvise.**
 
@@ -212,7 +316,7 @@ This rule exists to prevent architectural drift across agent sessions. **Improvi
 
 ---
 
-## 9) Output Standards
+## 10) Output Standards
 
 Every code output must be:
 
@@ -224,7 +328,7 @@ Every code output must be:
 
 ---
 
-## 10) Handoff Note (required at end of every task)
+## 11) Handoff Note (required at end of every task)
 
 After completing a task, always provide:
 
@@ -232,7 +336,11 @@ After completing a task, always provide:
 Task completed: [description]
 Files modified: [list]
 AGENTS.md updated: yes | no | N/A — [reason if N/A]
-Sections updated: [e.g. §8 DB Schema, §9 Protocol Matrix]
-Verification: [exact command or check the maintainer should run]
-Open issues: [any discovered but out-of-scope problems → document in AGENTS.md §14]
+Sections updated: [e.g. MinimaAds.md §8, §3.5]
+Verification: [list exactly what the maintainer should test in the browser:
+  - Which route/view to open (#viewer, #mycampaigns, etc.)
+  - Which action to perform (click X, fill form Y, etc.)
+  - What the expected result is
+  - Whether there should be no console errors]
+Open issues: [any discovered but out-of-scope problems → document in docs/KNOWN_ISSUES.md]
 ```

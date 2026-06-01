@@ -293,9 +293,30 @@ function _appendCampaignActions(container, c) {
 
   if (c.STATUS === 'active' || c.STATUS === 'paused') {
     container.appendChild(_makeBtn('Finish', 'secondary', function() {
-      if (!confirm('Finish campaign "' + c.TITLE + '"?\nThis action cannot be undone.')) { return; }
-      _disableAll();
-      _applyStatusChange(c.ID, 'finished');
+      // Replace action buttons with inline confirmation
+      container.innerHTML = '';
+      var msg = document.createElement('small');
+      msg.style.cssText = 'color:var(--pico-muted-color,#6c757d);margin-right:.5rem;';
+      msg.textContent = 'Finish "' + c.TITLE + '"?';
+      var confirmBtn = document.createElement('button');
+      confirmBtn.textContent = 'Yes, finish';
+      confirmBtn.className = 'secondary';
+      confirmBtn.style.cssText = 'width:auto;margin:0 .35rem 0 0;padding:.2rem .55rem;font-size:.78rem;';
+      var cancelBtn = document.createElement('button');
+      cancelBtn.textContent = 'Cancel';
+      cancelBtn.className = 'outline';
+      cancelBtn.style.cssText = 'width:auto;margin:0;padding:.2rem .55rem;font-size:.78rem;';
+      confirmBtn.addEventListener('click', function() {
+        container.innerHTML = '';
+        _applyStatusChange(c.ID, 'finished');
+      });
+      cancelBtn.addEventListener('click', function() {
+        container.innerHTML = '';
+        _appendCampaignActions(container, c);
+      });
+      container.appendChild(msg);
+      container.appendChild(confirmBtn);
+      container.appendChild(cancelBtn);
     }));
   }
 }

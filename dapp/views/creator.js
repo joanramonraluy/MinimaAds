@@ -70,21 +70,15 @@ function renderCreator(root) {
   var form = document.createElement('form');
   form.id = 'ma-creator-form';
   form.innerHTML = ''
-    + '<div class="ma-creator-overview">'
-    + '  <div class="ma-autobalance-row">'
-    + '    <label>'
-    + '      <input type="checkbox" name="auto_balance">'
-    + '      Auto-balance cap'
-    + '    </label>'
-    + '  </div>'
-    + '  <div id="ma-campaign-summary"></div>'
-    + '</div>'
     + '<div class="ma-tabs" role="tablist" aria-label="Campaign setup">'
-    + '  <button type="button" id="ma-tab-content" role="tab" aria-selected="true" aria-controls="ma-panel-content" data-target="ma-panel-content">Add content & duration</button>'
-    + '  <button type="button" id="ma-tab-viewer" role="tab" aria-selected="false" aria-controls="ma-panel-viewer" data-target="ma-panel-viewer">Viewer parameters</button>'
-    + '  <button type="button" id="ma-tab-publisher" role="tab" aria-selected="false" aria-controls="ma-panel-publisher" data-target="ma-panel-publisher">Publisher parameters <small style="font-weight:400;opacity:.75;">(optional)</small></button>'
+    + '  <button type="button" id="ma-tab-content" role="tab" aria-selected="true" aria-controls="ma-panel-content" data-target="ma-panel-content">Add Content</button>'
+    + '  <button type="button" id="ma-tab-budget" role="tab" aria-selected="false" aria-controls="ma-panel-budget" data-target="ma-panel-budget">Budget</button>'
+    + '  <button type="button" id="ma-tab-viewer" role="tab" aria-selected="false" aria-controls="ma-panel-viewer" data-target="ma-panel-viewer">Viewer Rewards</button>'
+    + '  <button type="button" id="ma-tab-publisher" role="tab" aria-selected="false" aria-controls="ma-panel-publisher" data-target="ma-panel-publisher">Publisher Rewards</button>'
+    + '  <button type="button" id="ma-tab-review" role="tab" aria-selected="false" aria-controls="ma-panel-review" data-target="ma-panel-review">Review</button>'
     + '</div>'
     + '<div class="ma-section ma-tab-panel" id="ma-panel-content" role="tabpanel" aria-labelledby="ma-tab-content">'
+    + '  <strong class="ma-section-title">Ad content</strong>'
     + '  <label>Campaign title'
     + '    <input name="title" value="Campanya " required maxlength="50">'
     + '  </label>'
@@ -104,67 +98,93 @@ function renderCreator(root) {
     + '  <label>CTA URL'
     + '    <input name="cta_url" type="url" value="https://minima.global" required>'
     + '  </label>'
-    + '  <label style="display:flex;align-items:center;gap:0.5rem;font-weight:normal;margin-top:-0.5rem;margin-bottom:0.75rem;">'
-    + '    <input type="checkbox" name="show_cta" checked style="margin:0;"> Show CTA button'
-    + '    <small style="font-weight:normal;">(clicking the image still navigates when hidden)</small></label>'
-    + '  <label>Campaign duration (days) — max ' + LIMITS.MAX_CAMPAIGN_DAYS
-    + '    <input name="campaign_days" type="number" step="1" min="1" max="' + LIMITS.MAX_CAMPAIGN_DAYS + '" value="7" required>'
-    + '  </label>'
+    + '  <label style="display:flex;align-items:center;gap:0.5rem;font-weight:normal;margin-top:-0.5rem;margin-bottom:0.25rem;">'
+    + '    <input type="checkbox" name="show_cta" checked style="margin:0;"> Show CTA button</label>'
+    + '  <small style="display:block;margin-bottom:0.75rem;color:var(--pico-muted-color,#6c757d);">Clicking the image still navigates when the button is hidden.</small>'
+    + '  <strong class="ma-section-title">Visual</strong>'
     + '  <label>Banner image (optional)'
     + '    <input name="image_file" type="file" accept="image/*">'
     + '    <small>Recommended: <strong>2:1</strong> (ex. 600&times;300 px). Compressed to JPEG and sent to viewers via Maxima. Max ~55&nbsp;KB after compression.</small>'
     + '  </label>'
     + '  <div id="ma-image-preview" style="display:none;margin-top:0.5rem;"></div>'
     + '  <input type="hidden" name="image_position" value="center">'
-  + '  <input type="hidden" name="image_zoom" value="1.0">'
-  + '  <input type="hidden" name="image_width_pct" value="40">'
+    + '  <input type="hidden" name="image_zoom" value="1.0">'
+    + '  <input type="hidden" name="image_width_pct" value="40">'
     + '  <div style="margin-top:0.75rem;">'
-    + '    <small style="display:block;margin-bottom:0.4rem;font-weight:600;">Banner theme</small>'
+    + '    <small style="display:block;margin-bottom:0.4rem;color:var(--pico-muted-color,#6c757d);">Banner theme</small>'
     + '    <div id="ma-theme-presets" style="display:flex;flex-wrap:wrap;gap:0.4rem;margin-bottom:0.5rem;"></div>'
     + '    <label style="margin:0;">Custom background'
     + '      <input type="color" name="bg_color" value="#ffffff" style="height:2rem;padding:0.1rem 0.2rem;cursor:pointer;width:4rem;">'
     + '    </label>'
     + '  </div>'
+    + '  <div style="margin-top:1rem;">'
+    + '    <strong class="ma-section-title">Ad preview</strong>'
+    + '    <div style="display:flex;gap:0.5rem;margin-bottom:0.4rem;flex-wrap:wrap;">'
+    + '      <button type="button" id="ma-preview-btn-mobile"  style="font-size:0.72rem;padding:0.15rem 0.45rem;border-radius:3px;font-weight:700;">Mobile</button>'
+    + '      <button type="button" id="ma-preview-btn-desktop" style="font-size:0.72rem;padding:0.15rem 0.45rem;border-radius:3px;font-weight:400;">Desktop</button>'
+    + '      <button type="button" id="ma-creator-preview-open-btn" style="font-size:0.72rem;padding:0.15rem 0.45rem;border-radius:3px;font-weight:400;">View preview</button>'
+    + '    </div>'
+    + '    <div id="ma-creator-preview" style="min-height:2rem;"></div>'
+    + '  </div>'
+    + '  <div id="ma-creator-mobile-controls" style="display:none;padding:.5rem 0;margin-bottom:.5rem;">'
+    + '    <small style="display:block;font-weight:600;margin-bottom:.3rem;">Image position &amp; size</small>'
+    + '    <label style="font-size:.85rem;margin-bottom:.3rem;display:block;">Horizontal (%)'
+    + '      <input type="range" id="ma-img-pos-x" min="0" max="100" value="50" style="margin:.15rem 0 0;">'
+    + '    </label>'
+    + '    <label style="font-size:.85rem;margin-bottom:.3rem;display:block;">Vertical (%)'
+    + '      <input type="range" id="ma-img-pos-y" min="0" max="100" value="50" style="margin:.15rem 0 0;">'
+    + '    </label>'
+    + '    <label style="font-size:.85rem;margin-bottom:.3rem;display:block;">Image width (%)'
+    + '      <input type="range" id="ma-img-width-pct" min="20" max="70" value="40" style="margin:.15rem 0 0;">'
+    + '    </label>'
+    + '  </div>'
+    + '</div>'
+    + '<div class="ma-section ma-tab-panel" id="ma-panel-budget" role="tabpanel" aria-labelledby="ma-tab-budget" hidden>'
+    + '  <strong class="ma-section-title">Campaign budget</strong>'
+    + '  <label>Total budget (MINIMA) — min ' + LIMITS.MIN_BUDGET + ' MINIMA'
+    + '    <input name="budget" type="text" inputmode="decimal" min="' + LIMITS.MIN_BUDGET + '" value="1000" required>'
+    + '    <small id="ma-budget-hint">Checking wallet balance…</small>'
+    + '  </label>'
+    + '  <strong class="ma-section-title">Duration</strong>'
+    + '  <label>Campaign duration (days) — max ' + LIMITS.MAX_CAMPAIGN_DAYS
+    + '    <input name="campaign_days" type="number" step="1" min="1" max="' + LIMITS.MAX_CAMPAIGN_DAYS + '" value="7" required>'
+    + '  </label>'
     + '</div>'
     + '<div class="ma-section ma-tab-panel" id="ma-panel-viewer" role="tabpanel" aria-labelledby="ma-tab-viewer" hidden>'
-    + '  <fieldset class="ma-fieldset">'
-    + '    <legend>Budget &amp; Rewards</legend>'
-    + '    <label>Total budget (MINIMA) — min ' + LIMITS.MIN_BUDGET + ' MINIMA'
-    + '      <input name="budget" type="text" inputmode="decimal" min="' + LIMITS.MIN_BUDGET + '" value="1000" required>'
-    + '      <small id="ma-budget-hint">Checking wallet balance…</small>'
-    + '    </label>'
-    + '    <label>Reward per view (MINIMA)'
-    + '      <input name="reward_view" type="number" step="0.000001" min="' + LIMITS.MIN_REWARD_VIEW + '" value="1" required>'
-    + '    </label>'
-    + '    <label>Reward per click (MINIMA)'
-    + '      <input name="reward_click" type="number" step="0.000001" min="' + LIMITS.MIN_REWARD_CLICK + '" value="2" required>'
-    + '    </label>'
-    + '    <label>Max reward per viewer (MINIMA)'
-    + '      <input name="max_viewer_reward" type="number" step="0.000001" min="0.000001" value="10" required>'
-    + '      <small id="ma-cap-min-hint" style="display:block;margin-top:0.2rem;"></small>'
-    + '      <span id="ma-multiplier-row" style="display:flex;align-items:center;gap:0.5rem;margin-top:0.35rem;">'
-    + '        <small style="color:var(--pico-muted-color)">(view + click) &times;</small>'
-    + '        <input name="multiplier" type="number" step="0.1" min="1" value="2"'
-    + '          style="width:5rem;margin:0;padding:0.2rem 0.4rem;">'
-    + '      </span>'
-    + '      <small id="ma-max-viewer-hint"></small>'
-    + '    </label>'
-    + '  </fieldset>'
-    + '  <fieldset class="ma-fieldset">'
-    + '    <legend>Limits</legend>'
-    + '    <label>Daily view limit (per viewer)'
-    + '      <input name="max_daily_views" type="number" step="1" min="1" value="100" required>'
-    + '    </label>'
-    + '    <label>Daily click limit (per viewer)'
-    + '      <input name="max_daily_clicks" type="number" step="1" min="1" value="100" required>'
-    + '    </label>'
-    + '    <label>Cooldown between rewards (seconds)'
-    + '      <input name="cooldown_s" type="number" step="1" min="1" value="300" required>'
-    + '      <small>Minimum time between two rewards for the same viewer (default 5 min)</small>'
-    + '    </label>'
-    + '  </fieldset>'
+    + '  <div class="ma-autobalance-row" style="margin-bottom:1rem;">'
+    + '    <label><input type="checkbox" name="auto_balance"> Auto-balance cap</label>'
+    + '  </div>'
+    + '  <strong class="ma-section-title">Rewards</strong>'
+    + '  <label>Reward per view (MINIMA)'
+    + '    <input name="reward_view" type="number" step="0.000001" min="' + LIMITS.MIN_REWARD_VIEW + '" value="1" required>'
+    + '  </label>'
+    + '  <label>Reward per click (MINIMA)'
+    + '    <input name="reward_click" type="number" step="0.000001" min="' + LIMITS.MIN_REWARD_CLICK + '" value="2" required>'
+    + '  </label>'
+    + '  <label>Max reward per viewer (MINIMA)'
+    + '    <input name="max_viewer_reward" type="number" step="0.000001" min="0.000001" value="10" required>'
+    + '    <small id="ma-cap-min-hint" style="display:block;margin-top:0.2rem;"></small>'
+    + '    <span id="ma-multiplier-row" style="display:flex;align-items:center;gap:0.5rem;margin-top:0.35rem;">'
+    + '      <small style="color:var(--pico-muted-color)">(view + click) &times;</small>'
+    + '      <input name="multiplier" type="number" step="0.1" min="1" value="2"'
+    + '        style="width:5rem;margin:0;padding:0.2rem 0.4rem;">'
+    + '    </span>'
+    + '    <small id="ma-max-viewer-hint"></small>'
+    + '  </label>'
+    + '  <strong class="ma-section-title">Limits</strong>'
+    + '  <label>Daily view limit (per viewer)'
+    + '    <input name="max_daily_views" type="number" step="1" min="1" value="100" required>'
+    + '  </label>'
+    + '  <label>Daily click limit (per viewer)'
+    + '    <input name="max_daily_clicks" type="number" step="1" min="1" value="100" required>'
+    + '  </label>'
+    + '  <label>Cooldown between rewards (seconds)'
+    + '    <input name="cooldown_s" type="number" step="1" min="1" value="300" required>'
+    + '    <small>Minimum time between two rewards for the same viewer (default 5 min)</small>'
+    + '  </label>'
     + '</div>'
     + '<div class="ma-section ma-tab-panel" id="ma-panel-publisher" role="tabpanel" aria-labelledby="ma-tab-publisher" hidden>'
+    + '  <strong class="ma-section-title">Publisher rewards</strong>'
     + '  <label>Publisher reward per view (MINIMA, optional)'
     + '    <input name="publisher_reward_view" type="number" step="0.001" min="0" value="10">'
     + '    <small>Leave at 0 to disable Frame rewards</small>'
@@ -174,28 +194,13 @@ function renderCreator(root) {
     + '    <small>Subset of total budget reserved for publisher payouts</small>'
     + '  </label>'
     + '</div>'
-    + '<div style="margin:1rem 0 0.5rem;">'
-    + '  <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.4rem;flex-wrap:wrap;">'
-    + '    <p class="ma-section-title" style="margin:0;">Ad preview</p>'
-    + '    <button type="button" id="ma-preview-btn-mobile"  style="font-size:0.72rem;padding:0.15rem 0.45rem;border-radius:3px;font-weight:700;">Mobile</button>'
-    + '    <button type="button" id="ma-preview-btn-desktop" style="font-size:0.72rem;padding:0.15rem 0.45rem;border-radius:3px;font-weight:400;">Desktop</button>'
-    + '    <button type="button" id="ma-creator-preview-open-btn" style="font-size:0.72rem;padding:0.15rem 0.45rem;border-radius:3px;font-weight:400;">View preview</button>'
-    + '  </div>'
-    + '  <div id="ma-creator-preview" style="min-height:2rem;"></div>'
+    + '<div class="ma-section ma-tab-panel" id="ma-panel-review" role="tabpanel" aria-labelledby="ma-tab-review" hidden>'
+    + '  <strong class="ma-section-title">Ad preview</strong>'
+    + '  <div id="ma-creator-preview-review" style="margin-bottom:1rem;"></div>'
+    + '  <div id="ma-campaign-reach-review"></div>'
+    + '  <div id="ma-campaign-cost"></div>'
+    + '  <button type="submit" style="width:100%;margin-top:1rem;">Publish Campaign</button>'
     + '</div>'
-    + '<div id="ma-creator-mobile-controls" style="display:none;padding:.5rem 0;margin-bottom:.5rem;">'
-    + '  <small style="display:block;font-weight:600;margin-bottom:.3rem;">Image position &amp; size</small>'
-    + '  <label style="font-size:.85rem;margin-bottom:.3rem;display:block;">Horizontal (%)'
-    + '    <input type="range" id="ma-img-pos-x" min="0" max="100" value="50" style="margin:.15rem 0 0;">'
-    + '  </label>'
-    + '  <label style="font-size:.85rem;margin-bottom:.3rem;display:block;">Vertical (%)'
-    + '    <input type="range" id="ma-img-pos-y" min="0" max="100" value="50" style="margin:.15rem 0 0;">'
-    + '  </label>'
-    + '  <label style="font-size:.85rem;margin-bottom:.3rem;display:block;">Image width (%)'
-    + '    <input type="range" id="ma-img-width-pct" min="20" max="70" value="40" style="margin:.15rem 0 0;">'
-    + '  </label>'
-    + '</div>'
-    + '<button type="submit">Publish campaign</button>'
     + '<p id="ma-creator-msg" role="status"></p>';
   root.appendChild(form);
 
@@ -326,10 +331,40 @@ function setupCreatorTabs(form) {
   }
   form.addEventListener('invalid', function(e) {
     var panel = findCreatorTabPanel(e.target);
-    if (panel && panel.id) {
-      selectCreatorTab(form, panel.id);
-    }
+    if (panel && panel.id) { selectCreatorTab(form, panel.id); }
   }, true);
+
+  // Add Previous / Next navigation to each panel
+  var panelIds = ['ma-panel-content', 'ma-panel-budget', 'ma-panel-viewer', 'ma-panel-publisher', 'ma-panel-review'];
+  var panelLabels = ['Add Content', 'Budget', 'Viewer Rewards', 'Publisher Rewards', 'Review'];
+  for (var j = 0; j < panelIds.length; j++) {
+    (function(idx) {
+      var panel = document.getElementById(panelIds[idx]);
+      if (!panel) { return; }
+      var nav = document.createElement('div');
+      nav.style.cssText = 'display:flex;justify-content:space-between;margin-top:1.25rem;gap:.5rem;';
+      if (idx > 0) {
+        var prevBtn = document.createElement('button');
+        prevBtn.type = 'button';
+        prevBtn.textContent = '← ' + panelLabels[idx - 1];
+        prevBtn.className = 'secondary outline';
+        prevBtn.style.cssText = 'width:auto;';
+        prevBtn.addEventListener('click', function() { selectCreatorTab(form, panelIds[idx - 1]); });
+        nav.appendChild(prevBtn);
+      } else {
+        nav.appendChild(document.createElement('span'));
+      }
+      if (idx < panelIds.length - 1) {
+        var nextBtn = document.createElement('button');
+        nextBtn.type = 'button';
+        nextBtn.textContent = panelLabels[idx + 1] + ' →';
+        nextBtn.style.cssText = 'width:auto;';
+        nextBtn.addEventListener('click', function() { selectCreatorTab(form, panelIds[idx + 1]); });
+        nav.appendChild(nextBtn);
+      }
+      panel.appendChild(nav);
+    })(j);
+  }
 }
 
 function findCreatorTabPanel(el) {
@@ -708,6 +743,9 @@ function updateCreatorPreview(form) {
   };
   if (_detachDivider) { _detachDivider(); _detachDivider = null; }
   renderAd(previewAd, 'ma-creator-preview');
+  if (document.getElementById('ma-creator-preview-review')) {
+    renderAd(previewAd, 'ma-creator-preview-review');
+  }
   if (window.innerWidth < 480) {
     // Mobile: detach any drag handlers, show numeric controls instead
     if (_detachPositioner) { _detachPositioner(); _detachPositioner = null; }
@@ -870,8 +908,9 @@ function applyAutoBalance(form) {
 }
 
 function updateCampaignSummary(form) {
-  var summaryEl = document.getElementById('ma-campaign-summary');
-  if (!summaryEl) return;
+  var reachReviewEl = document.getElementById('ma-campaign-reach-review');
+  var costEl        = document.getElementById('ma-campaign-cost');
+  if (!reachReviewEl && !costEl) { return; }
 
   var budget       = parseFloat((form.querySelector('[name="budget"]').value || '').replace(/,/g, ''));
   var rewardView   = parseFloat(form.querySelector('[name="reward_view"]').value);
@@ -881,51 +920,59 @@ function updateCampaignSummary(form) {
 
   if (!isFinite(budget) || budget <= 0 || !isFinite(rewardView) || !isFinite(rewardClick)
       || !isFinite(campaignDays) || campaignDays <= 0 || !isFinite(cap) || cap <= 0) {
-    summaryEl.innerHTML = '';
+    if (reachReviewEl) { reachReviewEl.innerHTML = ''; }
+    if (costEl)        { costEl.innerHTML        = ''; }
     return;
   }
 
-  var pubRvInput = form.querySelector('[name="publisher_reward_view"]');
-  var pubBudgInput = form.querySelector('[name="max_publisher_budget"]');
-  var publisherRewardView = pubRvInput ? (parseFloat(pubRvInput.value) || 0) : 0;
-  var maxPublisherBudget  = pubBudgInput ? (parseFloat(pubBudgInput.value) || 0) : 0;
+  var pubRvInput    = form.querySelector('[name="publisher_reward_view"]');
+  var pubBudgInput  = form.querySelector('[name="max_publisher_budget"]');
+  var publisherRv   = pubRvInput   ? (parseFloat(pubRvInput.value)   || 0) : 0;
+  var maxPubBudget  = pubBudgInput ? (parseFloat(pubBudgInput.value) || 0) : 0;
 
-  var maxViewers    = Math.floor(budget / cap);
-  var platformFee   = budget * PLATFORM_FEE_RATE;
-  var totalCost     = budget + platformFee;
+  var maxViewers  = Math.floor(budget / cap);
+  var platformFee = budget * PLATFORM_FEE_RATE;
+  var totalCost   = budget + platformFee;
 
-  var warningHtml = '';
-  if (maxViewers === 0) {
-    warningHtml = '<p class="ma-summary-warning">No viewer can be rewarded with these settings.'
-      + ' Increase the budget or reduce the cap per viewer.</p>';
+  // ── Reach estimate → Review panel only ───────────────────────────────
+  if (reachReviewEl) {
+    var warningHtml = maxViewers === 0
+      ? '<p class="ma-summary-warning">No viewer can be rewarded with these settings.'
+        + ' Increase the budget or reduce the cap per viewer.</p>'
+      : '';
+    var singleInteraction = rewardView + rewardClick;
+    var interactionNote = (isFinite(singleInteraction) && singleInteraction > 0 && cap < singleInteraction)
+      ? '<li><small>Cap is below a single view + click (' + formatMinima(singleInteraction)
+        + ' MINIMA) — viewers earn partial rewards per interaction.</small></li>'
+      : '';
+    var reachHtml = '<div class="ma-summary-box">'
+      + warningHtml
+      + '<strong>Campaign reach estimate</strong>'
+      + '<ul>'
+      + '<li>Max reward per viewer: ' + formatMinima(cap) + ' MINIMA</li>'
+      + '<li>Max viewers that can be rewarded: <strong>' + maxViewers.toLocaleString() + '</strong></li>'
+      + interactionNote
+      + '</ul>'
+      + '<small class="ma-cap-auto">This estimate depends on the parameters configured in Viewer Rewards and Publisher Rewards.</small>'
+      + '</div>';
+    if (reachReviewEl) { reachReviewEl.innerHTML = reachHtml; }
   }
 
-  var interactionNote = '';
-  var singleInteraction = rewardView + rewardClick;
-  if (isFinite(singleInteraction) && singleInteraction > 0 && cap < singleInteraction) {
-    interactionNote = '<li><small>Cap is below a single view + click ('
-      + formatMinima(singleInteraction) + ' MINIMA) — viewers earn partial rewards per interaction.</small></li>';
+  // ── Cost breakdown → Review panel ─────────────────────────────────────
+  if (costEl) {
+    costEl.innerHTML = '<div class="ma-summary-box">'
+      + '<strong>Cost breakdown</strong>'
+      + '<ul>'
+      + '<li>Budget: ' + formatMinima(budget) + ' MINIMA</li>'
+      + '<li>Platform fee (6%): ' + formatMinima(platformFee) + ' MINIMA</li>'
+      + (publisherRv > 0
+          ? '<li>Publisher reward/view: ' + formatMinima(publisherRv) + ' MINIMA'
+            + ' &middot; max budget: ' + formatMinima(maxPubBudget) + ' MINIMA</li>'
+          : '')
+      + '<li>Total cost: <strong>' + formatMinima(totalCost) + ' MINIMA</strong></li>'
+      + '</ul>'
+      + '</div>';
   }
-
-  summaryEl.innerHTML = '<div class="ma-summary-box">'
-    + warningHtml
-    + '<strong>Campaign reach estimate</strong>'
-    + '<ul>'
-    + '<li>Max reward per viewer: ' + formatMinima(cap) + ' MINIMA</li>'
-    + '<li>Max viewers that can be rewarded: <strong>' + maxViewers.toLocaleString() + '</strong></li>'
-    + interactionNote
-    + '</ul>'
-    + '<strong>Cost breakdown</strong>'
-    + '<ul>'
-    + '<li>Budget: ' + formatMinima(budget) + ' MINIMA</li>'
-    + '<li>Platform fee (6%): ' + formatMinima(platformFee) + ' MINIMA</li>'
-    + (publisherRewardView > 0
-        ? '<li>Publisher reward/view: ' + formatMinima(publisherRewardView) + ' MINIMA'
-          + ' &middot; max budget: ' + formatMinima(maxPublisherBudget) + ' MINIMA</li>'
-        : '')
-    + '<li>Total cost: <strong>' + formatMinima(totalCost) + ' MINIMA</strong></li>'
-    + '</ul>'
-    + '</div>';
 }
 
 function onCreatorSubmit(e) {
@@ -1372,7 +1419,17 @@ function saveCampaignAndBroadcast(campaign, ad, form, submitBtn, msgEl) {
     }
     console.log('[CREATOR] campaign saved locally:', campaign.id);
     if (submitBtn) { submitBtn.removeAttribute('disabled'); }
-    if (msgEl) { msgEl.textContent = 'Campaign published. ID: ' + campaign.id; }
+    if (msgEl) {
+      msgEl.innerHTML = '';
+      var successMsg = document.createElement('span');
+      successMsg.style.cssText = 'color:#2ecc71;font-weight:600;';
+      successMsg.textContent = 'Campaign "' + campaign.title + '" published successfully. ';
+      var link = document.createElement('a');
+      link.href = '#mycampaigns';
+      link.textContent = 'View in My Campaigns';
+      msgEl.appendChild(successMsg);
+      msgEl.appendChild(link);
+    }
     if (form) { form.reset(); }
   });
 }

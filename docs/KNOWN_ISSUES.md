@@ -91,7 +91,7 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 ## 13) Pre-merge Checklist
 
 1. Verify each new Maxima message type:
-   - [ ] Added to Protocol Matrix (docs/PROJECT_NOTES.md §9)
+   - [ ] Added to Protocol Matrix (docs/PROJECT_NOTES_REFERENCE.md §9)
    - [ ] Handler exists in SW
    - [ ] Signal type registered in FE MDSCOMMS handler (if applicable)
    - [ ] Outbound sends use `maxima action:sendall` or `send poll:false`
@@ -99,7 +99,7 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
    - [ ] Applied in SW `db-init.js`
    - [ ] Applied in FE DB init (`.js`, not `.ts` — MinimaAds is Vanilla JS)
    - [ ] Uses `ADD COLUMN IF NOT EXISTS` for non-breaking migration
-3. Verify each new `MDS.comms.solo` signal type is listed in docs/PROJECT_NOTES.md §10.
+3. Verify each new `MDS.comms.solo` signal type is listed in docs/PROJECT_NOTES_REFERENCE.md §10.
 4. All user-input strings pass through `escapeSql()` before SQL interpolation.
 5. All public key comparisons use `.toUpperCase()` on both sides.
 6. `AGENTS.md` updated: yes/no + affected sections listed.

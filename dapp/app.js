@@ -43,7 +43,7 @@ function generateUID() {
 
 function currentRoute() {
   var h = (window.location.hash || '').replace(/^#/, '');
-  if (h === 'creator' || h === 'mycampaigns' || h === 'stats' || h === 'viewer' || h === 'earnings' || h === 'frames' || h === 'settings' || h === 'profile') { return h; }
+  if (h === 'creator' || h === 'mycampaigns' || h === 'stats' || h === 'viewer' || h === 'earnings' || h === 'frames' || h === 'settings' || h === 'profile' || h === 'help') { return h; }
   return 'viewer';
 }
 
@@ -84,6 +84,18 @@ function renderNav() {
     li.appendChild(a);
     linksEl.appendChild(li);
   }
+  if (!linksEl.dataset.hasScrollListener) {
+    var arrowRight = document.getElementById('ma-nav-arrow-right');
+    var arrowLeft = document.getElementById('ma-nav-arrow-left');
+    if (typeof attachScrollIndicator === 'function') {
+      var updateFn = attachScrollIndicator(linksEl, arrowRight, arrowLeft);
+      linksEl.dataset.hasScrollListener = 'true';
+      linksEl.updateScrollIndicator = updateFn;
+    }
+  }
+  if (linksEl.updateScrollIndicator) {
+    setTimeout(linksEl.updateScrollIndicator, 50);
+  }
 }
 
 function setMode(mode) {
@@ -91,7 +103,7 @@ function setMode(mode) {
   _activeMode = mode;
   MDS.keypair.set('USER_MODE', mode, function() {});
   var route = currentRoute();
-  if (route === 'settings' || route === 'profile') {
+  if (route === 'settings' || route === 'profile' || route === 'help') {
     window.location.hash = MODE_VIEWS[mode][0];
     return;
   }
@@ -130,6 +142,11 @@ function doRender() {
   if (route === 'profile' && typeof renderProfile === 'function') {
     root.innerHTML = '';
     renderProfile(root);
+    return;
+  }
+  if (route === 'help' && typeof renderHelp === 'function') {
+    root.innerHTML = '';
+    renderHelp(root);
     return;
   }
   var views = MODE_VIEWS[_activeMode] || MODE_VIEWS.viewer;
@@ -251,6 +268,10 @@ function handleMdsComms(parsed) {
     if (typeof window.onCreatorLivenessPong === 'function') {
       window.onCreatorLivenessPong(parsed.campaign_id || '', parsed.status || '');
     }
+    return;
+  }
+  if (parsed.type === 'PROFILE_RECEIVED') {
+    if (typeof onProfileReceived === 'function') { onProfileReceived(parsed); }
     return;
   }
 }
@@ -1671,6 +1692,11 @@ function openProfileFromDrawer() {
 function openSettingsView() {
   closeDrawer();
   window.location.hash = 'settings';
+}
+
+function openHelpView() {
+  closeDrawer();
+  window.location.hash = 'help';
 }
 
 function setThemeMode(mode) {

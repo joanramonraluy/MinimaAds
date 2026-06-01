@@ -70,12 +70,16 @@ function renderCreator(root) {
   var form = document.createElement('form');
   form.id = 'ma-creator-form';
   form.innerHTML = ''
-    + '<div class="ma-tabs" role="tablist" aria-label="Campaign setup">'
-    + '  <button type="button" id="ma-tab-content" role="tab" aria-selected="true" aria-controls="ma-panel-content" data-target="ma-panel-content">Add Content</button>'
-    + '  <button type="button" id="ma-tab-budget" role="tab" aria-selected="false" aria-controls="ma-panel-budget" data-target="ma-panel-budget">Budget</button>'
-    + '  <button type="button" id="ma-tab-viewer" role="tab" aria-selected="false" aria-controls="ma-panel-viewer" data-target="ma-panel-viewer">Viewer Rewards</button>'
-    + '  <button type="button" id="ma-tab-publisher" role="tab" aria-selected="false" aria-controls="ma-panel-publisher" data-target="ma-panel-publisher">Publisher Rewards</button>'
-    + '  <button type="button" id="ma-tab-review" role="tab" aria-selected="false" aria-controls="ma-panel-review" data-target="ma-panel-review">Review</button>'
+    + '<div class="ma-tabs-container">'
+    + '  <div class="ma-tabs" id="ma-creator-tabs" role="tablist" aria-label="Campaign setup">'
+    + '    <button type="button" id="ma-tab-content" role="tab" aria-selected="true" aria-controls="ma-panel-content" data-target="ma-panel-content">Add Content</button>'
+    + '    <button type="button" id="ma-tab-budget" role="tab" aria-selected="false" aria-controls="ma-panel-budget" data-target="ma-panel-budget">Budget</button>'
+    + '    <button type="button" id="ma-tab-viewer" role="tab" aria-selected="false" aria-controls="ma-panel-viewer" data-target="ma-panel-viewer">Viewer Rewards</button>'
+    + '    <button type="button" id="ma-tab-publisher" role="tab" aria-selected="false" aria-controls="ma-panel-publisher" data-target="ma-panel-publisher">Publisher Rewards</button>'
+    + '    <button type="button" id="ma-tab-review" role="tab" aria-selected="false" aria-controls="ma-panel-review" data-target="ma-panel-review">Review</button>'
+    + '  </div>'
+    + '  <span class="ma-tabs-arrow left" id="ma-creator-tabs-arrow-left">&#8249;</span>'
+    + '  <span class="ma-tabs-arrow right" id="ma-creator-tabs-arrow-right">&#8250;</span>'
     + '</div>'
     + '<div class="ma-section ma-tab-panel" id="ma-panel-content" role="tabpanel" aria-labelledby="ma-tab-content">'
     + '  <strong class="ma-section-title">Ad content</strong>'
@@ -328,6 +332,13 @@ function setupCreatorTabs(form) {
     tabs[i].addEventListener('click', function() {
       selectCreatorTab(form, this.getAttribute('data-target'));
     });
+  }
+  var creatorTabs = form.querySelector('#ma-creator-tabs');
+  var creatorArrowRight = form.querySelector('#ma-creator-tabs-arrow-right');
+  var creatorArrowLeft = form.querySelector('#ma-creator-tabs-arrow-left');
+  if (creatorTabs && typeof attachScrollIndicator === 'function') {
+    var updateFn = attachScrollIndicator(creatorTabs, creatorArrowRight, creatorArrowLeft);
+    setTimeout(updateFn, 50);
   }
   form.addEventListener('invalid', function(e) {
     var panel = findCreatorTabPanel(e.target);

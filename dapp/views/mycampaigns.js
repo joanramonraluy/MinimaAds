@@ -4,6 +4,7 @@
 // Actions (pause/resume/finish) migrated here from the provisional section in creator.js (Sessió 5).
 // Sessió 9: Chart.js line chart inside a <details> per card, auto-refresh every 30s.
 // M4: table → campaign cards with status badge, stat cards, budget progress bar.
+// M5: Rewarded nodes + Settled channels expandable sections per card.
 
 var _autoRefreshTimer = 0;
 var _expandedCharts   = {};   // campaignId → Chart instance
@@ -136,9 +137,10 @@ function _buildCampaignCard(c) {
 
   // ── Activity chart (expandable) ─────────────────────────────────────────
   var details = document.createElement('details');
+  details.className = 'ma-campaign-details';
   var summary = document.createElement('summary');
   summary.textContent = 'Activity chart';
-  summary.style.cssText = 'cursor:pointer;font-size:.875rem;color:var(--pico-muted-color,#6c757d);';
+  summary.className = 'ma-campaign-details-summary';
   details.appendChild(summary);
 
   var detailBody = document.createElement('div');
@@ -162,6 +164,60 @@ function _buildCampaignCard(c) {
   });
 
   card.appendChild(details);
+
+  // ── Rewarded nodes (expandable) ────────────────────────────────────────
+  var nodesDetails = document.createElement('details');
+  nodesDetails.className = 'ma-campaign-details';
+  var nodesSummary = document.createElement('summary');
+  nodesSummary.textContent = 'Rewarded nodes';
+  nodesSummary.className = 'ma-campaign-details-summary';
+  nodesDetails.appendChild(nodesSummary);
+
+  var nodesBody = document.createElement('div');
+  nodesBody.style.cssText = 'padding:.75rem 0 .25rem;';
+  nodesDetails.appendChild(nodesBody);
+
+  var nodesLoaded = false;
+  nodesDetails.addEventListener('toggle', function() {
+    if (nodesDetails.open && !nodesLoaded) {
+      nodesLoaded = true;
+      nodesBody.appendChild(mkLoading('Loading rewarded nodes…'));
+      _loadRewardedNodes(c.ID, nodesBody);
+    }
+    if (!nodesDetails.open) {
+      nodesBody.innerHTML = '';
+      nodesLoaded = false;
+    }
+  });
+
+  card.appendChild(nodesDetails);
+
+  // ── Settled channels (expandable) ─────────────────────────────────────────
+  var settledDetails = document.createElement('details');
+  settledDetails.className = 'ma-campaign-details';
+  var settledSummary = document.createElement('summary');
+  settledSummary.textContent = 'Settled channels';
+  settledSummary.className = 'ma-campaign-details-summary';
+  settledDetails.appendChild(settledSummary);
+
+  var settledBody = document.createElement('div');
+  settledBody.style.cssText = 'padding:.75rem 0 .25rem;';
+  settledDetails.appendChild(settledBody);
+
+  var settledLoaded = false;
+  settledDetails.addEventListener('toggle', function() {
+    if (settledDetails.open && !settledLoaded) {
+      settledLoaded = true;
+      settledBody.appendChild(mkLoading('Loading settled channels…'));
+      _loadSettledChannels(c.ID, settledBody);
+    }
+    if (!settledDetails.open) {
+      settledBody.innerHTML = '';
+      settledLoaded = false;
+    }
+  });
+
+  card.appendChild(settledDetails);
   return card;
 }
 
@@ -256,6 +312,389 @@ function _loadChartData(campaignId, detailEl) {
       }
     });
   });
+}
+
+// ---------------------------------------------------------------------------
+// Settled channels per campaign (from CHANNEL_HISTORY, grouped by publisher PK)
+// ---------------------------------------------------------------------------
+
+function _loadSettledChannels(campaignId, detailEl) {
+  _loadMaximaContactsMap(function(contactsMap) {
+    var sql = "SELECT VIEWER_KEY, ROLE, CUMULATIVE_EARNED, STATUS, CREATED_AT, VIEWER_WALLET_ADDR"
+      + " FROM CHANNEL_HISTORY"
+      + " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')"
+      + " AND UPPER(ROLE) = 'PUBLISHER'"
+      + " ORDER BY CREATED_AT DESC";
+
+    sqlQuery(sql, function(err, rows) {
+      if (!detailEl) { return; }
+      detailEl.innerHTML = '';
+
+      if (err) {
+        var errEl = document.createElement('p');
+        errEl.textContent = 'Error loading settled channels: ' + err;
+        detailEl.appendChild(errEl);
+        return;
+      }
+
+      if (!rows || rows.length === 0) {
+        detailEl.appendChild(mkEmptyState('No settled publisher channels yet.'));
+        return;
+      }
+
+      _renderSettledChannelsTable(detailEl, rows, contactsMap);
+    });
+  });
+}
+
+function _renderSettledChannelsTable(target, rows, contactsMap) {
+  var groups = _groupSettledChannelsByPk(rows);
+  var table = document.createElement('table');
+  table.className = 'ma-nested-table';
+
+  var thead = document.createElement('thead');
+  var headerRow = document.createElement('tr');
+  var headers = ['Publisher', 'PK', 'Channels', 'Total', 'Last settled', ''];
+  for (var h = 0; h < headers.length; h++) {
+    var th = document.createElement('th');
+    th.textContent = headers[h];
+    headerRow.appendChild(th);
+  }
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  var tbody = document.createElement('tbody');
+  for (var i = 0; i < groups.length; i++) {
+    var group = groups[i];
+    var pk = group.pk || '';
+    var contact = contactsMap[String(pk).toUpperCase()] || null;
+    var nodeName = contact && contact.name ? contact.name : 'Unknown node';
+    var lastText = group.lastTs
+      ? new Date(group.lastTs).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
+      : '—';
+
+    var tr = document.createElement('tr');
+    tr.className = 'ma-expandable-row';
+    tr.setAttribute('tabindex', '0');
+    tr.setAttribute('aria-expanded', 'false');
+    tr.appendChild(_nodeTd(nodeName));
+    tr.appendChild(_nodeTd(_shortNodePk(pk)));
+    tr.appendChild(_nodeTd(String(group.rows.length)));
+    tr.appendChild(_nodeTd(group.total.toFixed(6) + ' M'));
+    tr.appendChild(_nodeTd(lastText));
+
+    var toggleTd = document.createElement('td');
+    var toggleIcon = document.createElement('span');
+    toggleIcon.setAttribute('aria-hidden', 'true');
+    toggleIcon.textContent = '›';
+    toggleIcon.style.cssText = 'display:inline-block;color:var(--pico-muted-color,#6c757d);font-size:1rem;transition:transform .15s ease;';
+    toggleTd.appendChild(toggleIcon);
+    tr.appendChild(toggleTd);
+    tbody.appendChild(tr);
+
+    var detailTr = document.createElement('tr');
+    detailTr.style.display = 'none';
+    var detailTd = document.createElement('td');
+    detailTd.className = 'ma-nested-detail';
+    detailTd.setAttribute('colspan', '6');
+    detailTd.style.cssText = 'padding:.5rem 1rem;';
+    detailTr.appendChild(detailTd);
+    tbody.appendChild(detailTr);
+
+    (function(summaryRow, icon, rowEl, cellEl, channelRows) {
+      var loaded = false;
+      function toggle() {
+        if (rowEl.style.display === 'none') {
+          rowEl.style.display = '';
+          icon.style.transform = 'rotate(90deg)';
+          summaryRow.setAttribute('aria-expanded', 'true');
+          if (!loaded) {
+            loaded = true;
+            _renderSettledChannelEvents(cellEl, channelRows);
+          }
+        } else {
+          rowEl.style.display = 'none';
+          icon.style.transform = 'rotate(0deg)';
+          summaryRow.setAttribute('aria-expanded', 'false');
+        }
+      }
+      summaryRow.addEventListener('click', toggle);
+      summaryRow.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          toggle();
+        }
+      });
+    })(tr, toggleIcon, detailTr, detailTd, group.rows);
+  }
+
+  table.appendChild(tbody);
+  target.appendChild(table);
+}
+
+function _groupSettledChannelsByPk(rows) {
+  var map = {};
+  var groups = [];
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var pk = r.VIEWER_KEY || '';
+    var key = String(pk).toUpperCase();
+    if (!map[key]) {
+      map[key] = { pk: pk, rows: [], total: 0, lastTs: 0 };
+      groups.push(map[key]);
+    }
+    var ts = parseInt(r.CREATED_AT || 0, 10) || 0;
+    map[key].rows.push(r);
+    map[key].total += (parseFloat(r.CUMULATIVE_EARNED || 0) || 0);
+    if (ts > map[key].lastTs) { map[key].lastTs = ts; }
+  }
+  groups.sort(function(a, b) { return b.lastTs - a.lastTs; });
+  return groups;
+}
+
+function _renderSettledChannelEvents(target, rows) {
+  target.innerHTML = '';
+  var table = document.createElement('table');
+  table.className = 'ma-nested-table';
+  var thead = document.createElement('thead');
+  var headerRow = document.createElement('tr');
+  var headers = ['Status', 'Earned', 'Settled at'];
+  for (var h = 0; h < headers.length; h++) {
+    var th = document.createElement('th');
+    th.textContent = headers[h];
+    headerRow.appendChild(th);
+  }
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  var tbody = document.createElement('tbody');
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var ts = parseInt(r.CREATED_AT || 0, 10);
+    var settledDate = ts
+      ? new Date(ts).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
+      : '—';
+    var tr = document.createElement('tr');
+    tr.appendChild(_nodeTd(r.STATUS || 'settled'));
+    tr.appendChild(_nodeTd((parseFloat(r.CUMULATIVE_EARNED || 0) || 0).toFixed(6) + ' M'));
+    tr.appendChild(_nodeTd(settledDate));
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  target.appendChild(table);
+}
+
+// ---------------------------------------------------------------------------
+// Rewarded nodes per campaign
+// ---------------------------------------------------------------------------
+
+function _loadRewardedNodes(campaignId, detailEl) {
+  _loadMaximaContactsMap(function(contactsMap) {
+    var sql = "SELECT USER_ADDRESS, TYPE, AMOUNT, TIMESTAMP"
+      + " FROM REWARD_EVENTS"
+      + " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')"
+      + " ORDER BY TIMESTAMP DESC";
+
+    sqlQuery(sql, function(err, rows) {
+      if (!detailEl) { return; }
+      detailEl.innerHTML = '';
+
+      if (err) {
+        var errEl = document.createElement('p');
+        errEl.textContent = 'Error loading rewarded nodes: ' + err;
+        detailEl.appendChild(errEl);
+        return;
+      }
+
+      if (!rows || rows.length === 0) {
+        detailEl.appendChild(mkEmptyState('No rewarded nodes yet.'));
+        return;
+      }
+
+      _renderRewardedNodesTable(detailEl, rows, contactsMap);
+    });
+  });
+}
+
+function _loadMaximaContactsMap(cb) {
+  MDS.cmd('maxcontacts action:list', function(res) {
+    var map = {};
+    if (res && res.status && res.response && res.response.contacts) {
+      var contacts = res.response.contacts;
+      for (var i = 0; i < contacts.length; i++) {
+        var c = contacts[i];
+        if (c.publickey) {
+          map[String(c.publickey).toUpperCase()] = {
+            name: (c.extradata && c.extradata.name) ? c.extradata.name : ''
+          };
+        }
+      }
+    }
+    cb(map);
+  });
+}
+
+function _renderRewardedNodesTable(target, rows, contactsMap) {
+  var groups = _groupRewardRowsByNode(rows);
+  var table = document.createElement('table');
+  table.className = 'ma-nested-table';
+
+  var thead = document.createElement('thead');
+  var headerRow = document.createElement('tr');
+  var headers = ['Node', 'PK', 'Rewards', 'Total', 'Last rewarded', ''];
+  for (var h = 0; h < headers.length; h++) {
+    var th = document.createElement('th');
+    th.textContent = headers[h];
+    headerRow.appendChild(th);
+  }
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  var tbody = document.createElement('tbody');
+  for (var i = 0; i < groups.length; i++) {
+    var group = groups[i];
+    var pk = group.pk || '';
+    var contact = contactsMap[String(pk).toUpperCase()] || null;
+    var nodeName = contact && contact.name ? contact.name : 'Unknown node';
+    var lastText = group.lastTs
+      ? new Date(group.lastTs).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
+      : '—';
+
+    var tr = document.createElement('tr');
+    tr.className = 'ma-expandable-row';
+    tr.setAttribute('tabindex', '0');
+    tr.setAttribute('aria-expanded', 'false');
+    tr.appendChild(_nodeTd(nodeName));
+    tr.appendChild(_nodeTd(_shortNodePk(pk)));
+    tr.appendChild(_nodeTd(String(group.rows.length)));
+    tr.appendChild(_nodeTd(group.total.toFixed(6) + ' M'));
+    tr.appendChild(_nodeTd(lastText));
+
+    var toggleTd = document.createElement('td');
+    var toggleIcon = document.createElement('span');
+    toggleIcon.setAttribute('aria-hidden', 'true');
+    toggleIcon.textContent = '›';
+    toggleIcon.style.cssText = 'display:inline-block;color:var(--pico-muted-color,#6c757d);font-size:1rem;transition:transform .15s ease;';
+    toggleTd.appendChild(toggleIcon);
+    tr.appendChild(toggleTd);
+    tbody.appendChild(tr);
+
+    var detailTr = document.createElement('tr');
+    detailTr.style.display = 'none';
+    var detailTd = document.createElement('td');
+    detailTd.className = 'ma-nested-detail';
+    detailTd.setAttribute('colspan', '6');
+    detailTd.style.cssText = 'padding:.5rem 1rem;';
+    detailTr.appendChild(detailTd);
+    tbody.appendChild(detailTr);
+
+    (function(summaryRow, icon, rowEl, cellEl, rewardRows) {
+      var loaded = false;
+      function toggle() {
+        if (rowEl.style.display === 'none') {
+          rowEl.style.display = '';
+          icon.style.transform = 'rotate(90deg)';
+          summaryRow.setAttribute('aria-expanded', 'true');
+          if (!loaded) {
+            loaded = true;
+            _renderNodeRewardEvents(cellEl, rewardRows);
+          }
+        } else {
+          rowEl.style.display = 'none';
+          icon.style.transform = 'rotate(0deg)';
+          summaryRow.setAttribute('aria-expanded', 'false');
+        }
+      }
+      summaryRow.addEventListener('click', toggle);
+      summaryRow.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          toggle();
+        }
+      });
+    })(tr, toggleIcon, detailTr, detailTd, group.rows);
+  }
+
+  table.appendChild(tbody);
+  target.appendChild(table);
+}
+
+function _groupRewardRowsByNode(rows) {
+  var map = {};
+  var groups = [];
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var pk = r.USER_ADDRESS || '';
+    var key = String(pk).toUpperCase();
+    if (!map[key]) {
+      map[key] = {
+        pk: pk,
+        rows: [],
+        total: 0,
+        lastTs: 0
+      };
+      groups.push(map[key]);
+    }
+    var ts = parseInt(r.TIMESTAMP || 0, 10) || 0;
+    map[key].rows.push(r);
+    map[key].total += (parseFloat(r.AMOUNT || 0) || 0);
+    if (ts > map[key].lastTs) { map[key].lastTs = ts; }
+  }
+  groups.sort(function(a, b) { return b.lastTs - a.lastTs; });
+  return groups;
+}
+
+function _renderNodeRewardEvents(target, rows) {
+  target.innerHTML = '';
+  var table = document.createElement('table');
+  table.className = 'ma-nested-table';
+  var thead = document.createElement('thead');
+  var headerRow = document.createElement('tr');
+  var headers = ['Reward', 'Amount', 'Reward date'];
+  for (var h = 0; h < headers.length; h++) {
+    var th = document.createElement('th');
+    th.textContent = headers[h];
+    headerRow.appendChild(th);
+  }
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  var tbody = document.createElement('tbody');
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var ts = parseInt(r.TIMESTAMP || 0, 10);
+    var rewardDate = ts
+      ? new Date(ts).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
+      : '—';
+    var tr = document.createElement('tr');
+    tr.appendChild(_nodeTd(_formatRewardType(r.TYPE)));
+    tr.appendChild(_nodeTd((parseFloat(r.AMOUNT || 0) || 0).toFixed(6) + ' M'));
+    tr.appendChild(_nodeTd(rewardDate));
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  target.appendChild(table);
+}
+
+function _formatRewardType(type) {
+  var t = (type || '').toLowerCase();
+  if (t === 'publisher_view') { return 'Publisher view'; }
+  if (t === 'view') { return 'View'; }
+  if (t === 'click') { return 'Click'; }
+  return type || '—';
+}
+
+function _shortNodePk(pk) {
+  if (!pk) { return '—'; }
+  var s = String(pk);
+  if (s.length <= 18) { return s; }
+  return s.slice(0, 10) + '…' + s.slice(-6);
+}
+
+function _nodeTd(value) {
+  var td = document.createElement('td');
+  td.textContent = (value === null || value === undefined) ? '' : String(value);
+  return td;
 }
 
 // ---------------------------------------------------------------------------

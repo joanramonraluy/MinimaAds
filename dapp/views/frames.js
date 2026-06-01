@@ -131,8 +131,27 @@ function _renderFramesList(rows) {
         snippetDetails.id = 'ma-snippet-' + sid;
         snippetDetails.style.cssText = 'margin-top:.75rem;';
         var snippetSummary = document.createElement('summary');
-        snippetSummary.textContent = 'Snippet';
         snippetSummary.style.cssText = 'cursor:pointer;font-size:.875rem;color:var(--pico-muted-color,#6c757d);';
+        var snippetSummaryRow = document.createElement('span');
+        snippetSummaryRow.style.cssText = 'display:inline-flex;align-items:center;gap:.5rem;';
+        var snippetLabel = document.createElement('span');
+        snippetLabel.textContent = 'Snippet';
+        snippetSummaryRow.appendChild(snippetLabel);
+        var snippetCopyBtn = document.createElement('button');
+        snippetCopyBtn.type = 'button';
+        snippetCopyBtn.textContent = 'Copy';
+        snippetCopyBtn.setAttribute('aria-label', 'Copy snippet');
+        snippetCopyBtn.style.cssText = 'width:auto;margin:0;padding:.25rem .55rem;font-size:.8rem;line-height:1.2;border-radius:.25rem;'
+          + 'background:var(--pico-primary-background,#0172ad);border-color:var(--pico-primary-border,#0172ad);'
+          + 'color:var(--pico-primary-inverse,#fff);';
+        snippetCopyBtn.addEventListener('mouseover', function() {
+          snippetCopyBtn.style.background = 'var(--pico-primary-hover-background,var(--pico-primary-background,#0172ad))';
+        });
+        snippetCopyBtn.addEventListener('mouseout', function() {
+          snippetCopyBtn.style.background = 'var(--pico-primary-background,#0172ad)';
+        });
+        snippetSummaryRow.appendChild(snippetCopyBtn);
+        snippetSummary.appendChild(snippetSummaryRow);
         snippetDetails.appendChild(snippetSummary);
         var snippetBody = document.createElement('div');
         snippetBody.id = 'ma-snippet-body-' + sid;
@@ -146,6 +165,11 @@ function _renderFramesList(rows) {
               body.appendChild(mkLoading('Loading snippet…'));
               _showSnippet(frameId);
             }
+          });
+          snippetCopyBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            _copyFrameSnippet(frameId, snippetCopyBtn);
           });
         })(snippetDetails, snippetBody, fid);
         card.appendChild(snippetDetails);
@@ -189,15 +213,21 @@ function _escapeHtml(str) {
 function _showSnippet(fid) {
   var bodyEl = document.getElementById('ma-snippet-body-' + _safeId(fid));
   if (!bodyEl) { return; }
-  MDS.sql("SELECT PUBLISHER_KEY FROM FRAMES WHERE UPPER(FRAME_ID) = UPPER('" + fid.replace(/'/g, "''") + "') LIMIT 1", function(res) {
-    var pubKey = (res && res.status && res.rows && res.rows.length > 0) ? (res.rows[0].PUBLISHER_KEY || '') : '';
+  _loadSnippet(fid, function(snippet) {
     bodyEl.innerHTML = '';
-    _renderSnippet(bodyEl, fid, pubKey);
+    _renderSnippet(bodyEl, fid, snippet);
   });
 }
 
-function _renderSnippet(detailEl, fid, pubKey) {
-  var snippet = "<div id=\"minimaads-slot\"></div>\n"
+function _loadSnippet(fid, cb) {
+  MDS.sql("SELECT PUBLISHER_KEY FROM FRAMES WHERE UPPER(FRAME_ID) = UPPER('" + fid.replace(/'/g, "''") + "') LIMIT 1", function(res) {
+    var pubKey = (res && res.status && res.rows && res.rows.length > 0) ? (res.rows[0].PUBLISHER_KEY || '') : '';
+    cb(_buildSnippet(fid, pubKey));
+  });
+}
+
+function _buildSnippet(fid, pubKey) {
+  return "<div id=\"minimaads-slot\"></div>\n"
     + "<script>\n"
     + "(function() {\n"
     + "  var publisherKey = '" + pubKey + "';\n"
@@ -401,6 +431,9 @@ function _renderSnippet(detailEl, fid, pubKey) {
     + "  _patchMds();\n"
     + "})();\n"
     + "</script>";
+}
+
+function _renderSnippet(detailEl, fid, snippet) {
   detailEl.innerHTML = '<div class="ma-section">'
     + '<p class="ma-section-title">SDK Snippet — ' + DOMPurify.sanitize(fid) + '</p>'
     + '<pre style="overflow-x:auto;white-space:pre-wrap;font-size:0.8rem">'
@@ -411,22 +444,47 @@ function _renderSnippet(detailEl, fid, pubKey) {
   var copyBtn = document.getElementById('ma-snippet-copy');
   if (copyBtn) {
     copyBtn.addEventListener('click', function() {
-      if (navigator.clipboard) {
-        navigator.clipboard.writeText(snippet).then(function() {
-          copyBtn.textContent = 'Copied!';
-          setTimeout(function() { copyBtn.textContent = 'Copy snippet'; }, 2000);
-        });
-      } else {
-        var el = document.getElementById('ma-snippet-code');
-        if (el) {
-          var range = document.createRange();
-          range.selectNodeContents(el);
-          var sel = window.getSelection();
-          sel.removeAllRanges();
-          sel.addRange(range);
-        }
-      }
+      _copySnippetText(snippet, copyBtn, 'Copy snippet');
     });
+  }
+}
+
+function _copyFrameSnippet(fid, btn) {
+  var originalText = btn ? btn.textContent : 'Copy';
+  if (btn) {
+    btn.textContent = '...';
+    btn.disabled = true;
+  }
+  _loadSnippet(fid, function(snippet) {
+    _copySnippetText(snippet, btn, originalText);
+  });
+}
+
+function _copySnippetText(snippet, btn, originalText) {
+  function done(text) {
+    if (!btn) { return; }
+    btn.disabled = false;
+    btn.textContent = text;
+    setTimeout(function() { btn.textContent = originalText || 'Copy'; }, 2000);
+  }
+
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(snippet).then(function() {
+      done('Copied!');
+    }, function() {
+      done('Copy failed');
+    });
+  } else {
+    var ta = document.createElement('textarea');
+    ta.value = snippet;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px;';
+    document.body.appendChild(ta);
+    ta.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
+    done(ok ? 'Copied!' : 'Copy failed');
   }
 }
 

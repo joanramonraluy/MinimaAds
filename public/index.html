@@ -15,8 +15,8 @@
       --pico-line-height: 1.6;
     }
     /* Glassmorphism header + gradient accent line */
-    header { position: sticky; top: 0; z-index: 50; background: rgba(255,255,255,.82); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 2px solid; border-image: linear-gradient(to right, transparent, var(--pico-primary,#6366f1) 50%, transparent) 1; }
-    [data-theme="dark"] header { background: rgba(18,18,24,.85); }
+    body > header { position: sticky; top: 0; z-index: 90; background: var(--pico-background-color, #fff); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 2px solid; border-image: linear-gradient(to right, transparent, var(--pico-primary,#6366f1) 50%, transparent) 1; }
+    [data-theme="dark"] body > header { background: var(--pico-background-color, #13171f); }
     button, [role="button"], input, select, textarea { transition: background-color .15s ease, border-color .15s ease, box-shadow .15s ease, color .15s ease, opacity .15s ease; }
     article { transition: box-shadow .15s ease; }
     /* Glow on primary (submit) buttons */
@@ -42,8 +42,8 @@
 
     body { margin: 0; padding: 0; }
     main { max-width: 960px; margin: 0 auto; padding: 0 1rem; }
-    header { padding: 0; }
-    header > nav { max-width: 960px; margin: 0 auto; padding: 0 1rem; }
+    body > header { padding: 0; }
+    body > header > nav { max-width: 960px; margin: 0 auto; padding: 0 1rem; }
     nav ul { list-style: none; display: flex; gap: 1.5rem; padding: 0; }
     nav a { text-decoration: none; }
     nav a[aria-current] { font-weight: bold; border-bottom: 2px solid currentColor; }
@@ -57,6 +57,20 @@
     .ma-summary-box ul { margin: 0.25rem 0 0.5rem; padding-left: 1.25rem; }
     .ma-summary-box small { color: var(--pico-muted-color, #6c757d); }
     .ma-summary-warning { color: var(--pico-del-color, #c0392b); font-weight: bold; margin-bottom: 0.5rem; }
+    .ma-nested-detail { background: var(--pico-card-sectionning-background-color, #f8f9fa); }
+    [data-theme="dark"] .ma-nested-detail { background: rgba(255,255,255,.04); }
+    .ma-campaign-details { margin-top: .35rem; border-top: 1px solid var(--pico-muted-border-color, #ddd); }
+    .ma-campaign-details-summary { cursor: pointer; font-size: .875rem; color: var(--pico-muted-color, #6c757d); padding: .45rem .25rem; border-radius: .25rem; }
+    .ma-campaign-details-summary:hover { background: var(--pico-card-sectionning-background-color, #f8f9fa); color: var(--pico-color, inherit); }
+    [data-theme="dark"] .ma-campaign-details-summary:hover { background: rgba(255,255,255,.06); }
+    .ma-nested-table { width: 100%; font-size: .85rem; margin: 0; border-collapse: collapse; }
+    .ma-nested-table th { color: var(--pico-muted-color, #6c757d); font-weight: 600; border-bottom: 1px solid var(--pico-muted-border-color, #ddd); }
+    .ma-nested-table td, .ma-nested-table th { padding: .45rem .5rem; }
+    .ma-nested-table tbody tr { border-bottom: 1px solid var(--pico-muted-border-color, #ddd); }
+    .ma-nested-table tbody tr:hover { background: var(--pico-card-sectionning-background-color, #f8f9fa); }
+    [data-theme="dark"] .ma-nested-table tbody tr:hover { background: rgba(255,255,255,.05); }
+    .ma-expandable-row { cursor: pointer; }
+    .ma-expandable-row:focus { outline: 2px solid var(--pico-primary-focus, rgba(99,102,241,.25)); outline-offset: -2px; }
     .ma-cap-auto { opacity: 0.65; }
     .ma-creator-overview { margin: 0 0 1rem; }
     .ma-tabs { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0 0 1rem; border-bottom: 1px solid var(--pico-muted-border-color, #ddd); }
@@ -93,15 +107,59 @@
     .ma-drawer-submenu li button { display: block; width: 100%; background: none; border: none; padding: .65rem 1.75rem; font-size: .95rem; cursor: pointer; text-align: left; color: inherit; margin: 0; border-radius: 0; }
     .ma-drawer-submenu li button:hover { background: var(--pico-muted-border-color, #ddd); }
     .ma-drawer-submenu li button[aria-selected="true"] { font-weight: 700; color: var(--pico-primary, #0172ad); }
-    /* 1A-1: Responsive nav at 375px — nav-links wrap to new row */
+    /* 1A-1: Responsive nav at 375px — nav-links in a single row, scrollable with scroll indicator */
     @media (max-width: 479px) {
-      header nav { flex-wrap: wrap; }
-      header nav > ul:first-child { flex: 1 0 auto; order: 0; }
-      #ma-nav-links { order: 1; flex: 0 0 100%; flex-wrap: wrap; gap: 0.75rem; }
+      body > header nav { flex-wrap: wrap; }
+      body > header nav > ul:first-child { flex: 1 0 auto; order: 0; }
+      #ma-nav-links {
+        order: 1;
+        flex: 0 0 100%;
+        max-width: 100%;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        gap: 0.75rem;
+        scrollbar-width: none;
+        padding-bottom: 0.15rem;
+      }
+      #ma-nav-links::-webkit-scrollbar { display: none; }
+      #ma-nav-links li { flex-shrink: 0; }
+      #ma-nav-links a { white-space: nowrap; }
     }
     /* M5: Creator form fieldsets */
     .ma-fieldset { border: 1px solid var(--pico-muted-border-color, #ddd); border-radius: .4rem; padding: .75rem 1rem; margin-bottom: 1rem; }
     .ma-fieldset legend { padding: 0 .4rem; font-weight: 600; font-size: .9rem; }
+    .ma-tabs-container {
+      position: relative;
+      width: 100%;
+      max-width: 100%;
+      overflow: hidden;
+    }
+    .ma-tabs-arrow {
+      display: none;
+      position: absolute;
+      top: 0;
+      height: 2.3rem;
+      line-height: 2.3rem;
+      font-size: 1.15rem;
+      font-weight: bold;
+      color: var(--pico-primary);
+      cursor: pointer;
+      user-select: none;
+      z-index: 10;
+    }
+    .ma-tabs-arrow.right {
+      right: 0;
+      background: linear-gradient(to left, var(--pico-background-color) 60%, transparent);
+      padding-left: 2rem;
+      padding-right: 0.25rem;
+    }
+    .ma-tabs-arrow.left {
+      left: 0;
+      background: linear-gradient(to right, var(--pico-background-color) 60%, transparent);
+      padding-right: 2rem;
+      padding-left: 0.25rem;
+    }
     /* Creator form: scrollable tabs on mobile */
     @media (max-width: 599px) {
       .ma-tabs { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
@@ -121,7 +179,7 @@
 </head>
 <body>
   <header>
-    <nav>
+    <nav style="position: relative;">
       <ul style="gap:.6rem;align-items:center">
         <li>
           <button class="ma-menu-btn outline secondary" onclick="openDrawer()">
@@ -135,6 +193,8 @@
         </li>
       </ul>
       <ul id="ma-nav-links"></ul>
+      <span id="ma-nav-arrow-left" class="ma-tabs-arrow left" style="bottom: 0.5rem; height: 1.8rem; line-height: 1.8rem;">&#8249;</span>
+      <span id="ma-nav-arrow-right" class="ma-tabs-arrow right" style="bottom: 0.5rem; height: 1.8rem; line-height: 1.8rem;">&#8250;</span>
     </nav>
   </header>
 
@@ -181,9 +241,9 @@
           </button>
         </li>
         <li>
-          <button class="ma-drawer-menu-btn" disabled>
+          <button class="ma-drawer-menu-btn" onclick="openHelpView()">
             Help
-            <span style="font-size:.75rem;color:var(--pico-muted-color,#6c757d)">Coming soon</span>
+            <span style="font-size:.85rem;color:var(--pico-muted-color,#6c757d)">&#8250;</span>
           </button>
         </li>
       </ul>
@@ -231,6 +291,7 @@
   <!-- Global views (profile, settings) -->
   <script src="dapp/views/profile.js"></script>
   <script src="dapp/views/settings.js"></script>
+  <script src="dapp/views/help.js"></script>
 
   <!-- Dev SQL console (Ctrl+Shift+D) -->
   <script src="dapp/views/devtools.js"></script>

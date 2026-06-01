@@ -1143,6 +1143,47 @@ Sent immediately by the creator's SW upon receiving a `CREATOR_LIVENESS_PING`. U
 5. Next `getAd()` → `selectAd()` filters out the campaign (`STATUS !== 'active'`)
 6. Next `_trackEvent()` → `validateView()` rejects the event
 
+### 8.17 PROFILE_REQUEST
+
+**Direction**: Viewer FE → Creator SW (unicast Maxima, `publickey:` routing, **`poll:false`**)
+
+Sent by the viewer's FE when building the campaign list and the campaign creator is not in the local Maxima contacts. Used to fetch the creator's display name and icon for the viewer list UI. Uses `poll:false` — if the creator is offline the request is silently dropped; the list renders with a letter-based fallback avatar.
+
+```json
+{
+  "type": "PROFILE_REQUEST"
+}
+```
+
+**Handler (creator node)**: `handleProfileRequest(payload, senderPk)` in `campaign.handler.js`
+
+**Effect**: Creator's SW calls `maxima action:info` to read its own `name` and `icon`, then sends a `PROFILE_RESPONSE` back to `senderPk`.
+
+---
+
+### 8.18 PROFILE_RESPONSE
+
+**Direction**: Creator SW → Viewer SW (unicast Maxima, `publickey:` routing, **`poll:false`**)
+
+```json
+{
+  "type": "PROFILE_RESPONSE",
+  "publickey": "0x...",
+  "name": "Creator display name",
+  "icon": "data:image/jpeg;base64,..."
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `publickey` | string | Creator's Maxima public key (uppercase) |
+| `name` | string | Creator's Maxima display name (empty string if not set) |
+| `icon` | string | Creator's avatar as a data URL (empty string if not set) |
+
+**Handler (viewer node)**: `handleProfileResponse(payload)` in `campaign.handler.js`
+
+**Effect**: Viewer's SW signals FE with `PROFILE_RECEIVED { publickey, name, icon }`. FE caches the profile in keypair (`CREATOR_PROFILE_<PK>`) and updates the campaign list row in-place (avatar image + creator name). Cached profiles are reused on subsequent list renders without re-requesting.
+
 ### 8.15 SW → FE Signal Contract
 
 | Signal type | Payload | Fired by | Trigger |
@@ -1166,6 +1207,7 @@ Sent immediately by the creator's SW upon receiving a `CREATOR_LIVENESS_PING`. U
 | `DO_PUBLISHER_REWARD_VOUCHER` | `{ campaign_id, publisher_key, publisher_mx, frame_id, event_id, cumulative }` | `channel.handler.js` (SW) | Creator FE builds publisher voucher tx and sends REWARD_VOUCHER |
 | `CREATOR_LIVENESS_PONG` | `{ campaign_id }` | `campaign.handler.js` (SW) | CREATOR_LIVENESS_PONG received — SDK resolves pending liveness check |
 | `STATUS_TX_PENDING` | `{ campaign_id, status, pending_uid }` | `dapp/views/mycampaigns.js` (FE) | Status-change tx awaiting Hub approval — UI shows "awaiting confirmation" until the V3 change coin is confirmed on-chain |
+| `PROFILE_RECEIVED` | `{ publickey, name, icon }` | `campaign.handler.js` (SW) | PROFILE_RESPONSE received — viewer FE updates creator avatar/name in campaign list |
 
 ---
 

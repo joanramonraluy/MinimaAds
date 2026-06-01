@@ -43,6 +43,10 @@ function renderEarnings(root) {
   pendingH3.id = 'ma-pending-settlements-title';
   pendingH3.textContent = 'Pending settlements';
   pendingSection.appendChild(pendingH3);
+  var settlementHint = document.createElement('p');
+  settlementHint.style.cssText = 'margin:-.35rem 0 1rem;color:var(--pico-muted-color,#6c757d);font-size:.875rem;';
+  settlementHint.textContent = 'Tip: settlement posts to L1. To avoid doing that too often, it is usually better to settle when the campaign ends or when the channel has reached its reward cap, unless you need the funds sooner.';
+  pendingSection.appendChild(settlementHint);
   var channelList = document.createElement('div');
   channelList.id = 'ma-channel-rewards-list';
   pendingSection.appendChild(channelList);

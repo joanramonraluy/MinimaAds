@@ -85,23 +85,64 @@ Before you start, **classify your task using this rubric**:
 - **Model: Opus required**
 - **Plan mode: YES — mandatory. Design review before coding.**
 
-### After Self-Assessment
+### CRITICAL: Public Assessment → Suggestion → User Confirmation
 
-**If you are NOT the recommended model:**
-- If you're Haiku and the task is MEDIUM or higher → STOP and tell the maintainer
-- If you're Sonnet and the task is HIGH or higher → STOP and tell the maintainer
-- If you're Opus: you can handle any task
+**Your self-assessment thinking is private. Your suggestion MUST be public.**
+
+After classifying the task, you **MUST IMMEDIATELY**:
+
+1. **Output your assessment publicly** (this is your response to the user):
+   ```
+   Complexity: [LOW/MEDIUM/HIGH/XHIGH]
+   Reasoning: [brief explanation of why this level]
+   Recommended model: [Haiku/Sonnet/Opus]
+   ```
+
+2. **Ask for confirmation** (blocking — do NOT proceed without user response):
+   ```
+   Vols que delegui a [Model], o [current model] va bé?
+   ```
+
+3. **WAIT for explicit user approval:**
+   - User says "OK" / "yes" / "approve" → proceed with suggested model
+   - User says "Haiku" / "no" / model name → proceed with that model
+   - Do NOT investigate, read files, or start work until you get this response
+
+**Example of correct flow:**
+```
+User: "Fix the creator offline error in viewer campaigns"
+
+[You assess internally: MEDIUM complexity, multi-layer (UI+Core+SW)]
+
+You output:
+"Complexity: MEDIUM (bug fix + multi-layer investigation: viewer.js, sdk, handlers)
+Reasoning: Involves UI view, Core liveness logic, and Service Worker — needs investigation across multiple layers
+Recommended model: Sonnet
+
+Vols que delegui a Sonnet, o Haiku va bé?"
+
+[You STOP here and wait]
+
+User: "OK, Sonnet"
+
+[Now you can proceed]
+```
+
+### After Self-Assessment + Confirmation
+
+**If user confirms your suggestion:**
+- Proceed with that model (or delegate if needed)
+
+**If you are NOT the recommended model and user doesn't confirm:**
+- If you're Haiku and task is MEDIUM or higher → user said "Haiku" anyway → proceed cautiously, report any blockers
+- If you're Sonnet and task is HIGH or higher → user said "Sonnet" anyway → proceed, but monitor complexity
 
 **If the task requires plan mode and you haven't already:**
 → Use `CLAUDE.md §4` (Task Execution Workflow, Step 1) to design your approach before coding
 
-**If this task could be done by a simpler model than you:**
-→ Say so at the start — the maintainer may want to switch to save cost
-
 ---
 
-**If this task requires Opus and you are not Opus: STOP. Tell the maintainer before writing any code.**
-**If this task could be done by Haiku: say so at the start — the maintainer may want to switch.**
+**MANDATORY: Every complexity assessment triggers the public suggestion + confirmation flow above. No exceptions.**
 
 ---
 

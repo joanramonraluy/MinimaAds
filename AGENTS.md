@@ -46,7 +46,24 @@ Before implementing a feature, read the relevant sections of `MinimaAds.md` and 
 
 ---
 
-## 2) Required Workflow
+## 2) CRITICAL: Model Assessment Protocol
+
+**Before ANY investigation or code changes:**
+
+1. Self-assess task complexity using `CLAUDE.md §2` rubric
+2. **Publicly output your assessment** (not just in thinking):
+   - Complexity level
+   - Reasoning
+   - Recommended model
+3. **Ask user for confirmation** and WAIT for response
+   - "Vols que delegui a [Model], o [current model] va bé?"
+4. Only proceed after explicit user approval
+
+See `CLAUDE.md §2` "CRITICAL: Public Assessment → Suggestion → User Confirmation" for full details.
+
+---
+
+## 3) Required Workflow
 
 1. Read the relevant `MinimaAds.md` sections first.
 2. Check `docs/KNOWN_ISSUES.md` for known fragility points or open bugs in the touched area.

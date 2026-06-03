@@ -30,6 +30,8 @@
   var _reconnectDone = false;
   var _activeFrameId = null;
   var _myMx = '';
+  var _mxReady = false;
+  var _mxReadyCallbacks = [];
 
   // Creator liveness check — cache per campaignId, timeout 2 min.
   // _pendingPings: campaignId → { cbs: [fn], timer }
@@ -40,9 +42,20 @@
 
   function _completeInit(cb) {
     MDS.cmd('maxima action:info', function(mxRes) {
-      if (mxRes && mxRes.status && mxRes.response && mxRes.response.contact) {
-        _myMx = mxRes.response.contact;
+      if (mxRes && mxRes.status && mxRes.response) {
+        if (mxRes.response.contact) {
+          _myMx = mxRes.response.contact;
+        }
+        // Also cache publickey for _myMxAddress fallback
+        if (mxRes.response.publickey && !_myMx) {
+          _myMx = mxRes.response.publickey;
+        }
       }
+      // Mark Maxima address as ready and drain waiting callbacks
+      _mxReady = true;
+      var callbacks = _mxReadyCallbacks.splice(0);
+      for (var i = 0; i < callbacks.length; i++) { callbacks[i](); }
+
       _resolveFrame(_config, function(frameErr) {
         if (frameErr) {
           if (cb) { cb(frameErr, false); }
@@ -520,6 +533,15 @@
       _pendingPings[campaignId].cbs.push(cb);
       return;
     }
+
+    // Wait for Maxima address to be ready before sending PING
+    if (!_mxReady) {
+      _mxReadyCallbacks.push(function() {
+        _checkCreatorLiveness(campaign, cb);
+      });
+      return;
+    }
+
     var cbs = [cb];
     var timer = setTimeout(function() {
       if (!_pendingPings[campaignId]) { return; }

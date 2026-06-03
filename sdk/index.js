@@ -110,7 +110,9 @@
 
     // Host MiniDapps such as MetaChain already own MDS.init. In that mode the
     // host calls MinimaAds.handleMdsEvent(msg) from its existing MDS callback.
-    if (_config.mdsAlreadyInitialized || _config.externalMdsInit || _config.skipMdsInit) {
+    // Also: if MDS.sql is already available, MDS.init() has been called elsewhere,
+    // so proceed directly to _completeInit without calling MDS.init() again.
+    if (_config.mdsAlreadyInitialized || _config.externalMdsInit || _config.skipMdsInit || (typeof MDS.sql === 'function')) {
       _inited = true;
       _completeInit(cb);
       return;
@@ -489,7 +491,7 @@
   // when the creator eventually comes back online.
   function _sendLivenessPing(creatorRoute, campaignId, cb) {
     if (!creatorRoute) { if (cb) { cb(false); } return; }
-    var payload = { type: 'CREATOR_LIVENESS_PING', campaign_id: campaignId, viewer_mx: _myMx };
+    var payload = { type: 'CREATOR_LIVENESS_PING', campaign_id: campaignId, viewer_mx: _myMxAddress() };
     var hex = '0x' + utf8ToHex(JSON.stringify(payload)).toUpperCase();
     var isMx = (creatorRoute.substring(0, 2).toUpperCase() === 'MX');
     var routeParam = isMx ? ('to:' + creatorRoute) : ('publickey:' + creatorRoute);
@@ -601,7 +603,9 @@
                 viewer_key: viewerKey,
                 viewer_mx: _myMxAddress(),
                 max_amount: maxAmount,
-                viewer_wallet_addr: viewerWalletAddr
+                viewer_wallet_addr: viewerWalletAddr,
+                frame_id: _activeFrameId || '',
+                role: 'viewer'
               }, function() { if (cb) { cb(); } });
             });
           });
@@ -644,13 +648,14 @@
     console.log('[SDK] REWARD_REQUEST campaign:' + campaign.ID + ' event:' + eventId + ' cumulative:' + newCum);
     var info = { cumulative: newCum, viewer_key: channel.VIEWER_KEY, amount: amount };
     _addPending(campaign.ID, eventId, info, function() {
-      _sendToCreator(channel.CREATOR_MX, {
+      var req = {
         type: 'REWARD_REQUEST',
         campaign_id: campaign.ID,
         viewer_key: channel.VIEWER_KEY,
         event_id: eventId,
         cumulative: newCum
-      }, function() { if (cb) { cb(); } });
+      };
+      _sendToCreator(channel.CREATOR_MX, req, function() { if (cb) { cb(); } });
     });
   }
 
@@ -693,21 +698,10 @@
           console.log('[SDK] flushPending campaign:' + campaignId + ' — nothing pending');
           return;
         }
-        console.log('[SDK] flushPending campaign:' + campaignId + ' events:' + list.length);
-        for (var i = 0; i < list.length; i++) {
-          (function(eid) {
-            _readPendingInfo(campaignId, eid, function(info) {
-              if (!info) { return; }
-              _sendToCreator(channel.CREATOR_MX, {
-                type: 'REWARD_REQUEST',
-                campaign_id: campaignId,
-                viewer_key: channel.VIEWER_KEY,
-                event_id: eid,
-                cumulative: parseFloat(info.cumulative)
-              }, function() {});
-            });
-          })(list[i]);
-        }
+        console.log('[SDK] flushPending campaign:' + campaignId + ' events:' + list.length + ' → clearing (channel now open)');
+        _savePendingIndex(campaignId, [], function() {
+          console.log('[SDK] flushPending cleared pending for campaign:' + campaignId);
+        });
       });
     });
   }
@@ -835,16 +829,46 @@
       return;
     }
 
-    // Viewer voucher — existing flow
-    console.log('[SDK] VOUCHER_RECEIVED campaign:' + parsed.campaign_id + ' cumulative:' + parsed.cumulative + ' → clearing pending ≤' + parsed.cumulative);
-    _clearPendingByCumulative(parsed.campaign_id, parseFloat(parsed.cumulative), function() {
-      console.log('[SDK] pending cleared for campaign:' + parsed.campaign_id);
+    // Viewer voucher — create REWARD_EVENT now that it's confirmed
+    console.log('[SDK] VOUCHER_RECEIVED campaign:' + parsed.campaign_id + ' cumulative:' + parsed.cumulative);
+    _getMyChannel(parsed.campaign_id, function(chErr, channel) {
+      var oldCumulative = (chErr || !channel) ? 0 : parseFloat(channel.CUMULATIVE_EARNED || 0);
+      var newCumulative = parseFloat(parsed.cumulative);
+      var amount = newCumulative - oldCumulative;
+      getCampaign(parsed.campaign_id, function(err, campaign) {
+        if (err || !campaign || amount <= 0) {
+          _clearPendingByCumulative(parsed.campaign_id, newCumulative, function() {});
+          return;
+        }
+        _lookupAdId(parsed.campaign_id, function(errAd, adId) {
+          var params = {
+            campaign_id: parsed.campaign_id,
+            ad_id: adId || '',
+            user_address: parsed.viewer_key,
+            type: 'view',
+            amount: amount
+          };
+          createRewardEvent(params, function() {
+            _clearPendingByCumulative(parsed.campaign_id, newCumulative, function() {
+              console.log('[SDK] pending cleared for campaign:' + parsed.campaign_id);
+            });
+          });
+        });
+      });
     });
   }
 
   // --- Public API ------------------------------------------------------
 
   function _trackEvent(type, campaignId, userAddress, cb) {
+    // Auto-init for builtin viewer if not explicitly initialized
+    if (!_inited) {
+      init({}, function(err) {
+        if (err) { cb(err, null); return; }
+        _trackEvent(type, campaignId, userAddress, cb);
+      });
+      return;
+    }
     _ensureReconnect();
     var validate = (type === 'view') ? validateView : validateClick;
     validate(campaignId, userAddress, function(result) {
@@ -880,17 +904,14 @@
           // Existing channels: creator was reachable at open time; reward requests
           // will be queued and flushed when they come back online.
           function doCreateReward() {
-            createRewardEvent(params, function(err3, evt) {
-              if (err3) { cb(err3, null); return; }
-              if (!evt) { cb(null, { confirmed: false }); return; }
-              // Fire-and-forget viewer channel flow.
-              _channelFlow(campaign, evt.id, amount, function() {});
-              // Fire-and-forget publisher reward flow when R_p > 0 and frame is set.
-              if (parseFloat(campaign.PUBLISHER_REWARD_VIEW) > 0 && type === 'view' && _activeFrameId) {
-                _publisherChannelFlow(campaign, _activeFrameId, parseFloat(campaign.PUBLISHER_REWARD_VIEW), function() {});
-              }
-              cb(null, { confirmed: true, event: evt });
-            });
+            var eventId = Date.now().toString(16) + '-' + Math.floor(Math.random() * 0xFFFFFFFF).toString(16);
+            // Fire-and-forget viewer channel flow.
+            _channelFlow(campaign, eventId, amount, function() {});
+            // Fire-and-forget publisher reward flow when R_p > 0 and frame is set.
+            if (parseFloat(campaign.PUBLISHER_REWARD_VIEW) > 0 && type === 'view' && _activeFrameId) {
+              _publisherChannelFlow(campaign, _activeFrameId, parseFloat(campaign.PUBLISHER_REWARD_VIEW), function() {});
+            }
+            cb(null, { confirmed: true, event: { id: eventId } });
           }
 
           _getMyChannel(campaignId, function(chErr, existingChannel) {

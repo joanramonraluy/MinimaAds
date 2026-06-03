@@ -175,17 +175,19 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
-2026-06-03 (fix: CREATOR_LIVENESS_PING regression — revert auto-init hack, restore proper SDK initialization):
-- **Problem**: Viewer receives `confirmed: false, reason: 'creator offline'` when calling `trackView()`, even when creator is reachable. PING messages sent to creator had empty `viewer_mx` field, so creator had no return route for PONG; ping timed out and liveness check failed.
-- **Root cause**: Recent change added auto-init hack in `_trackEvent` that set `_inited = true` without calling `_completeInit()`, leaving `_myMx` uninitialized. When `_sendLivenessPing()` referenced `_myMx` directly, it was empty.
-- **Solution**:
-  1. Removed simple auto-init hack from `_trackEvent` (lines 862-865).
-  2. Replaced with proper `init()` call in `_trackEvent` when `_inited === false`, ensuring `_completeInit()` runs and populates `_myMx`.
-  3. Fixed `_sendLivenessPing()` to use `_myMxAddress()` instead of `_myMx`, respecting both local `_myMx` and global `MY_MX_ADDRESS` override from FE.
-  4. Updated `init()` condition (line 113) to detect if MDS.init already called by checking `typeof MDS.sql === 'function'`, preventing duplicate `MDS.init()` calls when running inside main app where dapp/app.js already initialized MDS.
-- **Files**: `sdk/index.js`.
+2026-06-03 (fix: CREATOR_LIVENESS_PING regression — race condition in async Maxima init):
+- **Problem**: Viewer receives `confirmed: false, reason: 'creator offline'` when calling `trackView()`, even when creator is reachable. PING messages sent to creator had empty `viewer_mx` field, causing timeout. Root cause: TWO separate issues:
+  - **Issue 1**: Auto-init hack set `_inited = true` without calling `_completeInit()`, leaving `_myMx` uninitialized.
+  - **Issue 2** (subtle race): Even after `_completeInit()` was fixed, `_checkCreatorLiveness()` was called BEFORE async `MDS.cmd('maxima action:info')` completed inside `_completeInit()`, resulting in empty `_myMx`.
+- **Root cause**: The SDK's initialization is async (requires MDS.cmd callback), but `_checkCreatorLiveness()` was not waiting for this completion. In the viewer flow, trackView() → _checkCreatorLiveness() could fire before Maxima address was ready.
+- **Solution** (four-part fix):
+  1. Removed auto-init hack from `_trackEvent()` (was: simple `_inited = true`).
+  2. Added proper `init()` call in `_trackEvent()` when `_inited === false`, ensuring full initialization chain.
+  3. Added `_mxReady` flag + `_mxReadyCallbacks` queue in SDK: set to true only after `MDS.cmd('maxima action:info')` completes in `_completeInit()`. Queued callbacks are drained when flag is set.
+  4. Updated `_checkCreatorLiveness()` to check `_mxReady` before sending PING. If not ready, callback is queued and executed later when ready.
+- **Files**: `sdk/index.js` (two commits: 0e62b5c + d2f3abc).
 - **AGENTS.md updated**: yes — this entry.
-- **Verification**: (1) Viewer loads MinimaAds, calls getAd() to fetch campaign. (2) Viewer waits 3s and calls trackView(). (3) SDK auto-initializes, populates _myMx, sends PING to creator with valid viewer_mx. (4) Creator receives PING, sends PONG back. (5) Viewer receives PONG, liveness check passes. (6) trackView() returns `confirmed: true` with event ID. (7) Channel opens, reward is created. (8) Creator sends REWARD_VOUCHER via Maxima. (9) Viewer settles channel on-chain.
+- **Verification**: Viewer trackView() → SDK checks `_mxReady` → waits if needed → sends PING with valid viewer_mx → creator receives PING and responds with PONG → viewer receives PONG within 3s timeout → liveness check passes → reward proceeds.
 
 2026-06-03 (feat: campaign daily & publisher reward limits validation and hints):
 - **Problem**: Creators could configure daily limits that exceed the max reward per viewer, or set a publisher reward per view that exceeds the publisher budget or total campaign budget.

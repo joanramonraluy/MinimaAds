@@ -175,54 +175,46 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
-2026-06-01 (feat: help and about us view):
-- **Scope**: `dapp/views/help.js`, `public/index.html`, `dapp/app.js`.
-- **Change**: added a new Help and About view containing tabbed guides for the three roles (Viewer, Creator, Publisher) and an "About MinimaAds" section. The navigation drawer "Help" button was enabled and connected to the routing logic.
-- **Responsive Nav**: updated the sub-navigation tabs (`#ma-nav-links`) to display in a single scrollable row on mobile instead of wrapping to two lines. Implemented dynamic indicator chevrons (`#ma-nav-arrow-right` / `left`) that appear when there are off-screen options and disappear as the user scrolls. Added `flex-shrink: 0` to `li` elements and `white-space: nowrap` to `a` elements to prevent tabs from shrinking/wrapping internally.
-- **Help View Tabs**: removed inline styling overrides (`flex-wrap: wrap`) from the tab container in `help.js` to ensure the global stylesheet responsive `.ma-tabs` rules (which make them scroll horizontally on mobile screens) are correctly applied to the Help screen.
-- **Shared Scroll Indicator**: added `attachScrollIndicator` to `ui-helpers.js` and `.ma-tabs-container` / `.ma-tabs-arrow` styling to `index.html`. Refactored main navigation, Creator tabs, and Help tabs to use this shared utility, providing consistent visual left/right chevron indicators when tabs overflow. Clicking these arrows smoothly scrolls the tab container, and event propagation is stopped to prevent accidental tab switching. Restricted `.ma-tabs-container` and `#ma-nav-links` to `max-width: 100%` and `overflow: hidden` to prevent page-wide horizontal scrollbars.
-- **New files**: `dapp/views/help.js`.
-- **No contract changes**: UI changes only.
+2026-06-03 (fix: CREATOR_LIVENESS_PING regression — revert auto-init hack, restore proper SDK initialization):
+- **Problem**: Viewer receives `confirmed: false, reason: 'creator offline'` when calling `trackView()`, even when creator is reachable. PING messages sent to creator had empty `viewer_mx` field, so creator had no return route for PONG; ping timed out and liveness check failed.
+- **Root cause**: Recent change added auto-init hack in `_trackEvent` that set `_inited = true` without calling `_completeInit()`, leaving `_myMx` uninitialized. When `_sendLivenessPing()` referenced `_myMx` directly, it was empty.
+- **Solution**:
+  1. Removed simple auto-init hack from `_trackEvent` (lines 862-865).
+  2. Replaced with proper `init()` call in `_trackEvent` when `_inited === false`, ensuring `_completeInit()` runs and populates `_myMx`.
+  3. Fixed `_sendLivenessPing()` to use `_myMxAddress()` instead of `_myMx`, respecting both local `_myMx` and global `MY_MX_ADDRESS` override from FE.
+  4. Updated `init()` condition (line 113) to detect if MDS.init already called by checking `typeof MDS.sql === 'function'`, preventing duplicate `MDS.init()` calls when running inside main app where dapp/app.js already initialized MDS.
+- **Files**: `sdk/index.js`.
+- **AGENTS.md updated**: yes — this entry.
+- **Verification**: (1) Viewer loads MinimaAds, calls getAd() to fetch campaign. (2) Viewer waits 3s and calls trackView(). (3) SDK auto-initializes, populates _myMx, sends PING to creator with valid viewer_mx. (4) Creator receives PING, sends PONG back. (5) Viewer receives PONG, liveness check passes. (6) trackView() returns `confirmed: true` with event ID. (7) Channel opens, reward is created. (8) Creator sends REWARD_VOUCHER via Maxima. (9) Viewer settles channel on-chain.
 
-2026-06-01 (feat: creator settled channels list):
-- **Scope**: `dapp/views/mycampaigns.js` only.
-- **Change**: added a lazy-loaded `Settled channels` details section to each `My Campaigns` card. It queries `CHANNEL_HISTORY` for `ROLE='publisher'` rows of the campaign, groups them by `VIEWER_KEY` (publisher PK), and shows contact name when available from `maxcontacts`, shortened PK, channel count, total earned, and last settled date. Each publisher row has a nested expander listing individual settlement events with status, earned amount, and settled date.
-- **New functions**: `_loadSettledChannels`, `_renderSettledChannelsTable`, `_groupSettledChannelsByPk`, `_renderSettledChannelEvents`. Reuses existing helpers `_loadMaximaContactsMap`, `_nodeTd`, `_shortNodePk`, and shared CSS classes `ma-campaign-details`, `ma-campaign-details-summary`, `ma-nested-table`, `ma-nested-detail`, `ma-expandable-row`.
-- **Data note**: `CHANNEL_HISTORY.VIEWER_KEY` for `ROLE='publisher'` is the publisher's Maxima PK. Names resolved opportunistically from local Maxima contacts.
-- **No contract changes**: no DB, SW, Maxima schema, SDK, or spec changes.
+2026-06-03 (feat: campaign daily & publisher reward limits validation and hints):
+- **Problem**: Creators could configure daily limits that exceed the max reward per viewer, or set a publisher reward per view that exceeds the publisher budget or total campaign budget.
+- **Solution**:
+  - Added dynamic validation helper `enforceDailyLimits(form)` in `dapp/views/creator.js` to update hints under view/click limits, clamp input bounds, and validate on submit.
+  - Added dynamic validation helper `enforcePublisherLimits(form)` to ensure `max_publisher_budget >= publisher_reward_view` and `publisher_reward_view <= budget`, updating corresponding UI hints and clamping inputs. Also dynamically caps the maximum publisher budget and reward based on the remaining budget after viewer cap allocation (`budget - max_viewer_reward`).
+  - Added dynamic validation helper `enforceViewerRewardLimits(form)` to enforce `reward_view` and `reward_click` are capped by the allowed budget, displaying dynamic help hints showing minimum limits and max limits.
+  - Enforced all sets of checks in form submit validations (`onCreatorSubmit`), including ensuring that `max_viewer_reward + max_publisher_budget <= budget`.
+  - Removed "optional" label from `publisher_reward_view` and raised `LIMITS.MIN_PUBLISHER_REWARD_VIEW` from `0.001` to `0.01` in `dapp/app.js`, `service.js` and `MinimaAds.md`. Clamped `publisher_reward_view` to the new `0.01` minimum when active.
+  - Lowered `LIMITS.MIN_REWARD_CLICK` from `0.005` to `0.001` in `dapp/app.js`, `service.js`, and `MinimaAds.md` to align with the new click limit.
+  - Refactored `formatMinima` in `dapp/views/creator.js` to strip trailing decimal zeroes (e.g. formatting `0.001000` to `0.001` and `10.000000` to `10`).
+  - Updated `enforceCapMinimum(form)` to enforce `max_viewer_reward` is capped at `budget - max_publisher_budget`, updating hints dynamically.
+- **Files**: `dapp/views/creator.js`, `dapp/app.js`, `service.js`, `MinimaAds.md`.
+- **AGENTS.md updated**: yes — this entry.
+- **No contract changes**: UI validation and limit adjustment only.
+- **Verification**: Go to Creator tab, input Max reward per viewer = 10, Reward per view = 1. The Daily view limit input will be capped at 10. Go to Publisher rewards, set total campaign budget = 100, set publisher reward per view = 0.005. The reward will clamp to 0.01 immediately, displaying a hint under both fields. The reward per view and click inputs will display hints showing Min: 0.001 MINIMA and Max: 100 MINIMA. Trailing zeroes are stripped (e.g. 0.001 instead of 0.001000). Increasing the viewer cap reduces the allowed publisher budget max limit, and vice-versa. Attempting to submit a form where `max_viewer_reward + max_publisher_budget > budget` returns a clear error message.
 
-2026-06-01 (feat: creator rewarded nodes list):
-- **Scope**: `dapp/views/mycampaigns.js`, `public/index.html`.
-- **Change**: added a lazy-loaded `Rewarded nodes` details section to each `My Campaigns` card. It groups `REWARD_EVENTS` by `USER_ADDRESS` and shows contact name when available from `maxcontacts`, shortened public key, reward count, total rewarded amount, and last rewarded date/time. Each node row has a nested expander listing individual reward events with type, amount, and reward date.
-- **UI follow-up**: nested reward detail rows now use `.ma-nested-detail`, with theme-aware light/dark backgrounds, instead of an inline light fallback that showed white in dark mode.
-- **UI follow-up 2**: `My Campaigns` top-level details (`Activity chart`, `Rewarded nodes`) now share `.ma-campaign-details` / `.ma-campaign-details-summary` styling for consistent spacing, borders, and theme-aware hover states.
-- **UI follow-up 3**: `Rewarded nodes` summary/detail tables now use `.ma-nested-table` for card-like row spacing, soft separators, and theme-aware hover backgrounds.
-- **UI follow-up 4**: grouped `Rewarded nodes` rows are now clickable across the full row, with a muted rotating `›` chevron instead of a primary-colour button. Avoided `role="button"` because Pico styles `[role=button]` as a primary button, which made the full row orange; rows keep `tabindex` and `aria-expanded`.
-- **Data note**: `USER_PROFILE` does not store Maxima display names; names are resolved opportunistically from local Maxima contacts. Unknown contacts display as `Unknown node`.
-- **No contract changes**: no DB, SW, Maxima schema, SDK, or spec changes.
 
-2026-06-01 (UX: settlement timing hint):
-- **Scope**: `dapp/views/earnings.js` only.
-- **Change**: added a short hint under `Pending settlements` explaining that settlement posts to L1 and is usually best done when the campaign ends or the channel reaches its reward cap, unless funds are needed sooner. The Earnings view is shared by viewer and publisher modes, so the hint appears in both.
-- **No contract changes**: UI copy only.
-
-2026-06-01 (fix: sticky header layering during scroll):
-- **Scope**: `public/index.html` only.
-- **Fix**: scoped sticky header CSS from global `header` selectors to `body > header`. Frame cards use internal `<header>` elements, and the global selector was accidentally making card headers sticky too (`Built-in viewer` / `Built-in` appeared above the app header while scrolling). App header keeps `z-index:90`; drawer overlay/panel remain above it at `100/101`.
-- **Follow-up**: made the header background opaque (`var(--pico-background-color)`) instead of semi-transparent rgba. The remaining visible issue was content showing through the translucent header, not a higher stacking layer.
-- **No contract changes**: UI CSS only.
-
-2026-06-01 (feat: publisher snippet copy button in summary):
-- **Scope**: `dapp/views/frames.js` only.
-- **Fix**: custom Frame `Snippet` summary now includes a compact `Copy` button beside the native expand control. The button copies the generated SDK snippet without opening/closing the details panel (`preventDefault` + `stopPropagation`).
-- **Follow-up**: styled the summary `Copy` button with the current theme primary colour and `--pico-primary-hover-background` hover effect, with padding/radius aligned to the page's existing small action buttons.
-- **Refactor**: snippet generation moved into `_loadSnippet()` and `_buildSnippet()` so both the summary copy button and expanded snippet panel use the same source. `_copySnippetText()` handles Clipboard API and textarea fallback.
-- **No contract changes**: no DB, SW, Maxima, SDK, or spec changes.
-
-2026-06-01 (fix: viewer campaign row hover colour):
-- **Scope**: `dapp/views/viewer.js` only.
-- **Fix**: `_buildCampaignRow` no longer uses `var(--pico-card-sectionning-background-color)` for hover. Added `_viewerRowHoverBackground()` with explicit neutral hover colours: `rgba(255,255,255,.06)` in dark mode and `rgba(15,23,42,.05)` in light mode. Normal row background now resets to `transparent`.
-- **No contract changes**: no DB, SW, Maxima, SDK, or spec changes.
+2026-06-02 (fix: CREATOR_LIVENESS_PING race condition — Haiku-level fix):
+- **Problem**: PING messages were sent with empty `viewer_mx` field when `_myMx` initialization wasn't complete, causing PONG failures and confusing `ok:false` logs.
+- **Root cause**: Race condition — `_checkCreatorLiveness()` could execute before `_mxReady` flag was set (async `maxima action:info` in `_completeInit`).
+- **Solution 1** (`core/minima.js`): Enhanced `sendMaxima()` logging to show exactly which route failed and why (publickey vs mxAddress). Now logs payload type, error details, and fallback attempts.
+- **Solution 2** (`sdk/index.js`): Added `_mxReady` flag + `_mxReadyCallbacks` queue. `_checkCreatorLiveness()` now waits for `_mxReady` before sending PING. Callbacks are drained when maxima info completes.
+- **Solution 3** (`sdk/index.js`): Fixed `_sendLivenessPing()` to use `_myMxAddress()` instead of `_myMx` directly, respecting global `MY_MX_ADDRESS` if provided by host.
+- **Solution 4** (`sdk/index.js`): Also increased `LIVENESS_TIMEOUT_MS` from 3000 to 5000 for better reliability in slow networks.
+- **Files**: `core/minima.js`, `sdk/index.js`.
+- **AGENTS.md updated**: yes — this entry.
+- **No contract changes**: logging and initialization order only.
+- **Verification**: Send PING from viewer → check SW logs for `[MAXIMA]` entries showing routing and status. On creator side, check `[LIVENESS]` logs showing PONG sent with `ok:true`.
 
 2026-06-01 (feat: PROFILE_REQUEST/RESPONSE — creator avatar and name for non-contact campaigns):
 - **New Maxima messages**: `PROFILE_REQUEST` (§8.17) and `PROFILE_RESPONSE` (§8.18) in MinimaAds.md.
@@ -235,4 +227,5 @@ For verification procedures, see `docs/VERIFICATION.md`.
 - **No contract changes**: UI + new Maxima messages only. DB schema unchanged.
 
 > Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, and all earlier) are archived in `docs/HISTORY.md §17`.
+
 

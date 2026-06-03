@@ -8,7 +8,8 @@ var _viewerState = {
   campaign: null,
   viewTimerId: 0,
   progressId: 0,
-  viewTracked: false
+  viewTracked: false,
+  listRendering: false
 };
 
 function renderViewer(root) {
@@ -56,6 +57,8 @@ function _buildListShell(root) {
 }
 
 function _loadAndRenderList() {
+  if (_viewerState.listRendering) { return; }
+  _viewerState.listRendering = true;
   // Fetch Maxima contacts first so we can show creator names and avatars
   MDS.cmd('maxcontacts action:list', function(contactsRes) {
     var contactsMap = {};
@@ -115,6 +118,7 @@ function _loadAndRenderList() {
         listEl.appendChild(_buildCampaignRow(campaigns[i], contact));
       }
       _fetchNonContactProfiles(campaigns, contactsMap);
+      _viewerState.listRendering = false;
     });
   });
 }
@@ -302,16 +306,14 @@ function _trackDetailView(campaign) {
   _viewerState.viewTracked = true;
   _stopProgressBar();
 
-  MinimaAds.trackView(campaign.ID, MY_ADDRESS, function(err, res) {
-    var status = document.getElementById('ma-viewer-status');
-    if (!status) { return; }
-    if (err || !res) { return; }
-    if (!res.confirmed) {
-      status.textContent = 'View not rewarded: ' + (res.reason || 'unknown');
-    } else {
-      loadTodayEarned();
-    }
-  });
+  var payload = {
+    type: 'MA_TRACK_VIEW',
+    campaignId: campaign.ID,
+    userAddress: MY_ADDRESS,
+    publisherKey: ''
+  };
+  window.MDS.comms.broadcast(JSON.stringify(payload), function() {});
+  loadTodayEarned();
 }
 
 function _wireDetailInteractions(campaign) {
@@ -322,7 +324,13 @@ function _wireDetailInteractions(campaign) {
     links[i].addEventListener('click', function(e) {
       e.preventDefault();
       var href = e.currentTarget.getAttribute('href');
-      MinimaAds.trackClick(campaign.ID, MY_ADDRESS, function() {
+      var payload = {
+        type: 'MA_TRACK_CLICK',
+        campaignId: campaign.ID,
+        userAddress: MY_ADDRESS,
+        publisherKey: ''
+      };
+      window.MDS.comms.broadcast(JSON.stringify(payload), function() {
         if (href) { window.open(href, '_blank', 'noopener'); }
         _goBackToList();
       });

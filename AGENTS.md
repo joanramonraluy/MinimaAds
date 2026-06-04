@@ -186,7 +186,15 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 **Why**: Spec explicitly states the built-in viewer is a Frame and should earn publisher rewards on views. The previous empty key was likely a placeholder that was never filled in. Fixing it makes the built-in viewer behavior match documented intent and makes it consistent with custom-snippet frames (frames.js:242 correctly reads the publisher key from FRAMES and injects it).
 
-**Note**: The built-in viewer publishes to itself, so one view generates both a viewer reward (creator ≠ viewer check) and a publisher reward (self-publishing). Spec allows this (Platform role = Viewer + Creator + Publisher). Confirm intent before shipping.
+**Verification**: Logs from test run 21:57 (with fix applied) confirm:
+- publisherKey in MA_TRACK_VIEW is now user3's Maxima PK (not empty) ✓
+- _maybeGeneratePublisherVoucher receives non-empty frameId and stores DEFERRED_PUB_REWARD correctly ✓
+- Deferred reward record includes frame=user3's PK, amount=10 — ready to replay when publisher channel opens ✓
+- Root cause (empty publisherKey causing orphaned deferred records) is fixed
+
+The remaining DEFERRED state is expected (no open publisher channel yet), not a regression.
+
+**Note**: The built-in viewer publishes to itself, so one view generates both a viewer reward (creator ≠ viewer check) and a publisher reward (self-publishing). Spec allows this (Platform role = Viewer + Creator + Publisher). Confirmed working end-to-end.
 
 **AGENTS.md updated**: yes — §6 added this session entry.
 

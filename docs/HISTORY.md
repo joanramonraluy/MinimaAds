@@ -43,3 +43,70 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 
 ---
+
+## 17) UI and Core Session Archive
+
+### 2026-06-03 (fix: CREATOR_LIVENESS_PING regression — race condition in async Maxima init)
+- **Problem**: Viewer receives `confirmed: false, reason: 'creator offline'` when calling `trackView()`, even when creator is reachable. PING messages sent to creator had empty `viewer_mx` field, causing timeout. Root cause: TWO separate issues:
+  - **Issue 1**: Auto-init hack set `_inited = true` without calling `_completeInit()`, leaving `_myMx` uninitialized.
+  - **Issue 2** (subtle race): Even after `_completeInit()` was fixed, `_checkCreatorLiveness()` was called BEFORE async `MDS.cmd('maxima action:info')` completed inside `_completeInit()`, resulting in empty `_myMx`.
+- **Root cause**: The SDK's initialization is async (requires MDS.cmd callback), but `_checkCreatorLiveness()` was not waiting for this completion. In the viewer flow, trackView() → _checkCreatorLiveness() could fire before Maxima address was ready.
+- **Solution** (four-part fix):
+  1. Removed auto-init hack from `_trackEvent()` (was: simple `_inited = true`).
+  2. Added proper `init()` call in `_trackEvent()` when `_inited === false`, ensuring full initialization chain.
+  3. Added `_mxReady` flag + `_mxReadyCallbacks` queue in SDK: set to true only after `MDS.cmd('maxima action:info')` completes in `_completeInit()`. Queued callbacks are drained when flag is set.
+  4. Updated `_checkCreatorLiveness()` to check `_mxReady` before sending PING. If not ready, callback is queued and executed later when ready.
+- **Files**: `sdk/index.js` (two commits: 0e62b5c + d2f3abc).
+- **Verification**: Viewer trackView() → SDK checks `_mxReady` → waits if needed → sends PING with valid viewer_mx → creator receives PING and responds with PONG → viewer receives PONG within 3s timeout → liveness check passes → reward proceeds.
+
+### 2026-06-03 (docs: Maxima route discovery and static MLS plan)
+- **Problem**: Payment channels between non-contact Maxima users can lose off-chain availability when a creator/viewer/publisher `Mx...` route changes. Existing `PREVSTATE(4)=creator_mx_address` is only a mutable-route hint stored immutably on the current escrow coin.
+- **Key finding**: Minima supports permanent Maxima addresses via `maxextra`: `MAX#<maxima_public_key>#<static_mls_address>`. `maxima action:send to:MAX#...` resolves the current address through the static MLS before sending.
+- **Documented design**: New `docs/MAXIMA_ROUTE_DISCOVERY.md` recommends treating `PREVSTATE(4)` as `creator_route`, requiring `MAX#...` for campaign discovery before production, keeping `CREATOR_ADDRESS` as Maxima PK identity, adding passive route refresh on every message, and adding future `PEER_ROUTE_UPDATE` for viewer/publisher route changes.
+- **Files**: `docs/MAXIMA_ROUTE_DISCOVERY.md`, `docs/DOCUMENTATION_INDEX.md`, `docs/HISTORY.md`, `AGENTS.md`.
+- **No runtime changes**: documentation/design note only.
+
+### 2026-06-02 (fix: CREATOR_LIVENESS_PING race condition — Haiku-level fix)
+- **Problem**: PING messages were sent with empty `viewer_mx` field when `_myMx` initialization was not complete, causing PONG failures and confusing `ok:false` logs.
+- **Root cause**: `_checkCreatorLiveness()` could execute before the async `maxima action:info` in `_completeInit` set `_mxReady`.
+- **Solution**:
+  - Enhanced `core/minima.js` `sendMaxima()` logging to show route failures and fallback attempts.
+  - Added `_mxReady` and `_mxReadyCallbacks` in `sdk/index.js`; `_checkCreatorLiveness()` waits for Maxima info before sending PING.
+  - Fixed `_sendLivenessPing()` to use `_myMxAddress()` instead of `_myMx` directly.
+  - Increased `LIVENESS_TIMEOUT_MS` from 3000 to 5000.
+- **Files**: `core/minima.js`, `sdk/index.js`.
+- **No contract changes**: logging and initialization order only.
+
+### 2026-06-01 (feat: PROFILE_REQUEST/RESPONSE — creator avatar and name for non-contact campaigns)
+- **New Maxima messages**: `PROFILE_REQUEST` and `PROFILE_RESPONSE`.
+- **New SW→FE signal**: `PROFILE_RECEIVED { publickey, name, icon }`.
+- **Service Worker**: `campaign.handler.js` handles profile request/response; `maxima.handler.js` routes both message types.
+- **Viewer UI**: `dapp/views/viewer.js` fetches creator profiles for non-contact campaigns, caches them in keypair as `CREATOR_PROFILE_<PK>`, and updates avatar/name in-place when received.
+- **App dispatch**: `dapp/app.js` dispatches `PROFILE_RECEIVED` to `onProfileReceived(parsed)`.
+- **No DB schema changes**.
+
+### 2026-06-03 (feat: campaign daily & publisher reward limits validation and hints)
+- **Problem**: Creators could configure daily limits that exceed the max reward per viewer, or set a publisher reward per view that exceeds the publisher budget or total campaign budget.
+- **Solution**:
+  - Added dynamic validation helper `enforceDailyLimits(form)` in `dapp/views/creator.js` to update hints under view/click limits, clamp input bounds, and validate on submit.
+  - Added dynamic validation helper `enforcePublisherLimits(form)` to ensure `max_publisher_budget >= publisher_reward_view` and `publisher_reward_view <= budget`, updating corresponding UI hints and clamping inputs. Also dynamically caps the maximum publisher budget and reward based on the remaining budget after viewer cap allocation (`budget - max_viewer_reward`).
+  - Added dynamic validation helper `enforceViewerRewardLimits(form)` to enforce `reward_view` and `reward_click` are capped by the allowed budget, displaying dynamic help hints showing minimum limits and max limits.
+  - Enforced all sets of checks in form submit validations (`onCreatorSubmit`), including ensuring that `max_viewer_reward + max_publisher_budget <= budget`.
+  - Removed "optional" label from `publisher_reward_view` and raised `LIMITS.MIN_PUBLISHER_REWARD_VIEW` from `0.001` to `0.01` in `dapp/app.js`, `service.js` and `MinimaAds.md`. Clamped `publisher_reward_view` to the new `0.01` minimum when active.
+  - Lowered `LIMITS.MIN_REWARD_CLICK` from `0.005` to `0.001` in `dapp/app.js`, `service.js`, and `MinimaAds.md` to align with the new click limit.
+  - Refactored `formatMinima` in `dapp/views/creator.js` to strip trailing decimal zeroes.
+  - Updated `enforceCapMinimum(form)` to enforce `max_viewer_reward` is capped at `budget - max_publisher_budget`, updating hints dynamically.
+- **Files**: `dapp/views/creator.js`, `dapp/app.js`, `service.js`, `MinimaAds.md`.
+- **No contract changes**: UI validation and limit adjustment only.
+
+### 2026-06-01 (fix: scoped sticky header CSS)
+- **Problem**: Scoped sticky header CSS was affecting subheaders within cards.
+- **Solution**: Scoped sticky header CSS from global `header` selectors to `body > header`. Frame cards use internal `<header>` elements. Opaque background color applied to prevent content showing through.
+
+### 2026-06-01 (feat: publisher snippet copy button in summary)
+- **Problem**: Users had to open the details panel to copy the snippet.
+- **Solution**: Custom Frame `Snippet` summary includes a compact `Copy` button using Clipboard API/textarea fallback. Styled with theme primary hover colors.
+
+### 2026-06-01 (fix: viewer campaign row hover colour)
+- **Problem**: Hover color used pico card sectioning background color.
+- **Solution**: Set explicit neutral hover colors: `rgba(255,255,255,.06)` in dark mode and `rgba(15,23,42,.05)` in light mode.

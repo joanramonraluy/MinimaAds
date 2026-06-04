@@ -13,7 +13,7 @@
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;';
 
     var panel = document.createElement('div');
-    panel.style.cssText = 'background:#1e1e1e;color:#d4d4d4;border-radius:.5rem;padding:1.5rem;width:90%;max-width:800px;font-family:monospace;display:flex;flex-direction:column;gap:.75rem;max-height:90vh;';
+    panel.style.cssText = 'background:#1e1e1e;color:#d4d4d4;border-radius:.5rem;padding:1.5rem;width:95%;max-width:1000px;font-family:monospace;display:flex;flex-direction:column;gap:.75rem;max-height:90vh;overflow-y:auto;';
 
     var header = document.createElement('div');
     header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;';
@@ -78,11 +78,11 @@
     });
 
     var extRow = document.createElement('div');
-    extRow.style.cssText = 'display:flex;gap:.5rem;align-items:center;';
+    extRow.style.cssText = 'display:flex;gap:.5rem;align-items:stretch;flex-wrap:wrap;';
     var extInput = document.createElement('input');
     extInput.type = 'text';
     extInput.placeholder = '0xABC… (platform wallet address)';
-    extInput.style.cssText = 'flex:1;background:#252526;color:#d4d4d4;border:1px solid #3c3c3c;border-radius:.25rem;padding:.35rem .5rem;font-family:monospace;font-size:.8rem;';
+    extInput.style.cssText = 'flex:1;min-width:200px;background:#252526;color:#d4d4d4;border:1px solid #3c3c3c;border-radius:.25rem;padding:.35rem .5rem;font-family:monospace;font-size:.8rem;box-sizing:border-box;';
     var extBtn = document.createElement('button');
     extBtn.textContent = 'Register';
     extBtn.style.cssText = 'background:#6a9955;color:#fff;border:none;border-radius:.25rem;padding:.35rem .75rem;cursor:pointer;font-size:.8rem;white-space:nowrap;';
@@ -106,6 +106,57 @@
       });
     });
 
+    var routeSep = document.createElement('hr');
+    routeSep.style.cssText = 'border-color:#3c3c3c;margin:.25rem 0;';
+
+    var routeTitle = document.createElement('strong');
+    routeTitle.textContent = 'Dev Settings — Maxima Routes';
+    routeTitle.style.cssText = 'color:#569cd6;font-size:.85rem;';
+
+    var routeStatus = document.createElement('p');
+    routeStatus.id = 'ma-dev-route-status';
+    routeStatus.style.cssText = 'font-size:.8rem;color:#9cdcfe;margin:0;word-break:break-all;';
+    routeStatus.textContent = 'Checking stored route…';
+    MDS.keypair.get('CREATOR_PERMANENT_ROUTE', function(res) {
+      var stored = (res && res.status && res.value) ? res.value : null;
+      routeStatus.textContent = stored
+        ? 'Current route: ' + stored
+        : 'No route registered yet.';
+    });
+
+    var routeStaticMlsBtn = document.createElement('button');
+    routeStaticMlsBtn.textContent = 'Copy: maxextra action:staticmls host:<your-mls-p2p-identity>';
+    routeStaticMlsBtn.style.cssText = 'align-self:flex-start;background:#3c3c3c;color:#d4d4d4;border:1px solid #555;border-radius:.25rem;padding:.35rem .75rem;cursor:pointer;font-size:.8rem;margin-bottom:.25rem;';
+    routeStaticMlsBtn.addEventListener('click', function() {
+      navigator.clipboard.writeText('maxextra action:staticmls host:<your-mls-p2p-identity>');
+      routeStatus.textContent = 'Command copied to clipboard!';
+    });
+
+    var routeRegisterBtn = document.createElement('button');
+    routeRegisterBtn.textContent = 'Register Creator Route';
+    routeRegisterBtn.style.cssText = 'align-self:flex-start;background:#0e639c;color:#fff;border:none;border-radius:.25rem;padding:.35rem .85rem;cursor:pointer;font-size:.8rem;';
+    routeRegisterBtn.addEventListener('click', function() {
+      routeRegisterBtn.disabled = true;
+      routeRegisterBtn.textContent = 'Registering…';
+      if (typeof setCreatorMaximaRoute !== 'function') {
+        routeStatus.textContent = 'ERROR: setCreatorMaximaRoute() not available (core/minima.js not loaded).';
+        routeRegisterBtn.disabled = false;
+        routeRegisterBtn.textContent = 'Register Creator Route';
+        return;
+      }
+      setCreatorMaximaRoute(function(err, route) {
+        routeRegisterBtn.disabled = false;
+        routeRegisterBtn.textContent = 'Register Creator Route';
+        if (err) {
+          routeStatus.style.color = '#f44747';
+          routeStatus.textContent = 'Error: ' + err.message;
+        } else {
+          routeStatus.style.color = '#4ec9b0';
+          routeStatus.textContent = 'Route registered: ' + route;
+        }
+      });
+    });
+
     panel.appendChild(header);
     panel.appendChild(_textarea);
     panel.appendChild(runBtn);
@@ -116,6 +167,11 @@
     panel.appendChild(setSelfBtn);
     panel.appendChild(extRow);
     panel.appendChild(clearBtn);
+    panel.appendChild(routeSep);
+    panel.appendChild(routeTitle);
+    panel.appendChild(routeStatus);
+    panel.appendChild(routeStaticMlsBtn);
+    panel.appendChild(routeRegisterBtn);
     overlay.appendChild(panel);
 
     overlay.addEventListener('click', function (e) {

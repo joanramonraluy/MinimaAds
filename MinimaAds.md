@@ -23,6 +23,19 @@
 - [13) SDK Integration](#13)
 - [15) UI Design](#15)
 
+## Quick Navigation — Read by task type
+
+| Task type | Sections to read |
+|---|---|
+| UI (views, CSS, copy) | §12, §15 |
+| Core logic (campaigns, rewards, selection, validation) | §3, §7 |
+| Service Worker (handlers, DB schema, NEWBLOCK) | §3, §7, §11 |
+| Maxima protocol (message schemas, send/receive) | §3, §8 |
+| Payment channels (open, voucher, settle) | §3, §6.5–6.8, §7.6, §8.8–8.12 |
+| KissVM escrow / on-chain status | §4, §6.3, Appendix B |
+| SDK (publisher integration) | §3, §7, §13 |
+| Full feature (new system flow) | §1–§8, §11–§13, relevant Appendix |
+
 ---
 
 ## 1) Architecture
@@ -286,6 +299,27 @@ CREATE TABLE IF NOT EXISTS CHANNEL_STATE (
 
 ---
 
+### 3.6 Creator Permanent Routes (MVP)
+
+In MVP phase, creators' permanent Maxima routes are stored in local KeyPair storage:
+
+| Key | Value | Semantics |
+|---|---|---|
+| `CREATOR_PERMANENT_ROUTE` | `MAX#<publickey>#<staticMLS>` | Creator's permanent, MLS-resolved address. Set once at campaign creation; used in escrow STATE(4). |
+
+**On-chain storage**: The escrow coin's `STATE(4)` now contains the creator's permanent route instead of a mutable `Mx...` contact address. This enables campaign discovery even if the creator's contact address changes.
+
+**Setup flow**: Creators must have a static MLS configured on their node before creating campaigns. The creator setup wizard (first access to Creator view) guides them through:
+1. `maxextra action:staticmls host:<server-p2p-identity>` (on creator's node)
+2. `maxextra action:addpermanent publickey:<creator-pk>` (on static MLS server)
+3. Register in MinimaAds via UI button (stores in KeyPair)
+
+Once registered, all future campaigns use `MAX#<pk>#<mls>` in escrow STATE(4), enabling discovery via Minima's native MLS resolution mechanism.
+
+**Future (post-MVP)**: Dynamic route refresh via `PEER_ROUTE_UPDATE` messages (see `docs/MAXIMA_ROUTE_DISCOVERY.md`).
+
+---
+
 ## 4) Economic Model
 
 ### 4.1 Variables
@@ -386,8 +420,8 @@ var LIMITS = {
   MAX_CAMPAIGNS_PER_SESSION:       10,
   MIN_BUDGET:                      100,    // minimum campaign budget in MINIMA (~$0.77)
   MIN_REWARD_VIEW:                 0.001,  // minimum reward per view in MINIMA
-  MIN_REWARD_CLICK:                0.005,  // minimum reward per click in MINIMA
-  MIN_PUBLISHER_REWARD_VIEW:       0.001,  // floor for PUBLISHER_REWARD_VIEW (only applies when R_p > 0)
+  MIN_REWARD_CLICK:                0.001,  // minimum reward per click in MINIMA
+  MIN_PUBLISHER_REWARD_VIEW:       0.01,  // floor for PUBLISHER_REWARD_VIEW (only applies when R_p > 0)
   MAX_CAMPAIGN_DAYS:               90      // maximum campaign duration in days
 };
 ```
@@ -403,8 +437,8 @@ var LIMITS = {
 | `MAX_CAMPAIGNS_PER_SESSION` | 10 | `selection.js` — session counter, never persisted to DB |
 | `MIN_BUDGET` | 100 MINIMA | `creator.js` submit validation + HTML `min` attribute — anti-spam floor (~$0.77 at current rates) |
 | `MIN_REWARD_VIEW` | 0.001 MINIMA | `creator.js` submit validation + HTML `min` attribute |
-| `MIN_REWARD_CLICK` | 0.005 MINIMA | `creator.js` submit validation + HTML `min` attribute |
-| `MIN_PUBLISHER_REWARD_VIEW` | 0.001 MINIMA | `creator.js` submit validation — only applies when `PUBLISHER_REWARD_VIEW > 0`; value of 0 (disabled) is always valid |
+| `MIN_REWARD_CLICK` | 0.001 MINIMA | `creator.js` submit validation + HTML `min` attribute |
+| `MIN_PUBLISHER_REWARD_VIEW` | 0.01 MINIMA | `creator.js` submit validation — only applies when `PUBLISHER_REWARD_VIEW > 0`; value of 0 (disabled) is always valid |
 | `MAX_CAMPAIGN_DAYS` | 90 | `creator.js` submit validation + HTML `max` attribute |
 
 ---
@@ -865,8 +899,8 @@ signalFE(type, data)
 Every node with the DApp installed registers the ESCROW_SCRIPT at startup and independently tracks all coins at `ESCROW_ADDRESS`.
 
 - On `NEWBLOCK` → SW queries `coins address:<ESCROW_ADDRESS>` → finds coins from all creators
-- Each coin has STATE(3)=campaign_id_hex and STATE(4)=creator_mx_address
-- If campaign is unknown → SW sends `REQUEST_CAMPAIGN_DATA` to creator via `to:<creator_mx_address>`
+- Each coin has STATE(3)=campaign_id_hex and STATE(4)=creator_permanent_route (MAX#<pk>#<mls> format)
+- If campaign is unknown → SW sends `REQUEST_CAMPAIGN_DATA` to creator via `to:<STATE(4)>` (Minima resolves the route via static MLS)
 - Creator responds with `CAMPAIGN_DATA_RESPONSE` containing full campaign + ad JSON
 - Receiving node persists via `MERGE INTO CAMPAIGNS` + `MERGE INTO ADS`
 
@@ -1002,6 +1036,8 @@ Sent by the viewer SDK the first time it wants to earn rewards from a campaign. 
 ```
 
 > `role` defaults to `"viewer"`. Set to `"publisher"` for publisher channels. `frame_id` is required when `role="publisher"`.
+
+> **Routing semantics (MVP)**: `viewer_mx` is a short-lived contact address hint. Creators may reply to `to:<viewer_mx>` directly if the viewer is in their contacts, or via `publickey:` fallback. Creator permanent route is stored from escrow STATE(4); viewer route discovery follows the same pattern as RequestCampaignData (via liveness checks).
 
 ### 8.9 CHANNEL_OPEN
 
@@ -1313,8 +1349,8 @@ var LIMITS = {
   MAX_CAMPAIGNS_PER_SESSION:       10,
   MIN_BUDGET:                      100,
   MIN_REWARD_VIEW:                 0.001,
-  MIN_REWARD_CLICK:                0.005,
-  MIN_PUBLISHER_REWARD_VIEW:       0.001,
+  MIN_REWARD_CLICK:                0.001,
+  MIN_PUBLISHER_REWARD_VIEW:       0.01,
   MAX_CAMPAIGN_DAYS:               90
 };
 

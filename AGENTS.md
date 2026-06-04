@@ -175,6 +175,51 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-06-04 — MAX# Permanent Routes (MVP)
+
+**Task**: Implement MAX# permanent Maxima routes for Creator/Publisher discovery.
+
+**Changes**:
+- **core/minima.js** (+45 lines): Added 4 helpers — `getMaximaInfo()`, `parseMaximaRoute()`, `setCreatorMaximaRoute()`, `getCreatorMaximaRoute()`. Routes stored in KeyPair as `CREATOR_PERMANENT_ROUTE`.
+- **dapp/views/creator.js** (+150 lines, refactored): Added setup banner (3-step wizard) on first access to Creator role. `fundEscrowAndPublish()` now validates permanent route before escrow funding. `fundEscrowWithRoute()` uses permanent route in escrow STATE(4).
+- **dapp/views/devtools.js** (+60 lines): New "Dev Settings — Maxima Routes" section in Ctrl+Shift+D panel. Shows stored route, copy button for `maxextra staticmls` command, and "Register Creator Route" button.
+
+**Why**: Solves dynamic Mx address problem for Creator/Publisher discovery. STATE(4) now contains `MAX#<pk>#<mls>` (permanent, MLS-resolved) instead of mutable `Mx...` contact. Campaign discovery survives creator node restart or address change.
+
+**Architecture validated against**: Minima 1.0.45 source (maxima.java, maxextra.java); MinimaAds codebase (sendMaxima fallback, escrow discovery, keypair storage all pre-existing). No schema migrations needed (KeyPair storage only).
+
+**Testing required**:
+- [ ] Ctrl+Shift+D: "Maxima Routes" section visible
+- [ ] Creator view (first access): setup banner appears
+- [ ] After registering route: campaign form enabled
+- [ ] Campaign creation: STATE(4) contains `MAX#0x...#Mx...@host:port`
+- [ ] Viewer node discovery: reads STATE(4), sends REQUEST_CAMPAIGN_DATA to MAX# route, receives CAMPAIGN_DATA_RESPONSE via MLS
+
+**Docs updated**: MinimaAds.md §3.6 (new), §8.1 (STATE(4) semantics), §8.8 (routing note). AGENTS.md this section.
+
+**Known limitations (MVP)**: No dynamic route refresh (`PEER_ROUTE_UPDATE` messages). Setup is one-time per node. Viewers are not required to register (they initialize chats directly).
+
+**Future work** (post-MVP, see `docs/MAXIMA_ROUTE_DISCOVERY.md`):
+- Implement `PEER_ROUTE_UPDATE` messages for dynamic creator/viewer route refresh
+- Add publisher permanent route setup (mirrors creator flow)
+- Add passive route refresh headers to all Maxima messages (sender_route, sender_mx)
+- Rate-limit route update messages
+
+**Code quality**: All Rhino-compatible (var, function declarations, no arrows/templates). Helpers use MDS.cmd and MDS.keypair APIs. No breaking changes to existing signatures.
+
+---
+
+2026-06-04 (feat: MAX# permanent route support — creator setup + escrow STATE(4)):
+- **What**: Implemented MVP phase of permanent Maxima route support validated by Opus.
+- **Changes**:
+  - `core/minima.js`: added 4 helper functions — `getMaximaInfo(cb)`, `parseMaximaRoute(route)`, `setCreatorMaximaRoute(cb)`, `getCreatorMaximaRoute(cb)`. All Rhino-safe (var, function declarations, no arrow functions/template literals). Route stored in keypair as `CREATOR_PERMANENT_ROUTE`.
+  - `dapp/views/creator.js`: `fundEscrowAndPublish` now validates `CREATOR_PERMANENT_ROUTE` exists before starting escrow. If not set → fails with clear message. Escrow STATE(4) now stores `MAX#<pk>#<mls>` (permanent route) instead of mutable `Mx...` contact string. Added `_showCreatorRouteSetupBanner()` (3-step setup instructions + "Check & Register Route" button) shown on creator view load when route is not set. Submit button disabled while route is missing. Helper `_copyToClipboard()` added.
+  - `dapp/views/devtools.js`: Ctrl+Shift+D panel expanded with "Dev Settings — Maxima Routes" section showing current stored route, copy command for `maxextra action:staticmls`, and "Register Creator Route" button.
+- **STATE(4) contract change**: escrow coin STATE(4) now encodes `MAX#<pk>#<mls>` instead of `Mx...` contact. Viewers discovering campaigns via on-chain STATE(4) must send to this MAX# route (existing `sendMaxima` fallback with `to:MAX#...` already handles this — see `sendMaxima` in core/minima.js which passes mxAddress as second arg).
+- **Files**: `core/minima.js`, `dapp/views/creator.js`, `dapp/views/devtools.js`.
+- **AGENTS.md updated**: yes — this entry; oldest entry archived to `docs/HISTORY.md §17`.
+- **Verification**: (1) Navigate to #creator — setup banner should appear (route not yet set). (2) Ctrl+Shift+D → "Maxima Routes" section visible, shows "No route registered yet.". (3) If node has static MLS: click "Check & Register Route" → success, page reloads. (4) After reload: no banner, submit enabled. (5) Create a campaign → inspect escrow coin STATE(4) — should be hex of `MAX#<pk>#<mls>`. (6) Nodes without static MLS: "Register" shows "Node does not have static MLS configured" error.
+
 2026-06-03 (refactor: viewer.js — eliminate SDK race conditions via Service Worker broadcast):
 - **Problem**: Viewer received "creator offline" errors when calling `trackView()` due to race conditions in SDK initialization. Liveness check PING timed out because async Maxima address initialization wasn't complete.
 - **Root Cause Analysis**: The SDK was never designed to handle the complex timing interactions in the integrated viewer.js context. However, the **publisher SDK snippet** uses a completely different pattern that **works perfectly**: broadcast `MA_TRACK_VIEW` messages and let the Service Worker handle validation, rewards, and payments.
@@ -194,59 +239,4 @@ For verification procedures, see `docs/VERIFICATION.md`.
 - **SDK Note**: The earlier `_mxReady` flag fixes in `sdk/index.js` are retained for other use cases (publishers using SDK directly), but viewer.js no longer depends on them.
 - **Verification**: (1) Navigate to #viewer, click campaign to open detail. (2) Wait 3s for progress bar. (3) Verify "Today earned" updates automatically. (4) Click CTA and verify URL opens. (5) Check logs for no errors.
 
-2026-06-03 (fix: CREATOR_LIVENESS_PING regression — race condition in async Maxima init):
-- **Problem**: Viewer receives `confirmed: false, reason: 'creator offline'` when calling `trackView()`, even when creator is reachable. PING messages sent to creator had empty `viewer_mx` field, causing timeout. Root cause: TWO separate issues:
-  - **Issue 1**: Auto-init hack set `_inited = true` without calling `_completeInit()`, leaving `_myMx` uninitialized.
-  - **Issue 2** (subtle race): Even after `_completeInit()` was fixed, `_checkCreatorLiveness()` was called BEFORE async `MDS.cmd('maxima action:info')` completed inside `_completeInit()`, resulting in empty `_myMx`.
-- **Root cause**: The SDK's initialization is async (requires MDS.cmd callback), but `_checkCreatorLiveness()` was not waiting for this completion. In the viewer flow, trackView() → _checkCreatorLiveness() could fire before Maxima address was ready.
-- **Solution** (four-part fix):
-  1. Removed auto-init hack from `_trackEvent()` (was: simple `_inited = true`).
-  2. Added proper `init()` call in `_trackEvent()` when `_inited === false`, ensuring full initialization chain.
-  3. Added `_mxReady` flag + `_mxReadyCallbacks` queue in SDK: set to true only after `MDS.cmd('maxima action:info')` completes in `_completeInit()`. Queued callbacks are drained when flag is set.
-  4. Updated `_checkCreatorLiveness()` to check `_mxReady` before sending PING. If not ready, callback is queued and executed later when ready.
-- **Files**: `sdk/index.js` (two commits: 0e62b5c + d2f3abc).
-- **AGENTS.md updated**: yes — this entry.
-- **Verification**: Viewer trackView() → SDK checks `_mxReady` → waits if needed → sends PING with valid viewer_mx → creator receives PING and responds with PONG → viewer receives PONG within 3s timeout → liveness check passes → reward proceeds.
-
-2026-06-03 (feat: campaign daily & publisher reward limits validation and hints):
-- **Problem**: Creators could configure daily limits that exceed the max reward per viewer, or set a publisher reward per view that exceeds the publisher budget or total campaign budget.
-- **Solution**:
-  - Added dynamic validation helper `enforceDailyLimits(form)` in `dapp/views/creator.js` to update hints under view/click limits, clamp input bounds, and validate on submit.
-  - Added dynamic validation helper `enforcePublisherLimits(form)` to ensure `max_publisher_budget >= publisher_reward_view` and `publisher_reward_view <= budget`, updating corresponding UI hints and clamping inputs. Also dynamically caps the maximum publisher budget and reward based on the remaining budget after viewer cap allocation (`budget - max_viewer_reward`).
-  - Added dynamic validation helper `enforceViewerRewardLimits(form)` to enforce `reward_view` and `reward_click` are capped by the allowed budget, displaying dynamic help hints showing minimum limits and max limits.
-  - Enforced all sets of checks in form submit validations (`onCreatorSubmit`), including ensuring that `max_viewer_reward + max_publisher_budget <= budget`.
-  - Removed "optional" label from `publisher_reward_view` and raised `LIMITS.MIN_PUBLISHER_REWARD_VIEW` from `0.001` to `0.01` in `dapp/app.js`, `service.js` and `MinimaAds.md`. Clamped `publisher_reward_view` to the new `0.01` minimum when active.
-  - Lowered `LIMITS.MIN_REWARD_CLICK` from `0.005` to `0.001` in `dapp/app.js`, `service.js`, and `MinimaAds.md` to align with the new click limit.
-  - Refactored `formatMinima` in `dapp/views/creator.js` to strip trailing decimal zeroes (e.g. formatting `0.001000` to `0.001` and `10.000000` to `10`).
-  - Updated `enforceCapMinimum(form)` to enforce `max_viewer_reward` is capped at `budget - max_publisher_budget`, updating hints dynamically.
-- **Files**: `dapp/views/creator.js`, `dapp/app.js`, `service.js`, `MinimaAds.md`.
-- **AGENTS.md updated**: yes — this entry.
-- **No contract changes**: UI validation and limit adjustment only.
-- **Verification**: Go to Creator tab, input Max reward per viewer = 10, Reward per view = 1. The Daily view limit input will be capped at 10. Go to Publisher rewards, set total campaign budget = 100, set publisher reward per view = 0.005. The reward will clamp to 0.01 immediately, displaying a hint under both fields. The reward per view and click inputs will display hints showing Min: 0.001 MINIMA and Max: 100 MINIMA. Trailing zeroes are stripped (e.g. 0.001 instead of 0.001000). Increasing the viewer cap reduces the allowed publisher budget max limit, and vice-versa. Attempting to submit a form where `max_viewer_reward + max_publisher_budget > budget` returns a clear error message.
-
-
-2026-06-02 (fix: CREATOR_LIVENESS_PING race condition — Haiku-level fix):
-- **Problem**: PING messages were sent with empty `viewer_mx` field when `_myMx` initialization wasn't complete, causing PONG failures and confusing `ok:false` logs.
-- **Root cause**: Race condition — `_checkCreatorLiveness()` could execute before `_mxReady` flag was set (async `maxima action:info` in `_completeInit`).
-- **Solution 1** (`core/minima.js`): Enhanced `sendMaxima()` logging to show exactly which route failed and why (publickey vs mxAddress). Now logs payload type, error details, and fallback attempts.
-- **Solution 2** (`sdk/index.js`): Added `_mxReady` flag + `_mxReadyCallbacks` queue. `_checkCreatorLiveness()` now waits for `_mxReady` before sending PING. Callbacks are drained when maxima info completes.
-- **Solution 3** (`sdk/index.js`): Fixed `_sendLivenessPing()` to use `_myMxAddress()` instead of `_myMx` directly, respecting global `MY_MX_ADDRESS` if provided by host.
-- **Solution 4** (`sdk/index.js`): Also increased `LIVENESS_TIMEOUT_MS` from 3000 to 5000 for better reliability in slow networks.
-- **Files**: `core/minima.js`, `sdk/index.js`.
-- **AGENTS.md updated**: yes — this entry.
-- **No contract changes**: logging and initialization order only.
-- **Verification**: Send PING from viewer → check SW logs for `[MAXIMA]` entries showing routing and status. On creator side, check `[LIVENESS]` logs showing PONG sent with `ok:true`.
-
-2026-06-01 (feat: PROFILE_REQUEST/RESPONSE — creator avatar and name for non-contact campaigns):
-- **New Maxima messages**: `PROFILE_REQUEST` (§8.17) and `PROFILE_RESPONSE` (§8.18) in MinimaAds.md.
-- **New SW→FE signal**: `PROFILE_RECEIVED { publickey, name, icon }` — added to §8.15 signal table.
-- **`public/service-workers/handlers/campaign.handler.js`**: Added `handleProfileRequest(payload, senderPk)` — calls `maxima action:info`, reads `name` and `icon`, sends `PROFILE_RESPONSE` back via `sendMaxima(senderPk, null, ...)`. Added `handleProfileResponse(payload)` — calls `signalFE("PROFILE_RECEIVED", { publickey, name, icon })`.
-- **`public/service-workers/handlers/maxima.handler.js`**: Added two branches — `PROFILE_REQUEST` (passes `msg.data.from` as senderPk) and `PROFILE_RESPONSE`.
-- **`dapp/views/viewer.js`**: `_buildCampaignRow` now sets `data-creator-pk`, `class="ma-row-avatar"` (with `data-letter` fallback), and `class="ma-row-body"`. `_loadAndRenderList` calls `_fetchNonContactProfiles(campaigns, contactsMap)` after rendering rows. New functions: `_fetchNonContactProfiles`, `_loadOrRequestProfile`, `_sendProfileRequest`, `_applyProfileToRow`, `onProfileReceived`. Profile cached in keypair as `CREATOR_PROFILE_<PK>`.
-- **`dapp/app.js`**: Added `PROFILE_RECEIVED` dispatch in `handleMdsComms` → `onProfileReceived(parsed)`.
-- **Flow**: viewer renders list → for each creator not in contacts, checks keypair cache → if not cached, sends PROFILE_REQUEST (poll:false) → creator SW responds with PROFILE_RESPONSE → viewer SW signals PROFILE_RECEIVED → FE updates avatar/name in-place and caches to keypair. Graceful fallback: letter avatar shown until profile arrives.
-- **No contract changes**: UI + new Maxima messages only. DB schema unchanged.
-
 > Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, and all earlier) are archived in `docs/HISTORY.md §17`.
-
-

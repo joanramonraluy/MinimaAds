@@ -65,6 +65,54 @@ function sendMaxima(publicKey, mxAddress, payload, cb) {
   }
 }
 
+// Helper: Get current node's Maxima info (publickey, staticmls status, mls address).
+// Works in both SW and FE contexts.
+function getMaximaInfo(cb) {
+  MDS.cmd("maxima action:info", function(resp) {
+    if (resp.status) {
+      cb(null, {
+        publickey: resp.response.publickey,
+        staticmls: resp.response.staticmls === true,
+        mls: resp.response.mls || ""
+      });
+    } else {
+      cb(new Error("Cannot read maxima info"));
+    }
+  });
+}
+
+// Helper: Validate and parse a permanent route string MAX#<pk>#<mls>.
+// Returns { publickey, mls } or null if invalid.
+function parseMaximaRoute(route) {
+  if (!route || typeof route !== "string") { return null; }
+  if (route.indexOf("MAX#") !== 0) { return null; }
+  var parts = route.split("#");
+  if (parts.length !== 3) { return null; }
+  return { publickey: parts[1], mls: parts[2] };
+}
+
+// Helper: Build and store the creator permanent route MAX#<pk>#<mls>.
+// Requires static MLS to be configured on the node.
+function setCreatorMaximaRoute(cb) {
+  getMaximaInfo(function(err, info) {
+    if (err) { return cb(err); }
+    if (!info.staticmls) { return cb(new Error("Node does not have static MLS configured")); }
+    var permanentRoute = "MAX#" + info.publickey + "#" + info.mls;
+    MDS.keypair.set("CREATOR_PERMANENT_ROUTE", permanentRoute, function() {
+      cb(null, permanentRoute);
+    });
+  });
+}
+
+// Helper: Get the stored creator permanent route.
+// Calls cb(route) where route is the MAX# string, or null if not set.
+function getCreatorMaximaRoute(cb) {
+  MDS.keypair.get("CREATOR_PERMANENT_ROUTE", function(res) {
+    var route = (res && res.status && res.value) ? res.value : null;
+    cb(route);
+  });
+}
+
 function broadcastMaxima(payload, cb) {
   var hex = "0x" + utf8ToHex(JSON.stringify(payload)).toUpperCase();
   MDS.cmd("maxima action:sendall application:" + APP_NAME + " data:" + hex, function(res) {

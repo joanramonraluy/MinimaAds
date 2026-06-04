@@ -310,7 +310,7 @@ function _trackDetailView(campaign) {
     type: 'MA_TRACK_VIEW',
     campaignId: campaign.ID,
     userAddress: MY_ADDRESS,
-    publisherKey: ''
+    publisherKey: MY_ADDRESS
   };
   window.MDS.comms.broadcast(JSON.stringify(payload), function() {});
   loadTodayEarned();
@@ -328,7 +328,7 @@ function _wireDetailInteractions(campaign) {
         type: 'MA_TRACK_CLICK',
         campaignId: campaign.ID,
         userAddress: MY_ADDRESS,
-        publisherKey: ''
+        publisherKey: MY_ADDRESS
       };
       window.MDS.comms.broadcast(JSON.stringify(payload), function() {
         if (href) { window.open(href, '_blank', 'noopener'); }

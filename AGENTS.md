@@ -175,6 +175,23 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-06-04 — Fix: Built-in Viewer Publisher Rewards Not Earned
+
+**Task**: Diagnose and fix why the built-in viewer (integrated snippet in MinimaAds) produces viewer rewards but publisher rewards are never generated or sent.
+
+**Investigation**: Opus traced the reward flow end-to-end across frames.js → comms.handler.js → channel.handler.js → voucher pipeline. The channel/voucher infrastructure is correct and capable of publisher-reward generation. The single defect: `viewer.js:313` and `:331` hardcoded `publisherKey: ''` in both `MA_TRACK_VIEW` and `MA_TRACK_CLICK` payloads. Per spec (§96, §664-669), the built-in viewer IS a registered Frame with `publisher_key = node's own Maxima PK`, and should self-publish (earn publisher rewards on own views). An empty `publisher_key` causes the guard at `channel.handler.js:1309` (`if (r === 'viewer' && (frame_id || publisher_key))`) to skip `_maybeGeneratePublisherVoucher`, blocking the entire publisher-reward branch at the deferred-voucher step (where log shows viewer event created at user1.txt:37 then stops — no publisher voucher).
+
+**Changes**:
+- **dapp/views/viewer.js** (lines 313 and 331): Replace `publisherKey: ''` with `publisherKey: MY_ADDRESS`. `MY_ADDRESS` is the node's Maxima public key (set from `maxima action:info` at app.js:1842) — the same value used for the built-in frame ID. This enables the publisher-reward branch to fire on every view/click in the built-in viewer.
+
+**Why**: Spec explicitly states the built-in viewer is a Frame and should earn publisher rewards on views. The previous empty key was likely a placeholder that was never filled in. Fixing it makes the built-in viewer behavior match documented intent and makes it consistent with custom-snippet frames (frames.js:242 correctly reads the publisher key from FRAMES and injects it).
+
+**Note**: The built-in viewer publishes to itself, so one view generates both a viewer reward (creator ≠ viewer check) and a publisher reward (self-publishing). Spec allows this (Platform role = Viewer + Creator + Publisher). Confirm intent before shipping.
+
+**AGENTS.md updated**: yes — §6 added this session entry.
+
+---
+
 ### Session: 2026-06-04 — Documentation Audit: Publisher Campaign Discovery & SDK Integration
 
 **Task**: Audit MinimaAds.md §6/§8/§13 to identify obsolete or misleading documentation about publisher campaign discovery post-MAXIMA_ROUTE_DISCOVERY, then fix any inaccuracies or gaps.

@@ -175,6 +175,47 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-06-04 — Settings Page Accordions
+
+**Task**: Refactor the Settings page to consolidate all sections (Appearance, Maxima Routes, and Privacy) into collapsible accordions (details/summary elements), keeping only Appearance open by default, and handling automatic route-based expansion.
+
+**Changes**:
+- **dapp/views/settings.js**: Refactored `renderSettings()` to use PicoCSS details/summary accordions. Integrated `renderMaximaRoutesSettings` inside the "Configure Maxima Routes" accordion. If the URL hash is `settings/maxima-routes`, it opens the routes accordion, collapses Appearance, and scrolls the routes section into view.
+- **dapp/views/settings-maxima-routes.js**: Removed the standalone heading so the MLS and permanent route configuration forms embed cleanly in the accordion, and updated the description to note that the feature is essential for both campaign creators and publishers.
+
+**Why**: Consolidates settings configuration onto a single screen to eliminate unnecessary sub-page redirects, while maintaining backward-compatibility with `#settings/maxima-routes` deep links.
+
+**Testing required**:
+- Navigate to `#settings` → Appearance should be open, other accordions closed.
+- Click "Configure Maxima Routes" → verify it opens and contains MLS, Permanent User registration, and Finalise options.
+- Click a redirection link/trigger (e.g. Creator view without route) → page redirects to `#settings/maxima-routes`, which opens the routes accordion, collapses Appearance, and scrolls to the routes section.
+
+---
+
+### Session: 2026-06-04 — Settings: Maxima Routes Page
+
+**Task**: Move MLS/permanent route configuration from inline creator banner to a dedicated Settings sub-page (`#settings/maxima-routes`). Both Creator and Publisher views redirect to that page when no permanent route is registered.
+
+**Changes**:
+- **dapp/views/settings-maxima-routes.js** (new): `renderMaximaRoutesSettings(root)` — 3 sections: MLS Server Address (save to keypair), Register as Permanent (maxextra addpermanent), Finalise Route Registration (setCreatorMaximaRoute + live route display).
+- **dapp/views/settings.js**: added sub-route dispatch — `hash === 'settings/maxima-routes'` → call `renderMaximaRoutesSettings`. Added "Maxima Routes" section to main settings page with `Configure Maxima Routes ›` link.
+- **dapp/views/creator.js**: removed `_showCreatorRouteSetupBanner()` and `_copyToClipboard()`. `renderCreator` now calls `getCreatorMaximaRoute` and redirects to `#settings/maxima-routes` when no route is set. No more inline 3-step wizard.
+- **dapp/views/frames.js**: added same `getCreatorMaximaRoute` redirect check at start of `renderFrames` — publisher without a registered route is redirected to `#settings/maxima-routes`.
+- **dapp/app.js**: `currentRoute()` now recognises `settings/maxima-routes`. `renderNav` and `setMode` treat it as a settings-family route (no nav links, mode change navigates away). `doRender` routes both `settings` and `settings/maxima-routes` to `renderSettings`.
+- **public/index.html**: added `<script src="dapp/views/settings-maxima-routes.js">` after settings.js.
+
+**Why**: Centralises route setup into a discoverable, permanent Settings page. Removes the inline banner that cluttered the Creator form. Publisher route setup was missing entirely — now covered by the same redirect pattern.
+
+**Testing required**:
+- Navigate to `#settings` → verify "Maxima Routes" section is visible with "Configure Maxima Routes ›" link.
+- Click the link → verify `#settings/maxima-routes` loads the three-section page (MLS Server, Register as Permanent, Finalise Route Registration).
+- Node without permanent route: navigate to `#creator` → should redirect to `#settings/maxima-routes`.
+- Node without permanent route: navigate to `#frames` → should redirect to `#settings/maxima-routes`.
+- Node with permanent route already set: `#creator` and `#frames` should load normally (no redirect).
+- On `#settings/maxima-routes`: fill MLS address, click Save → verify `MLS_SERVER_ADDRESS` is stored. Click "Register as Permanent" → verify command executes. Click "Check & Register Route" → verify route is shown in green.
+
+---
+
 ### Session: 2026-06-04 — DevTools Polish & SQL Console Removal
 
 **Task**: Fix DevTools CSS layout, remove the SQL console, adjust button styling, remove the Copy command button, and add "Copy Address" helper buttons.
@@ -192,52 +233,5 @@ For verification procedures, see `docs/VERIFICATION.md`.
 - Click "Copy Address" in either section and verify the respective key/address is copied to your clipboard (showing a quick status change in the card).
 - Verify that the MLS Server configuration section no longer displays the "Copy: maxextra action:staticmls" button.
 - Close the modal with `✕` or by clicking outside and verify the transition is smooth.
-
----
-
-### Session: 2026-06-04 — MAX# Permanent Routes (MVP)
-
-**Task**: Implement MAX# permanent Maxima routes for Creator/Publisher discovery.
-
-**Changes**:
-- **core/minima.js** (+45 lines): Added 4 helpers — `getMaximaInfo()`, `parseMaximaRoute()`, `setCreatorMaximaRoute()`, `getCreatorMaximaRoute()`. Routes stored in KeyPair as `CREATOR_PERMANENT_ROUTE`.
-- **dapp/views/creator.js** (+150 lines, refactored): Added setup banner (3-step wizard) on first access to Creator role. `fundEscrowAndPublish()` now validates permanent route before escrow funding. `fundEscrowWithRoute()` uses permanent route in escrow STATE(4).
-- **dapp/views/devtools.js** (+60 lines): New "Dev Settings — Maxima Routes" section in Ctrl+Shift+D panel. Shows stored route, copy button for `maxextra staticmls` command, and "Register Creator Route" button.
-
-**Why**: Solves dynamic Mx address problem for Creator/Publisher discovery. STATE(4) now contains `MAX#<pk>#<mls>` (permanent, MLS-resolved) instead of mutable `Mx...` contact. Campaign discovery survives creator node restart or address change.
-
-**Architecture validated against**: Minima 1.0.45 source (maxima.java, maxextra.java); MinimaAds codebase (sendMaxima fallback, escrow discovery, keypair storage all pre-existing). No schema migrations needed (KeyPair storage only).
-
-**Testing required**:
-- [ ] Ctrl+Shift+D: "Maxima Routes" section visible
-- [ ] Creator view (first access): setup banner appears
-- [ ] After registering route: campaign form enabled
-- [ ] Campaign creation: STATE(4) contains `MAX#0x...#Mx...@host:port`
-- [ ] Viewer node discovery: reads STATE(4), sends REQUEST_CAMPAIGN_DATA to MAX# route, receives CAMPAIGN_DATA_RESPONSE via MLS
-
-**Docs updated**: MinimaAds.md §3.6 (new), §8.1 (STATE(4) semantics), §8.8 (routing note). AGENTS.md this section.
-
-**Known limitations (MVP)**: No dynamic route refresh (`PEER_ROUTE_UPDATE` messages). Setup is one-time per node. Viewers are not required to register (they initialize chats directly).
-
-**Future work** (post-MVP, see `docs/MAXIMA_ROUTE_DISCOVERY.md`):
-- Implement `PEER_ROUTE_UPDATE` messages for dynamic creator/viewer route refresh
-- Add publisher permanent route setup (mirrors creator flow)
-- Add passive route refresh headers to all Maxima messages (sender_route, sender_mx)
-- Rate-limit route update messages
-
-**Code quality**: All Rhino-compatible (var, function declarations, no arrows/templates). Helpers use MDS.cmd and MDS.keypair APIs. No breaking changes to existing signatures.
-
----
-
-2026-06-04 (feat: MAX# permanent route support — creator setup + escrow STATE(4)):
-- **What**: Implemented MVP phase of permanent Maxima route support validated by Opus.
-- **Changes**:
-  - `core/minima.js`: added 4 helper functions — `getMaximaInfo(cb)`, `parseMaximaRoute(route)`, `setCreatorMaximaRoute(cb)`, `getCreatorMaximaRoute(cb)`. All Rhino-safe (var, function declarations, no arrow functions/template literals). Route stored in keypair as `CREATOR_PERMANENT_ROUTE`.
-  - `dapp/views/creator.js`: `fundEscrowAndPublish` now validates `CREATOR_PERMANENT_ROUTE` exists before starting escrow. If not set → fails with clear message. Escrow STATE(4) now stores `MAX#<pk>#<mls>` (permanent route) instead of mutable `Mx...` contact string. Added `_showCreatorRouteSetupBanner()` (3-step setup instructions + "Check & Register Route" button) shown on creator view load when route is not set. Submit button disabled while route is missing. Helper `_copyToClipboard()` added.
-  - `dapp/views/devtools.js`: Ctrl+Shift+D panel expanded with "Dev Settings — Maxima Routes" section showing current stored route, copy command for `maxextra action:staticmls`, and "Register Creator Route" button.
-- **STATE(4) contract change**: escrow coin STATE(4) now encodes `MAX#<pk>#<mls>` instead of `Mx...` contact. Viewers discovering campaigns via on-chain STATE(4) must send to this MAX# route (existing `sendMaxima` fallback with `to:MAX#...` already handles this — see `sendMaxima` in core/minima.js which passes mxAddress as second arg).
-- **Files**: `core/minima.js`, `dapp/views/creator.js`, `dapp/views/devtools.js`.
-- **AGENTS.md updated**: yes — this entry; oldest entry archived to `docs/HISTORY.md §17`.
-- **Verification**: (1) Navigate to #creator — setup banner should appear (route not yet set). (2) Ctrl+Shift+D → "Maxima Routes" section visible, shows "No route registered yet.". (3) If node has static MLS: click "Check & Register Route" → success, page reloads. (4) After reload: no banner, submit enabled. (5) Create a campaign → inspect escrow coin STATE(4) — should be hex of `MAX#<pk>#<mls>`. (6) Nodes without static MLS: "Register" shows "Node does not have static MLS configured" error.
 
 > Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, and all earlier) are archived in `docs/HISTORY.md §17`.

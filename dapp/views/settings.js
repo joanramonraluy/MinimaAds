@@ -1,26 +1,37 @@
 // Settings view — global, accessible from drawer regardless of active mode.
-// Route: #settings. Renders appearance controls (theme + accent) and
-// a placeholder for privacy preferences (coming soon).
+// Route: #settings renders appearance + privacy controls.
+// Route: #settings/maxima-routes renders renderMaximaRoutesSettings() from
+//        settings-maxima-routes.js.
 
 function renderSettings(root) {
   root.innerHTML = '';
+
+  var hash = (window.location.hash || '').replace(/^#/, '');
+  var openRoutes = (hash === 'settings/maxima-routes');
 
   var h2 = document.createElement('h2');
   h2.textContent = 'Settings';
   root.appendChild(h2);
 
-  // ── Appearance ──────────────────────────────────────────────────────────
-  var appearanceSection = document.createElement('section');
-  appearanceSection.style.cssText = 'margin-bottom:2rem;';
+  // ── Accordion 1: Appearance ──────────────────────────────────────────────
+  var appDetails = document.createElement('details');
+  if (!openRoutes) {
+    appDetails.setAttribute('open', '');
+  }
+  
+  var appSummary = document.createElement('summary');
+  appSummary.style.cssText = 'font-weight:700;font-size:1.1rem;cursor:pointer;margin-bottom:0.5rem;';
+  appSummary.textContent = 'Appearance';
+  appDetails.appendChild(appSummary);
 
-  var appTitle = mkSectionTitle('Appearance');
-  appearanceSection.appendChild(appTitle);
+  var appearanceContent = document.createElement('div');
+  appearanceContent.style.cssText = 'padding:0.5rem 0.75rem 1.5rem;';
 
   // Theme mode
   var themeLabel = document.createElement('small');
   themeLabel.style.cssText = 'display:block;margin-bottom:.5rem;color:var(--pico-muted-color,#6c757d);';
   themeLabel.textContent = 'Theme';
-  appearanceSection.appendChild(themeLabel);
+  appearanceContent.appendChild(themeLabel);
 
   var themeRow = document.createElement('div');
   themeRow.style.cssText = 'display:flex;gap:.5rem;margin-bottom:1.5rem;max-width:16rem;';
@@ -39,13 +50,13 @@ function renderSettings(root) {
 
   themeRow.appendChild(lightBtn);
   themeRow.appendChild(darkBtn);
-  appearanceSection.appendChild(themeRow);
+  appearanceContent.appendChild(themeRow);
 
   // Accent color
   var accentLabel = document.createElement('small');
   accentLabel.style.cssText = 'display:block;margin-bottom:.6rem;color:var(--pico-muted-color,#6c757d);';
   accentLabel.textContent = 'Accent color';
-  appearanceSection.appendChild(accentLabel);
+  appearanceContent.appendChild(accentLabel);
 
   var accentRow = document.createElement('div');
   accentRow.style.cssText = 'display:flex;gap:.75rem;flex-wrap:wrap;align-items:center;margin-bottom:.5rem;';
@@ -70,23 +81,58 @@ function renderSettings(root) {
     })(accentDefs[i]);
   }
 
-  appearanceSection.appendChild(accentRow);
+  appearanceContent.appendChild(accentRow);
+  appDetails.appendChild(appearanceContent);
+  root.appendChild(appDetails);
 
-  root.appendChild(appearanceSection);
+  // ── Accordion 2: Configure Maxima Routes ─────────────────────────────────
+  var routesDetails = document.createElement('details');
+  routesDetails.id = 'ma-settings-routes-details';
+  if (openRoutes) {
+    routesDetails.setAttribute('open', '');
+  }
 
-  // ── Privacy ─────────────────────────────────────────────────────────────
-  var privacySection = document.createElement('section');
+  var routesSummary = document.createElement('summary');
+  routesSummary.style.cssText = 'font-weight:700;font-size:1.1rem;cursor:pointer;margin-bottom:0.5rem;';
+  routesSummary.textContent = 'Configure Maxima Routes';
+  routesDetails.appendChild(routesSummary);
 
-  var privTitle = mkSectionTitle('Privacy');
-  privacySection.appendChild(privTitle);
+  var routesContent = document.createElement('div');
+  routesContent.style.cssText = 'padding:0.5rem 0.75rem 1.5rem;';
+
+  if (typeof renderMaximaRoutesSettings === 'function') {
+    renderMaximaRoutesSettings(routesContent);
+  }
+
+  routesDetails.appendChild(routesContent);
+  root.appendChild(routesDetails);
+
+  // ── Accordion 3: Privacy ──────────────────────────────────────────────────
+  var privacyDetails = document.createElement('details');
+
+  var privacySummary = document.createElement('summary');
+  privacySummary.style.cssText = 'font-weight:700;font-size:1.1rem;cursor:pointer;margin-bottom:0.5rem;';
+  privacySummary.textContent = 'Privacy';
+  privacyDetails.appendChild(privacySummary);
+
+  var privacyContent = document.createElement('div');
+  privacyContent.style.cssText = 'padding:0.5rem 0.75rem 1.5rem;';
 
   var privMsg = document.createElement('p');
-  privMsg.style.cssText = 'color:var(--pico-muted-color,#6c757d);font-size:.875rem;margin:.5rem 0 0;';
+  privMsg.style.cssText = 'color:var(--pico-muted-color,#6c757d);font-size:.875rem;margin:0;';
   privMsg.textContent = 'Privacy preferences — coming soon.';
-  privacySection.appendChild(privMsg);
+  privacyContent.appendChild(privMsg);
 
-  root.appendChild(privacySection);
+  privacyDetails.appendChild(privacyContent);
+  root.appendChild(privacyDetails);
 
   // Sync active states
   _updateSettingsUI();
+
+  // If openRoutes, scroll routesDetails into view smoothly
+  if (openRoutes) {
+    setTimeout(function() {
+      routesDetails.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 100);
+  }
 }

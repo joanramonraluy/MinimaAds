@@ -319,7 +319,7 @@
         clientConnectBtn.disabled = false;
         clientConnectBtn.textContent = 'Connect';
         if (res.status) {
-          MDS.keypair.set('CREATOR_PERMANENT_ROUTE', serverAddr, function() {
+          MDS.keypair.set('MLS_SERVER_ADDRESS', serverAddr, function() {
             clientStatus.innerHTML = '<span style="color:var(--pico-ins-color, #27ae60);">✓ Connected to: ' + serverAddr + '</span>';
             clientStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
             clientInput.value = '';

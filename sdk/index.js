@@ -967,9 +967,12 @@
 
   function _persistCampaignPayload(payload) {
     if (!payload || !payload.campaign || !payload.ad || !payload.campaign.id) { return; }
-    if (typeof PLATFORM_KEY !== 'undefined' && PLATFORM_KEY && payload.platform_key) {
-      if (String(payload.platform_key).toUpperCase() !== String(PLATFORM_KEY).toUpperCase()) { return; }
-    }
+    // Payload-based platform_key check is removed. It's spoofable and breaks cross-node
+    // discovery when nodes have different PLATFORM_KEY overrides. The authoritative check
+    // is in the SW (campaign.handler.js) which validates PREVSTATE(5) on-chain.
+    // if (typeof PLATFORM_KEY !== 'undefined' && PLATFORM_KEY && payload.platform_key) {
+    //   if (String(payload.platform_key).toUpperCase() !== String(PLATFORM_KEY).toUpperCase()) { return; }
+    // }
     var maxViewerReward = (payload.max_viewer_reward !== undefined && payload.max_viewer_reward !== null)
       ? parseFloat(payload.max_viewer_reward) : null;
     payload.campaign.max_viewer_reward = maxViewerReward;

@@ -30,11 +30,15 @@ function handleCampaignAnnounce(payload) {
     return;
   }
 
-  var payloadPk = payload.platform_key ? payload.platform_key.toUpperCase() : '';
-  if (payloadPk !== PLATFORM_KEY.toUpperCase()) {
-    MDS.log("[CAMPAIGN] platform_key mismatch, dropping campaign: " + campaignId);
-    return;
-  }
+  // Payload-based platform_key check is redundant (spoofable) and breaks cross-node
+  // discovery when nodes have per-node PLATFORM_KEY overrides. The authoritative
+  // check is PREVSTATE(5) from the on-chain escrow coin (lines 45-58 below).
+  // See KNOWN_ISSUES.md #31: never trust payload fields for PKs — verify on-chain.
+  // var payloadPk = payload.platform_key ? payload.platform_key.toUpperCase() : '';
+  // if (payloadPk !== PLATFORM_KEY.toUpperCase()) {
+  //   MDS.log("[CAMPAIGN] platform_key mismatch, dropping campaign: " + campaignId);
+  //   return;
+  // }
 
   var coinId = (payload.campaign.escrow_coinid || '');
   if (!coinId) {
@@ -50,7 +54,9 @@ function handleCampaignAnnounce(payload) {
     }
     var prevstates = res.response[0].prevstate || [];
     var onChainPk = getStateVar(prevstates, 5);
-    if (!onChainPk || onChainPk.toUpperCase() !== PLATFORM_KEY.toUpperCase()) {
+    // If escrow was created without PLATFORM_KEY (0x00), accept regardless of local setting.
+    // Creator and viewer may have different PLATFORM_KEY overrides; 0x00 means creator had fee disabled.
+    if (onChainPk && onChainPk !== '0x00' && onChainPk.toUpperCase() !== PLATFORM_KEY.toUpperCase()) {
       MDS.log("[CAMPAIGN] PREVSTATE(5) mismatch, dropping campaign: " + campaignId);
       return;
     }

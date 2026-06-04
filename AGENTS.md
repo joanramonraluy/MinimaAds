@@ -175,6 +175,32 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-06-04 — Fix: MAXIMA_ROUTE_DISCOVERY Campaign Platform_Key Mismatch
+
+**Task**: Diagnose and fix campaign discovery rejection caused by `platform_key mismatch` error blocking user4 (MinimaAds creator) from accepting campaigns from other nodes.
+
+**Root Cause**: The MAXIMA_ROUTE_DISCOVERY changes enabled reliable cross-node campaign discovery, which exposed a latent bug: the `platform_key` validation in `campaign.handler.js` (lines 33-37) compared the announced key from the Maxima payload against the receiver's local `PLATFORM_KEY` override. When nodes had different `PLATFORM_KEY` values (per-node overrides set via DevTools), campaigns were silently rejected as mismatches. The payload-based check is also spoofable — the real authority is the on-chain `PREVSTATE(5)` in the escrow coin.
+
+**Changes**:
+- **public/service-workers/handlers/campaign.handler.js** (lines 33-41): Commented out the spoofable payload-based `platform_key` check. Added explanation: the authoritative validation is on-chain via `PREVSTATE(5)`.
+- **public/service-workers/handlers/campaign.handler.js** (lines 59): Updated the on-chain `PREVSTATE(5)` validation to accept campaigns where `PREVSTATE(5) = 0x00` (creator had no platform fee). Old logic: `!onChainPk || onChainPk !== PLATFORM_KEY` would reject. New logic: `onChainPk && onChainPk !== '0x00' && onChainPk !== PLATFORM_KEY` accepts 0x00 regardless of receiver's local setting.
+- **sdk/index.js** (lines 970-972): Applied the same fix to the SDK path's `_persistCampaignPayload` function. Commented out the equivalent payload-based platform_key check for consistency.
+
+**Why**: The payload-based check breaks cross-node discovery and is a security anti-pattern (payload is attacker-controlled). The on-chain validation already exists and is authoritative. See KNOWN_ISSUES.md #31 principle: "never read PREVSTATE from announced JSON payload as primary verification — always verify on-chain."
+
+**Testing required**:
+- User1 creates campaign without fee (PREVSTATE(5) = 0x00).
+- User4 (with PLATFORM_KEY override) discovers the escrow coin.
+- User4 receives `CAMPAIGN_DATA_RESPONSE` from user1.
+- Campaign is accepted and persisted (no "platform_key mismatch" log).
+- Same test with both nodes having different PLATFORM_KEY overrides (should still accept).
+
+**Note on Commission**: Platform creation fees are **already paid as part of the escrow funding tx** (creator.js line 1500-1604). User1 either includes a fee output (output[0] to PLATFORM_KEY, output[1] to escrow) or does not. This is a wallet-level transfer, not a DB reward event. The commission was never "missing" — it was either created or not at creator's choice. The bug only prevented the campaign from being visible on user4's node.
+
+**AGENTS.md updated**: yes — §6 added this session entry.
+
+---
+
 ### Session: 2026-06-04 — Settings Page Accordions
 
 **Task**: Refactor the Settings page to consolidate all sections (Appearance, Maxima Routes, and Privacy) into collapsible accordions (details/summary elements), keeping only Appearance open by default, and handling automatic route-based expansion.
@@ -182,6 +208,7 @@ For verification procedures, see `docs/VERIFICATION.md`.
 **Changes**:
 - **dapp/views/settings.js**: Refactored `renderSettings()` to use PicoCSS details/summary accordions. Integrated `renderMaximaRoutesSettings` inside the "Configure Maxima Routes" accordion. If the URL hash is `settings/maxima-routes`, it opens the routes accordion, collapses Appearance, and scrolls the routes section into view.
 - **dapp/views/settings-maxima-routes.js**: Removed the standalone heading so the MLS and permanent route configuration forms embed cleanly in the accordion, and updated the description to note that the feature is essential for both campaign creators and publishers.
+- **dapp/views/creator.js**: Moved the campaign creation status/error message paragraph inside the review panel, directly below the "Publish Campaign" button.
 
 **Why**: Consolidates settings configuration onto a single screen to eliminate unnecessary sub-page redirects, while maintaining backward-compatibility with `#settings/maxima-routes` deep links.
 
@@ -218,20 +245,21 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 ### Session: 2026-06-04 — DevTools Polish & SQL Console Removal
 
-**Task**: Fix DevTools CSS layout, remove the SQL console, adjust button styling, remove the Copy command button, and add "Copy Address" helper buttons.
+**Task**: Fix DevTools CSS layout, remove the SQL console, adjust button styling, remove the Copy command button, add "Copy Address" helper buttons, remove the "Client Mode (Advanced)" section, and ensure MLS Save configures static MLS.
 
 **Changes**:
-- **dapp/views/devtools.js**: Removed SQL console inputs, textarea, run button, outputs, and the `runQuery` function. Re-styled the entire modal layout with modern glassmorphism overlay using PicoCSS theme variables. Added smooth open/close animations. Aligned all input rows (Platform Key, MLS Server, Client Mode) to a consistent 2.2rem height. Renamed the Platform Key "Register" button to "Save". Removed the "Copy: maxextra action:staticmls" button. Added "Copy Address" buttons to both the Platform Key Configuration and MLS Server Configuration sections to easily copy active addresses.
+- **dapp/views/devtools.js**: Removed SQL console inputs, textarea, run button, outputs, and the `runQuery` function. Re-styled the entire modal layout with modern glassmorphism overlay using PicoCSS theme variables. Added smooth open/close animations. Aligned all input rows (Platform Key, MLS Server) to a consistent 2.2rem height. Renamed the Platform Key "Register" button to "Save". Removed the "Copy: maxextra action:staticmls" button. Added "Copy Address" buttons to both the Platform Key Configuration and MLS Server Configuration sections to easily copy active addresses. Fixed the MLS Server configuration "Save" button to execute `maxextra action:staticmls` on the node, ensuring the setting applies at the platform level. Completely removed the "Client Mode (Advanced)" section since route setup is now fully managed on the Settings page.
 
-**Why**: Simplifies development settings, makes input-button alignments consistent, cleans up redundant command buttons, and provides convenient one-click copying of nodes' addresses.
+**Why**: Simplifies development settings, makes input-button alignments consistent, cleans up redundant command buttons, and resolves a bug where saving the MLS server via DevTools failed to actually register the MLS server with the Maxima stack.
 
 **Testing required**:
 - Press `Ctrl+Shift+D` to toggle DevTools.
-- Verify that inputs and "Save/Connect" buttons are perfectly aligned in height (2.2rem).
+- Verify that inputs and "Save" buttons are perfectly aligned in height (2.2rem).
 - Verify that the Platform Key custom address registration button is named "Save".
+- Verify that the "Client Mode (Advanced)" section is completely gone from the DevTools dialog.
 - Verify that both the Platform Key and MLS Server configuration sections have a "Copy Address" button.
 - Click "Copy Address" in either section and verify the respective key/address is copied to your clipboard (showing a quick status change in the card).
-- Verify that the MLS Server configuration section no longer displays the "Copy: maxextra action:staticmls" button.
+- Type a valid MLS Server address in the DevTools input and click "Save": verify it displays "MLS server applied and saved" and correctly configures Maxima's static MLS at the platform level.
 - Close the modal with `✕` or by clicking outside and verify the transition is smooth.
 
 > Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, and all earlier) are archived in `docs/HISTORY.md §17`.

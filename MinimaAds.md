@@ -505,12 +505,17 @@ var LIMITS = {
     b. Register escrow script (once per install, or when PLATFORM_KEY changes):
        newscript script:"<B.2 script with PLATFORM_KEY>" trackall:false
        → save returned address as ESCROW_ADDRESS_V2 in keypair
-    c. Send budget + fee to escrow:
-       send amount:<budget_total + fee> address:<ESCROW_ADDRESS_V2>
-            state:{"1":"<wallet_pubkey>","2":"<expiry_block>","3":"<campaign_id_hex>",
-                   "4":"<creator_mx_address>","5":"<PLATFORM_KEY or 0x00>","6":"<max_publisher_budget>"}
-       Note: STATE(4) = creator Mx address — enables on-chain campaign discovery
-       Note: STATE(5) = PLATFORM_KEY — embedded for contract enforcement and network validation
+    c. Send budget + fee in two atomic outputs via `send multi:`:
+       — If PLATFORM_KEY is null (MVP): legacy `send amount:<budget_total>` (single output, no fee)
+       — If PLATFORM_KEY is set: `send multi:["<PLATFORM_KEY>:<feeAmount>","<ESCROW_ADDRESS>:<budgetTotal>"] state:...`
+         • Output[0]: fee (6% of budget_total) → PLATFORM_KEY (direct wallet output, no state)
+         • Output[1]: budget → ESCROW_ADDRESS_V2 (with state)
+         • Change: auto-added by txnpost, back to creator wallet
+       State JSON (only on escrow output):
+            {"1":"<wallet_pubkey>","2":"<expiry_block>","3":"<campaign_id_hex>",
+             "4":"<creator_mx_address>","5":"<PLATFORM_KEY or 0x00>","6":"<max_publisher_budget>"}
+       Note: STATE(4) = creator MAX#route (permanent address for discovery) — enables on-chain campaign discovery
+       Note: STATE(5) = PLATFORM_KEY — embedded for contract enforcement and network validation (0x00 if disabled)
        Note: STATE(6) = max_publisher_budget — for publisher channel budget tracking
     d. Save returned coinid in CAMPAIGNS.ESCROW_COINID
 5.  Campaign created locally: status='active', budget_remaining=budget_total,
@@ -519,14 +524,21 @@ var LIMITS = {
     (Campaign propagates to other nodes automatically via on-chain discovery — §8.1)
 ```
 
-**Network-side validation** (mandatory on every receiving node, in `campaign.handler.js`):
+**Network-side validation** (mandatory on every receiving node, in `campaign.handler.js` + `sdk/index.js`):
+
+The payload's `platform_key` field must NOT be used for validation — it is attacker-controlled data. All validation must read the on-chain coin's `PREVSTATE(5)`:
 
 ```
-On CAMPAIGN_ANNOUNCE or escrow coin discovery via NEWBLOCK:
-  1. If local PLATFORM_KEY is null → accept (MVP — no validation)
-  2. Else: read escrow coin PREVSTATE(5) from on-chain coin (NOT from Maxima payload alone)
-  3. If PREVSTATE(5).toUpperCase() === PLATFORM_KEY.toUpperCase() → accept
-  4. Else → MDS.log("[CAMPAIGN] platform_key mismatch, dropping: " + campaign_id) and return
+On CAMPAIGN_ANNOUNCE via CAMPAIGN_DATA_RESPONSE, or escrow coin discovery via NEWBLOCK:
+  1. If escrow coinid is present: query the on-chain coin (MDS.cmd('coins coinid:...'))
+  2. Read PREVSTATE(5) from the coin (the authoritative PLATFORM_KEY value)
+  3. If local PLATFORM_KEY is null → accept (MVP — no validation)
+  4. Else if PREVSTATE(5) = 0x00 → accept (creator had fee disabled; escrow was created without fee output)
+  5. Else if PREVSTATE(5).toUpperCase() === PLATFORM_KEY.toUpperCase() → accept
+  6. Else → MDS.log("[CAMPAIGN] PREVSTATE(5) mismatch, dropping: " + campaign_id) and return
+
+Do NOT drop campaigns based on the Maxima payload's platform_key field.
+The on-chain coin PREVSTATE(5) is the single source of truth for fee enforcement.
 ```
 
 ### 6.5 Channel Open Flow
@@ -955,6 +967,8 @@ All `MDS.cmd("maxima action:send ... application:" + APP_NAME + " ...")` calls m
 >
 > `cooldown_ms` is **optional** (default 300 000 ms = 5 min). Receiving nodes store it in `CAMPAIGNS.COOLDOWN_MS`. `validation.js` uses it as the cooldown between rewards for any single viewer — overrides the global `LIMITS.COOLDOWN_BETWEEN_REWARDS_MS`. When absent, the LIMITS fallback applies (backward-compatible).
 >
+> ⚠️ **`platform_key` — INFORMATIONAL ONLY, NOT AUTHORITATIVE.** This field is populated from the creator's local config and may not match the on-chain `PREVSTATE(5)`. Receivers **must NOT** validate campaign acceptance based on this field. The authoritative fee enforcement check is the on-chain escrow coin's `PREVSTATE(5)` — see Network-side validation rules in §6.3.
+>
 > `publisher_reward_view` and `max_publisher_budget` are **optional** (default 0). When `publisher_reward_view = 0`, the campaign has no publisher payouts.
 >
 > `platform_key` is the `PLATFORM_KEY` embedded in the escrow coin. Receivers **must** validate this matches their local `PLATFORM_KEY` constant AND the on-chain coin PREVSTATE(5). Mismatch → silent drop. When local `PLATFORM_KEY` is null, skip validation.
@@ -991,9 +1005,11 @@ Reward processing (view and click events) is handled entirely within the FE runt
 
 ### 8.6 REQUEST_CAMPAIGN_DATA
 
-**Direction**: Viewer SW → Creator SW (unicast via `to:<creator_mx_address>`)
+**Direction**: Viewer SW → Creator SW (unicast via `to:<STATE(4)>`)
 
 Sent when a viewer's node detects a new escrow coin but does not have the campaign data locally.
+The creator's permanent route is read from the escrow coin's STATE(4) (MAX#<pk>#<mls> format).
+Minima resolves the MAX# route through the static MLS to find the creator's current contact address.
 
 ```json
 {

@@ -184,10 +184,22 @@
         mlsStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
         return;
       }
-      MDS.keypair.set('MLS_SERVER_ADDRESS', addr, function() {
-        mlsStatus.textContent = 'MLS server saved: ' + addr;
-        mlsStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
-        mlsInput.value = '';
+      mlsBtn.disabled = true;
+      mlsBtn.textContent = 'Saving…';
+      var cmd = 'maxextra action:staticmls host:' + addr;
+      MDS.cmd(cmd, function(cmdRes) {
+        mlsBtn.disabled = false;
+        mlsBtn.textContent = 'Save';
+        if (cmdRes.status) {
+          MDS.keypair.set('MLS_SERVER_ADDRESS', addr, function() {
+            mlsStatus.textContent = 'MLS server applied and saved: ' + addr;
+            mlsStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
+            mlsInput.value = '';
+          });
+        } else {
+          mlsStatus.textContent = 'ERROR: ' + (cmdRes.error || 'Failed to apply MLS server');
+          mlsStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
+        }
       });
     });
     mlsInputRow.appendChild(mlsInput);
@@ -265,99 +277,6 @@
 
     panel.appendChild(mlsSection);
 
-    // Section 1.7: Client Mode (connect to MLS server)
-    var clientSection = document.createElement('section');
-    clientSection.style.cssText = 'background:var(--pico-card-sectionning-background-color, rgba(0,0,0,0.03));border:1px solid var(--pico-muted-border-color);border-radius:0.5rem;padding:1.25rem;display:flex;flex-direction:column;gap:0.75rem;margin:0;';
-
-    var clientTitle = document.createElement('strong');
-    clientTitle.textContent = 'Client Mode (Advanced)';
-    clientTitle.style.cssText = 'display:block;font-size:0.9rem;font-weight:700;color:var(--pico-primary);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.25rem;';
-    clientSection.appendChild(clientTitle);
-
-    var clientDesc = document.createElement('p');
-    clientDesc.textContent = 'To be discoverable by other users and receive offline messages, connect to an always-online MLS server.';
-    clientDesc.style.cssText = 'font-size:0.8rem;color:var(--pico-color);margin:0;line-height:1.5;';
-    clientSection.appendChild(clientDesc);
-
-    var clientStatus = document.createElement('div');
-    clientStatus.id = 'ma-dev-client-status';
-    clientStatus.style.cssText = 'font-family:monospace;font-size:0.75rem;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);padding:0.75rem;border-radius:0.375rem;margin:0.5rem 0;word-break:break-all;color:var(--pico-color);line-height:1.4;min-height:40px;display:flex;align-items:center;';
-    clientStatus.textContent = 'Checking connection status…';
-    MDS.keypair.get('CREATOR_PERMANENT_ROUTE', function(res) {
-      var stored = (res && res.status && res.value) ? res.value : null;
-      if (stored) {
-        clientStatus.innerHTML = '<span style="color:var(--pico-ins-color, #27ae60);">✓ Connected to: ' + stored + '</span>';
-        clientStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
-      } else {
-        clientStatus.innerHTML = '<span style="color:var(--pico-muted-color, #999);">Not connected to any MLS server</span>';
-      }
-    });
-    clientSection.appendChild(clientStatus);
-
-    var clientInputRow = document.createElement('div');
-    clientInputRow.style.cssText = 'display:flex;gap:0.5rem;align-items:stretch;';
-    
-    var clientInput = document.createElement('input');
-    clientInput.type = 'text';
-    clientInput.placeholder = 'Mx...@host:port (MLS server address)';
-    clientInput.style.cssText = 'flex:1;min-width:200px;margin:0;padding:0 0.6rem;font-size:0.8rem;font-family:monospace;height:2.2rem;box-sizing:border-box;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);color:var(--pico-color);border-radius:0.375rem;';
-    
-    var clientConnectBtn = document.createElement('button');
-    clientConnectBtn.textContent = 'Connect';
-    clientConnectBtn.className = 'primary';
-    clientConnectBtn.style.cssText = 'width:auto;margin:0;padding:0 1.2rem;font-size:0.8rem;height:2.2rem;box-sizing:border-box;display:flex;align-items:center;justify-content:center;line-height:2.2rem;white-space:nowrap;';
-    clientConnectBtn.addEventListener('click', function() {
-      var serverAddr = (clientInput.value || '').trim();
-      if (!serverAddr) {
-        clientStatus.textContent = 'ERROR: enter an MLS server address first';
-        clientStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
-        return;
-      }
-      clientConnectBtn.disabled = true;
-      clientConnectBtn.textContent = 'Connecting…';
-      MDS.cmd('maxextra action:staticmls host:' + serverAddr, function(res) {
-        clientConnectBtn.disabled = false;
-        clientConnectBtn.textContent = 'Connect';
-        if (res.status) {
-          MDS.keypair.set('MLS_SERVER_ADDRESS', serverAddr, function() {
-            clientStatus.innerHTML = '<span style="color:var(--pico-ins-color, #27ae60);">✓ Connected to: ' + serverAddr + '</span>';
-            clientStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
-            clientInput.value = '';
-          });
-        } else {
-          clientStatus.textContent = 'Error connecting to server: ' + (res.error || 'unknown error');
-          clientStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
-        }
-      });
-    });
-    clientInputRow.appendChild(clientInput);
-    clientInputRow.appendChild(clientConnectBtn);
-    clientSection.appendChild(clientInputRow);
-
-    var clientDisconnectBtn = document.createElement('button');
-    clientDisconnectBtn.textContent = 'Disconnect';
-    clientDisconnectBtn.className = 'outline';
-    clientDisconnectBtn.style.cssText = 'width:auto;margin:0;padding:0.45rem 0.9rem;font-size:0.8rem;line-height:1.2;';
-    clientDisconnectBtn.addEventListener('click', function() {
-      clientDisconnectBtn.disabled = true;
-      clientDisconnectBtn.textContent = 'Disconnecting…';
-      MDS.cmd('maxextra action:staticmls host:clear', function(res) {
-        clientDisconnectBtn.disabled = false;
-        clientDisconnectBtn.textContent = 'Disconnect';
-        if (res.status) {
-          MDS.keypair.set('CREATOR_PERMANENT_ROUTE', '', function() {
-            clientStatus.innerHTML = '<span style="color:var(--pico-muted-color, #999);">Not connected to any MLS server</span>';
-            clientStatus.style.borderColor = 'var(--pico-muted-border-color)';
-          });
-        } else {
-          clientStatus.textContent = 'Error disconnecting: ' + (res.error || 'unknown error');
-          clientStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
-        }
-      });
-    });
-    clientSection.appendChild(clientDisconnectBtn);
-
-    panel.appendChild(clientSection);
 
     // Section 1.9: Register MinimaAds Creator as Permanent
     var creatorRegSection = document.createElement('section');

@@ -216,8 +216,8 @@ function renderCreator(root) {
     + '  <div id="ma-campaign-reach-review"></div>'
     + '  <div id="ma-campaign-cost"></div>'
     + '  <button type="submit" style="width:100%;margin-top:1rem;">Publish Campaign</button>'
-    + '</div>'
-    + '<p id="ma-creator-msg" role="status"></p>';
+    + '  <p id="ma-creator-msg" role="status" style="margin-top:1rem;margin-bottom:0;"></p>'
+    + '</div>';
   root.appendChild(form);
 
   setupCreatorTabs(form);

@@ -46,6 +46,23 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### 2026-06-03 (refactor: viewer.js — eliminate SDK race conditions via Service Worker broadcast)
+- **Problem**: Viewer received "creator offline" errors when calling `trackView()` due to race conditions in SDK initialization. Liveness check PING timed out because async Maxima address initialization wasn't complete.
+- **Root Cause Analysis**: The SDK was never designed to handle the complex timing interactions in the integrated viewer.js context. However, the **publisher SDK snippet** uses a completely different pattern that **works perfectly**: broadcast `MA_TRACK_VIEW` messages and let the Service Worker handle validation, rewards, and payments.
+- **Key Insight**: The Service Worker handlers (`handleTrackView()`, `handleTrackClick()` in `comms.handler.js`) already implement ALL the logic: validation, budget updates, reward creation, channel payment. The SDK's complex async initialization was unnecessary.
+- **Solution**: Refactored `viewer.js` to use the proven publisher pattern:
+  - `_trackDetailView()`: send `MA_TRACK_VIEW` broadcast, refresh earnings immediately (no callback wait)
+  - `_wireDetailInteractions()`: send `MA_TRACK_CLICK` broadcast, open URL in callback
+  - Service Worker processes both messages and handles all validation/rewards synchronously
+- **Why This Is Better**: 
+  1. **No race conditions**: Broadcasting is async and independent of SDK init
+  2. **Proven pattern**: Publisher snippet uses this successfully
+  3. **Simpler code**: No callback chains or SDK complexity in viewer.js
+  4. **Same result**: Identical reward flow, identical budget tracking, identical channel payments
+  5. **Better separation**: UI sends message, SW handles logic (clear responsibility boundary)
+- **Files**: `dapp/views/viewer.js`, `sdk/index.js`
+- **Verification**: (1) Navigate to #viewer, click campaign to open detail. (2) Wait 3s for progress bar. (3) Verify "Today earned" updates automatically. (4) Click CTA and verify URL opens. (5) Check logs for no errors.
+
 ### 2026-06-03 (fix: CREATOR_LIVENESS_PING regression — race condition in async Maxima init)
 - **Problem**: Viewer receives `confirmed: false, reason: 'creator offline'` when calling `trackView()`, even when creator is reachable. PING messages sent to creator had empty `viewer_mx` field, causing timeout. Root cause: TWO separate issues:
   - **Issue 1**: Auto-init hack set `_inited = true` without calling `_completeInit()`, leaving `_myMx` uninitialized.

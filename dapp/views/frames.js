@@ -5,6 +5,15 @@
 function renderFrames(root) {
   root.innerHTML = '';
 
+  // Check for permanent Maxima route — redirect to settings if not registered.
+  if (typeof getCreatorMaximaRoute === 'function') {
+    getCreatorMaximaRoute(function(route) {
+      if (!route) {
+        window.location.hash = 'settings/maxima-routes';
+      }
+    });
+  }
+
   var h2 = document.createElement('h2');
   h2.textContent = 'Publisher Frames';
   root.appendChild(h2);

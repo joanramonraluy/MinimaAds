@@ -43,7 +43,7 @@ function generateUID() {
 
 function currentRoute() {
   var h = (window.location.hash || '').replace(/^#/, '');
-  if (h === 'creator' || h === 'mycampaigns' || h === 'stats' || h === 'viewer' || h === 'earnings' || h === 'frames' || h === 'settings' || h === 'profile' || h === 'help') { return h; }
+  if (h === 'creator' || h === 'mycampaigns' || h === 'stats' || h === 'viewer' || h === 'earnings' || h === 'frames' || h === 'settings' || h === 'settings/maxima-routes' || h === 'profile' || h === 'help') { return h; }
   return 'viewer';
 }
 
@@ -60,7 +60,7 @@ function renderNav() {
   }
   var linksEl = document.getElementById('ma-nav-links');
   if (!linksEl) { return; }
-  if (currentRoute() === 'settings' || currentRoute() === 'profile') { linksEl.innerHTML = ''; return; }
+  if (currentRoute() === 'settings' || currentRoute() === 'settings/maxima-routes' || currentRoute() === 'profile') { linksEl.innerHTML = ''; return; }
   var views = MODE_VIEWS[_activeMode] || MODE_VIEWS.viewer;
   var route = currentRoute();
   var linkDefs = {
@@ -103,7 +103,7 @@ function setMode(mode) {
   _activeMode = mode;
   MDS.keypair.set('USER_MODE', mode, function() {});
   var route = currentRoute();
-  if (route === 'settings' || route === 'profile' || route === 'help') {
+  if (route === 'settings' || route === 'settings/maxima-routes' || route === 'profile' || route === 'help') {
     window.location.hash = MODE_VIEWS[mode][0];
     return;
   }
@@ -134,7 +134,7 @@ function doRender() {
   }
   var route = currentRoute();
   // Global views — accessible from any mode
-  if (route === 'settings' && typeof renderSettings === 'function') {
+  if ((route === 'settings' || route === 'settings/maxima-routes') && typeof renderSettings === 'function') {
     root.innerHTML = '';
     renderSettings(root);
     return;

@@ -61,84 +61,6 @@ function _renderThemeSwatches(form) {
   }
 }
 
-function _copyToClipboard(text) {
-  navigator.clipboard.writeText(text);
-  alert('Command copied to clipboard!');
-}
-
-function _showCreatorRouteSetupBanner(root) {
-  var banner = document.createElement('div');
-  banner.id = 'ma-creator-route-banner';
-  banner.style.cssText = 'background:#fffbe6;border:1px solid #f0ad4e;border-radius:.4rem;padding:.85rem 1rem;margin-bottom:1rem;color:#333;';
-
-  var title = document.createElement('strong');
-  title.textContent = 'Setup required: Permanent Maxima Route';
-  title.style.cssText = 'display:block;margin-bottom:.5rem;font-size:.95rem;';
-  banner.appendChild(title);
-
-  var desc = document.createElement('p');
-  desc.style.cssText = 'margin:0 0 .75rem;font-size:.85rem;';
-  desc.textContent = 'To create campaigns, your node must have a static MLS and a registered permanent Maxima address. Follow the steps below, then click "Register Route".';
-  banner.appendChild(desc);
-
-  var step1 = document.createElement('p');
-  step1.style.cssText = 'margin:0 0 .35rem;font-size:.85rem;font-weight:600;';
-  step1.textContent = 'Step 1 — Configure static MLS on your node:';
-  banner.appendChild(step1);
-  var btn1 = document.createElement('button');
-  btn1.type = 'button';
-  btn1.textContent = 'Copy: maxextra action:staticmls host:<your-mls-address>';
-  btn1.className = 'outline secondary';
-  btn1.style.cssText = 'font-size:.8rem;padding:.25rem .6rem;margin-bottom:.5rem;width:auto;';
-  btn1.addEventListener('click', function() { _copyToClipboard('maxextra action:staticmls host:<your-mls-address>'); });
-  banner.appendChild(btn1);
-
-  var step2 = document.createElement('p');
-  step2.style.cssText = 'margin:0 0 .35rem;font-size:.85rem;font-weight:600;';
-  step2.textContent = 'Step 2 — Add permanent address on your MLS server node:';
-  banner.appendChild(step2);
-  var btn2 = document.createElement('button');
-  btn2.type = 'button';
-  btn2.textContent = 'Copy: maxextra action:addpermanent publickey:<your-maxima-pk>';
-  btn2.className = 'outline secondary';
-  btn2.style.cssText = 'font-size:.8rem;padding:.25rem .6rem;margin-bottom:.5rem;width:auto;';
-  btn2.addEventListener('click', function() { _copyToClipboard('maxextra action:addpermanent publickey:<your-maxima-pk>'); });
-  banner.appendChild(btn2);
-
-  var step3 = document.createElement('p');
-  step3.style.cssText = 'margin:0 0 .35rem;font-size:.85rem;font-weight:600;';
-  step3.textContent = 'Step 3 — Register your permanent route:';
-  banner.appendChild(step3);
-
-  var registerBtn = document.createElement('button');
-  registerBtn.type = 'button';
-  registerBtn.textContent = 'Check & Register Route';
-  registerBtn.style.cssText = 'width:auto;font-size:.85rem;';
-  var statusMsg = document.createElement('small');
-  statusMsg.style.cssText = 'display:block;margin-top:.35rem;color:#555;';
-  registerBtn.addEventListener('click', function() {
-    registerBtn.disabled = true;
-    registerBtn.textContent = 'Checking…';
-    statusMsg.textContent = '';
-    setCreatorMaximaRoute(function(err, route) {
-      registerBtn.disabled = false;
-      registerBtn.textContent = 'Check & Register Route';
-      if (err) {
-        statusMsg.style.color = '#c0392b';
-        statusMsg.textContent = 'Error: ' + err.message + '. Make sure your static MLS is configured.';
-      } else {
-        statusMsg.style.color = '#27ae60';
-        statusMsg.textContent = 'Route registered: ' + route + '. Reloading…';
-        setTimeout(function() { location.reload(); }, 1200);
-      }
-    });
-  });
-  banner.appendChild(registerBtn);
-  banner.appendChild(statusMsg);
-
-  root.insertBefore(banner, root.firstChild);
-}
-
 function renderCreator(root) {
   root.innerHTML = '';
 
@@ -146,18 +68,10 @@ function renderCreator(root) {
   h2.textContent = 'Create Campaign';
   root.appendChild(h2);
 
-  // Check for permanent Maxima route — show setup banner if not registered.
+  // Check for permanent Maxima route — redirect to settings if not registered.
   getCreatorMaximaRoute(function(route) {
     if (!route) {
-      _showCreatorRouteSetupBanner(root);
-      var form = document.getElementById('ma-creator-form');
-      if (form) {
-        var submitBtn = form.querySelector('button[type="submit"]');
-        if (submitBtn) {
-          submitBtn.setAttribute('disabled', '');
-          submitBtn.title = 'Register your permanent Maxima route first (see banner above)';
-        }
-      }
+      window.location.hash = 'settings/maxima-routes';
     }
   });
 

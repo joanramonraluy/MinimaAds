@@ -46,6 +46,17 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### 2026-06-04 (feat: MAX# permanent route support — creator setup + escrow STATE(4))
+- **What**: Implemented MVP phase of permanent Maxima route support validated by Opus.
+- **Changes**:
+  - `core/minima.js`: added 4 helper functions — `getMaximaInfo(cb)`, `parseMaximaRoute(route)`, `setCreatorMaximaRoute(cb)`, `getCreatorMaximaRoute(cb)`. All Rhino-safe (var, function declarations, no arrow functions/template literals). Route stored in keypair as `CREATOR_PERMANENT_ROUTE`.
+  - `dapp/views/creator.js`: `fundEscrowAndPublish` now validates `CREATOR_PERMANENT_ROUTE` exists before starting escrow. If not set → fails with clear message. Escrow STATE(4) now stores `MAX#<pk>#<mls>` (permanent route) instead of mutable `Mx...` contact string. Added `_showCreatorRouteSetupBanner()` (3-step setup instructions + "Check & Register Route" button) shown on creator view load when route is not set. Submit button disabled while route is missing. Helper `_copyToClipboard()` added.
+  - `dapp/views/devtools.js`: Ctrl+Shift+D panel expanded with "Dev Settings — Maxima Routes" section showing current stored route, copy command for `maxextra action:staticmls`, and "Register Creator Route" button.
+- **STATE(4) contract change**: escrow coin STATE(4) now encodes `MAX#<pk>#<mls>` instead of `Mx...` contact. Viewers discovering campaigns via on-chain STATE(4) must send to this MAX# route (existing `sendMaxima` fallback with `to:MAX#...` already handles this — see `sendMaxima` in core/minima.js which passes mxAddress as second arg).
+- **Files**: `core/minima.js`, `dapp/views/creator.js`, `dapp/views/devtools.js`.
+- **AGENTS.md updated**: yes — this entry; oldest entry archived to `docs/HISTORY.md §17`.
+- **Verification**: (1) Navigate to #creator — setup banner should appear (route not yet set). (2) Ctrl+Shift+D → "Maxima Routes" section visible, shows "No route registered yet.". (3) If node has static MLS: click "Check & Register Route" → success, page reloads. (4) After reload: no banner, submit enabled. (5) Create a campaign → inspect escrow coin STATE(4) — should be hex of `MAX#<pk>#<mls>`. (6) Nodes without static MLS: "Register" shows "Node does not have static MLS configured" error.
+
 ### 2026-06-03 (refactor: viewer.js — eliminate SDK race conditions via Service Worker broadcast)
 - **Problem**: Viewer received "creator offline" errors when calling `trackView()` due to race conditions in SDK initialization. Liveness check PING timed out because async Maxima address initialization wasn't complete.
 - **Root Cause Analysis**: The SDK was never designed to handle the complex timing interactions in the integrated viewer.js context. However, the **publisher SDK snippet** uses a completely different pattern that **works perfectly**: broadcast `MA_TRACK_VIEW` messages and let the Service Worker handle validation, rewards, and payments.

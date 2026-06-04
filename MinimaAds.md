@@ -513,7 +513,7 @@ var LIMITS = {
          • Change: auto-added by txnpost, back to creator wallet
        State JSON (only on escrow output):
             {"1":"<wallet_pubkey>","2":"<expiry_block>","3":"<campaign_id_hex>",
-             "4":"<creator_mx_address>","5":"<PLATFORM_KEY or 0x00>","6":"<max_publisher_budget>"}
+             "4":"<creator_permanent_route MAX#pk#mls>","5":"<PLATFORM_KEY or 0x00>","6":"<max_publisher_budget>"}
        Note: STATE(4) = creator MAX#route (permanent address for discovery) — enables on-chain campaign discovery
        Note: STATE(5) = PLATFORM_KEY — embedded for contract enforcement and network validation (0x00 if disabled)
        Note: STATE(6) = max_publisher_budget — for publisher channel budget tracking
@@ -970,8 +970,6 @@ All `MDS.cmd("maxima action:send ... application:" + APP_NAME + " ...")` calls m
 > ⚠️ **`platform_key` — INFORMATIONAL ONLY, NOT AUTHORITATIVE.** This field is populated from the creator's local config and may not match the on-chain `PREVSTATE(5)`. Receivers **must NOT** validate campaign acceptance based on this field. The authoritative fee enforcement check is the on-chain escrow coin's `PREVSTATE(5)` — see Network-side validation rules in §6.3.
 >
 > `publisher_reward_view` and `max_publisher_budget` are **optional** (default 0). When `publisher_reward_view = 0`, the campaign has no publisher payouts.
->
-> `platform_key` is the `PLATFORM_KEY` embedded in the escrow coin. Receivers **must** validate this matches their local `PLATFORM_KEY` constant AND the on-chain coin PREVSTATE(5). Mismatch → silent drop. When local `PLATFORM_KEY` is null, skip validation.
 
 ### 8.4 Reward Processing — FE-internal (not a Maxima message)
 
@@ -1478,22 +1476,30 @@ service.js            # SW entry point — must be named service.js at zip root
 
 ### 13.1 Minimal Integration
 
-Publisher Frames generate a copy-paste snippet. For a host MiniDapp that
-already owns `MDS.init`, paste the snippet into the page and add only these two
-calls inside the host's existing MDS callback:
+Publisher Frames generate a self-contained copy-paste snippet. Paste it anywhere
+in your MiniDapp's HTML — it requires no external dependencies or setup calls.
 
-```javascript
-MDS.init(function(msg) {
-  MinimaAdsPublisherHandleMdsEvent(msg);
-  if (msg.event === 'inited') {
-    MinimaAdsPublisherInit(myMaximaPublicKey, 'metachain,social');
-  }
-});
-```
+The generated snippet:
+1. Defines a `<div id="minimaads-slot">` for ad rendering
+2. Patches `window.MDS.init` to intercept `inited` and `MDSCOMMS` events
+3. Sends `MA_GET_AD` to the host MiniDapp's Service Worker (via `MDS.comms.broadcast`)
+4. Receives `MA_AD_RESPONSE` with the ad object
+5. Renders the ad into the slot using inline CSS
+6. Waits 3 seconds, then sends `MA_TRACK_VIEW` to record the view event
+7. Handles click events by calling `MA_TRACK_CLICK`
 
-The generated snippet loads SDK dependencies in order, calls
-`MinimaAds.init({ frameId, mdsAlreadyInitialized:true })`, renders into
-`#minimaads-slot`, waits 3 seconds, and calls `trackView`.
+**How it works**: The snippet intercepts MDS comms messages between the publisher iframe
+and the host MiniDapp. The host MiniDapp's Service Worker must handle `MA_GET_AD`,
+`MA_TRACK_VIEW`, and `MA_TRACK_CLICK` messages and forward them to the MinimaAds
+Service Worker. The MinimaAds Service Worker then queries the local CAMPAIGNS table
+(populated by on-chain discovery — see §8.1) and responds with an ad object or a
+not-found signal.
+
+**Important**: Campaign discovery is a **Service Worker responsibility**, not an SDK call.
+The MinimaAds Service Worker automatically scans escrow coins on each NEWBLOCK and sends
+`REQUEST_CAMPAIGN_DATA` to campaign creators. Campaign data is persisted locally and made
+available to publishers via the snippet. The SDK (`getAd`) reads from this pre-populated
+CAMPAIGNS table — it does not perform discovery itself.
 
 ### 13.2 SDK API Reference
 

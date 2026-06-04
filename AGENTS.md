@@ -175,6 +175,23 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-06-04 — Documentation Audit: Publisher Campaign Discovery & SDK Integration
+
+**Task**: Audit MinimaAds.md §6/§8/§13 to identify obsolete or misleading documentation about publisher campaign discovery post-MAXIMA_ROUTE_DISCOVERY, then fix any inaccuracies or gaps.
+
+**Findings and Fixes**:
+1. **§13.1 Minimal Integration** — was completely wrong. Documented old API (`MinimaAdsPublisherHandleMdsEvent`, `MinimaAdsPublisherInit`) that doesn't exist. Rewritten to accurately describe the self-contained comms-broadcast snippet that frames.js actually generates: patches `MDS.init`, sends `MA_GET_AD` / `MA_TRACK_VIEW` / `MA_TRACK_CLICK` messages to the host's SW.
+2. **§8.3 platform_key contradiction** — line 974 contradicted line 970. Line 970 (correct) says "must NOT validate platform_key from payload"; line 974 (stale) said "must validate platform_key". Deleted line 974.
+3. **§6.3 STATE(4) mislabel** — example JSON showed `"4":"<creator_mx_address>"` but the code stores a permanent route `MAX#...`. Relabeled to `<creator_permanent_route MAX#pk#mls>`.
+4. **MAXIMA_ROUTE_DISCOVERY.md status** — said "design note for future implementation" but the core recommendation (STATE(4) route) is already implemented. Updated to "Partially implemented (STATE(4) DONE; route caches / PEER_ROUTE_UPDATE still future)".
+5. **§13 gap** — SDK section was silent on campaign discovery responsibility. Added 3-line note: "Campaign discovery is SW responsibility, not SDK call. SDK reads from pre-populated CAMPAIGNS table via getAd()."
+
+**Result**: Documentation now accurately describes MAXIMA_ROUTE_DISCOVERY system end-to-end, from on-chain escrow discovery through publisher snippet campaign retrieval.
+
+**AGENTS.md updated**: yes — §6 added this session entry.
+
+---
+
 ### Session: 2026-06-04 — Fix: MAXIMA_ROUTE_DISCOVERY Campaign Platform_Key Mismatch
 
 **Task**: Diagnose and fix campaign discovery rejection caused by `platform_key mismatch` error blocking user4 (MinimaAds creator) from accepting campaigns from other nodes.

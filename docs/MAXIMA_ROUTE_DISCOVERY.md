@@ -1,6 +1,6 @@
 # Maxima Route Discovery Notes
 
-Status: design note for future implementation before production.
+Status: Partially implemented. STATE(4) route in escrow coin DONE (2026-06-03). Route caches, PEER_ROUTE_UPDATE, route-refresh tx still future.
 Date: 2026-06-03.
 
 This document captures the routing design discussion for payment channels between MinimaAds users who are not Maxima contacts.

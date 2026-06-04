@@ -175,7 +175,9 @@ function handleChannelOpenRequest(payload, senderPk) {
       }
 
       MDS.cmd("maxima action:addcontact contact:" + viewerMx, function(addRes) {
-        MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: addcontact viewer result: " + (addRes ? addRes.status : 'null'));
+        // Optional/informational: contact may already exist; either way routing via
+        // to: still works, so a non-true status here is NOT a failure.
+        MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: addcontact viewer (optional, contact may already exist; routing via to: will work) status=" + (addRes ? addRes.status : 'null'));
       });
 
       getChannelState(campaignId, viewerKey, 'viewer', function(chErr, existing) {

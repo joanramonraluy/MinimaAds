@@ -80,30 +80,19 @@ function renderMaximaRoutesSettings(root) {
   mlsInputRow.appendChild(mlsSaveBtn);
   mlsSection.appendChild(mlsInputRow);
 
-  // Load current MLS status from node (via getMaximaInfo)
-  // This is the SOURCE OF TRUTH — what matters is whether node has staticmls: true
-  if (typeof getMaximaInfo === 'function') {
-    getMaximaInfo(function(err, info) {
-      if (err || !info) {
-        mlsStatus.textContent = '✗ Unable to check node status';
-        mlsStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
-        mlsStatus.style.color = 'var(--pico-del-color, #c0392b)';
-        return;
-      }
-
-      if (info.staticmls === true) {
-        mlsStatus.textContent = '✓ MLS configured on node';
-        mlsStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
-        mlsStatus.style.color = 'var(--pico-ins-color, #27ae60)';
-      } else {
-        mlsStatus.textContent = '✗ No MLS configured on node. Enter address and click "Apply to Node" below.';
-        mlsStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
-        mlsStatus.style.color = 'var(--pico-del-color, #c0392b)';
-      }
-    });
-  } else {
-    mlsStatus.textContent = '? Cannot verify MLS status';
-  }
+  // Load current MLS address from keypair
+  MDS.keypair.get('MLS_SERVER_ADDRESS', function(res) {
+    var savedAddr = (res && res.status && res.value) ? res.value : null;
+    if (savedAddr) {
+      mlsStatus.textContent = '✓ ' + savedAddr;
+      mlsStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
+      mlsStatus.style.color = 'var(--pico-ins-color, #27ae60)';
+    } else {
+      mlsStatus.textContent = '✗ No MLS address saved';
+      mlsStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
+      mlsStatus.style.color = 'var(--pico-del-color, #c0392b)';
+    }
+  });
 
   root.appendChild(mlsSection);
 

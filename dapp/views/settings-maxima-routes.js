@@ -80,42 +80,19 @@ function renderMaximaRoutesSettings(root) {
   mlsInputRow.appendChild(mlsSaveBtn);
   mlsSection.appendChild(mlsInputRow);
 
-  // Load current MLS status AND verify if it's applied
+  // Load current MLS status
+  // If it's saved, it's been applied (both "Apply to Node" and "Connect" execute command first)
   MDS.keypair.get('MLS_SERVER_ADDRESS', function(res) {
     var savedAddr = (res && res.status && res.value) ? res.value : null;
-    if (!savedAddr) {
+    if (savedAddr) {
+      mlsStatus.textContent = '✓ MLS configured: ' + savedAddr;
+      mlsStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
+      mlsStatus.style.color = 'var(--pico-ins-color, #27ae60)';
+    } else {
       mlsStatus.textContent = '✗ No MLS server configured';
       mlsStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
       mlsStatus.style.color = 'var(--pico-del-color, #c0392b)';
-      return;
     }
-
-    // Check if it's actually applied to the node
-    if (typeof getMaximaInfo !== 'function') {
-      mlsStatus.textContent = '✓ MLS saved: ' + savedAddr;
-      mlsStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
-      mlsStatus.style.color = 'var(--pico-ins-color, #27ae60)';
-      return;
-    }
-
-    getMaximaInfo(function(err, info) {
-      if (err || !info) {
-        mlsStatus.textContent = '✓ MLS saved: ' + savedAddr;
-        mlsStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
-        mlsStatus.style.color = 'var(--pico-ins-color, #27ae60)';
-        return;
-      }
-
-      if (info.staticmls === true) {
-        mlsStatus.textContent = '✓ MLS configured and applied: ' + savedAddr;
-        mlsStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
-        mlsStatus.style.color = 'var(--pico-ins-color, #27ae60)';
-      } else {
-        mlsStatus.textContent = '⚠ MLS saved but NOT applied to node. Click "Apply to Node" to activate.';
-        mlsStatus.style.borderColor = 'var(--pico-muted-color, #ffc107)';
-        mlsStatus.style.color = 'var(--pico-muted-color, #ffc107)';
-      }
-    });
   });
 
   root.appendChild(mlsSection);

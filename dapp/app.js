@@ -110,6 +110,12 @@ function setMode(mode) {
   doRender();
 }
 
+function goHome() {
+  if (typeof closeDrawer === 'function') { closeDrawer(); }
+  var view = MODE_VIEWS[_activeMode] ? MODE_VIEWS[_activeMode][0] : 'viewer';
+  window.location.hash = view;
+}
+
 function setStatus(text) {
   var root = document.getElementById('app');
   if (!root) { return; }

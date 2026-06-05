@@ -928,6 +928,27 @@ function _maybeNotifyPublisher(campaignId, frameId) {
 }
 
 // ---------------------------------------------------------------------------
+// _notifyPublisherByKey — sends PUBLISHER_REWARD_NOTIFY directly using the
+// publisher's Maxima PK (no FRAMES table lookup required). Used for built-in
+// frames where no FRAMES row exists on the creator node but publisherKey is
+// known from the REWARD_REQUEST payload (e.g. MINIMAADS_CREATOR_PK).
+// ---------------------------------------------------------------------------
+function _notifyPublisherByKey(campaignId, frameId, publisherKey) {
+  if (!publisherKey) { return; }
+  getChannelState(campaignId, publisherKey, 'publisher', function(chErr, ch) {
+    if (!chErr && ch && (ch.STATUS === 'open' || ch.STATUS === 'pending')) { return; }
+    var notify = {
+      type:        "PUBLISHER_REWARD_NOTIFY",
+      campaign_id: campaignId,
+      frame_id:    frameId
+    };
+    sendMaxima(publisherKey, null, notify, function(ok) {
+      MDS.log("[CHANNEL] PUBLISHER_REWARD_NOTIFY (by-key) sent pubKey: " + publisherKey.substring(0, 16) + "... ok=" + ok);
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
 // handlePublisherRewardNotify — runs on the publisher's node.
 // Generates a wallet key, then sends CHANNEL_OPEN_REQUEST (role=publisher)
 // back to the creator so the creator can fund a publisher channel coin.
@@ -1032,6 +1053,7 @@ function _maybeGeneratePublisherVoucher(campaignId, frameId, eventId, publisherK
         if (err || !rows || rows.length === 0) {
           MDS.log("[CHANNEL] _maybeGeneratePublisherVoucher: publisher channel not open — DEFERRING. campaign: " + campaignId + " pubKey: " + publisherKey.substring(0, 16) + "...");
           _deferPublisherReward(campaignId, frameId || publisherKey, eventId);
+          _notifyPublisherByKey(campaignId, frameId || publisherKey, publisherKey);
           return;
         }
         _doGeneratePublisherVoucher(campaignId, frameId || rows[0].FRAME_ID, eventId, rows[0]);
@@ -1065,6 +1087,7 @@ function _maybeGeneratePublisherVoucher(campaignId, frameId, eventId, publisherK
             if (err2 || !rows2 || rows2.length === 0) {
               MDS.log("[CHANNEL] _maybeGeneratePublisherVoucher: no open publisher channel — DEFERRING. campaign: " + campaignId + " frame: " + frameId);
               _deferPublisherReward(campaignId, frameId, eventId);
+              _maybeNotifyPublisher(campaignId, frameId);
               return;
             }
             MDS.log("[CHANNEL] _maybeGeneratePublisherVoucher: fallback to open publisher channel. campaign: " + campaignId + " frame: " + frameId);

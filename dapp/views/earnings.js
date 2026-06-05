@@ -150,13 +150,13 @@ function _refreshSettlementHistory() {
       + " AND (UPPER(c.CREATOR_ADDRESS) != UPPER('" + escapeSql(MY_ADDRESS) + "')"
       + " OR c.CREATOR_ADDRESS IS NULL)";
   }
-  var sql = "SELECT ch.CAMPAIGN_ID, ch.ROLE, SUM(ch.CUMULATIVE_EARNED) AS CUMULATIVE_EARNED,"
-          + " MIN(ch.CREATED_AT) AS CREATED_AT, c.TITLE, c.CREATOR_ADDRESS"
+  // Select each settled channel as an individual row (no GROUP BY)
+  // so that multiple cycles for the same campaign each show separately.
+  var sql = "SELECT ch.CAMPAIGN_ID, ch.ROLE, ch.CUMULATIVE_EARNED, ch.CREATED_AT, c.TITLE, c.CREATOR_ADDRESS"
           + " FROM CHANNEL_HISTORY ch"
           + " LEFT JOIN CAMPAIGNS c ON UPPER(ch.CAMPAIGN_ID) = UPPER(c.ID)"
           + roleFilter
-          + " GROUP BY ch.CAMPAIGN_ID, ch.ROLE, c.TITLE, c.CREATOR_ADDRESS"
-          + " ORDER BY MIN(ch.CREATED_AT) ASC";
+          + " ORDER BY ch.CREATED_AT ASC";
   sqlQuery(sql, function(err, rows) {
     target.innerHTML = '';
     renderSettlementHistory(target, rows || []);
@@ -231,7 +231,7 @@ function renderSettlementHistory(target, settlements) {
           detailTr.style.display = '';
           toggleIcon.style.transform = 'rotate(90deg)';
           tr.setAttribute('aria-expanded', 'true');
-          if (!loaded) { loaded = true; _loadChannelEvents(r.CAMPAIGN_ID, r.ROLE, true, detailTd); }
+          if (!loaded) { loaded = true; _loadChannelEvents(r.CAMPAIGN_ID, r.ROLE, true, detailTd, parseInt(r.CREATED_AT, 10)); }
         } else {
           detailTr.style.display = 'none';
           toggleIcon.style.transform = 'rotate(0deg)';
@@ -257,18 +257,52 @@ function earningsTd(value) {
   return el;
 }
 
-function _loadChannelEvents(campaignId, role, isSettled, targetEl) {
+function _loadChannelEvents(campaignId, role, isSettled, targetEl, channelCreatedAt) {
+  // For settled channels we need two boundaries:
+  //   lower:  channelCreatedAt (the CREATED_AT of this specific channel instance)
+  //   upper:  the CREATED_AT of the next channel for this campaign+role
+  //           (either the next settled channel or the currently open one)
+  // For active (non-settled) channels we only need the lower bound (open channel's CREATED_AT).
+
+  if (isSettled && channelCreatedAt) {
+    // Find the next channel boundary: smallest CREATED_AT > channelCreatedAt across
+    // CHANNEL_HISTORY and CHANNEL_STATE for the same campaign+role.
+    var nextHistSql = "SELECT MIN(CREATED_AT) AS NEXT_AT FROM CHANNEL_HISTORY"
+                    + " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')"
+                    + " AND UPPER(ROLE) = UPPER('" + escapeSql(role) + "')"
+                    + " AND CREATED_AT > " + channelCreatedAt;
+    sqlQuery(nextHistSql, function(nhErr, nhRows) {
+      var nextHistAt = (!nhErr && nhRows && nhRows[0] && nhRows[0].NEXT_AT)
+                       ? parseInt(nhRows[0].NEXT_AT, 10) : null;
+      var openStateSql = "SELECT CREATED_AT FROM CHANNEL_STATE"
+                       + " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')"
+                       + " AND UPPER(ROLE) = UPPER('" + escapeSql(role) + "')"
+                       + " AND (STATUS = 'open' OR STATUS = 'pending')";
+      sqlQuery(openStateSql, function(osErr, osRows) {
+        var openAt = (!osErr && osRows && osRows[0]) ? parseInt(osRows[0].CREATED_AT, 10) : null;
+        // Upper bound = smallest of nextHistAt and openAt (ignore nulls)
+        var upperBound = null;
+        if (nextHistAt && openAt) { upperBound = Math.min(nextHistAt, openAt); }
+        else if (nextHistAt)      { upperBound = nextHistAt; }
+        else if (openAt)          { upperBound = openAt; }
+        var timeFilter = " AND TIMESTAMP >= " + channelCreatedAt;
+        if (upperBound) { timeFilter += " AND TIMESTAMP < " + upperBound; }
+        _doLoadEvents(campaignId, timeFilter, targetEl);
+      });
+    });
+    return;
+  }
+
+  // Active (non-settled) channel: events from the open channel's CREATED_AT onwards.
   var stateSql = "SELECT CREATED_AT FROM CHANNEL_STATE"
                + " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')"
                + " AND UPPER(ROLE) = UPPER('" + escapeSql(role) + "')"
                + " AND STATUS = 'open'";
-
   sqlQuery(stateSql, function(err, rows) {
     var openCreatedAt = null;
     if (!err && rows && rows.length > 0) {
       openCreatedAt = parseInt(rows[0].CREATED_AT, 10);
     }
-
     var timeFilter = "";
     if (openCreatedAt) {
       if (isSettled) {
@@ -281,7 +315,11 @@ function _loadChannelEvents(campaignId, role, isSettled, targetEl) {
         timeFilter = " AND 1=0";
       }
     }
+    _doLoadEvents(campaignId, timeFilter, targetEl);
+  });
+}
 
+function _doLoadEvents(campaignId, timeFilter, targetEl) {
     var sql = "SELECT TYPE, AMOUNT, TIMESTAMP"
             + " FROM REWARD_EVENTS"
             + " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')"
@@ -326,7 +364,6 @@ function _loadChannelEvents(campaignId, role, isSettled, targetEl) {
       table.appendChild(tbody);
       targetEl.appendChild(table);
     });
-  });
 }
 
 // ---------------------------------------------------------------------------

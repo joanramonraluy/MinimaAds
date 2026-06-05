@@ -92,6 +92,8 @@ function handleTrackView(payload) {
   var userAddress  = payload.userAddress || "";
   var publisherKey = payload.publisherKey || "";
 
+  MDS.log("[COMMS] MA_TRACK_VIEW received: userAddress format=" + (userAddress && userAddress.indexOf('MAX#')===0 ? 'PERMANENT_ROUTE' : 'DIRECT_ADDRESS') + " publisherKey format=" + (publisherKey && publisherKey.indexOf('MAX#')===0 ? 'PERMANENT_ROUTE' : 'RSA_KEY'));
+
   if (!campaignId || !userAddress) {
     MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "missing fields"}), function() {});
     return;

@@ -312,6 +312,7 @@ function _trackDetailView(campaign) {
     userAddress: MY_ADDRESS,
     publisherKey: MINIMAADS_CREATOR_PK
   };
+  console.log('[MA-BUILTIN-VIEWER] TRACK_VIEW: userAddress format=DIRECT_ADDRESS publisherKey format=RSA_KEY');
   window.MDS.comms.broadcast(JSON.stringify(payload), function() {});
   loadTodayEarned();
 }

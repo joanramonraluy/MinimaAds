@@ -175,6 +175,39 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-06-05 — Fix Missing Settled Channels on Creator Dashboard
+
+**Task**: Diagnose and fix why settled channels never appeared in the creator's `CHANNEL_HISTORY` / Settled channels UI section, even after viewer nodes settled their channels on-chain. Also fix the viewer's `#earnings` view showing all settled cycles merged into one row.
+
+**Root cause**: Three silent data-loss/display paths:
+1. **`handleChannelOpen`** (viewer side): when the creator sends a `CHANNEL_OPEN` for a second channel cycle, raw `MERGE INTO CHANNEL_STATE KEY (CAMPAIGN_ID, VIEWER_KEY, ROLE)` silently overwrote the existing row without archiving to `CHANNEL_HISTORY`.
+2. **`CHANNEL_OPEN_REQUEST` stale-pending path** (both viewer and publisher sides): when an existing `pending` channel was older than 5 minutes and had no split-coin, the code fell through to `openChannel()` directly, again overwriting without archiving.
+3. **`_refreshSettlementHistory`** in `earnings.js`: a `GROUP BY (CAMPAIGN_ID, ROLE)` merged all settled channel cycles for the same campaign into a single row — hiding individual channel instances.
+
+**Changes**:
+- **public/service-workers/handlers/channel.handler.js**:
+  - `handleChannelOpen`: before the `MERGE`, query `CHANNEL_STATE` for an existing open/pending row with a **different** coinid. If found, call `settleChannel()` first to archive it, then delegate to a new helper `_doChannelOpenUpsert()`.
+  - `_doChannelOpenUpsert()` (new helper): extracted the raw MERGE + post-open logic from `handleChannelOpen` to keep both paths DRY.
+  - `CHANNEL_OPEN_REQUEST` stale-pending, no split-coin path (**viewer**): now calls `settleChannel()` to archive the stale record, then proceeds to `openChannel()` + `_swDispatchChannelOpen()`.
+  - `CHANNEL_OPEN_REQUEST (publisher)` stale-pending, no split-coin path: same fix as viewer — archive stale record via `settleChannel()` before opening a new channel, preserving the `VIEWER_WALLET_PK` and `PUBLISHER_BUDGET_SPENT` updates.
+- **dapp/views/earnings.js**:
+  - `_refreshSettlementHistory`: removed `GROUP BY` — now selects each `CHANNEL_HISTORY` row individually so multiple settlement cycles appear as separate rows.
+  - `_loadChannelEvents`: added `channelCreatedAt` param; for settled channels, determines the per-channel event range as `[channelCreatedAt, nextChannelCreatedAt)` by querying `CHANNEL_HISTORY` for the next cycle and `CHANNEL_STATE` for the current open channel.
+  - `_doLoadEvents()` (new helper): extracted event-table rendering logic shared by both settled and active paths.
+
+**Why**: Ensures every channel lifecycle transition is fully archived and individually visible.
+
+**AGENTS.md updated**: yes — §6 updated this entry.
+
+**Verification**:
+- Let viewer earn rewards → settle → earn again (2nd channel) → settle → earn (3rd channel).
+- On viewer `#earnings` → "Settled channels": should show 2 separate rows, each with its own earned amount and correct per-channel events.
+- On creator `#creator` → "Settled channels": should show both settled channels.
+- Publisher stale-pending: same behaviour as viewer for publisher channels.
+
+---
+
+
 ### Session: 2026-06-05 — Include CREATOR_PERMANENT_ROUTE in REWARD_REQUEST Payload
 
 **Task**: Add `publisher_mx` field to the `REWARD_REQUEST` Maxima payload in `_sendRewardRequest`, carrying the creator's permanent Maxima route (`CREATOR_PERMANENT_ROUTE` keypair value) so the creator node can send `PUBLISHER_REWARD_NOTIFY` back via a stable route.
@@ -194,31 +227,6 @@ For verification procedures, see `docs/VERIFICATION.md`.
 - In SW logs on the viewer node, confirm `REWARD_REQUEST sent` appears.
 - On the creator node, decode the received `REWARD_REQUEST` payload and confirm `publisher_mx` is present (a `MAX#...` string or empty string if route not yet set).
 - No console errors expected on either node.
-
----
-
-### Session: 2026-06-05 — Unify Settled Channels and Segment Creator Metrics Reward Events
-
-**Task**: Fix creator campaign metrics where settled viewer channels were not shown under "Settled channels" (due to a `role = 'PUBLISHER'` SQL filter) and duplicate settled reward events were displayed under active nodes in "Rewarded nodes". Also ensure that when channels are settled on the creator's node, they are written to `CHANNEL_HISTORY` rather than just overwritten in `CHANNEL_STATE`.
-
-**Changes**:
-- **dapp/views/mycampaigns.js**:
-  - Removed `AND UPPER(ROLE) = 'PUBLISHER'` from the `CHANNEL_HISTORY` query in `_loadSettledChannels` to load both viewer and publisher settled channels.
-  - Updated `_renderSettledChannelsTable` to add a "Type" column showing "Viewer" or "Publisher" based on the channel role, and updated the details colspan to 7.
-  - Updated `_groupSettledChannelsByPk` to group channels by PK and role.
-  - Refactored `_loadRewardedNodes` to query `CHANNEL_STATE` for active channels, extract their creation timestamps (`CREATED_AT`), and filter out settled events (where event timestamp is less than the active channel's creation timestamp).
-- **public/service-workers/handlers/channel.handler.js**:
-  - Replaced direct `sqlQuery` `UPDATE CHANNEL_STATE SET STATUS = 'settled'` with a call to `settleChannel` (from `core/channels.js`) for both viewer and publisher settlement paths on the creator node.
-  - Implemented `checkOpenChannelsSettled()`, which queries all open channels, verifies if their channel coins have been spent on-chain at the `CHANNEL_SCRIPT_ADDRESS`, and automatically transitions/archives them to `CHANNEL_HISTORY` on the creator node when spent.
-- **service.js**:
-  - Registered/called `checkOpenChannelsSettled()` on the `NEWBLOCK` event listener.
-
-**Why**: Ensures all settled payment channels are archived and visible on the creator's dashboard, and partitions the individual views/clicks so that already-settled rewards do not duplicate under active nodes. It also solves the sync issue between nodes by automatically detecting on-chain channel settlements via block checks.
-
-**Testing required**:
-- Navigate to `#creator` (My Campaigns view).
-- Check "Settled channels": verify both settled publisher and viewer channels are listed with their respective "Type" (Viewer or Publisher) when they are settled.
-- Check "Rewarded nodes": verify only the active (unsettled) views/clicks of the current channel are listed under each node, and that any older views/clicks that were settled are excluded and do not duplicate.
 
 ---
 

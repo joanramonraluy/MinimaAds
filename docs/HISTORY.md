@@ -46,6 +46,25 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-04 — DevTools Polish & SQL Console Removal
+
+**Task**: Fix DevTools CSS layout, remove the SQL console, adjust button styling, remove the Copy command button, add "Copy Address" helper buttons, remove the "Client Mode (Advanced)" section, and ensure MLS Save configures static MLS.
+
+**Changes**:
+- **dapp/views/devtools.js**: Removed SQL console inputs, textarea, run button, outputs, and the `runQuery` function. Re-styled the entire modal layout with modern glassmorphism overlay using PicoCSS theme variables. Added smooth open/close animations. Aligned all input rows (Platform Key, MLS Server) to a consistent 2.2rem height. Renamed the Platform Key "Register" button to "Save". Removed the "Copy: maxextra action:staticmls" button. Added "Copy Address" buttons to both the Platform Key Configuration and MLS Server Configuration sections to easily copy active addresses. Fixed the MLS Server configuration "Save" button to execute `maxextra action:staticmls` on the node, ensuring the setting applies at the platform level. Completely removed the "Client Mode (Advanced)" section since route setup is now fully managed on the Settings page.
+
+**Why**: Simplifies development settings, makes input-button alignments consistent, cleans up redundant command buttons, and resolves a bug where saving the MLS server via DevTools failed to actually register the MLS server with the Maxima stack.
+
+**Testing required**:
+- Press `Ctrl+Shift+D` to toggle DevTools.
+- Verify that inputs and "Save" buttons are perfectly aligned in height (2.2rem).
+- Verify that the Platform Key custom address registration button is named "Save".
+- Verify that the "Client Mode (Advanced)" section is completely gone from the DevTools dialog.
+- Verify that both the Platform Key and MLS Server configuration sections have a "Copy Address" button.
+- Click "Copy Address" in either section and verify the respective key/address is copied to your clipboard (showing a quick status change in the card).
+
+---
+
 ### Session: 2026-06-04 — Built-in Frame Owned by Platform Creator (MINIMAADS_CREATOR_PK)
 
 **Task**: Make the built-in viewer Frame belong to the platform creator instead of the viewing node. Previously each node attributed its built-in-viewer publisher rewards to itself (`publisherKey: MY_ADDRESS`). The built-in surface is a platform-owned Frame; its publisher-side rewards must accrue to one canonical key shared by all nodes.

@@ -353,7 +353,8 @@ function _sendRewardRequest(campaignId, campaign, channel, eventId, cumulative, 
     event_id:      eventId,
     cumulative:    cumulative,
     role:          "viewer",
-    publisher_key: publisherKey || ""
+    publisher_key: publisherKey || "",
+    frame_id:      "builtin:" + MY_MAXIMA_PK.toUpperCase()
   };
   MDS.keypair.get("CREATOR_MX_" + campaignId, function(kpRes) {
     var creatorMx = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : null;

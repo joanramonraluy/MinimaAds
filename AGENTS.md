@@ -189,8 +189,8 @@ For verification procedures, see `docs/VERIFICATION.md`.
   - Users can save the stable route of the platform creator (saved under `MINIMAADS_CREATOR_ROUTE` keypair) or clear it.
   - Added auto-extraction of raw Maxima contact address if the user inputs a full `MAX#...` permanent route as the MLS Server Address.
 - **dapp/views/devtools.js**:
-  - Added Section 4: "Platform Creator Route Configuration" with an input field to paste the route, a "Save" button, and a "Clear" button to easily manage the creator route during development.
-  - Added auto-extraction of raw Maxima contact address if the user inputs a full `MAX#...` permanent route as the MLS Server Address.
+  - Restructured the DevTools panel into exactly three clean visual sections: (1) Platform Creator Configuration (for local server registration, platform key, and creator permanent route), (2) Client / User Configuration (for remote MLS host setting, client handshake, and creator route import), and (3) Database & Storage Console (with Keypair Inspector and SQL Console).
+  - Styled sections with distinct colored left-borders (primary accent for creator, purple for client, and neutral/gray for DB console) for premium look and feel.
   - Fixed a bug in the "Register This Node as MLS Server" action by ensuring it uses the node's own P2P identity (`info.p2pidentity || info.localidentity`) instead of the currently configured remote MLS address.
   - Redesigned the MLS status block to show a detailed comparison of DApp Stored MLS address, System staticmls, System MLS host, and System P2P identity, turning green when properly configured.
   - Added Section 5: "SQL Console" at the bottom of the panel allowing developers to execute raw H2 database queries with formatted output, a copy-to-clipboard utility, and automatic status indicators.

@@ -7,11 +7,10 @@
   function buildModal() {
     var overlay = document.createElement('div');
     overlay.id = 'ma-devtools';
-    // Glassmorphism overlay with animation support
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15, 23, 42, 0.45);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);z-index:9999;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity 0.2s ease-in-out;';
 
     var panel = document.createElement('div');
-    panel.style.cssText = 'background:var(--pico-card-background-color);color:var(--pico-color);border:1px solid var(--pico-muted-border-color);border-radius:1rem;padding:2rem;width:90%;max-width:550px;display:flex;flex-direction:column;gap:1.5rem;max-height:85vh;overflow-y:auto;box-shadow:0 20px 25px -5px rgba(0,0,0,0.15), 0 10px 10px -5px rgba(0,0,0,0.06);transform:scale(0.95);transition:transform 0.2s ease-in-out;';
+    panel.style.cssText = 'background:var(--pico-card-background-color);color:var(--pico-color);border:1px solid var(--pico-muted-border-color);border-radius:1rem;padding:2rem;width:95%;max-width:600px;display:flex;flex-direction:column;gap:1.5rem;max-height:85vh;overflow-y:auto;box-shadow:0 20px 25px -5px rgba(0,0,0,0.15), 0 10px 10px -5px rgba(0,0,0,0.06);transform:scale(0.95);transition:transform 0.2s ease-in-out;';
 
     // Header
     var header = document.createElement('div');
@@ -33,34 +32,85 @@
     header.appendChild(closeBtn);
     panel.appendChild(header);
 
-    // Section 1: Platform Key Configuration
-    var pkSection = document.createElement('section');
-    pkSection.style.cssText = 'background:var(--pico-card-sectionning-background-color, rgba(0,0,0,0.03));border:1px solid var(--pico-muted-border-color);border-radius:0.5rem;padding:1.25rem;display:flex;flex-direction:column;gap:0.75rem;margin:0;';
+    // Helpers for Keypair Inspector
+    var kpListContainer = document.createElement('div');
+    kpListContainer.style.cssText = 'display:flex;flex-direction:column;gap:0.4rem;';
 
-    var pkTitle = document.createElement('strong');
-    pkTitle.textContent = 'Platform Key Configuration';
-    pkTitle.style.cssText = 'display:block;font-size:0.9rem;font-weight:700;color:var(--pico-primary);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.25rem;';
-    pkSection.appendChild(pkTitle);
+    var kpRows = {};
+
+    function addKpRow(keyName) {
+      var row = document.createElement('div');
+      row.style.cssText = 'display:flex;flex-direction:column;gap:0.15rem;font-family:monospace;font-size:0.75rem;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);padding:0.5rem;border-radius:0.375rem;';
+      
+      var nameEl = document.createElement('strong');
+      nameEl.textContent = keyName;
+      nameEl.style.color = 'var(--pico-primary)';
+      row.appendChild(nameEl);
+
+      var valEl = document.createElement('span');
+      valEl.style.cssText = 'word-break:break-all;color:var(--pico-muted-color,#6c757d);';
+      valEl.textContent = 'Loading…';
+      row.appendChild(valEl);
+
+      row.valEl = valEl;
+      kpRows[keyName] = row;
+      kpListContainer.appendChild(row);
+    }
+
+    function refreshKeypairInspector() {
+      Object.keys(kpRows).forEach(function(keyName) {
+        var valEl = kpRows[keyName].valEl;
+        MDS.keypair.get(keyName, function(res) {
+          var val = (res && res.status && res.value) ? res.value : null;
+          valEl.textContent = val || '(not set)';
+          if (val) {
+            valEl.style.color = 'var(--pico-color)';
+          } else {
+            valEl.style.color = 'var(--pico-muted-color,#6c757d)';
+          }
+        });
+      });
+    }
+
+    // ==========================================
+    // SECTION 1: Platform Creator Configuration
+    // ==========================================
+    var creatorSec = document.createElement('section');
+    creatorSec.style.cssText = 'background:var(--pico-card-sectionning-background-color, rgba(0,0,0,0.02));border:1px solid var(--pico-muted-border-color);border-left:4px solid var(--pico-primary);border-radius:0.75rem;padding:1.25rem;display:flex;flex-direction:column;gap:1.25rem;margin:0;';
+
+    var creatorTitle = document.createElement('strong');
+    creatorTitle.textContent = '1. Platform Creator Configuration';
+    creatorTitle.style.cssText = 'display:block;font-size:0.95rem;font-weight:700;color:var(--pico-primary);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.1rem;';
+    creatorSec.appendChild(creatorTitle);
+
+    // Sub-item 1.1: Platform Key (PLATFORM_KEY)
+    var pkSub = document.createElement('div');
+    pkSub.style.cssText = 'display:flex;flex-direction:column;gap:0.4rem;';
+    
+    var pkSubTitle = document.createElement('span');
+    pkSubTitle.textContent = 'Platform Key (PLATFORM_KEY)';
+    pkSubTitle.style.cssText = 'font-size:0.75rem;font-weight:700;color:var(--pico-muted-color);text-transform:uppercase;letter-spacing:0.05em;';
+    pkSub.appendChild(pkSubTitle);
 
     var pkStatus = document.createElement('div');
     pkStatus.id = 'ma-dev-pk-status';
-    pkStatus.style.cssText = 'font-family:monospace;font-size:0.75rem;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);padding:0.75rem;border-radius:0.375rem;margin:0;word-break:break-all;color:var(--pico-color);line-height:1.4;';
+    pkStatus.style.cssText = 'font-family:monospace;font-size:0.75rem;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);padding:0.6rem 0.75rem;border-radius:0.375rem;margin:0;word-break:break-all;color:var(--pico-color);line-height:1.4;';
     pkStatus.textContent = 'Current PLATFORM_KEY: ' + (typeof PLATFORM_KEY !== 'undefined' && PLATFORM_KEY ? PLATFORM_KEY : '(not set)');
-    pkSection.appendChild(pkStatus);
+    pkSub.appendChild(pkStatus);
 
     var pkActions = document.createElement('div');
     pkActions.style.cssText = 'display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;';
 
     var setSelfBtn = document.createElement('button');
-    setSelfBtn.textContent = 'Set as Platform Node';
+    setSelfBtn.textContent = 'Set Self Wallet';
     setSelfBtn.className = 'primary';
-    setSelfBtn.style.cssText = 'width:auto;margin:0;padding:0.45rem 0.9rem;font-size:0.8rem;line-height:1.2;';
+    setSelfBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;';
     setSelfBtn.addEventListener('click', function() {
       setSelfBtn.disabled = true;
       setSelfBtn.textContent = 'Reading…';
       MDS.cmd('getaddress', function(res) {
         setSelfBtn.disabled = false;
-        setSelfBtn.textContent = 'Set as Platform Node';
+        setSelfBtn.textContent = 'Set Self Wallet';
         if (!res || !res.status || !res.response || !res.response.address) {
           pkStatus.textContent = 'ERROR: could not read wallet address';
           pkStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
@@ -71,6 +121,7 @@
           PLATFORM_KEY = addr;
           pkStatus.textContent = 'PLATFORM_KEY set to: ' + addr + '\n(reload SW to apply)';
           pkStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
+          refreshKeypairInspector();
         });
       });
     });
@@ -79,19 +130,20 @@
     var clearBtn = document.createElement('button');
     clearBtn.textContent = 'Clear Override';
     clearBtn.className = 'outline secondary';
-    clearBtn.style.cssText = 'width:auto;margin:0;padding:0.45rem 0.9rem;font-size:0.8rem;line-height:1.2;';
+    clearBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;';
     clearBtn.addEventListener('click', function() {
       MDS.keypair.set('PLATFORM_KEY_OVERRIDE', '', function() {
         pkStatus.textContent = 'PLATFORM_KEY override cleared\n(reload SW to apply)';
         pkStatus.style.borderColor = 'var(--pico-muted-border-color)';
+        refreshKeypairInspector();
       });
     });
     pkActions.appendChild(clearBtn);
 
     var pkCopyBtn = document.createElement('button');
-    pkCopyBtn.textContent = 'Copy Address';
+    pkCopyBtn.textContent = 'Copy';
     pkCopyBtn.className = 'outline secondary';
-    pkCopyBtn.style.cssText = 'width:auto;margin:0;padding:0.45rem 0.9rem;font-size:0.8rem;line-height:1.2;';
+    pkCopyBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;';
     pkCopyBtn.addEventListener('click', function() {
       var currentKey = (typeof PLATFORM_KEY !== 'undefined' && PLATFORM_KEY) ? PLATFORM_KEY : '';
       if (!currentKey) {
@@ -109,22 +161,18 @@
       }, 2000);
     });
     pkActions.appendChild(pkCopyBtn);
+    pkSub.appendChild(pkActions);
 
-    pkSection.appendChild(pkActions);
-
-    // Register Input row
     var extRow = document.createElement('div');
-    extRow.style.cssText = 'display:flex;gap:0.5rem;align-items:stretch;margin-top:0.25rem;';
-    
+    extRow.style.cssText = 'display:flex;gap:0.5rem;align-items:stretch;';
     var extInput = document.createElement('input');
     extInput.type = 'text';
-    extInput.placeholder = 'Custom address (0xABC…)';
-    extInput.style.cssText = 'flex:1;margin:0;padding:0 0.75rem;font-size:0.8rem;font-family:monospace;height:2.2rem;box-sizing:border-box;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);color:var(--pico-color);border-radius:0.375rem;';
-    
+    extInput.placeholder = 'Or paste custom creator address (0xABC…)';
+    extInput.style.cssText = 'flex:1;margin:0;padding:0 0.5rem;font-size:0.75rem;font-family:monospace;height:2rem;box-sizing:border-box;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);color:var(--pico-color);border-radius:0.375rem;';
     var extBtn = document.createElement('button');
     extBtn.textContent = 'Save';
     extBtn.className = 'primary';
-    extBtn.style.cssText = 'width:auto;margin:0;padding:0 1.2rem;font-size:0.8rem;height:2.2rem;box-sizing:border-box;display:flex;align-items:center;justify-content:center;line-height:2.2rem;white-space:nowrap;';
+    extBtn.style.cssText = 'width:auto;margin:0;padding:0 1rem;font-size:0.75rem;height:2rem;box-sizing:border-box;display:flex;align-items:center;justify-content:center;line-height:2rem;white-space:nowrap;';
     extBtn.addEventListener('click', function() {
       var pk = (extInput.value || '').trim();
       if (!pk) {
@@ -136,28 +184,179 @@
         pkStatus.textContent = 'PLATFORM_KEY set to: ' + pk + '\n(reload SW to apply)';
         pkStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
         extInput.value = '';
+        refreshKeypairInspector();
       });
     });
     extRow.appendChild(extInput);
     extRow.appendChild(extBtn);
-    pkSection.appendChild(extRow);
+    pkSub.appendChild(extRow);
+    creatorSec.appendChild(pkSub);
+
+    // Sub-item 1.2: Register Self as MLS Server
+    var selfMlsSub = document.createElement('div');
+    selfMlsSub.style.cssText = 'display:flex;flex-direction:column;gap:0.4rem;border-top:1px dashed var(--pico-muted-border-color);padding-top:0.75rem;';
     
-    panel.appendChild(pkSection);
+    var selfMlsSubTitle = document.createElement('span');
+    selfMlsSubTitle.textContent = 'MLS Server Node Registration';
+    selfMlsSubTitle.style.cssText = 'font-size:0.75rem;font-weight:700;color:var(--pico-muted-color);text-transform:uppercase;letter-spacing:0.05em;';
+    selfMlsSub.appendChild(selfMlsSubTitle);
 
-    // Section 1.5: MLS Server Configuration
-    var mlsSection = document.createElement('section');
-    mlsSection.style.cssText = 'background:var(--pico-card-sectionning-background-color, rgba(0,0,0,0.03));border:1px solid var(--pico-muted-border-color);border-radius:0.5rem;padding:1.25rem;display:flex;flex-direction:column;gap:0.75rem;margin:0;';
+    var selfMlsActions = document.createElement('div');
+    selfMlsActions.style.cssText = 'display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;';
 
-    var mlsTitle = document.createElement('strong');
-    mlsTitle.textContent = 'MLS Server Configuration';
-    mlsTitle.style.cssText = 'display:block;font-size:0.9rem;font-weight:700;color:var(--pico-primary);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.25rem;';
-    mlsSection.appendChild(mlsTitle);
+    var mlsRegisterBtn = document.createElement('button');
+    mlsRegisterBtn.textContent = 'Register This Node as MLS Server';
+    mlsRegisterBtn.className = 'primary';
+    mlsRegisterBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;';
+    mlsRegisterBtn.addEventListener('click', function() {
+      mlsRegisterBtn.disabled = true;
+      mlsRegisterBtn.textContent = 'Registering…';
+      getMaximaInfo(function(err, info) {
+        if (err) {
+          alert('Error: ' + err.message);
+          mlsRegisterBtn.disabled = false;
+          mlsRegisterBtn.textContent = 'Register This Node as MLS Server';
+          return;
+        }
+        var p2pId = info.p2pidentity || info.localidentity || info.contact;
+        MDS.cmd('maxextra action:staticmls host:' + p2pId, function(res) {
+          mlsRegisterBtn.disabled = false;
+          mlsRegisterBtn.textContent = 'Register This Node as MLS Server';
+          if (res.status) {
+            MDS.keypair.set('MLS_SERVER_ADDRESS', p2pId, function() {
+              updateMlsStatus();
+              refreshKeypairInspector();
+            });
+          } else {
+            alert('Error registering MLS server: ' + (res.error || 'unknown error'));
+          }
+        });
+      });
+    });
+    selfMlsActions.appendChild(mlsRegisterBtn);
+
+    var mlsCopyBtn = document.createElement('button');
+    mlsCopyBtn.textContent = 'Copy Server Address';
+    mlsCopyBtn.className = 'outline secondary';
+    mlsCopyBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;';
+    mlsCopyBtn.addEventListener('click', function() {
+      MDS.keypair.get('MLS_SERVER_ADDRESS', function(res) {
+        var stored = (res && res.status && res.value) ? res.value : null;
+        if (!stored) {
+          alert('ERROR: No MLS server configured to copy');
+          return;
+        }
+        navigator.clipboard.writeText(stored);
+        alert('Server address copied to clipboard!');
+      });
+    });
+    selfMlsActions.appendChild(mlsCopyBtn);
+    selfMlsSub.appendChild(selfMlsActions);
+    creatorSec.appendChild(selfMlsSub);
+
+    // Sub-item 1.3: Creator Permanent Route Registration
+    var crSub = document.createElement('div');
+    crSub.style.cssText = 'display:flex;flex-direction:column;gap:0.4rem;border-top:1px dashed var(--pico-muted-border-color);padding-top:0.75rem;';
+    
+    var crSubTitle = document.createElement('span');
+    crSubTitle.textContent = 'Creator Permanent Route';
+    crSubTitle.style.cssText = 'font-size:0.75rem;font-weight:700;color:var(--pico-muted-color);text-transform:uppercase;letter-spacing:0.05em;';
+    crSub.appendChild(crSubTitle);
+
+    var crStatus = document.createElement('div');
+    crStatus.id = 'ma-dev-cr-status';
+    crStatus.style.cssText = 'font-family:monospace;font-size:0.75rem;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);padding:0.6rem 0.75rem;border-radius:0.375rem;margin:0;word-break:break-all;color:var(--pico-color);line-height:1.4;';
+    crStatus.textContent = 'Loading Creator Permanent Route…';
+    MDS.keypair.get('CREATOR_PERMANENT_ROUTE', function(res) {
+      var route = (res && res.status && res.value) ? res.value : '';
+      crStatus.textContent = route ? 'Current Route: ' + route : 'Current Route: (not set)';
+    });
+    crSub.appendChild(crStatus);
+
+    var crActions = document.createElement('div');
+    crActions.style.cssText = 'display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;';
+
+    var setSelfCrBtn = document.createElement('button');
+    setSelfCrBtn.textContent = 'Set as Self Route';
+    setSelfCrBtn.className = 'primary';
+    setSelfCrBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;';
+    setSelfCrBtn.addEventListener('click', function() {
+      setSelfCrBtn.disabled = true;
+      setSelfCrBtn.textContent = 'Setting…';
+      setCreatorMaximaRoute(function(err, route) {
+        setSelfCrBtn.disabled = false;
+        setSelfCrBtn.textContent = 'Set as Self Route';
+        if (err) {
+          crStatus.textContent = 'ERROR: ' + err.message;
+          crStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
+        } else {
+          crStatus.textContent = 'Route set to: ' + route;
+          crStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
+          refreshKeypairInspector();
+        }
+      });
+    });
+    crActions.appendChild(setSelfCrBtn);
+
+    var clearCrBtn = document.createElement('button');
+    clearCrBtn.textContent = 'Clear Route';
+    clearCrBtn.className = 'outline secondary';
+    clearCrBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;';
+    clearCrBtn.addEventListener('click', function() {
+      MDS.keypair.set('CREATOR_PERMANENT_ROUTE', '', function() {
+        crStatus.textContent = 'Creator permanent route cleared';
+        crStatus.style.borderColor = 'var(--pico-muted-border-color)';
+        refreshKeypairInspector();
+      });
+    });
+    crActions.appendChild(clearCrBtn);
+
+    var crCopyBtn = document.createElement('button');
+    crCopyBtn.textContent = 'Copy';
+    crCopyBtn.className = 'outline secondary';
+    crCopyBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;';
+    crCopyBtn.addEventListener('click', function() {
+      MDS.keypair.get('CREATOR_PERMANENT_ROUTE', function(res) {
+        var currentRoute = (res && res.status && res.value) ? res.value : '';
+        if (!currentRoute) {
+          alert('ERROR: No Creator Permanent Route is set to copy');
+          return;
+        }
+        navigator.clipboard.writeText(currentRoute);
+        alert('Copied!');
+      });
+    });
+    crActions.appendChild(crCopyBtn);
+    crSub.appendChild(crActions);
+    creatorSec.appendChild(crSub);
+
+    panel.appendChild(creatorSec);
+
+    // ==========================================
+    // SECTION 2: Client / User Configuration
+    // ==========================================
+    var clientSec = document.createElement('section');
+    clientSec.style.cssText = 'background:var(--pico-card-sectionning-background-color, rgba(0,0,0,0.02));border:1px solid var(--pico-muted-border-color);border-left:4px solid #a855f7;border-radius:0.75rem;padding:1.25rem;display:flex;flex-direction:column;gap:1.25rem;margin:0;';
+
+    var clientTitle = document.createElement('strong');
+    clientTitle.textContent = '2. Client / User Configuration';
+    clientTitle.style.cssText = 'display:block;font-size:0.95rem;font-weight:700;color:#a855f7;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.1rem;';
+    clientSec.appendChild(clientTitle);
+
+    // Sub-item 2.1: MLS Server Connection
+    var connMlsSub = document.createElement('div');
+    connMlsSub.style.cssText = 'display:flex;flex-direction:column;gap:0.4rem;';
+
+    var connMlsSubTitle = document.createElement('span');
+    connMlsSubTitle.textContent = 'Connect to MLS Server';
+    connMlsSubTitle.style.cssText = 'font-size:0.75rem;font-weight:700;color:var(--pico-muted-color);text-transform:uppercase;letter-spacing:0.05em;';
+    connMlsSub.appendChild(connMlsSubTitle);
 
     var mlsStatus = document.createElement('pre');
     mlsStatus.id = 'ma-dev-mls-status';
-    mlsStatus.style.cssText = 'font-family:monospace;font-size:0.75rem;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);padding:0.75rem;border-radius:0.375rem;margin:0;word-break:break-all;color:var(--pico-color);line-height:1.4;white-space:pre-wrap;';
+    mlsStatus.style.cssText = 'font-family:monospace;font-size:0.75rem;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);padding:0.6rem 0.75rem;border-radius:0.375rem;margin:0;word-break:break-all;color:var(--pico-color);line-height:1.4;white-space:pre-wrap;';
     mlsStatus.textContent = 'Loading MLS server address…';
-    mlsSection.appendChild(mlsStatus);
+    connMlsSub.appendChild(mlsStatus);
 
     function updateMlsStatus() {
       if (typeof getMaximaInfo !== 'function') {
@@ -187,7 +386,7 @@
             mlsStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
             mlsStatus.style.color = 'var(--pico-ins-color, #27ae60)';
           } else if (stored) {
-            mlsStatus.style.borderColor = 'var(--pico-primary)';
+            mlsStatus.style.borderColor = '#a855f7';
             mlsStatus.style.color = 'var(--pico-color)';
           } else {
             mlsStatus.style.borderColor = 'var(--pico-muted-border-color)';
@@ -196,27 +395,22 @@
         });
       });
     }
-
-    // Load initial status
     setTimeout(updateMlsStatus, 100);
 
     var mlsInputRow = document.createElement('div');
     mlsInputRow.style.cssText = 'display:flex;gap:0.5rem;align-items:stretch;';
-    
     var mlsInput = document.createElement('input');
     mlsInput.type = 'text';
-    mlsInput.placeholder = 'Mx...@host:port (your server MLS p2p-identity)';
-    mlsInput.style.cssText = 'flex:1;min-width:200px;margin:0;padding:0 0.6rem;font-size:0.8rem;font-family:monospace;height:2.2rem;box-sizing:border-box;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);color:var(--pico-color);border-radius:0.375rem;';
-    
+    mlsInput.placeholder = 'Paste server MLS address (Mx...@host:port)';
+    mlsInput.style.cssText = 'flex:1;min-width:200px;margin:0;padding:0 0.5rem;font-size:0.75rem;font-family:monospace;height:2rem;box-sizing:border-box;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);color:var(--pico-color);border-radius:0.375rem;';
     var mlsBtn = document.createElement('button');
-    mlsBtn.textContent = 'Save';
+    mlsBtn.textContent = 'Connect';
     mlsBtn.className = 'primary';
-    mlsBtn.style.cssText = 'width:auto;margin:0;padding:0 1.2rem;font-size:0.8rem;height:2.2rem;box-sizing:border-box;display:flex;align-items:center;justify-content:center;line-height:2.2rem;white-space:nowrap;';
+    mlsBtn.style.cssText = 'width:auto;margin:0;padding:0 1rem;font-size:0.75rem;height:2rem;box-sizing:border-box;display:flex;align-items:center;justify-content:center;line-height:2rem;white-space:nowrap;background-color:#a855f7;border-color:#a855f7;';
     mlsBtn.addEventListener('click', function() {
       var addr = (mlsInput.value || '').trim();
       if (!addr) {
-        mlsStatus.textContent = 'ERROR: enter an MLS server address first';
-        mlsStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
+        alert('ERROR: enter an MLS server address first');
         return;
       }
       if (addr.indexOf('MAX#') === 0) {
@@ -230,140 +424,56 @@
       var cmd = 'maxextra action:staticmls host:' + addr;
       MDS.cmd(cmd, function(cmdRes) {
         mlsBtn.disabled = false;
-        mlsBtn.textContent = 'Save';
+        mlsBtn.textContent = 'Connect';
         if (cmdRes.status) {
           MDS.keypair.set('MLS_SERVER_ADDRESS', addr, function() {
             mlsInput.value = '';
             updateMlsStatus();
+            refreshKeypairInspector();
           });
         } else {
-          mlsStatus.textContent = 'ERROR: ' + (cmdRes.error || 'Failed to apply MLS server');
-          mlsStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
+          alert('ERROR: ' + (cmdRes.error || 'Failed to apply MLS server'));
         }
       });
     });
     mlsInputRow.appendChild(mlsInput);
     mlsInputRow.appendChild(mlsBtn);
-    mlsSection.appendChild(mlsInputRow);
+    connMlsSub.appendChild(mlsInputRow);
+    clientSec.appendChild(connMlsSub);
 
-    var mlsActionRow = document.createElement('div');
-    mlsActionRow.style.cssText = 'display:flex;gap:0.5rem;flex-wrap:wrap;';
+    // Sub-item 2.2: MLS Permanent Registration
+    var regSub = document.createElement('div');
+    regSub.style.cssText = 'display:flex;flex-direction:column;gap:0.4rem;border-top:1px dashed var(--pico-muted-border-color);padding-top:0.75rem;';
 
-    var mlsRegisterBtn = document.createElement('button');
-    mlsRegisterBtn.textContent = 'Register This Node as MLS Server';
-    mlsRegisterBtn.className = 'primary';
-    mlsRegisterBtn.style.cssText = 'width:auto;margin:0;padding:0.45rem 0.9rem;font-size:0.8rem;line-height:1.2;';
-    mlsRegisterBtn.addEventListener('click', function() {
-      mlsRegisterBtn.disabled = true;
-      mlsRegisterBtn.textContent = 'Registering…';
-      if (typeof getMaximaInfo !== 'function') {
-        mlsStatus.textContent = 'ERROR: getMaximaInfo() not available (core/minima.js not loaded).';
-        mlsStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
-        mlsRegisterBtn.disabled = false;
-        mlsRegisterBtn.textContent = 'Register This Node as MLS Server';
-        return;
-      }
-      getMaximaInfo(function(err, info) {
-        if (err) {
-          mlsStatus.textContent = 'Error: ' + err.message;
-          mlsStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
-          mlsRegisterBtn.disabled = false;
-          mlsRegisterBtn.textContent = 'Register This Node as MLS Server';
-          return;
-        }
-        var p2pId = info.p2pidentity || info.localidentity || info.contact;
-        MDS.cmd('maxextra action:staticmls host:' + p2pId, function(res) {
-          mlsRegisterBtn.disabled = false;
-          mlsRegisterBtn.textContent = 'Register This Node as MLS Server';
-          if (res.status) {
-            MDS.keypair.set('MLS_SERVER_ADDRESS', p2pId, function() {
-              updateMlsStatus();
-            });
-          } else {
-            mlsStatus.textContent = 'Error registering MLS server: ' + (res.error || 'unknown error');
-            mlsStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
-          }
-        });
-      });
-    });
-    mlsActionRow.appendChild(mlsRegisterBtn);
-
-    var mlsCopyBtn = document.createElement('button');
-    mlsCopyBtn.textContent = 'Copy Address';
-    mlsCopyBtn.className = 'outline secondary';
-    mlsCopyBtn.style.cssText = 'width:auto;margin:0;padding:0.45rem 0.9rem;font-size:0.8rem;line-height:1.2;';
-    mlsCopyBtn.addEventListener('click', function() {
-      MDS.keypair.get('MLS_SERVER_ADDRESS', function(res) {
-        var stored = (res && res.status && res.value) ? res.value : null;
-        if (!stored) {
-          mlsStatus.textContent = 'ERROR: No MLS server configured to copy';
-          mlsStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
-          return;
-        }
-        navigator.clipboard.writeText(stored);
-        var oldText = mlsStatus.textContent;
-        mlsStatus.textContent = 'MLS server address copied to clipboard!';
-        mlsStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
-        setTimeout(function() {
-          mlsStatus.textContent = oldText;
-          mlsStatus.style.borderColor = 'var(--pico-muted-border-color)';
-        }, 2000);
-      });
-    });
-    mlsActionRow.appendChild(mlsCopyBtn);
-
-    mlsSection.appendChild(mlsActionRow);
-
-    panel.appendChild(mlsSection);
-
-    // Section 1.5.5: MLS Permanent Registration
-    var regSection = document.createElement('section');
-    regSection.style.cssText = 'background:var(--pico-card-sectionning-background-color, rgba(0,0,0,0.03));border:1px solid var(--pico-muted-border-color);border-radius:0.5rem;padding:1.25rem;display:flex;flex-direction:column;gap:0.75rem;margin:0;';
-
-    var regTitle = document.createElement('strong');
-    regTitle.textContent = 'MLS Permanent Registration';
-    regTitle.style.cssText = 'display:block;font-size:0.9rem;font-weight:700;color:var(--pico-primary);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.25rem;';
-    regSection.appendChild(regTitle);
+    var regSubTitle = document.createElement('span');
+    regSubTitle.textContent = 'MLS Permanent Registration';
+    regSubTitle.style.cssText = 'font-size:0.75rem;font-weight:700;color:var(--pico-muted-color);text-transform:uppercase;letter-spacing:0.05em;';
+    regSub.appendChild(regSubTitle);
 
     var regStatus = document.createElement('div');
     regStatus.id = 'ma-dev-reg-status';
-    regStatus.style.cssText = 'font-family:monospace;font-size:0.75rem;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);padding:0.75rem;border-radius:0.375rem;margin:0;word-break:break-all;color:var(--pico-color);line-height:1.4;';
+    regStatus.style.cssText = 'font-family:monospace;font-size:0.75rem;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);padding:0.6rem 0.75rem;border-radius:0.375rem;margin:0;word-break:break-all;color:var(--pico-color);line-height:1.4;';
     regStatus.textContent = 'Checking MLS server registration...';
-    regSection.appendChild(regStatus);
+    regSub.appendChild(regStatus);
 
-    if (typeof getMaximaInfo === 'function') {
-      getMaximaInfo(function(err, info) {
-        if (err) {
-          regStatus.textContent = 'Not registered locally or failed to fetch Maxima info.';
-        } else {
-          regStatus.textContent = 'Your Maxima PK:\n' + info.publickey + '\n\nReady to register on the MLS server.';
-        }
-      });
-    } else {
-      regStatus.textContent = 'getMaximaInfo not loaded.';
-    }
-
-    var regActionRow = document.createElement('div');
-    regActionRow.style.cssText = 'display:flex;gap:0.5rem;flex-wrap:wrap;';
+    getMaximaInfo(function(err, info) {
+      if (err) {
+        regStatus.textContent = 'Failed to fetch Maxima info.';
+      } else {
+        regStatus.textContent = 'Your Maxima PK:\n' + info.publickey + '\n\nReady to register on the MLS server.';
+      }
+    });
 
     var registerSelfKeyBtn = document.createElement('button');
     registerSelfKeyBtn.textContent = 'Register Self Key on MLS';
     registerSelfKeyBtn.className = 'primary';
-    registerSelfKeyBtn.style.cssText = 'width:auto;margin:0;padding:0.45rem 0.9rem;font-size:0.8rem;line-height:1.2;';
+    registerSelfKeyBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;background-color:#a855f7;border-color:#a855f7;';
     registerSelfKeyBtn.addEventListener('click', function() {
       registerSelfKeyBtn.disabled = true;
       registerSelfKeyBtn.textContent = 'Registering…';
-      if (typeof getMaximaInfo !== 'function') {
-        regStatus.textContent = 'ERROR: getMaximaInfo() not available (core/minima.js not loaded).';
-        regStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
-        registerSelfKeyBtn.disabled = false;
-        registerSelfKeyBtn.textContent = 'Register Self Key on MLS';
-        return;
-      }
       getMaximaInfo(function(err, info) {
         if (err) {
-          regStatus.textContent = 'Error: ' + err.message;
-          regStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
+          alert('Error: ' + err.message);
           registerSelfKeyBtn.disabled = false;
           registerSelfKeyBtn.textContent = 'Register Self Key on MLS';
           return;
@@ -376,118 +486,26 @@
             regStatus.textContent = 'Success! Key registered on local MLS server:\n' + pk;
             regStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
           } else {
-            regStatus.textContent = 'Error: ' + (res.error || 'unknown error');
-            regStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
+            alert('Error: ' + (res.error || 'unknown error'));
           }
         });
       });
     });
-    regActionRow.appendChild(registerSelfKeyBtn);
-    regSection.appendChild(regActionRow);
+    regSub.appendChild(registerSelfKeyBtn);
+    clientSec.appendChild(regSub);
 
-    panel.appendChild(regSection);
+    // Sub-item 2.3: Platform Creator Route Configuration
+    var pcDevSub = document.createElement('div');
+    pcDevSub.style.cssText = 'display:flex;flex-direction:column;gap:0.4rem;border-top:1px dashed var(--pico-muted-border-color);padding-top:0.75rem;';
 
-    // Section 1.2: Creator Permanent Route Configuration
-    var crSection = document.createElement('section');
-    crSection.style.cssText = 'background:var(--pico-card-sectionning-background-color, rgba(0,0,0,0.03));border:1px solid var(--pico-muted-border-color);border-radius:0.5rem;padding:1.25rem;display:flex;flex-direction:column;gap:0.75rem;margin:0;';
-
-    var crTitle = document.createElement('strong');
-    crTitle.textContent = 'Creator Permanent Route Configuration';
-    crTitle.style.cssText = 'display:block;font-size:0.9rem;font-weight:700;color:var(--pico-primary);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.25rem;';
-    crSection.appendChild(crTitle);
-
-    var crStatus = document.createElement('div');
-    crStatus.id = 'ma-dev-cr-status';
-    crStatus.style.cssText = 'font-family:monospace;font-size:0.75rem;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);padding:0.75rem;border-radius:0.375rem;margin:0;word-break:break-all;color:var(--pico-color);line-height:1.4;';
-    crStatus.textContent = 'Loading Creator Permanent Route…';
-    MDS.keypair.get('CREATOR_PERMANENT_ROUTE', function(res) {
-      var route = (res && res.status && res.value) ? res.value : '';
-      crStatus.textContent = route ? 'Current Route: ' + route : 'Current Route: (not set)';
-    });
-    crSection.appendChild(crStatus);
-
-    var crActions = document.createElement('div');
-    crActions.style.cssText = 'display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;';
-
-    var setSelfCrBtn = document.createElement('button');
-    setSelfCrBtn.textContent = 'Set as Self Route';
-    setSelfCrBtn.className = 'primary';
-    setSelfCrBtn.style.cssText = 'width:auto;margin:0;padding:0.45rem 0.9rem;font-size:0.8rem;line-height:1.2;';
-    setSelfCrBtn.addEventListener('click', function() {
-      setSelfCrBtn.disabled = true;
-      setSelfCrBtn.textContent = 'Setting…';
-      if (typeof setCreatorMaximaRoute === 'function') {
-        setCreatorMaximaRoute(function(err, route) {
-          setSelfCrBtn.disabled = false;
-          setSelfCrBtn.textContent = 'Set as Self Route';
-          if (err) {
-            crStatus.textContent = 'ERROR: ' + err.message;
-            crStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
-          } else {
-            crStatus.textContent = 'Route set to: ' + route;
-            crStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
-          }
-        });
-      } else {
-        setSelfCrBtn.disabled = false;
-        setSelfCrBtn.textContent = 'Set as Self Route';
-        crStatus.textContent = 'ERROR: setCreatorMaximaRoute not found';
-        crStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
-      }
-    });
-    crActions.appendChild(setSelfCrBtn);
-
-    var clearCrBtn = document.createElement('button');
-    clearCrBtn.textContent = 'Clear Route';
-    clearCrBtn.className = 'outline secondary';
-    clearCrBtn.style.cssText = 'width:auto;margin:0;padding:0.45rem 0.9rem;font-size:0.8rem;line-height:1.2;';
-    clearCrBtn.addEventListener('click', function() {
-      MDS.keypair.set('CREATOR_PERMANENT_ROUTE', '', function() {
-        crStatus.textContent = 'Creator permanent route cleared';
-        crStatus.style.borderColor = 'var(--pico-muted-border-color)';
-      });
-    });
-    crActions.appendChild(clearCrBtn);
-
-    var crCopyBtn = document.createElement('button');
-    crCopyBtn.textContent = 'Copy Route';
-    crCopyBtn.className = 'outline secondary';
-    crCopyBtn.style.cssText = 'width:auto;margin:0;padding:0.45rem 0.9rem;font-size:0.8rem;line-height:1.2;';
-    crCopyBtn.addEventListener('click', function() {
-      MDS.keypair.get('CREATOR_PERMANENT_ROUTE', function(res) {
-        var currentRoute = (res && res.status && res.value) ? res.value : '';
-        if (!currentRoute) {
-          crStatus.textContent = 'ERROR: No Creator Permanent Route is set to copy';
-          crStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
-          return;
-        }
-        navigator.clipboard.writeText(currentRoute);
-        var oldText = crStatus.textContent;
-        crStatus.textContent = 'Creator Permanent Route copied to clipboard!';
-        crStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
-        setTimeout(function() {
-          crStatus.textContent = oldText;
-          crStatus.style.borderColor = 'var(--pico-muted-border-color)';
-        }, 2000);
-      });
-    });
-    crActions.appendChild(crCopyBtn);
-
-    crSection.appendChild(crActions);
-    panel.appendChild(crSection);
-
-    // ── Section 4: Platform Creator Route Configuration ───────────────────
-    var pcDevSection = document.createElement('div');
-    pcDevSection.style.cssText = 'border-top:1px dashed var(--pico-muted-border-color);padding-top:1rem;display:flex;flex-direction:column;gap:0.5rem;';
-
-    var pcDevTitle = document.createElement('strong');
-    pcDevTitle.textContent = 'Platform Creator Route Configuration';
-    pcDevTitle.style.cssText = 'display:block;font-size:0.9rem;font-weight:700;color:var(--pico-primary);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.25rem;';
-    pcDevSection.appendChild(pcDevTitle);
+    var pcDevSubTitle = document.createElement('span');
+    pcDevSubTitle.textContent = 'MinimaAds Platform Creator Route';
+    pcDevSubTitle.style.cssText = 'font-size:0.75rem;font-weight:700;color:var(--pico-muted-color);text-transform:uppercase;letter-spacing:0.05em;';
+    pcDevSub.appendChild(pcDevSubTitle);
 
     var pcDevStatus = document.createElement('div');
     pcDevStatus.id = 'ma-dev-pc-status';
-    pcDevStatus.style.cssText = 'font-family:monospace;font-size:0.75rem;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);padding:0.75rem;border-radius:0.375rem;margin:0;word-break:break-all;color:var(--pico-color);line-height:1.4;';
+    pcDevStatus.style.cssText = 'font-family:monospace;font-size:0.75rem;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);padding:0.6rem 0.75rem;border-radius:0.375rem;margin:0;word-break:break-all;color:var(--pico-color);line-height:1.4;';
     pcDevStatus.textContent = 'Loading Platform Creator Route…';
     MDS.keypair.get('MINIMAADS_CREATOR_ROUTE', function(res) {
       var route = (res && res.status && res.value) ? res.value : '';
@@ -496,21 +514,18 @@
         pcDevStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
       }
     });
-    pcDevSection.appendChild(pcDevStatus);
+    pcDevSub.appendChild(pcDevStatus);
 
     var pcDevInputRow = document.createElement('div');
     pcDevInputRow.style.cssText = 'display:flex;gap:0.5rem;align-items:center;';
-
     var pcDevInput = document.createElement('input');
     pcDevInput.type = 'text';
     pcDevInput.placeholder = 'Paste Platform Creator Route (MAX#...)';
-    pcDevInput.style.cssText = 'flex:1;margin:0;font-size:0.8rem;height:2.2rem;';
-    pcDevInputRow.appendChild(pcDevInput);
-
+    pcDevInput.style.cssText = 'flex:1;margin:0;font-size:0.75rem;height:2rem;box-sizing:border-box;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);color:var(--pico-color);border-radius:0.375rem;';
     var pcDevSaveBtn = document.createElement('button');
     pcDevSaveBtn.textContent = 'Save';
     pcDevSaveBtn.className = 'primary';
-    pcDevSaveBtn.style.cssText = 'width:auto;margin:0;padding:0.45rem 0.9rem;font-size:0.8rem;line-height:1.2;height:2.2rem;';
+    pcDevSaveBtn.style.cssText = 'width:auto;margin:0;padding:0 1rem;font-size:0.75rem;height:2rem;box-sizing:border-box;display:flex;align-items:center;justify-content:center;line-height:2rem;white-space:nowrap;background-color:#a855f7;border-color:#a855f7;';
     pcDevSaveBtn.addEventListener('click', function() {
       var route = (pcDevInput.value || '').trim();
       if (!route) {
@@ -527,43 +542,75 @@
         pcDevInput.value = '';
         pcDevStatus.textContent = 'Route set to: ' + route;
         pcDevStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
+        refreshKeypairInspector();
       });
     });
-    pcDevInputRow.appendChild(pcDevSaveBtn);
-
     var pcDevClearBtn = document.createElement('button');
     pcDevClearBtn.textContent = 'Clear';
     pcDevClearBtn.className = 'outline secondary';
-    pcDevClearBtn.style.cssText = 'width:auto;margin:0;padding:0.45rem 0.9rem;font-size:0.8rem;line-height:1.2;height:2.2rem;';
+    pcDevClearBtn.style.cssText = 'width:auto;margin:0;padding:0 1rem;font-size:0.75rem;height:2rem;box-sizing:border-box;display:flex;align-items:center;justify-content:center;line-height:2rem;white-space:nowrap;';
     pcDevClearBtn.addEventListener('click', function() {
       MDS.keypair.set('MINIMAADS_CREATOR_ROUTE', '', function() {
         pcDevStatus.textContent = 'Current Route: (not set)';
         pcDevStatus.style.borderColor = 'var(--pico-muted-border-color)';
+        refreshKeypairInspector();
       });
     });
+    pcDevInputRow.appendChild(pcDevInput);
+    pcDevInputRow.appendChild(pcDevSaveBtn);
     pcDevInputRow.appendChild(pcDevClearBtn);
+    pcDevSub.appendChild(pcDevInputRow);
+    clientSec.appendChild(pcDevSub);
 
-    pcDevSection.appendChild(pcDevInputRow);
-    panel.appendChild(pcDevSection);
+    panel.appendChild(clientSec);
 
-    // ── Section 5: SQL Console ───────────────────────────────────────────
-    var sqlSection = document.createElement('section');
-    sqlSection.style.cssText = 'background:var(--pico-card-sectionning-background-color, rgba(0,0,0,0.03));border:1px solid var(--pico-muted-border-color);border-radius:0.5rem;padding:1.25rem;display:flex;flex-direction:column;gap:0.75rem;margin:0;';
+    // ==========================================
+    // SECTION 3: Database & storage console
+    // ==========================================
+    var dbSec = document.createElement('section');
+    dbSec.style.cssText = 'background:var(--pico-card-sectionning-background-color, rgba(0,0,0,0.02));border:1px solid var(--pico-muted-border-color);border-left:4px solid var(--pico-muted-color, #6c757d);border-radius:0.75rem;padding:1.25rem;display:flex;flex-direction:column;gap:1.25rem;margin:0;';
 
-    var sqlTitle = document.createElement('strong');
-    sqlTitle.textContent = 'SQL Console';
-    sqlTitle.style.cssText = 'display:block;font-size:0.9rem;font-weight:700;color:var(--pico-primary);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.25rem;';
-    sqlSection.appendChild(sqlTitle);
+    var dbTitle = document.createElement('strong');
+    dbTitle.textContent = '3. Database & Storage Console';
+    dbTitle.style.cssText = 'display:block;font-size:0.95rem;font-weight:700;color:var(--pico-muted-color, #6c757d);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.1rem;';
+    dbSec.appendChild(dbTitle);
+
+    // Sub-item 3.1: DApp Keypair Inspector
+    var kpSub = document.createElement('div');
+    kpSub.style.cssText = 'display:flex;flex-direction:column;gap:0.4rem;';
+
+    var kpSubTitle = document.createElement('span');
+    kpSubTitle.textContent = 'DApp Keypair Storage';
+    kpSubTitle.style.cssText = 'font-size:0.75rem;font-weight:700;color:var(--pico-muted-color);text-transform:uppercase;letter-spacing:0.05em;';
+    kpSub.appendChild(kpSubTitle);
+
+    kpSub.appendChild(kpListContainer);
+    dbSec.appendChild(kpSub);
+
+    addKpRow('MLS_SERVER_ADDRESS');
+    addKpRow('CREATOR_PERMANENT_ROUTE');
+    addKpRow('MINIMAADS_CREATOR_ROUTE');
+    addKpRow('PLATFORM_KEY_OVERRIDE');
+    refreshKeypairInspector();
+
+    // Sub-item 3.2: SQL Console
+    var sqlSub = document.createElement('div');
+    sqlSub.style.cssText = 'display:flex;flex-direction:column;gap:0.4rem;border-top:1px dashed var(--pico-muted-border-color);padding-top:0.75rem;';
+
+    var sqlSubTitle = document.createElement('span');
+    sqlSubTitle.textContent = 'SQL Console';
+    sqlSubTitle.style.cssText = 'font-size:0.75rem;font-weight:700;color:var(--pico-muted-color);text-transform:uppercase;letter-spacing:0.05em;';
+    sqlSub.appendChild(sqlSubTitle);
 
     var sqlDesc = document.createElement('span');
     sqlDesc.textContent = 'Execute raw SQL queries against the local MinimaAds H2 database.';
-    sqlDesc.style.cssText = 'font-size:0.75rem;color:var(--pico-muted-color,#6c757d);';
-    sqlSection.appendChild(sqlDesc);
+    sqlDesc.style.cssText = 'font-size:0.7rem;color:var(--pico-muted-color,#6c757d);';
+    sqlSub.appendChild(sqlDesc);
 
     var sqlTextarea = document.createElement('textarea');
     sqlTextarea.placeholder = 'SELECT * FROM campaigns LIMIT 5;';
-    sqlTextarea.style.cssText = 'width:100%;min-height:80px;font-family:monospace;font-size:0.8rem;margin:0;padding:0.5rem;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);color:var(--pico-color);border-radius:0.375rem;box-sizing:border-box;resize:vertical;';
-    sqlSection.appendChild(sqlTextarea);
+    sqlTextarea.style.cssText = 'width:100%;min-height:70px;font-family:monospace;font-size:0.75rem;margin:0;padding:0.4rem;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);color:var(--pico-color);border-radius:0.375rem;box-sizing:border-box;resize:vertical;';
+    sqlSub.appendChild(sqlTextarea);
 
     var sqlBtnRow = document.createElement('div');
     sqlBtnRow.style.cssText = 'display:flex;gap:0.5rem;align-items:center;';
@@ -571,26 +618,26 @@
     var sqlRunBtn = document.createElement('button');
     sqlRunBtn.textContent = 'Run Query';
     sqlRunBtn.className = 'primary';
-    sqlRunBtn.style.cssText = 'width:auto;margin:0;padding:0.45rem 0.9rem;font-size:0.8rem;line-height:1.2;';
+    sqlRunBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;';
     sqlBtnRow.appendChild(sqlRunBtn);
 
     var sqlClearBtn = document.createElement('button');
     sqlClearBtn.textContent = 'Clear';
     sqlClearBtn.className = 'outline secondary';
-    sqlClearBtn.style.cssText = 'width:auto;margin:0;padding:0.45rem 0.9rem;font-size:0.8rem;line-height:1.2;';
+    sqlClearBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;';
     sqlBtnRow.appendChild(sqlClearBtn);
 
     var sqlCopyBtn = document.createElement('button');
     sqlCopyBtn.textContent = 'Copy Result';
     sqlCopyBtn.className = 'outline secondary';
-    sqlCopyBtn.style.cssText = 'width:auto;margin:0;padding:0.45rem 0.9rem;font-size:0.8rem;line-height:1.2;display:none;';
+    sqlCopyBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;display:none;';
     sqlBtnRow.appendChild(sqlCopyBtn);
 
-    sqlSection.appendChild(sqlBtnRow);
+    sqlSub.appendChild(sqlBtnRow);
 
     var sqlResult = document.createElement('pre');
-    sqlResult.style.cssText = 'font-family:monospace;font-size:0.75rem;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);padding:0.75rem;border-radius:0.375rem;margin:0;word-break:break-all;white-space:pre-wrap;color:var(--pico-color);line-height:1.4;max-height:200px;overflow-y:auto;display:none;';
-    sqlSection.appendChild(sqlResult);
+    sqlResult.style.cssText = 'font-family:monospace;font-size:0.7rem;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);padding:0.6rem 0.75rem;border-radius:0.375rem;margin:0.25rem 0 0 0;word-break:break-all;white-space:pre-wrap;color:var(--pico-color);line-height:1.4;max-height:150px;overflow-y:auto;display:none;';
+    sqlSub.appendChild(sqlResult);
 
     sqlRunBtn.addEventListener('click', function() {
       var query = (sqlTextarea.value || '').trim();
@@ -604,14 +651,6 @@
       sqlResult.textContent = 'Executing query…';
       sqlResult.style.borderColor = 'var(--pico-muted-border-color)';
       sqlCopyBtn.style.display = 'none';
-
-      if (typeof sqlQuery !== 'function') {
-        sqlRunBtn.disabled = false;
-        sqlRunBtn.textContent = 'Run Query';
-        sqlResult.textContent = 'Error: sqlQuery wrapper function not available (core/minima.js not loaded).';
-        sqlResult.style.borderColor = 'var(--pico-del-color, #c0392b)';
-        return;
-      }
 
       sqlQuery(query, function(err, rows) {
         sqlRunBtn.disabled = false;
@@ -648,7 +687,8 @@
       sqlCopyBtn.style.display = 'none';
     });
 
-    panel.appendChild(sqlSection);
+    dbSec.appendChild(sqlSub);
+    panel.appendChild(dbSec);
 
     overlay.appendChild(panel);
 

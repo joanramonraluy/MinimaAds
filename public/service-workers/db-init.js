@@ -22,7 +22,8 @@ function initDB(cb) {
     + "MAX_VIEWER_REWARD DECIMAL(20,6) DEFAULT NULL,"
     + "MAX_DAILY_VIEWS  INT           DEFAULT 100,"
     + "MAX_DAILY_CLICKS INT           DEFAULT 100,"
-    + "COOLDOWN_MS      BIGINT        DEFAULT 300000"
+    + "COOLDOWN_MS      BIGINT        DEFAULT 300000,"
+    + "CREATOR_MX       VARCHAR(1024) DEFAULT ''"
     + ")";
 
   var sql_ads = "CREATE TABLE IF NOT EXISTS ADS ("
@@ -170,6 +171,7 @@ function initDB(cb) {
                     sqlQuery("ALTER TABLE DEFERRED_PUB_REWARDS ADD COLUMN IF NOT EXISTS PUBLISHER_MX VARCHAR(1024) DEFAULT ''", function() {
                     sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS VIEWER_WALLET_PK VARCHAR(512) DEFAULT ''", function() {
                     sqlQuery("ALTER TABLE CAMPAIGNS ADD COLUMN IF NOT EXISTS COOLDOWN_MS BIGINT DEFAULT 300000", function() {
+                    sqlQuery("ALTER TABLE CAMPAIGNS ADD COLUMN IF NOT EXISTS CREATOR_MX VARCHAR(1024) DEFAULT ''", function() {
                     sqlQuery("ALTER TABLE ADS ADD COLUMN IF NOT EXISTS IMAGE_DATA CLOB DEFAULT NULL", function() {
                     sqlQuery("ALTER TABLE ADS ADD COLUMN IF NOT EXISTS SHOW_TITLE SMALLINT DEFAULT 1", function() {
                     sqlQuery("ALTER TABLE ADS ADD COLUMN IF NOT EXISTS SHOW_BODY SMALLINT DEFAULT 1", function() {
@@ -196,6 +198,7 @@ function initDB(cb) {
                     }); // end SHOW_TITLE migration
                     }); // end IMAGE_DATA migration
                     }); // end COOLDOWN_MS migration
+                    }); // end CREATOR_MX migration
                     }); // end VIEWER_WALLET_PK migration
                     }); // end DEFERRED_PUB_REWARDS PUBLISHER_MX migration
                     }); // end CHANNEL_HISTORY creation

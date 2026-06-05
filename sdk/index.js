@@ -460,8 +460,7 @@
   function _sendPublisherRewardRequest(campaign, channel, frameId, amount, cb) {
     var newCum = (parseFloat(channel.CUMULATIVE_EARNED) || 0) + amount;
     var evtId = 'pub_' + Date.now().toString(16) + '_' + Math.floor(Math.random() * 0xFFFF).toString(16);
-    console.log('[SDK] publisher REWARD_REQUEST campaign:' + campaign.ID + ' cumulative:' + newCum);
-    _sendToCreator(channel.CREATOR_MX, {
+    var rewardPayload = {
       type: 'REWARD_REQUEST',
       campaign_id: campaign.ID,
       viewer_key: channel.VIEWER_KEY,
@@ -469,7 +468,10 @@
       cumulative: newCum,
       role: 'publisher',
       frame_id: frameId
-    }, function() { if (cb) { cb(); } });
+    };
+    console.log('[SDK] publisher REWARD_REQUEST full payload:', JSON.stringify(rewardPayload));
+    console.log('[SDK] publisher REWARD_REQUEST routing via channel.CREATOR_MX:', channel.CREATOR_MX);
+    _sendToCreator(channel.CREATOR_MX, rewardPayload, function() { if (cb) { cb(); } });
   }
 
   function _publisherChannelFlow(campaign, frameId, amount, cb) {

@@ -203,31 +203,46 @@ function renderSettlementHistory(target, settlements) {
       tr.appendChild(earningsTd(parseFloat(r.CUMULATIVE_EARNED || 0).toFixed(6) + ' MINIMA'));
       tr.appendChild(earningsTd(date));
 
+      tr.className = 'ma-expandable-row';
+      tr.setAttribute('tabindex', '0');
+      tr.setAttribute('aria-expanded', 'false');
+
       var toggleTd = document.createElement('td');
-      var toggleBtn = document.createElement('button');
-      toggleBtn.textContent = '▶';
-      toggleBtn.style.cssText = 'width:auto;margin:0;padding:.1rem .4rem;font-size:.75rem;';
-      toggleTd.appendChild(toggleBtn);
+      var toggleIcon = document.createElement('span');
+      toggleIcon.setAttribute('aria-hidden', 'true');
+      toggleIcon.textContent = '›';
+      toggleIcon.style.cssText = 'display:inline-block;color:var(--pico-muted-color,#6c757d);font-size:1rem;transition:transform .15s ease;';
+      toggleTd.appendChild(toggleIcon);
       tr.appendChild(toggleTd);
       tbody.appendChild(tr);
 
       var detailTr = document.createElement('tr');
       detailTr.style.display = 'none';
       var detailTd = document.createElement('td');
+      detailTd.className = 'ma-nested-detail';
       detailTd.setAttribute('colspan', '5');
-      detailTd.style.cssText = 'padding:.5rem 1rem;background:var(--pico-card-sectionning-background-color,#f8f8f8);';
+      detailTd.style.cssText = 'padding:.5rem 1rem;';
       detailTr.appendChild(detailTd);
       tbody.appendChild(detailTr);
 
       var loaded = false;
-      toggleBtn.addEventListener('click', function() {
+      function toggle() {
         if (detailTr.style.display === 'none') {
           detailTr.style.display = '';
-          toggleBtn.textContent = '▼';
-          if (!loaded) { loaded = true; _loadChannelEvents(r.CAMPAIGN_ID, detailTd); }
+          toggleIcon.style.transform = 'rotate(90deg)';
+          tr.setAttribute('aria-expanded', 'true');
+          if (!loaded) { loaded = true; _loadChannelEvents(r.CAMPAIGN_ID, r.ROLE, true, detailTd); }
         } else {
           detailTr.style.display = 'none';
-          toggleBtn.textContent = '▶';
+          toggleIcon.style.transform = 'rotate(0deg)';
+          tr.setAttribute('aria-expanded', 'false');
+        }
+      }
+      tr.addEventListener('click', toggle);
+      tr.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          toggle();
         }
       });
     })(settlements[j]);
@@ -242,48 +257,75 @@ function earningsTd(value) {
   return el;
 }
 
-function _loadChannelEvents(campaignId, targetEl) {
-  var sql = "SELECT TYPE, AMOUNT, TIMESTAMP"
-          + " FROM REWARD_EVENTS"
-          + " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')"
-          + " AND UPPER(USER_ADDRESS) = UPPER('" + escapeSql(MY_ADDRESS) + "')"
-          + " ORDER BY TIMESTAMP ASC";
-  sqlQuery(sql, function(err, rows) {
-    if (!targetEl) { return; }
-    targetEl.innerHTML = '';
-    if (err || !rows || !rows.length) {
-      var p = document.createElement('p');
-      p.style.cssText = 'margin:.25rem 0;font-size:.85em;color:var(--pico-muted-color,#6c757d);';
-      p.textContent = 'No events recorded for this channel.';
-      targetEl.appendChild(p);
-      return;
+function _loadChannelEvents(campaignId, role, isSettled, targetEl) {
+  var stateSql = "SELECT CREATED_AT FROM CHANNEL_STATE"
+               + " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')"
+               + " AND UPPER(ROLE) = UPPER('" + escapeSql(role) + "')"
+               + " AND STATUS = 'open'";
+
+  sqlQuery(stateSql, function(err, rows) {
+    var openCreatedAt = null;
+    if (!err && rows && rows.length > 0) {
+      openCreatedAt = parseInt(rows[0].CREATED_AT, 10);
     }
-    var table = document.createElement('table');
-    table.style.cssText = 'width:100%;font-size:.85em;margin:0;';
-    var thead = document.createElement('thead');
-    var hRow = document.createElement('tr');
-    var headers = ['Type', 'Amount', 'Date'];
-    for (var h = 0; h < headers.length; h++) {
-      var th = document.createElement('th');
-      th.textContent = headers[h];
-      hRow.appendChild(th);
+
+    var timeFilter = "";
+    if (openCreatedAt) {
+      if (isSettled) {
+        timeFilter = " AND TIMESTAMP < " + openCreatedAt;
+      } else {
+        timeFilter = " AND TIMESTAMP >= " + openCreatedAt;
+      }
+    } else {
+      if (!isSettled) {
+        timeFilter = " AND 1=0";
+      }
     }
-    thead.appendChild(hRow);
-    table.appendChild(thead);
-    var tbody = document.createElement('tbody');
-    for (var i = 0; i < rows.length; i++) {
-      var r = rows[i];
-      var tr = document.createElement('tr');
-      var date = r.TIMESTAMP
-        ? new Date(parseInt(r.TIMESTAMP)).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
-        : '—';
-      tr.appendChild(earningsTd(r.TYPE));
-      tr.appendChild(earningsTd(parseFloat(r.AMOUNT || 0).toFixed(6)));
-      tr.appendChild(earningsTd(date));
-      tbody.appendChild(tr);
-    }
-    table.appendChild(tbody);
-    targetEl.appendChild(table);
+
+    var sql = "SELECT TYPE, AMOUNT, TIMESTAMP"
+            + " FROM REWARD_EVENTS"
+            + " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')"
+            + " AND UPPER(USER_ADDRESS) = UPPER('" + escapeSql(MY_ADDRESS) + "')"
+            + timeFilter
+            + " ORDER BY TIMESTAMP ASC";
+
+    sqlQuery(sql, function(err2, eventRows) {
+      if (!targetEl) { return; }
+      targetEl.innerHTML = '';
+      if (err2 || !eventRows || !eventRows.length) {
+        var p = document.createElement('p');
+        p.style.cssText = 'margin:.25rem 0;font-size:.85em;color:var(--pico-muted-color,#6c757d);';
+        p.textContent = 'No events recorded for this channel.';
+        targetEl.appendChild(p);
+        return;
+      }
+      var table = document.createElement('table');
+      table.style.cssText = 'width:100%;font-size:.85em;margin:0;';
+      var thead = document.createElement('thead');
+      var hRow = document.createElement('tr');
+      var headers = ['Type', 'Amount', 'Date'];
+      for (var h = 0; h < headers.length; h++) {
+        var th = document.createElement('th');
+        th.textContent = headers[h];
+        hRow.appendChild(th);
+      }
+      thead.appendChild(hRow);
+      table.appendChild(thead);
+      var tbody = document.createElement('tbody');
+      for (var i = 0; i < eventRows.length; i++) {
+        var eventRow = eventRows[i];
+        var tr = document.createElement('tr');
+        var date = eventRow.TIMESTAMP
+          ? new Date(parseInt(eventRow.TIMESTAMP)).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
+          : '—';
+        tr.appendChild(earningsTd(eventRow.TYPE));
+        tr.appendChild(earningsTd(parseFloat(eventRow.AMOUNT || 0).toFixed(6)));
+        tr.appendChild(earningsTd(date));
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      targetEl.appendChild(table);
+    });
   });
 }
 
@@ -367,9 +409,10 @@ function _renderChannelRewardRows(rows, container) {
 
       // Expandable event detail
       var details = document.createElement('details');
+      details.className = 'ma-campaign-details';
       var summary = document.createElement('summary');
       summary.textContent = 'Show events';
-      summary.style.cssText = 'cursor:pointer;font-size:.875rem;color:var(--pico-muted-color,#6c757d);';
+      summary.className = 'ma-campaign-details-summary';
       details.appendChild(summary);
       var detailBody = document.createElement('div');
       detailBody.style.cssText = 'margin-top:.5rem;';
@@ -379,7 +422,7 @@ function _renderChannelRewardRows(rows, container) {
       details.addEventListener('toggle', function() {
         if (details.open && !loaded) {
           loaded = true;
-          _loadChannelEvents(campaignId, detailBody);
+          _loadChannelEvents(campaignId, role, false, detailBody);
         }
       });
       card.appendChild(details);

@@ -101,6 +101,7 @@ function initDB(cb) {
     + "FRAME_ID        VARCHAR(512)  NOT NULL,"
     + "VIEWER_EVENT_ID VARCHAR(64)   NOT NULL,"
     + "AMOUNT          DECIMAL(20,9) NOT NULL,"
+    + "PUBLISHER_MX    VARCHAR(1024),"
     + "CREATED_AT      BIGINT        NOT NULL"
     + ")";
 
@@ -166,6 +167,7 @@ function initDB(cb) {
                       if (dprErr) { MDS.log("[DB] initDB: failed to create DEFERRED_PUB_REWARDS — " + dprErr); return; }
                     sqlQuery(sql_channel_history, function(chErr) {
                       if (chErr) { MDS.log("[DB] initDB: failed to create CHANNEL_HISTORY — " + chErr); return; }
+                    sqlQuery("ALTER TABLE DEFERRED_PUB_REWARDS ADD COLUMN IF NOT EXISTS PUBLISHER_MX VARCHAR(1024) DEFAULT ''", function() {
                     sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS VIEWER_WALLET_PK VARCHAR(512) DEFAULT ''", function() {
                     sqlQuery("ALTER TABLE CAMPAIGNS ADD COLUMN IF NOT EXISTS COOLDOWN_MS BIGINT DEFAULT 300000", function() {
                     sqlQuery("ALTER TABLE ADS ADD COLUMN IF NOT EXISTS IMAGE_DATA CLOB DEFAULT NULL", function() {
@@ -195,6 +197,7 @@ function initDB(cb) {
                     }); // end IMAGE_DATA migration
                     }); // end COOLDOWN_MS migration
                     }); // end VIEWER_WALLET_PK migration
+                    }); // end DEFERRED_PUB_REWARDS PUBLISHER_MX migration
                     }); // end CHANNEL_HISTORY creation
                     }); // end DEFERRED_PUB_REWARDS creation
                     }); // end SPLIT_COINID migration

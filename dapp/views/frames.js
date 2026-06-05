@@ -387,7 +387,7 @@ function _buildSnippet(fid, pubKey) {
     + "\n"
     + "  function _getMxContact(cb) {\n"
     + "    _cmdRaw('maxima action:info', function(res) {\n"
-    + "      cb((res && res.status && res.response && res.response.publickey) ? res.response.publickey : '');\n"
+    + "      cb((res && res.status && res.response && res.response.contact) ? res.response.contact : '');\n"
     + "    });\n"
     + "  }\n"
     + "\n"

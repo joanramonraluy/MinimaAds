@@ -95,10 +95,19 @@ function parseMaximaRoute(route) {
 // Helper: Build and store the creator permanent route MAX#<pk>#<mls>.
 // Requires static MLS to be configured on the node.
 function setCreatorMaximaRoute(cb) {
-  getMaximaInfo(function(err, info) {
-    if (err) { return cb(err); }
-    if (!info.staticmls) { return cb(new Error("Node does not have static MLS configured")); }
-    var permanentRoute = "MAX#" + info.publickey + "#" + info.mls;
+  MDS.cmd("maxima action:info", function(resp) {
+    if (!resp.status || !resp.response) { return cb(new Error("Cannot read maxima info")); }
+    var staticmls = resp.response.staticmls === true;
+    if (!staticmls) { return cb(new Error("Node does not have static MLS configured")); }
+    var contact = resp.response.contact || "";
+    var mls = resp.response.mls || "";
+    // Extract Maxima PK (Mx...) from contact address (Mx...@host:port)
+    var maximaPk = '';
+    if (contact && contact.indexOf('@') > 0) {
+      maximaPk = contact.substring(0, contact.indexOf('@'));
+    }
+    if (!maximaPk) { return cb(new Error("Cannot extract Maxima PK from contact")); }
+    var permanentRoute = "MAX#" + maximaPk + "#" + mls;
     MDS.keypair.set("CREATOR_PERMANENT_ROUTE", permanentRoute, function() {
       cb(null, permanentRoute);
     });

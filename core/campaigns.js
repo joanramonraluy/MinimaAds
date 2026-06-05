@@ -33,7 +33,7 @@ function saveCampaign(campaign, ad, cb) {
     "(ID, CREATOR_ADDRESS, TITLE, BUDGET_TOTAL, BUDGET_REMAINING, " +
     "REWARD_VIEW, REWARD_CLICK, STATUS, CREATED_AT, EXPIRES_AT, " +
     "ESCROW_COINID, ESCROW_WALLET_PK, MAX_VIEWER_REWARD, " +
-    "PUBLISHER_REWARD_VIEW, MAX_PUBLISHER_BUDGET, PUBLISHER_BUDGET_SPENT, MAX_DAILY_VIEWS, MAX_DAILY_CLICKS, COOLDOWN_MS) KEY (ID) VALUES (" +
+    "PUBLISHER_REWARD_VIEW, MAX_PUBLISHER_BUDGET, PUBLISHER_BUDGET_SPENT, MAX_DAILY_VIEWS, MAX_DAILY_CLICKS, COOLDOWN_MS, CREATOR_MX) KEY (ID) VALUES (" +
     "'" + escapeSql(campaign.id) + "'," +
     "'" + escapeSql(campaign.creator_address) + "'," +
     "'" + escapeSql(campaign.title) + "'," +
@@ -48,7 +48,8 @@ function saveCampaign(campaign, ad, cb) {
     "'" + escapeSql(campaign.escrow_wallet_pk || '') + "'," +
     (mvr !== null && mvr !== undefined ? parseFloat(mvr) : "NULL") + "," +
     prv + "," + mpb + "," + pbs + "," +
-    mdv + "," + mdc + "," + cms +
+    mdv + "," + mdc + "," + cms + "," +
+    "'" + escapeSql(campaign.creator_mx || '') + "'" +
     ")";
 
   sqlQuery(cSql, function(err) {

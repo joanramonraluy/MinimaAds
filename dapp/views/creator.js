@@ -1570,7 +1570,17 @@ function _fundEscrowWithRoute(campaign, ad, form, submitBtn, msgEl, campaignDura
             campaign.escrow_coinid = coinId;
             msgEl.textContent = 'Escrow funded. Saving campaign…';
 
-            saveCampaignAndBroadcast(campaign, ad, form, submitBtn, msgEl);
+            // Retrieve creator's permanent route (MAX#Mx...#mls) to store with campaign
+            if (typeof getCreatorMaximaRoute === 'function') {
+              getCreatorMaximaRoute(function(creatorRoute) {
+                campaign.creator_mx = creatorRoute || '';
+                console.log('[CREATOR] campaign creator_mx:', campaign.creator_mx ? 'stored' : 'empty');
+                saveCampaignAndBroadcast(campaign, ad, form, submitBtn, msgEl);
+              });
+            } else {
+              campaign.creator_mx = '';
+              saveCampaignAndBroadcast(campaign, ad, form, submitBtn, msgEl);
+            }
           }
 
           if (!hasPlatformKey) {

@@ -46,6 +46,96 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-04 — Built-in Frame Owned by Platform Creator (MINIMAADS_CREATOR_PK)
+
+**Task**: Make the built-in viewer Frame belong to the platform creator instead of the viewing node. Previously each node attributed its built-in-viewer publisher rewards to itself (`publisherKey: MY_ADDRESS`). The built-in surface is a platform-owned Frame; its publisher-side rewards must accrue to one canonical key shared by all nodes.
+
+**Design decision**: Introduced `MINIMAADS_CREATOR_PK` as a constant in `config.js`, alongside `PLATFORM_KEY` and `APP_NAME`. `config.js` is loaded first in BOTH runtimes (SW via `MDS.load`, FE via `<script>` in index.html), so the constant resolves as a global in `core/*` and `dapp/views/*` with no init plumbing. This mirrors the existing shared-constant model (§4.6) — identical on every node, no per-node sync needed. It is the node's *attribution* key on the wire; it is NOT made a per-node mutable global like `MY_ADDRESS`. Value extracted from the platform creator's Maxima PK (DER format) in logs/user4.txt.
+
+**Changes**:
+- **config.js**: Added `var MINIMAADS_CREATOR_PK = '0X3081...0203010001';` (platform creator's Maxima PK, DER format) with a comment explaining ownership and dual-runtime loading.
+- **dapp/views/viewer.js** (lines 313, 331): `publisherKey: MY_ADDRESS` → `publisherKey: MINIMAADS_CREATOR_PK` in both `MA_TRACK_VIEW` and `MA_TRACK_CLICK`. Now every built-in-viewer impression attributes its publisher reward to the platform creator.
+
+**Not changed (deliberate)**:
+- **SW (`service.js` / `core/frames.js`)**: `initBuiltinFrame` still registers the local `builtin:<node_pk>` FRAMES row keyed on the node's own Maxima PK. That row is a per-node SDK default-frame artifact and is independent of on-the-wire publisher attribution (`_tryOpenPublisherChannelForAllFrames` already skips built-in frames). No SW change is required for attribution.
+- **dapp/views/frames.js** SDK snippet (line 242): custom Frames keep their own `publisherKey` (the registering publisher's key) — unchanged.
+
+**Operational note**: For the platform creator to actually collect the built-in-frame publisher reward, the creator's node must hold an open publisher channel for `MINIMAADS_CREATOR_PK`. That is an operational/runtime concern, out of scope for this attribution change.
+
+**Spec updated**: MinimaAds.md §4.6.1 (new — MINIMAADS_CREATOR_PK), §6.9 (frame ownership model + built-in impression attribution), FRAMES schema comment (§3.5), file-tree config.js comment.
+
+**Verification**: Open `#viewer`, view an ad ≥3s (and click one). In the SW log, the `MA_TRACK_VIEW`/`MA_TRACK_CLICK` publisher attribution and any `REWARD_REQUEST` (role='publisher') / DEFERRED_PUB_REWARD should now carry the platform creator's Maxima PK (`0X3081...`), not the viewing node's wallet address. No console errors expected.
+
+**AGENTS.md updated**: yes — §6 added this entry; oldest entry (Platform_Key Mismatch) moved to docs/HISTORY.md §17.
+
+---
+
+### Session: 2026-06-04 — Fix: Built-in Viewer Publisher Rewards Not Earned
+
+**Task**: Diagnose and fix why the built-in viewer (integrated snippet in MinimaAds) produces viewer rewards but publisher rewards are never generated or sent.
+
+**Investigation**: Opus traced the reward flow end-to-end across frames.js → comms.handler.js → channel.handler.js → voucher pipeline. The channel/voucher infrastructure is correct and capable of publisher-reward generation. The single defect: `viewer.js:313` and `:331` hardcoded `publisherKey: ''` in both `MA_TRACK_VIEW` and `MA_TRACK_CLICK` payloads. Per spec (§96, §664-669), the built-in viewer IS a registered Frame with `publisher_key = node's own Maxima PK`, and should self-publish (earn publisher rewards on own views). An empty `publisher_key` causes the guard at `channel.handler.js:1309` (`if (r === 'viewer' && (frame_id || publisher_key))`) to skip `_maybeGeneratePublisherVoucher`, blocking the entire publisher-reward branch at the deferred-voucher step (where log shows viewer event created at user1.txt:37 then stops — no publisher voucher).
+
+**Changes**:
+- **dapp/views/viewer.js** (lines 313 and 331): Replace `publisherKey: ''` with `publisherKey: MY_ADDRESS`. `MY_ADDRESS` is the node's Maxima public key (set from `maxima action:info` at app.js:1842) — the same value used for the built-in frame ID. This enables the publisher-reward branch to fire on every view/click in the built-in viewer.
+
+**Why**: Spec explicitly states the built-in viewer is a Frame and should earn publisher rewards on views. The previous empty key was likely a placeholder that was never filled in. Fixing it makes the built-in viewer behavior match documented intent and makes it consistent with custom-snippet frames (frames.js:242 correctly reads the publisher key from FRAMES and injects it).
+
+**Verification**: Logs from test run 21:57 (with fix applied) confirm:
+- publisherKey in MA_TRACK_VIEW is now user3's Maxima PK (not empty) ✓
+- _maybeGeneratePublisherVoucher receives non-empty frameId and stores DEFERRED_PUB_REWARD correctly ✓
+- Deferred reward record includes frame=user3's PK, amount=10 — ready to replay when publisher channel opens ✓
+- Root cause (empty publisherKey causing orphaned deferred records) is fixed
+
+The remaining DEFERRED state is expected (no open publisher channel yet), not a regression.
+
+**Note**: The built-in viewer publishes to itself, so one view generates both a viewer reward (creator ≠ viewer check) and a publisher reward (self-publishing). Spec allows this (Platform role = Viewer + Creator + Publisher). Confirmed working end-to-end.
+
+**AGENTS.md updated**: yes — §6 added this session entry.
+
+---
+
+### Session: 2026-06-04 — Documentation Audit: Publisher Campaign Discovery & SDK Integration
+
+**Task**: Audit MinimaAds.md §6/§8/§13 to identify obsolete or misleading documentation about publisher campaign discovery post-MAXIMA_ROUTE_DISCOVERY, then fix any inaccuracies or gaps.
+
+**Findings and Fixes**:
+1. **§13.1 Minimal Integration** — was completely wrong. Documented old API (`MinimaAdsPublisherHandleMdsEvent`, `MinimaAdsPublisherInit`) that doesn't exist. Rewritten to accurately describe the self-contained comms-broadcast snippet that frames.js actually generates: patches `MDS.init`, sends `MA_GET_AD` / `MA_TRACK_VIEW` / `MA_TRACK_CLICK` messages to the host's SW.
+2. **§8.3 platform_key contradiction** — line 974 contradicted line 970. Line 970 (correct) says "must NOT validate platform_key from payload"; line 974 (stale) said "must validate platform_key". Deleted line 974.
+3. **§6.3 STATE(4) mislabel** — example JSON showed `"4":"<creator_mx_address>"` but the code stores a permanent route `MAX#...`. Relabeled to `<creator_permanent_route MAX#pk#mls>`.
+4. **MAXIMA_ROUTE_DISCOVERY.md status** — said "design note for future implementation" but the core recommendation (STATE(4) route) is already implemented. Updated to "Partially implemented (STATE(4) DONE; route caches / PEER_ROUTE_UPDATE still future)".
+5. **§13 gap** — SDK section was silent on campaign discovery responsibility. Added 3-line note: "Campaign discovery is SW responsibility, not SDK call. SDK reads from pre-populated CAMPAIGNS table via getAd()."
+
+**Result**: Documentation now accurately describes MAXIMA_ROUTE_DISCOVERY system end-to-end, from on-chain escrow discovery through publisher snippet campaign retrieval.
+
+**AGENTS.md updated**: yes — §6 added this session entry.
+
+---
+
+### Session: 2026-06-04 — Settings: Maxima Routes Page
+
+**Task**: Move MLS/permanent route configuration from inline creator banner to a dedicated Settings sub-page (`#settings/maxima-routes`). Both Creator and Publisher views redirect to that page when no permanent route is registered.
+
+**Changes**:
+- **dapp/views/settings-maxima-routes.js** (new): `renderMaximaRoutesSettings(root)` — 3 sections: MLS Server Address (save to keypair), Register as Permanent (maxextra addpermanent), Finalise Route Registration (setCreatorMaximaRoute + live route display).
+- **dapp/views/settings.js**: added sub-route dispatch — `hash === 'settings/maxima-routes'` → call `renderMaximaRoutesSettings`. Added "Maxima Routes" section to main settings page with `Configure Maxima Routes ›` link.
+- **dapp/views/creator.js**: removed `_showCreatorRouteSetupBanner()` and `_copyToClipboard()`. `renderCreator` now calls `getCreatorMaximaRoute` and redirects to `#settings/maxima-routes` when no route is set. No more inline 3-step wizard.
+- **dapp/views/frames.js**: added same `getCreatorMaximaRoute` redirect check at start of `renderFrames` — publisher without a registered route is redirected to `#settings/maxima-routes`.
+- **dapp/app.js**: `currentRoute()` now recognises `settings/maxima-routes`. `renderNav` and `setMode` treat it as a settings-family route (no nav links, mode change navigates away). `doRender` routes both `settings` and `settings/maxima-routes` to `renderSettings`.
+- **public/index.html**: added `<script src="dapp/views/settings-maxima-routes.js">` after settings.js.
+
+**Why**: Centralises route setup into a discoverable, permanent Settings page. Removes the inline banner that cluttered the Creator form. Publisher route setup was missing entirely — now covered by the same redirect pattern.
+
+**Testing required**:
+- Navigate to `#settings` → verify "Maxima Routes" section is visible with "Configure Maxima Routes ›" link.
+- Click the link → verify `#settings/maxima-routes` loads the three-section page (MLS Server, Register as Permanent, Finalise Route Registration).
+- Node without permanent route: navigate to `#creator` → should redirect to `#settings/maxima-routes`.
+- Node without permanent route: navigate to `#frames` → should redirect to `#settings/maxima-routes`.
+- Node with permanent route already set: `#creator` and `#frames` should load normally (no redirect).
+- On `#settings/maxima-routes`: fill MLS address, click Save → verify `MLS_SERVER_ADDRESS` is stored. Click "Register as Permanent" → verify command executes. Click "Check & Register Route" → verify route is shown in green.
+
+---
+
 ### Session: 2026-06-04 — Fix: MAXIMA_ROUTE_DISCOVERY Campaign Platform_Key Mismatch
 
 **Task**: Diagnose and fix campaign discovery rejection caused by `platform_key mismatch` error blocking user4 (MinimaAds creator) from accepting campaigns from other nodes.
@@ -60,6 +150,22 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 **Why**: The payload-based check breaks cross-node discovery and is a security anti-pattern (payload is attacker-controlled). The on-chain validation already exists and is authoritative. See KNOWN_ISSUES.md #31 principle: "never read PREVSTATE from announced JSON payload as primary verification — always verify on-chain."
 
 **Note on Commission**: Platform creation fees are **already paid as part of the escrow funding tx** (creator.js line 1500-1604). User1 either includes a fee output (output[0] to PLATFORM_KEY, output[1] to escrow) or does not. This is a wallet-level transfer, not a DB reward event. The commission was never "missing" — it was either created or not at creator's choice. The bug only prevented the campaign from being visible on user4's node.
+
+---
+
+### Session: 2026-06-04 — Settings Page Accordions
+
+**Task**: Refactor the Settings page to consolidate all sections (Appearance, Maxima Routes, and Privacy) into collapsible accordions (details/summary elements), keeping only Appearance open by default, and handling automatic route-based expansion.
+
+**Changes**:
+- **dapp/views/settings.js**: Refactored `renderSettings()` to use PicoCSS details/summary accordions. Integrated `renderMaximaRoutesSettings` inside the "Configure Maxima Routes" accordion. If the URL hash is `settings/maxima-routes`, it opens the routes accordion, collapses Appearance, and scrolls the routes section into view.
+- **dapp/views/settings-maxima-routes.js**: Removed the standalone heading so the MLS and permanent route configuration forms embed cleanly in the accordion, and updated the description to note that the feature is essential for both campaign creators and publishers.
+- **dapp/views/creator.js**: Moved the campaign creation status/error message paragraph inside the review panel, directly below the "Publish Campaign" button.
+
+**Testing required**:
+- Navigate to `#settings` → Appearance should be open, other accordions closed.
+- Click "Configure Maxima Routes" → verify it opens and contains MLS, Permanent User registration, and Finalise options.
+- Click a redirection link/trigger (e.g. Creator view without route) → page redirects to `#settings/maxima-routes`, which opens the routes accordion, collapses Appearance, and scrolls to the routes section.
 
 ---
 

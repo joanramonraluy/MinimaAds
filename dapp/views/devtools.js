@@ -213,23 +213,28 @@
       mlsRegisterBtn.textContent = 'Registering…';
       getMaximaInfo(function(err, info) {
         if (err) {
-          alert('Error: ' + err.message);
           mlsRegisterBtn.disabled = false;
-          mlsRegisterBtn.textContent = 'Register This Node as MLS Server';
+          mlsRegisterBtn.textContent = '✕ Error: ' + err.message;
+          setTimeout(function() {
+            mlsRegisterBtn.textContent = 'Register This Node as MLS Server';
+          }, 2000);
           return;
         }
         var p2pId = info.p2pidentity || info.localidentity || info.contact;
         MDS.cmd('maxextra action:staticmls host:' + p2pId, function(res) {
           mlsRegisterBtn.disabled = false;
-          mlsRegisterBtn.textContent = 'Register This Node as MLS Server';
           if (res.status) {
+            mlsRegisterBtn.textContent = '✓ Registered!';
             MDS.keypair.set('MLS_SERVER_ADDRESS', p2pId, function() {
               updateMlsStatus();
               refreshKeypairInspector();
             });
           } else {
-            alert('Error registering MLS server: ' + (res.error || 'unknown error'));
+            mlsRegisterBtn.textContent = '✕ Failed: ' + (res.error || 'unknown');
           }
+          setTimeout(function() {
+            mlsRegisterBtn.textContent = 'Register This Node as MLS Server';
+          }, 2000);
         });
       });
     });
@@ -244,20 +249,24 @@
       mlsAddSelfKeyBtn.textContent = 'Registering…';
       getMaximaInfo(function(err, info) {
         if (err) {
-          alert('Error: ' + err.message);
           mlsAddSelfKeyBtn.disabled = false;
-          mlsAddSelfKeyBtn.textContent = 'Register Self Key on Local MLS';
+          mlsAddSelfKeyBtn.textContent = '✕ Error: ' + err.message;
+          setTimeout(function() {
+            mlsAddSelfKeyBtn.textContent = 'Register Self Key on Local MLS';
+          }, 2000);
           return;
         }
         var pk = info.publickey;
         MDS.cmd('maxextra action:addpermanent publickey:' + pk, function(res) {
           mlsAddSelfKeyBtn.disabled = false;
-          mlsAddSelfKeyBtn.textContent = 'Register Self Key on Local MLS';
           if (res.status) {
-            alert('Success! Self key registered on local MLS server.');
+            mlsAddSelfKeyBtn.textContent = '✓ Success!';
           } else {
-            alert('Error: ' + (res.error || 'unknown error'));
+            mlsAddSelfKeyBtn.textContent = '✕ Error!';
           }
+          setTimeout(function() {
+            mlsAddSelfKeyBtn.textContent = 'Register Self Key on Local MLS';
+          }, 2000);
         });
       });
     });
@@ -271,11 +280,17 @@
       MDS.keypair.get('MLS_SERVER_ADDRESS', function(res) {
         var stored = (res && res.status && res.value) ? res.value : null;
         if (!stored) {
-          alert('ERROR: No MLS server configured to copy');
+          mlsCopyBtn.textContent = '✕ No Address';
+          setTimeout(function() {
+            mlsCopyBtn.textContent = 'Copy Server Address';
+          }, 1500);
           return;
         }
         navigator.clipboard.writeText(stored);
-        alert('Server address copied to clipboard!');
+        mlsCopyBtn.textContent = '✓ Copied!';
+        setTimeout(function() {
+          mlsCopyBtn.textContent = 'Copy Server Address';
+        }, 1500);
       });
     });
     selfMlsActions.appendChild(mlsCopyBtn);
@@ -347,11 +362,17 @@
       MDS.keypair.get('CREATOR_PERMANENT_ROUTE', function(res) {
         var currentRoute = (res && res.status && res.value) ? res.value : '';
         if (!currentRoute) {
-          alert('ERROR: No Creator Permanent Route is set to copy');
+          crCopyBtn.textContent = '✕ No Route';
+          setTimeout(function() {
+            crCopyBtn.textContent = 'Copy';
+          }, 1500);
           return;
         }
         navigator.clipboard.writeText(currentRoute);
-        alert('Copied!');
+        crCopyBtn.textContent = '✓ Copied!';
+        setTimeout(function() {
+          crCopyBtn.textContent = 'Copy';
+        }, 1500);
       });
     });
     crActions.appendChild(crCopyBtn);
@@ -438,7 +459,10 @@
     mlsBtn.addEventListener('click', function() {
       var addr = (mlsInput.value || '').trim();
       if (!addr) {
-        alert('ERROR: enter an MLS server address first');
+        mlsBtn.textContent = '✕ Empty!';
+        setTimeout(function() {
+          mlsBtn.textContent = 'Connect';
+        }, 1500);
         return;
       }
       if (addr.indexOf('MAX#') === 0) {
@@ -452,16 +476,19 @@
       var cmd = 'maxextra action:staticmls host:' + addr;
       MDS.cmd(cmd, function(cmdRes) {
         mlsBtn.disabled = false;
-        mlsBtn.textContent = 'Connect';
         if (cmdRes.status) {
+          mlsBtn.textContent = '✓ Connected!';
           MDS.keypair.set('MLS_SERVER_ADDRESS', addr, function() {
             mlsInput.value = '';
             updateMlsStatus();
             refreshKeypairInspector();
           });
         } else {
-          alert('ERROR: ' + (cmdRes.error || 'Failed to apply MLS server'));
+          mlsBtn.textContent = '✕ Failed!';
         }
+        setTimeout(function() {
+          mlsBtn.textContent = 'Connect';
+        }, 1500);
       });
     });
     mlsInputRow.appendChild(mlsInput);
@@ -513,9 +540,10 @@
       registerRemoteKeyBtn.textContent = 'Registering…';
       getMaximaInfo(function(err, info) {
         if (err) {
-          alert('Error: ' + err.message);
           registerRemoteKeyBtn.disabled = false;
           registerRemoteKeyBtn.textContent = 'Register Client Key on Remote MLS';
+          regStatus.textContent = 'Error: ' + err.message;
+          regStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
           return;
         }
         MDS.comms.solo(JSON.stringify({
@@ -531,9 +559,10 @@
             if (!err2 && route) {
               updateRegStatus();
               refreshKeypairInspector();
-              alert('Registration completed! Route: ' + route);
+              regStatus.textContent = '✓ Registration completed!\nRoute: ' + route;
+              regStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
             } else {
-              alert('Registration requested. Check SW logs for confirmation.');
+              regStatus.textContent = 'Requested registration.\nCheck SW logs for status.';
             }
           });
         }, 2000);
@@ -577,20 +606,24 @@
     pcDevSaveBtn.addEventListener('click', function() {
       var route = (pcDevInput.value || '').trim();
       if (!route) {
-        alert('Please enter a Maxima route');
+        pcDevSaveBtn.textContent = '✕ Empty';
+        setTimeout(function() { pcDevSaveBtn.textContent = 'Save'; }, 1500);
         return;
       }
       if (route.indexOf('MAX#') !== 0) {
-        alert('Invalid format. Route must start with MAX#');
+        pcDevSaveBtn.textContent = '✕ Invalid';
+        setTimeout(function() { pcDevSaveBtn.textContent = 'Save'; }, 1500);
         return;
       }
       pcDevSaveBtn.disabled = true;
       MDS.keypair.set('MINIMAADS_CREATOR_ROUTE', route, function() {
         pcDevSaveBtn.disabled = false;
+        pcDevSaveBtn.textContent = '✓ Saved';
         pcDevInput.value = '';
         pcDevStatus.textContent = 'Route set to: ' + route;
         pcDevStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
         refreshKeypairInspector();
+        setTimeout(function() { pcDevSaveBtn.textContent = 'Save'; }, 1500);
       });
     });
     var pcDevClearBtn = document.createElement('button');
@@ -690,7 +723,8 @@
     sqlRunBtn.addEventListener('click', function() {
       var query = (sqlTextarea.value || '').trim();
       if (!query) {
-        alert('Please enter a SQL query');
+        sqlRunBtn.textContent = '✕ Empty';
+        setTimeout(function() { sqlRunBtn.textContent = 'Run Query'; }, 1500);
         return;
       }
       sqlRunBtn.disabled = true;
@@ -722,8 +756,11 @@
         setTimeout(function() {
           sqlCopyBtn.textContent = oldText;
         }, 1500);
-      }).catch(function(e) {
-        alert('Failed to copy: ' + e);
+      }).catch(function() {
+        sqlCopyBtn.textContent = '✕ Failed';
+        setTimeout(function() {
+          sqlCopyBtn.textContent = 'Copy Result';
+        }, 1500);
       });
     });
 

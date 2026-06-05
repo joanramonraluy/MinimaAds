@@ -942,8 +942,17 @@ function _notifyPublisherByKey(campaignId, frameId, publisherKey) {
       campaign_id: campaignId,
       frame_id:    frameId
     };
-    sendMaxima(publisherKey, null, notify, function(ok) {
-      MDS.log("[CHANNEL] PUBLISHER_REWARD_NOTIFY (by-key) sent pubKey: " + publisherKey.substring(0, 16) + "... ok=" + ok);
+    // For built-in frames, frameId encodes the publisher's Maxima PK (EC key).
+    // publisherKey is the RSA identity key (MINIMAADS_CREATOR_PK) — not routable.
+    // Extract the Maxima PK from the frameId prefix for actual routing.
+    var routeKey;
+    if (frameId && frameId.indexOf('builtin:') === 0) {
+      routeKey = frameId.substring(8).toUpperCase();
+    } else {
+      routeKey = publisherKey;
+    }
+    sendMaxima(routeKey, null, notify, function(ok) {
+      MDS.log("[CHANNEL] PUBLISHER_REWARD_NOTIFY (by-key) sent routeKey: " + routeKey.substring(0, 16) + "... ok=" + ok);
     });
   });
 }

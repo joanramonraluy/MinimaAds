@@ -175,6 +175,32 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-06-05 — _notifyPublisherByKey: extract Maxima routeKey from frameId
+
+**Task**: Fix `_notifyPublisherByKey` to route the `PUBLISHER_REWARD_NOTIFY` Maxima message to the correct key. The function was passing `publisherKey` (RSA/DER identity key, `MINIMAADS_CREATOR_PK`) to `sendMaxima`, but `sendMaxima` requires an EC Maxima public key for routing.
+
+**Root cause**: For built-in frames, `frameId` encodes the publisher node's actual Maxima PK as `builtin:<maxima_pk>`. The RSA `MINIMAADS_CREATOR_PK` stored as `publisherKey` is used for channel-state identity (VIEWER_KEY/PUBLISHER lookups) but is not a valid Maxima routing key. Passing it to `sendMaxima` caused the message to route to the wrong node or fail silently.
+
+**Changes**:
+- **public/service-workers/handlers/channel.handler.js** — `_notifyPublisherByKey` (lines ~936–956):
+  - Before calling `sendMaxima`, extract `routeKey`:
+    - If `frameId` starts with `'builtin:'` → `routeKey = frameId.substring(8).toUpperCase()` (the embedded EC Maxima PK)
+    - Otherwise → `routeKey = publisherKey` (existing behaviour for custom frames)
+  - Call `sendMaxima(routeKey, null, notify, cb)` instead of `sendMaxima(publisherKey, ...)`.
+  - Updated log line to log `routeKey` (not `publisherKey`).
+  - `publisherKey` is preserved untouched for channel-state identity queries.
+
+**AGENTS.md updated**: yes — §6 added this entry; oldest (DevTools Polish & SQL Console Removal) moved to docs/HISTORY.md §17.
+
+**Verification**:
+- Open `#viewer`, view an ad ≥3s on a node whose built-in-frame `frameId` is `builtin:<maxima_pk>`.
+- In the SW log on the creator node, look for: `[CHANNEL] PUBLISHER_REWARD_NOTIFY (by-key) sent routeKey: <maxima_pk_prefix>... ok=true`
+- On the platform creator's node: `[CHANNEL] PUBLISHER_REWARD_NOTIFY` received + `CHANNEL_OPEN_REQUEST (role=publisher)` sent back.
+- Confirm no `ok=false` for the notify (which would indicate the wrong key was used).
+- No console errors expected.
+
+---
+
 ### Session: 2026-06-05 — Publisher Notify on Deferral
 
 **Task**: After `_deferPublisherReward()` saves a pending publisher reward, the publisher (e.g. platform creator for built-in frames) was never notified to open a channel. Without the notify, the deferred reward remained orphaned indefinitely.
@@ -212,27 +238,6 @@ For verification procedures, see `docs/VERIFICATION.md`.
 **Testing required**:
 - Click the "MinimaAds" title in the top header from the main view of any mode (viewer, creator, publisher) and verify it remains on the start page without reloading.
 - Navigate to `#settings` or `#profile`, then click the "MinimaAds" title and verify it correctly returns to the default view of the active mode (e.g., `#viewer` if in viewer mode, `#creator` if in creator mode, `#frames` if in publisher mode).
-
----
-
-### Session: 2026-06-04 — DevTools Polish & SQL Console Removal
-
-**Task**: Fix DevTools CSS layout, remove the SQL console, adjust button styling, remove the Copy command button, add "Copy Address" helper buttons, remove the "Client Mode (Advanced)" section, and ensure MLS Save configures static MLS.
-
-**Changes**:
-- **dapp/views/devtools.js**: Removed SQL console inputs, textarea, run button, outputs, and the `runQuery` function. Re-styled the entire modal layout with modern glassmorphism overlay using PicoCSS theme variables. Added smooth open/close animations. Aligned all input rows (Platform Key, MLS Server) to a consistent 2.2rem height. Renamed the Platform Key "Register" button to "Save". Removed the "Copy: maxextra action:staticmls" button. Added "Copy Address" buttons to both the Platform Key Configuration and MLS Server Configuration sections to easily copy active addresses. Fixed the MLS Server configuration "Save" button to execute `maxextra action:staticmls` on the node, ensuring the setting applies at the platform level. Completely removed the "Client Mode (Advanced)" section since route setup is now fully managed on the Settings page.
-
-**Why**: Simplifies development settings, makes input-button alignments consistent, cleans up redundant command buttons, and resolves a bug where saving the MLS server via DevTools failed to actually register the MLS server with the Maxima stack.
-
-**Testing required**:
-- Press `Ctrl+Shift+D` to toggle DevTools.
-- Verify that inputs and "Save" buttons are perfectly aligned in height (2.2rem).
-- Verify that the Platform Key custom address registration button is named "Save".
-- Verify that the "Client Mode (Advanced)" section is completely gone from the DevTools dialog.
-- Verify that both the Platform Key and MLS Server configuration sections have a "Copy Address" button.
-- Click "Copy Address" in either section and verify the respective key/address is copied to your clipboard (showing a quick status change in the card).
-- Type a valid MLS Server address in the DevTools input and click "Save": verify it displays "MLS server applied and saved" and correctly configures Maxima's static MLS at the platform level.
-- Close the modal with `✕` or by clicking outside and verify the transition is smooth.
 
 ---
 

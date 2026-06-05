@@ -175,29 +175,42 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
-### Session: 2026-06-05 — _notifyPublisherByKey: extract Maxima routeKey from frameId
+### Session: 2026-06-05 — Add frame_id to REWARD_REQUEST Payload
 
-**Task**: Fix `_notifyPublisherByKey` to route the `PUBLISHER_REWARD_NOTIFY` Maxima message to the correct key. The function was passing `publisherKey` (RSA/DER identity key, `MINIMAADS_CREATOR_PK`) to `sendMaxima`, but `sendMaxima` requires an EC Maxima public key for routing.
-
-**Root cause**: For built-in frames, `frameId` encodes the publisher node's actual Maxima PK as `builtin:<maxima_pk>`. The RSA `MINIMAADS_CREATOR_PK` stored as `publisherKey` is used for channel-state identity (VIEWER_KEY/PUBLISHER lookups) but is not a valid Maxima routing key. Passing it to `sendMaxima` caused the message to route to the wrong node or fail silently.
+**Task**: Include `frame_id` in the `REWARD_REQUEST` Maxima message so the creator node can identify which frame originated the reward request (specifically, built-in frames).
 
 **Changes**:
-- **public/service-workers/handlers/channel.handler.js** — `_notifyPublisherByKey` (lines ~936–956):
-  - Before calling `sendMaxima`, extract `routeKey`:
-    - If `frameId` starts with `'builtin:'` → `routeKey = frameId.substring(8).toUpperCase()` (the embedded EC Maxima PK)
-    - Otherwise → `routeKey = publisherKey` (existing behaviour for custom frames)
-  - Call `sendMaxima(routeKey, null, notify, cb)` instead of `sendMaxima(publisherKey, ...)`.
-  - Updated log line to log `routeKey` (not `publisherKey`).
-  - `publisherKey` is preserved untouched for channel-state identity queries.
+- **public/service-workers/handlers/comms.handler.js** (`_sendRewardRequest`, line ~349):
+  - Added `frame_id: "builtin:" + MY_MAXIMA_PK.toUpperCase()` to the `payload` object.
+  - `MY_MAXIMA_PK` is already a global initialized at SW startup in `service.js` and was already used in this function — no new dependency introduced.
 
-**AGENTS.md updated**: yes — §6 added this entry; oldest (DevTools Polish & SQL Console Removal) moved to docs/HISTORY.md §17.
+**Why**: The creator's `PUBLISHER_REWARD_NOTIFY` routing needs to know the frame that generated the reward. For built-in frames, the frame ID is `"builtin:" + viewerMaximaPK`. Without this field the creator could not correlate the reward request to a specific frame.
+
+**AGENTS.md updated**: yes — §6 added this entry; oldest (Brand Header Navigation to Home) moved to `docs/HISTORY.md §17`.
 
 **Verification**:
-- Open `#viewer`, view an ad ≥3s on a node whose built-in-frame `frameId` is `builtin:<maxima_pk>`.
-- In the SW log on the creator node, look for: `[CHANNEL] PUBLISHER_REWARD_NOTIFY (by-key) sent routeKey: <maxima_pk_prefix>... ok=true`
-- On the platform creator's node: `[CHANNEL] PUBLISHER_REWARD_NOTIFY` received + `CHANNEL_OPEN_REQUEST (role=publisher)` sent back.
-- Confirm no `ok=false` for the notify (which would indicate the wrong key was used).
-- No console errors expected.
+  - Open `#viewer` on the viewer node and view an ad for ≥3 s.
+  - In the SW log on the viewer node, confirm `REWARD_REQUEST sent` appears.
+  - On the creator node, receive the `REWARD_REQUEST` and confirm `frame_id` is present in the decoded payload (e.g. `"builtin:0XABC..."`).
+  - No console errors expected on either node.
+
+---
+
+### Session: 2026-06-05 — Viewer Collapsibles and Expandable Table Rows CSS Polish
+
+**Task**: Style collapsibles and expandable rows in the viewer earnings dashboard (`dapp/views/earnings.js`) to match the premium aesthetics of the creator campaign metrics (`dapp/views/mycampaigns.js`).
+
+**Changes**:
+- **dapp/views/earnings.js**:
+  - For "Pending settlements" (lines ~364–386), updated the `<details>`/`<summary>` element to use `className = 'ma-campaign-details'` and `className = 'ma-campaign-details-summary'` and removed the inline style.
+  - For "Settled channels" (lines ~203–240), refactored the expandable table row to use `className = 'ma-expandable-row'`, `tabindex = '0'`, and `aria-expanded = 'false'`. Replaced the plain `▶`/`▼` toggle button with an animated `›` span chevron. Configured row-level click and keyboard Enter/Space event listeners to toggle the expansion and transition the rotation of the chevron, using the `ma-nested-detail` class on the inner detail cell.
+
+**Why**: Unifies the UI layout, brings the custom focus states, hover backgrounds, and smooth chevron transitions from the Campaign card accordion lists to the viewer's personal Earnings views.
+
+**Testing required**:
+- Navigate to `#earnings`.
+- Check the "Pending settlements" section: the "Show events" details collapsible should have hover styling matching the creator activity chart collapsibles.
+- Check the "Settled channels" section: click anywhere on a settled campaign row to expand/collapse it, verifying the `›` chevron transitions to 90 degrees and the detail table loads correctly.
 
 ---
 
@@ -223,21 +236,6 @@ For verification procedures, see `docs/VERIFICATION.md`.
   - On the platform creator's node: `[CHANNEL] PUBLISHER_REWARD_NOTIFY` received + `CHANNEL_OPEN_REQUEST (role=publisher)` sent back.
   No console errors expected.
 
----
-
-### Session: 2026-06-05 — Brand Header Navigation to Home
-
-**Task**: Clicking the MinimaAds title/brand in the header should navigate to the active role's home/start tab (e.g. `#viewer` for viewer, `#creator` for creator, and `#frames` for publisher) without reloading the page.
-
-**Changes**:
-- **dapp/app.js**: Added `goHome()` global function that closes the drawer side menu (if open) and routes the user to the default view of their active mode (`MODE_VIEWS[_activeMode][0]`).
-- **public/index.html**: Changed the "MinimaAds" brand logo header `<a>` tag to use `href="#" onclick="goHome(); return false;"` to trigger the routing function cleanly without page reloads.
-
-**Why**: Simplifies DApp exploration, letting the user go back to their role's starting point from any deep page (like Settings, Profile, or Help) with a single tap, while maintaining the Single Page App (SPA) structure.
-
-**Testing required**:
-- Click the "MinimaAds" title in the top header from the main view of any mode (viewer, creator, publisher) and verify it remains on the start page without reloading.
-- Navigate to `#settings` or `#profile`, then click the "MinimaAds" title and verify it correctly returns to the default view of the active mode (e.g., `#viewer` if in viewer mode, `#creator` if in creator mode, `#frames` if in publisher mode).
 
 ---
 

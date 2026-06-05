@@ -46,6 +46,22 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-05 — Brand Header Navigation to Home
+
+**Task**: Clicking the MinimaAds title/brand in the header should navigate to the active role's home/start tab (e.g. `#viewer` for viewer, `#creator` for creator, and `#frames` for publisher) without reloading the page.
+
+**Changes**:
+- **dapp/app.js**: Added `goHome()` global function that closes the drawer side menu (if open) and routes the user to the default view of their active mode (`MODE_VIEWS[_activeMode][0]`).
+- **public/index.html**: Changed the "MinimaAds" brand logo header `<a>` tag to use `href="#" onclick="goHome(); return false;"` to trigger the routing function cleanly without page reloads.
+
+**Why**: Simplifies DApp exploration, letting the user go back to their role's starting point from any deep page (like Settings, Profile, or Help) with a single tap, while maintaining the Single Page App (SPA) structure.
+
+**Testing required**:
+- Click the "MinimaAds" title in the top header from the main view of any mode (viewer, creator, publisher) and verify it remains on the start page without reloading.
+- Navigate to `#settings` or `#profile`, then click the "MinimaAds" title and verify it correctly returns to the default view of the active mode (e.g., `#viewer` if in viewer mode, `#creator` if in creator mode, `#frames` if in publisher mode).
+
+---
+
 ### Session: 2026-06-04 — DevTools Polish & SQL Console Removal
 
 **Task**: Fix DevTools CSS layout, remove the SQL console, adjust button styling, remove the Copy command button, add "Copy Address" helper buttons, remove the "Client Mode (Advanced)" section, and ensure MLS Save configures static MLS.
@@ -286,3 +302,16 @@ The remaining DEFERRED state is expected (no open publisher channel yet), not a 
 ### 2026-06-01 (fix: viewer campaign row hover colour)
 - **Problem**: Hover color used pico card sectioning background color.
 - **Solution**: Set explicit neutral hover colors: `rgba(255,255,255,.06)` in dark mode and `rgba(15,23,42,.05)` in light mode.
+
+---
+
+### 2026-06-05 (fix: _notifyPublisherByKey: extract Maxima routeKey from frameId)
+- **Task**: Fix `_notifyPublisherByKey` to route the `PUBLISHER_REWARD_NOTIFY` Maxima message to the correct key. The function was passing `publisherKey` (RSA/DER identity key, `MINIMAADS_CREATOR_PK`) to `sendMaxima`, but `sendMaxima` requires an EC Maxima public key for routing.
+- **Root cause**: For built-in frames, `frameId` encodes the publisher node's actual Maxima PK as `builtin:<maxima_pk>`. The RSA `MINIMAADS_CREATOR_PK` stored as `publisherKey` is used for channel-state identity (VIEWER_KEY/PUBLISHER lookups) but is not a valid Maxima routing key. Passing it to `sendMaxima` caused the message to route to the wrong node or fail silently.
+- **Changes**:
+  - **public/service-workers/handlers/channel.handler.js** — `_notifyPublisherByKey`:
+    - Before calling `sendMaxima`, extract `routeKey`:
+      - If `frameId` starts with `'builtin:'` → `routeKey = frameId.substring(8).toUpperCase()` (the embedded EC Maxima PK)
+      - Otherwise → `routeKey = publisherKey` (existing behaviour for custom frames)
+    - Call `sendMaxima(routeKey, null, notify, cb)` instead of `sendMaxima(publisherKey, ...)`.
+- **AGENTS.md updated**: yes.

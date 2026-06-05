@@ -144,6 +144,130 @@
     
     panel.appendChild(pkSection);
 
+    // Section 1.2: Creator Permanent Route Configuration
+    var crSection = document.createElement('section');
+    crSection.style.cssText = 'background:var(--pico-card-sectionning-background-color, rgba(0,0,0,0.03));border:1px solid var(--pico-muted-border-color);border-radius:0.5rem;padding:1.25rem;display:flex;flex-direction:column;gap:0.75rem;margin:0;';
+
+    var crTitle = document.createElement('strong');
+    crTitle.textContent = 'Creator Permanent Route Configuration';
+    crTitle.style.cssText = 'display:block;font-size:0.9rem;font-weight:700;color:var(--pico-primary);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.25rem;';
+    crSection.appendChild(crTitle);
+
+    var crStatus = document.createElement('div');
+    crStatus.id = 'ma-dev-cr-status';
+    crStatus.style.cssText = 'font-family:monospace;font-size:0.75rem;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);padding:0.75rem;border-radius:0.375rem;margin:0;word-break:break-all;color:var(--pico-color);line-height:1.4;';
+    crStatus.textContent = 'Loading Creator Permanent Route…';
+    MDS.keypair.get('CREATOR_PERMANENT_ROUTE', function(res) {
+      var route = (res && res.status && res.value) ? res.value : '';
+      crStatus.textContent = route ? 'Current Route: ' + route : 'Current Route: (not set)';
+    });
+    crSection.appendChild(crStatus);
+
+    var crActions = document.createElement('div');
+    crActions.style.cssText = 'display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;';
+
+    var setSelfCrBtn = document.createElement('button');
+    setSelfCrBtn.textContent = 'Set as Self Route';
+    setSelfCrBtn.className = 'primary';
+    setSelfCrBtn.style.cssText = 'width:auto;margin:0;padding:0.45rem 0.9rem;font-size:0.8rem;line-height:1.2;';
+    setSelfCrBtn.addEventListener('click', function() {
+      setSelfCrBtn.disabled = true;
+      setSelfCrBtn.textContent = 'Setting…';
+      if (typeof setCreatorMaximaRoute === 'function') {
+        setCreatorMaximaRoute(function(err, route) {
+          setSelfCrBtn.disabled = false;
+          setSelfCrBtn.textContent = 'Set as Self Route';
+          if (err) {
+            crStatus.textContent = 'ERROR: ' + err.message;
+            crStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
+          } else {
+            crStatus.textContent = 'Route set to: ' + route;
+            crStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
+          }
+        });
+      } else {
+        setSelfCrBtn.disabled = false;
+        setSelfCrBtn.textContent = 'Set as Self Route';
+        crStatus.textContent = 'ERROR: setCreatorMaximaRoute not found';
+        crStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
+      }
+    });
+    crActions.appendChild(setSelfCrBtn);
+
+    var clearCrBtn = document.createElement('button');
+    clearCrBtn.textContent = 'Clear Route';
+    clearCrBtn.className = 'outline secondary';
+    clearCrBtn.style.cssText = 'width:auto;margin:0;padding:0.45rem 0.9rem;font-size:0.8rem;line-height:1.2;';
+    clearCrBtn.addEventListener('click', function() {
+      MDS.keypair.set('CREATOR_PERMANENT_ROUTE', '', function() {
+        crStatus.textContent = 'Creator permanent route cleared';
+        crStatus.style.borderColor = 'var(--pico-muted-border-color)';
+      });
+    });
+    crActions.appendChild(clearCrBtn);
+
+    var crCopyBtn = document.createElement('button');
+    crCopyBtn.textContent = 'Copy Route';
+    crCopyBtn.className = 'outline secondary';
+    crCopyBtn.style.cssText = 'width:auto;margin:0;padding:0.45rem 0.9rem;font-size:0.8rem;line-height:1.2;';
+    crCopyBtn.addEventListener('click', function() {
+      MDS.keypair.get('CREATOR_PERMANENT_ROUTE', function(res) {
+        var currentRoute = (res && res.status && res.value) ? res.value : '';
+        if (!currentRoute) {
+          crStatus.textContent = 'ERROR: No Creator Permanent Route is set to copy';
+          crStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
+          return;
+        }
+        navigator.clipboard.writeText(currentRoute);
+        var oldText = crStatus.textContent;
+        crStatus.textContent = 'Creator Permanent Route copied to clipboard!';
+        crStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
+        setTimeout(function() {
+          crStatus.textContent = oldText;
+          crStatus.style.borderColor = 'var(--pico-muted-border-color)';
+        }, 2000);
+      });
+    });
+    crActions.appendChild(crCopyBtn);
+
+    crSection.appendChild(crActions);
+
+    var crInputRow = document.createElement('div');
+    crInputRow.style.cssText = 'display:flex;gap:0.5rem;align-items:stretch;margin-top:0.25rem;';
+
+    var crInput = document.createElement('input');
+    crInput.type = 'text';
+    crInput.placeholder = 'Custom permanent route (MAX#pk#mls)';
+    crInput.style.cssText = 'flex:1;margin:0;padding:0 0.75rem;font-size:0.8rem;font-family:monospace;height:2.2rem;box-sizing:border-box;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);color:var(--pico-color);border-radius:0.375rem;';
+
+    var crSaveBtn = document.createElement('button');
+    crSaveBtn.textContent = 'Save';
+    crSaveBtn.className = 'primary';
+    crSaveBtn.style.cssText = 'width:auto;margin:0;padding:0 1.2rem;font-size:0.8rem;height:2.2rem;box-sizing:border-box;display:flex;align-items:center;justify-content:center;line-height:2.2rem;white-space:nowrap;';
+    crSaveBtn.addEventListener('click', function() {
+      var route = (crInput.value || '').trim();
+      if (!route) {
+        crStatus.textContent = 'ERROR: enter a permanent route first';
+        crStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
+        return;
+      }
+      if (route.indexOf('MAX#') !== 0) {
+        crStatus.textContent = 'ERROR: route must start with MAX#';
+        crStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
+        return;
+      }
+      MDS.keypair.set('CREATOR_PERMANENT_ROUTE', route, function() {
+        crStatus.textContent = 'CREATOR_PERMANENT_ROUTE set to: ' + route;
+        crStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
+        crInput.value = '';
+      });
+    });
+    crInputRow.appendChild(crInput);
+    crInputRow.appendChild(crSaveBtn);
+    crSection.appendChild(crInputRow);
+
+    panel.appendChild(crSection);
+
     // Section 1.5: MLS Server Configuration
     var mlsSection = document.createElement('section');
     mlsSection.style.cssText = 'background:var(--pico-card-sectionning-background-color, rgba(0,0,0,0.03));border:1px solid var(--pico-muted-border-color);border-radius:0.5rem;padding:1.25rem;display:flex;flex-direction:column;gap:0.75rem;margin:0;';
@@ -276,69 +400,6 @@
     mlsSection.appendChild(mlsActionRow);
 
     panel.appendChild(mlsSection);
-
-
-    // Section 1.9: Register MinimaAds Creator as Permanent
-    var creatorRegSection = document.createElement('section');
-    creatorRegSection.style.cssText = 'background:var(--pico-card-sectionning-background-color, rgba(0,0,0,0.03));border:1px solid var(--pico-muted-border-color);border-radius:0.5rem;padding:1.25rem;display:flex;flex-direction:column;gap:0.75rem;margin:0;';
-
-    var creatorRegTitle = document.createElement('strong');
-    creatorRegTitle.textContent = 'Register MinimaAds Creator as Permanent (Server Mode)';
-    creatorRegTitle.style.cssText = 'display:block;font-size:0.9rem;font-weight:700;color:var(--pico-primary);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.25rem;';
-    creatorRegSection.appendChild(creatorRegTitle);
-
-    var creatorRegDesc = document.createElement('p');
-    creatorRegDesc.textContent = 'If this node is running as an MLS server, execute this command ON THIS SERVER to register the MinimaAds creator as a permanent user.';
-    creatorRegDesc.style.cssText = 'font-size:0.8rem;color:var(--pico-color);margin:0;line-height:1.5;';
-    creatorRegSection.appendChild(creatorRegDesc);
-
-    var creatorRegStatus = document.createElement('div');
-    creatorRegStatus.id = 'ma-dev-creator-reg-status';
-    creatorRegStatus.style.cssText = 'font-family:monospace;font-size:0.75rem;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);padding:0.75rem;border-radius:0.375rem;margin:0.5rem 0;word-break:break-all;color:var(--pico-color);line-height:1.4;min-height:50px;';
-    creatorRegStatus.textContent = 'Fetching creator publickey…';
-
-    getMaximaInfo(function(err, info) {
-      if (err) {
-        creatorRegStatus.textContent = 'Error: ' + err.message;
-        creatorRegStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
-      } else {
-        creatorRegStatus.innerHTML = 'Run on server terminal:<br/><code style="display:block; margin-top:0.5rem;">maxextra action:addpermanent publickey:' + info.publickey + '</code>';
-      }
-    });
-    creatorRegSection.appendChild(creatorRegStatus);
-
-    var creatorRegBtn = document.createElement('button');
-    creatorRegBtn.textContent = 'Register Creator as Permanent';
-    creatorRegBtn.className = 'primary';
-    creatorRegBtn.style.cssText = 'width:auto;margin:0;padding:0.45rem 0.9rem;font-size:0.8rem;line-height:1.2;';
-    creatorRegBtn.addEventListener('click', function() {
-      creatorRegBtn.disabled = true;
-      creatorRegBtn.textContent = 'Registering…';
-      getMaximaInfo(function(err, info) {
-        if (err) {
-          creatorRegStatus.textContent = 'Error: ' + err.message;
-          creatorRegStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
-          creatorRegBtn.disabled = false;
-          creatorRegBtn.textContent = 'Register Creator as Permanent';
-          return;
-        }
-        var cmd = 'maxextra action:addpermanent publickey:' + info.publickey;
-        MDS.cmd(cmd, function(res) {
-          creatorRegBtn.disabled = false;
-          creatorRegBtn.textContent = 'Register Creator as Permanent';
-          if (res.status) {
-            creatorRegStatus.innerHTML = '<span style="color:var(--pico-ins-color, #27ae60);">✓ Creator registered as permanent!</span><br/><code style="display:block; margin-top:0.5rem; font-size:0.7rem;">' + info.publickey + '</code>';
-            creatorRegStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
-          } else {
-            creatorRegStatus.innerHTML = '<span style="color:var(--pico-del-color, #c0392b);">✗ Registration failed</span><br/>' + (res.error || 'Unknown error');
-            creatorRegStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
-          }
-        });
-      });
-    });
-    creatorRegSection.appendChild(creatorRegBtn);
-
-    panel.appendChild(creatorRegSection);
 
     overlay.appendChild(panel);
 

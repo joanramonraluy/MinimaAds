@@ -206,17 +206,15 @@ function handleChannelOpenRequest(payload, senderPk) {
               });
             } else {
               MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: coin spent — settling and opening new channel. campaign: " + campaignId);
-              sqlQuery(
-                "UPDATE CHANNEL_STATE SET STATUS = 'settled' WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(viewerKey) + "') AND ROLE = 'viewer'",
-                function() {
-                  openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', '', viewerWalletAddr, function(openErr) {
-                    if (openErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: openChannel failed: " + openErr); return; }
-                    _signalCampaignUpdated(campaignId);
-                    MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: building channel TX in SW. campaign: " + campaignId + " viewer_mx: " + viewerMx);
-                    _swDispatchChannelOpen(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', '', viewerWalletPK, viewerWalletAddr);
-                  });
-                }
-              );
+              settleChannel(campaignId, viewerKey, 'viewer', function(settleErr) {
+                if (settleErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: settleChannel failed: " + settleErr); }
+                openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', '', viewerWalletAddr, function(openErr) {
+                  if (openErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: openChannel failed: " + openErr); return; }
+                  _signalCampaignUpdated(campaignId);
+                  MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: building channel TX in SW. campaign: " + campaignId + " viewer_mx: " + viewerMx);
+                  _swDispatchChannelOpen(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', '', viewerWalletPK, viewerWalletAddr);
+                });
+              });
             }
           });
           return;
@@ -437,6 +435,8 @@ function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumu
   var role         = payload.role || 'viewer';
   var frameId      = payload.frame_id || '';
   var publisherKey = payload.publisher_key || '';
+  var publisherMx  = payload.publisher_mx || '';
+  MDS.log("[CHANNEL] _handleRewardRequestInner received: frameId=" + frameId + " publisherKey=" + (publisherKey ? publisherKey.substring(0, 16) + '...' : '(empty)') + " publisherMx=" + (publisherMx ? 'present' : 'absent'));
 
   getChannelState(campaignId, viewerKey, role, function(err, channel) {
     if (err || !channel) {
@@ -487,7 +487,7 @@ function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumu
           } else {
             MDS.log("[CHANNEL] REWARD_REQUEST: coin indexed. building viewer voucher in SW. campaign: " + campaignId + " cumulative: " + cumulative);
             _swDispatchVoucher(campaignId, viewerKey, channel.CREATOR_MX, eventId, cumulative, channel, 'viewer', '');
-            if (channelFrameId || publisherKey) { _maybeGeneratePublisherVoucher(campaignId, channelFrameId, eventId, publisherKey); }
+            if (channelFrameId || publisherKey) { _maybeGeneratePublisherVoucher(campaignId, channelFrameId, eventId, publisherKey, publisherMx); }
           }
         } else {
           var pending = JSON.stringify({
@@ -933,7 +933,7 @@ function _maybeNotifyPublisher(campaignId, frameId) {
 // frames where no FRAMES row exists on the creator node but publisherKey is
 // known from the REWARD_REQUEST payload (e.g. MINIMAADS_CREATOR_PK).
 // ---------------------------------------------------------------------------
-function _notifyPublisherByKey(campaignId, frameId, publisherKey) {
+function _notifyPublisherByKey(campaignId, frameId, publisherKey, publisherMx) {
   if (!publisherKey) { return; }
   getChannelState(campaignId, publisherKey, 'publisher', function(chErr, ch) {
     if (!chErr && ch && (ch.STATUS === 'open' || ch.STATUS === 'pending')) { return; }
@@ -951,7 +951,9 @@ function _notifyPublisherByKey(campaignId, frameId, publisherKey) {
     } else {
       routeKey = publisherKey;
     }
-    sendMaxima(routeKey, null, notify, function(ok) {
+    var mxAddress = publisherMx || null;
+    MDS.log("[CHANNEL] _notifyPublisherByKey: frameId=" + frameId + " publisherKey=" + publisherKey.substring(0, 16) + "... routeKey=" + routeKey.substring(0, 16) + "... mxAddress=" + (mxAddress ? 'yes (' + mxAddress.substring(0, 20) + '...)' : 'null'));
+    sendMaxima(routeKey, mxAddress, notify, function(ok) {
       MDS.log("[CHANNEL] PUBLISHER_REWARD_NOTIFY (by-key) sent routeKey: " + routeKey.substring(0, 16) + "... ok=" + ok);
     });
   });
@@ -1049,7 +1051,7 @@ function _doSendPublisherChannelOpenRequest(campaignId, campaign, frameId, creat
 // voucher TX. Replaces the old _maybeNotifyPublisher approach, which failed
 // for frames that don't exist in the creator's FRAMES table.
 // ---------------------------------------------------------------------------
-function _maybeGeneratePublisherVoucher(campaignId, frameId, eventId, publisherKey) {
+function _maybeGeneratePublisherVoucher(campaignId, frameId, eventId, publisherKey, publisherMx) {
   if (!frameId && !publisherKey) { return; }
   if (publisherKey) {
     // Fast path: publisherKey provided directly by viewer snippet — no keypair lookup needed.
@@ -1061,8 +1063,9 @@ function _maybeGeneratePublisherVoucher(campaignId, frameId, eventId, publisherK
       function(err, rows) {
         if (err || !rows || rows.length === 0) {
           MDS.log("[CHANNEL] _maybeGeneratePublisherVoucher: publisher channel not open — DEFERRING. campaign: " + campaignId + " pubKey: " + publisherKey.substring(0, 16) + "...");
-          _deferPublisherReward(campaignId, frameId || publisherKey, eventId);
-          _notifyPublisherByKey(campaignId, frameId || publisherKey, publisherKey);
+          _deferPublisherReward(campaignId, frameId || publisherKey, eventId, publisherMx || '');
+
+          _notifyPublisherByKey(campaignId, frameId || publisherKey, publisherKey, publisherMx);
           return;
         }
         _doGeneratePublisherVoucher(campaignId, frameId || rows[0].FRAME_ID, eventId, rows[0]);
@@ -1095,7 +1098,7 @@ function _maybeGeneratePublisherVoucher(campaignId, frameId, eventId, publisherK
           function(err2, rows2) {
             if (err2 || !rows2 || rows2.length === 0) {
               MDS.log("[CHANNEL] _maybeGeneratePublisherVoucher: no open publisher channel — DEFERRING. campaign: " + campaignId + " frame: " + frameId);
-              _deferPublisherReward(campaignId, frameId, eventId);
+              _deferPublisherReward(campaignId, frameId, eventId, publisherMx || '');
               _maybeNotifyPublisher(campaignId, frameId);
               return;
             }
@@ -1110,7 +1113,7 @@ function _maybeGeneratePublisherVoucher(campaignId, frameId, eventId, publisherK
   });
 }
 
-function _deferPublisherReward(campaignId, frameId, eventId) {
+function _deferPublisherReward(campaignId, frameId, eventId, publisherMx) {
   var dprId = 'pub-' + eventId;
   isDuplicate(dprId, function(isDup) {
     if (isDup) {
@@ -1123,9 +1126,9 @@ function _deferPublisherReward(campaignId, frameId, eventId) {
       if (pubReward <= 0) { return; }
       var now = Date.now();
       sqlQuery(
-        "MERGE INTO DEFERRED_PUB_REWARDS (ID, CAMPAIGN_ID, FRAME_ID, VIEWER_EVENT_ID, AMOUNT, CREATED_AT) KEY (ID) VALUES ('" +
+        "MERGE INTO DEFERRED_PUB_REWARDS (ID, CAMPAIGN_ID, FRAME_ID, VIEWER_EVENT_ID, AMOUNT, PUBLISHER_MX, CREATED_AT) KEY (ID) VALUES ('" +
         escapeSql(dprId) + "','" + escapeSql(campaignId) + "','" + escapeSql(frameId) + "','" +
-        escapeSql(eventId) + "'," + pubReward + "," + now + ")",
+        escapeSql(eventId) + "'," + pubReward + ",'" + escapeSql(publisherMx || '') + "'," + now + ")",
         function(mergeErr) {
           if (mergeErr) {
             MDS.log("[CHANNEL] _deferPublisherReward: MERGE failed: " + mergeErr);
@@ -1247,41 +1250,39 @@ function _doGeneratePublisherVoucher(campaignId, frameId, eventId, pubChannel) {
           var _pubMaxAmount  = parseFloat(pubChannel.MAX_AMOUNT) || 0;
           var _pubWalletAddr = pubChannel.VIEWER_WALLET_ADDR || '';
           var _pubWalletPK   = pubChannel.VIEWER_WALLET_PK  || '';
-          sqlQuery(
-            "UPDATE CHANNEL_STATE SET STATUS = 'settled' WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(_pubViewerKey) + "') AND ROLE = 'publisher'",
-            function() {
-              var _now2 = Date.now();
-              sqlQuery(
-                "MERGE INTO DEFERRED_PUB_REWARDS (ID, CAMPAIGN_ID, FRAME_ID, VIEWER_EVENT_ID, AMOUNT, CREATED_AT) KEY (ID) VALUES ('" +
-                escapeSql(pubEventId) + "','" + escapeSql(campaignId) + "','" + escapeSql(frameId) + "','" +
-                escapeSql(eventId) + "'," + pubReward + "," + _now2 + ")",
-                function() {
-                  openChannel(campaignId, _pubViewerKey, _pubViewerMx, _pubMaxAmount, 'publisher', frameId, _pubWalletAddr, function(openErr) {
-                    if (openErr) {
-                      MDS.log("[CHANNEL] _doGeneratePublisherVoucher: openChannel (publisher) failed: " + openErr);
-                      return;
-                    }
-                    var _bumpSql = "UPDATE CAMPAIGNS SET PUBLISHER_BUDGET_SPENT = COALESCE(PUBLISHER_BUDGET_SPENT, 0) + " + _pubMaxAmount +
-                      " WHERE UPPER(ID) = UPPER('" + escapeSql(campaignId) + "')";
-                    sqlQuery(_bumpSql, function() {
-                      sqlQuery(
-                        "UPDATE CHANNEL_STATE SET VIEWER_WALLET_PK = '" + escapeSql(_pubWalletPK) + "'" +
-                        " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
-                        " AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(_pubViewerKey) + "')" +
-                        " AND ROLE = 'publisher'",
-                        function() {
-                          MDS.keypair.set("FRAME_PUBLISHER_" + frameId, _pubViewerKey, function() {
-                            MDS.log("[CHANNEL] _doGeneratePublisherVoucher: dispatching new publisher channel. campaign: " + campaignId);
-                            _swDispatchChannelOpen(campaignId, _pubViewerKey, _pubViewerMx, _pubMaxAmount, 'publisher', frameId, _pubWalletPK, _pubWalletAddr);
-                          });
-                        }
-                      );
-                    });
+          settleChannel(campaignId, _pubViewerKey, 'publisher', function(settleErr) {
+            if (settleErr) { MDS.log("[CHANNEL] _doGeneratePublisherVoucher: settleChannel failed: " + settleErr); }
+            var _now2 = Date.now();
+            sqlQuery(
+              "MERGE INTO DEFERRED_PUB_REWARDS (ID, CAMPAIGN_ID, FRAME_ID, VIEWER_EVENT_ID, AMOUNT, CREATED_AT) KEY (ID) VALUES ('" +
+              escapeSql(pubEventId) + "','" + escapeSql(campaignId) + "','" + escapeSql(frameId) + "','" +
+              escapeSql(eventId) + "'," + pubReward + "," + _now2 + ")",
+              function() {
+                openChannel(campaignId, _pubViewerKey, _pubViewerMx, _pubMaxAmount, 'publisher', frameId, _pubWalletAddr, function(openErr) {
+                  if (openErr) {
+                    MDS.log("[CHANNEL] _doGeneratePublisherVoucher: openChannel (publisher) failed: " + openErr);
+                    return;
+                  }
+                  var _bumpSql = "UPDATE CAMPAIGNS SET PUBLISHER_BUDGET_SPENT = COALESCE(PUBLISHER_BUDGET_SPENT, 0) + " + _pubMaxAmount +
+                    " WHERE UPPER(ID) = UPPER('" + escapeSql(campaignId) + "')";
+                  sqlQuery(_bumpSql, function() {
+                    sqlQuery(
+                      "UPDATE CHANNEL_STATE SET VIEWER_WALLET_PK = '" + escapeSql(_pubWalletPK) + "'" +
+                      " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
+                      " AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(_pubViewerKey) + "')" +
+                      " AND ROLE = 'publisher'",
+                      function() {
+                        MDS.keypair.set("FRAME_PUBLISHER_" + frameId, _pubViewerKey, function() {
+                          MDS.log("[CHANNEL] _doGeneratePublisherVoucher: dispatching new publisher channel. campaign: " + campaignId);
+                          _swDispatchChannelOpen(campaignId, _pubViewerKey, _pubViewerMx, _pubMaxAmount, 'publisher', frameId, _pubWalletPK, _pubWalletAddr);
+                        });
+                      }
+                    );
                   });
-                }
-              );
-            }
-          );
+                });
+              }
+            );
+          });
           return;
         }
         var now = Date.now();
@@ -1810,6 +1811,47 @@ function swBuildAndPostChannelOpenTx(ctx) {
           });
         });
       });
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// checkOpenChannelsSettled — runs on NEWBLOCK to detect on-chain settlement
+// of open channels (spent coins) and transition them to settled in DB.
+// ---------------------------------------------------------------------------
+function checkOpenChannelsSettled() {
+  var chAddr = CHANNEL_SCRIPT_ADDRESS || '';
+  if (!chAddr) { return; }
+
+  var sql = "SELECT CAMPAIGN_ID, VIEWER_KEY, ROLE, CHANNEL_COINID FROM CHANNEL_STATE WHERE STATUS = 'open'";
+  sqlQuery(sql, function(err, rows) {
+    if (err || !rows || rows.length === 0) { return; }
+
+    MDS.cmd("coins address:" + chAddr, function(cRes) {
+      var coins = (cRes && cRes.status && cRes.response) ? cRes.response : [];
+      var activeCoinIds = {};
+      for (var i = 0; i < coins.length; i++) {
+        if (coins[i].coinid) {
+          activeCoinIds[coins[i].coinid.toUpperCase()] = true;
+        }
+      }
+
+      for (var j = 0; j < rows.length; j++) {
+        var row = rows[j];
+        var coinId = row.CHANNEL_COINID || '';
+        if (coinId && !activeCoinIds[coinId.toUpperCase()]) {
+          MDS.log("[CHANNEL] checkOpenChannelsSettled: channel coin " + coinId + " spent/settled on-chain! Settling locally.");
+          (function(r) {
+            settleChannel(r.CAMPAIGN_ID, r.VIEWER_KEY, r.ROLE || 'viewer', function(settleErr) {
+              if (settleErr) {
+                MDS.log("[CHANNEL] checkOpenChannelsSettled: settleChannel failed for " + r.CAMPAIGN_ID + " error: " + settleErr);
+              } else {
+                _signalCampaignUpdated(r.CAMPAIGN_ID);
+              }
+            });
+          })(row);
+        }
+      }
     });
   });
 }

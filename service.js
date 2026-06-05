@@ -210,7 +210,7 @@ MDS.init(function(msg) {
   if (msg.event === "inited")   { onInited(); }
   if (msg.event === "MAXIMA")   { onMaxima(msg); }
   if (msg.event === "NEWBLOCK") {
-    scanEscrowCoins(); checkPendingChannelOpens(); checkPendingVouchers(); checkExpiredCampaigns();
+    scanEscrowCoins(); checkPendingChannelOpens(); checkPendingVouchers(); checkExpiredCampaigns(); checkOpenChannelsSettled();
     _livenessCheckBlock++;
     if (_livenessCheckBlock % 20 === 0) { checkCampaignStatuses(); }
   }

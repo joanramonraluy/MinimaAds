@@ -45,6 +45,7 @@ function sqlQuery(query, cb) {
 }
 
 function sendMaxima(publicKey, mxAddress, payload, cb) {
+  MDS.log("[MINIMA] sendMaxima called: publicKey=" + publicKey + " mxAddress=" + mxAddress + " payloadType=" + (payload && payload.type));
   var hex = "0x" + utf8ToHex(JSON.stringify(payload)).toUpperCase();
   if (publicKey) {
     MDS.cmd("maxima action:send publickey:" + publicKey + " application:" + APP_NAME + " data:" + hex + " poll:false", function(res) {

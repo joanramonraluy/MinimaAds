@@ -323,7 +323,6 @@ function _loadSettledChannels(campaignId, detailEl) {
     var sql = "SELECT VIEWER_KEY, ROLE, CUMULATIVE_EARNED, STATUS, CREATED_AT, VIEWER_WALLET_ADDR"
       + " FROM CHANNEL_HISTORY"
       + " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')"
-      + " AND UPPER(ROLE) = 'PUBLISHER'"
       + " ORDER BY CREATED_AT DESC";
 
     sqlQuery(sql, function(err, rows) {
@@ -338,7 +337,7 @@ function _loadSettledChannels(campaignId, detailEl) {
       }
 
       if (!rows || rows.length === 0) {
-        detailEl.appendChild(mkEmptyState('No settled publisher channels yet.'));
+        detailEl.appendChild(mkEmptyState('No settled channels yet.'));
         return;
       }
 
@@ -354,7 +353,7 @@ function _renderSettledChannelsTable(target, rows, contactsMap) {
 
   var thead = document.createElement('thead');
   var headerRow = document.createElement('tr');
-  var headers = ['Publisher', 'PK', 'Channels', 'Total', 'Last settled', ''];
+  var headers = ['Type', 'Node', 'PK', 'Channels', 'Total', 'Last settled', ''];
   for (var h = 0; h < headers.length; h++) {
     var th = document.createElement('th');
     th.textContent = headers[h];
@@ -367,6 +366,8 @@ function _renderSettledChannelsTable(target, rows, contactsMap) {
   for (var i = 0; i < groups.length; i++) {
     var group = groups[i];
     var pk = group.pk || '';
+    var role = group.role || 'viewer';
+    var typeText = role === 'publisher' ? 'Publisher' : 'Viewer';
     var contact = contactsMap[String(pk).toUpperCase()] || null;
     var nodeName = contact && contact.name ? contact.name : 'Unknown node';
     var lastText = group.lastTs
@@ -377,6 +378,7 @@ function _renderSettledChannelsTable(target, rows, contactsMap) {
     tr.className = 'ma-expandable-row';
     tr.setAttribute('tabindex', '0');
     tr.setAttribute('aria-expanded', 'false');
+    tr.appendChild(_nodeTd(typeText));
     tr.appendChild(_nodeTd(nodeName));
     tr.appendChild(_nodeTd(_shortNodePk(pk)));
     tr.appendChild(_nodeTd(String(group.rows.length)));
@@ -396,7 +398,7 @@ function _renderSettledChannelsTable(target, rows, contactsMap) {
     detailTr.style.display = 'none';
     var detailTd = document.createElement('td');
     detailTd.className = 'ma-nested-detail';
-    detailTd.setAttribute('colspan', '6');
+    detailTd.setAttribute('colspan', '7');
     detailTd.style.cssText = 'padding:.5rem 1rem;';
     detailTr.appendChild(detailTd);
     tbody.appendChild(detailTr);
@@ -438,9 +440,10 @@ function _groupSettledChannelsByPk(rows) {
   for (var i = 0; i < rows.length; i++) {
     var r = rows[i];
     var pk = r.VIEWER_KEY || '';
-    var key = String(pk).toUpperCase();
+    var role = r.ROLE || 'viewer';
+    var key = String(pk).toUpperCase() + '_' + String(role).toUpperCase();
     if (!map[key]) {
-      map[key] = { pk: pk, rows: [], total: 0, lastTs: 0 };
+      map[key] = { pk: pk, role: role, rows: [], total: 0, lastTs: 0 };
       groups.push(map[key]);
     }
     var ts = parseInt(r.CREATED_AT || 0, 10) || 0;
@@ -490,28 +493,68 @@ function _renderSettledChannelEvents(target, rows) {
 
 function _loadRewardedNodes(campaignId, detailEl) {
   _loadMaximaContactsMap(function(contactsMap) {
-    var sql = "SELECT USER_ADDRESS, TYPE, AMOUNT, TIMESTAMP"
-      + " FROM REWARD_EVENTS"
+    var channelSql = "SELECT VIEWER_KEY, ROLE, CREATED_AT FROM CHANNEL_STATE"
       + " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')"
-      + " ORDER BY TIMESTAMP DESC";
+      + " AND STATUS IN ('open', 'pending')";
 
-    sqlQuery(sql, function(err, rows) {
-      if (!detailEl) { return; }
-      detailEl.innerHTML = '';
-
-      if (err) {
-        var errEl = document.createElement('p');
-        errEl.textContent = 'Error loading rewarded nodes: ' + err;
-        detailEl.appendChild(errEl);
+    sqlQuery(channelSql, function(chErr, chRows) {
+      if (chErr) {
+        if (detailEl) {
+          detailEl.innerHTML = '';
+          var errEl = document.createElement('p');
+          errEl.textContent = 'Error loading active channels: ' + chErr;
+          detailEl.appendChild(errEl);
+        }
         return;
       }
 
-      if (!rows || rows.length === 0) {
-        detailEl.appendChild(mkEmptyState('No rewarded nodes yet.'));
-        return;
+      var activeStartTimes = {};
+      if (chRows) {
+        for (var c = 0; c < chRows.length; c++) {
+          var ch = chRows[c];
+          var key = String(ch.VIEWER_KEY).toUpperCase() + '_' + String(ch.ROLE).toLowerCase();
+          activeStartTimes[key] = parseInt(ch.CREATED_AT || 0, 10);
+        }
       }
 
-      _renderRewardedNodesTable(detailEl, rows, contactsMap);
+      var sql = "SELECT USER_ADDRESS, TYPE, AMOUNT, TIMESTAMP"
+        + " FROM REWARD_EVENTS"
+        + " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')"
+        + " ORDER BY TIMESTAMP DESC";
+
+      sqlQuery(sql, function(err, rows) {
+        if (!detailEl) { return; }
+        detailEl.innerHTML = '';
+
+        if (err) {
+          var errEl = document.createElement('p');
+          errEl.textContent = 'Error loading rewarded nodes: ' + err;
+          detailEl.appendChild(errEl);
+          return;
+        }
+
+        var activeRows = [];
+        if (rows) {
+          for (var i = 0; i < rows.length; i++) {
+            var r = rows[i];
+            var role = (r.TYPE === 'publisher_view') ? 'publisher' : 'viewer';
+            var k = String(r.USER_ADDRESS).toUpperCase() + '_' + role;
+            if (activeStartTimes[k] !== undefined) {
+              var tOpen = activeStartTimes[k];
+              if (parseInt(r.TIMESTAMP || 0, 10) >= tOpen) {
+                activeRows.push(r);
+              }
+            }
+          }
+        }
+
+        if (activeRows.length === 0) {
+          detailEl.appendChild(mkEmptyState('No rewarded nodes yet.'));
+          return;
+        }
+
+        _renderRewardedNodesTable(detailEl, activeRows, contactsMap);
+      });
     });
   });
 }

@@ -138,9 +138,9 @@ function _renderFramesList(rows) {
       if (!isB) {
         var snippetDetails = document.createElement('details');
         snippetDetails.id = 'ma-snippet-' + sid;
-        snippetDetails.style.cssText = 'margin-top:.75rem;';
+        snippetDetails.className = 'ma-campaign-details';
         var snippetSummary = document.createElement('summary');
-        snippetSummary.style.cssText = 'cursor:pointer;font-size:.875rem;color:var(--pico-muted-color,#6c757d);';
+        snippetSummary.className = 'ma-campaign-details-summary';
         var snippetSummaryRow = document.createElement('span');
         snippetSummaryRow.style.cssText = 'display:inline-flex;align-items:center;gap:.5rem;';
         var snippetLabel = document.createElement('span');
@@ -187,10 +187,10 @@ function _renderFramesList(rows) {
       // Earnings <details>
       var earningsDetails = document.createElement('details');
       earningsDetails.id = 'ma-earnings-' + sid;
-      earningsDetails.style.cssText = 'margin-top:.4rem;';
+      earningsDetails.className = 'ma-campaign-details';
       var earningsSummary = document.createElement('summary');
       earningsSummary.textContent = 'Earnings';
-      earningsSummary.style.cssText = 'cursor:pointer;font-size:.875rem;color:var(--pico-muted-color,#6c757d);';
+      earningsSummary.className = 'ma-campaign-details-summary';
       earningsDetails.appendChild(earningsSummary);
       var earningsBody = document.createElement('div');
       earningsBody.id = 'ma-earnings-body-' + sid;

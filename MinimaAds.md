@@ -259,6 +259,10 @@ CREATE TABLE IF NOT EXISTS DEDUP_LOG (
 
 CREATE TABLE IF NOT EXISTS FRAMES (
   FRAME_ID         VARCHAR(512)  PRIMARY KEY,        -- UUID, or 'builtin:<maxima_pk>' for default frame
+  -- PUBLISHER_KEY: Maxima PK of the owning publisher node (0x...). For the local
+  -- built-in row this is the node's own PK (per-node SDK default-frame artifact).
+  -- Built-in viewer impressions, however, attribute publisher rewards to the
+  -- platform creator (MINIMAADS_CREATOR_PK in config.js) — see §6.9.
   PUBLISHER_KEY    VARCHAR(512)  NOT NULL,           -- Maxima public key of the publisher node (0x...)
   PUBLISHER_WALLET VARCHAR(512)  DEFAULT '',         -- Wallet address for publisher reward settlement
   LABEL            VARCHAR(256)  DEFAULT '',         -- Human-readable name
@@ -367,6 +371,10 @@ Once registered, all future campaigns use `MAX#<pk>#<mls>` in escrow STATE(4), e
 A campaign whose escrow does not embed the canonical `PLATFORM_KEY` is silently rejected by all participating nodes. No viewers, no publishers, no rewards, no propagation. The attack is self-defeating — it requires deliberate code modification and produces a campaign that the entire network ignores.
 
 For MVP testing, `PLATFORM_KEY = null`. When null, the on-chain enforcement is skipped. This is MVP-only and must be set to a real key before any mainnet release.
+
+#### 4.6.1 MINIMAADS_CREATOR_PK — Built-in Frame Ownership
+
+`MINIMAADS_CREATOR_PK` is the platform creator's Maxima public key (DER format, `0x...`). Like `PLATFORM_KEY`, it is a constant shipped in `config.js` and identical on every node. It identifies the owner of the **built-in viewer Frame**: every impression served by the in-app `#viewer` surface attributes its publisher-side reward to this key (see §6.9). Custom Frames are unaffected — they carry the registering publisher's own key. The constant is loaded in both runtimes (SW via `MDS.load`, FE via `<script>`) and resolves as a global in `core/*` and `dapp/views/*`.
 
 ### 4.7 Campaign Status as On-chain State
 
@@ -660,13 +668,26 @@ Creator receives VOUCHER_SYNC_REQUEST:
 
 A Frame is a registered display surface for a publisher. It is the unit of identity for publisher reward attribution.
 
+**Frame ownership model.** Custom Frames can be registered by any publisher and are owned by the node that creates them (`publisher_key = MY_MAXIMA_PK`). The **built-in Frame** (the in-app `#viewer` surface) belongs to the **platform creator**: impressions served by the built-in viewer attribute the publisher-side reward to `MINIMAADS_CREATOR_PK` (a constant shipped in `config.js`, identical on every node), not to the viewing node. This makes the built-in viewer a platform-owned surface — its publisher rewards accrue to the platform creator regardless of which node served the ad.
+
 ```
 Built-in Frame (auto-registered at app init):
 1.  On 'inited' event, SW resolves node Maxima PK via maxima action:info
 2.  SW computes frame_id = 'builtin:' + maxima_pk.toUpperCase()
 3.  SW upserts FRAMES row: { frame_id, publisher_key=maxima_pk, is_builtin=true,
                              label='Built-in viewer', publisher_wallet=<getaddress> }
+    (This local row lets the SDK resolve a default frameId per node; it is a
+     per-node artifact and is independent of publisher-reward attribution.)
 4.  signalFE('FRAME_READY', { frame_id, is_builtin: true })
+
+Built-in viewer impression attribution (dapp/views/viewer.js):
+- MA_TRACK_VIEW / MA_TRACK_CLICK carry publisherKey = MINIMAADS_CREATOR_PK
+  (the platform creator's Maxima PK from config.js), NOT the viewing node's key.
+- The publisher-side REWARD_VOUCHER is therefore attributed to the platform
+  creator. The creator node generates and pays it out against the publisher
+  channel held by MINIMAADS_CREATOR_PK.
+- Custom Frames keep their own publisher_key in MA_TRACK_* (see SDK snippet),
+  so custom-frame rewards still go to the registering publisher.
 
 User-created Frame (via Frames UI):
 1.  Publisher opens 'Frames' menu → clicks 'Create frame'
@@ -1446,7 +1467,7 @@ MDS.init(function(msg) {
 /renderer
   renderAd.js         # Renders one ad unit into a DOM container element
 
-config.js             # Shared constants — PLATFORM_KEY, APP_NAME (loaded first by SW + FE)
+config.js             # Shared constants — PLATFORM_KEY, APP_NAME, MINIMAADS_CREATOR_PK (loaded first by SW + FE)
 dapp.conf             # Minima MiniDapp manifest — must be at zip root
 service.js            # SW entry point — must be named service.js at zip root
 

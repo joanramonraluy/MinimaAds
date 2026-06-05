@@ -197,7 +197,7 @@
     selfMlsSub.style.cssText = 'display:flex;flex-direction:column;gap:0.4rem;border-top:1px dashed var(--pico-muted-border-color);padding-top:0.75rem;';
     
     var selfMlsSubTitle = document.createElement('span');
-    selfMlsSubTitle.textContent = 'MLS Server Node Registration';
+    selfMlsSubTitle.textContent = 'MLS Server Node & Permanent Registration';
     selfMlsSubTitle.style.cssText = 'font-size:0.75rem;font-weight:700;color:var(--pico-muted-color);text-transform:uppercase;letter-spacing:0.05em;';
     selfMlsSub.appendChild(selfMlsSubTitle);
 
@@ -234,6 +234,34 @@
       });
     });
     selfMlsActions.appendChild(mlsRegisterBtn);
+
+    var mlsAddSelfKeyBtn = document.createElement('button');
+    mlsAddSelfKeyBtn.textContent = 'Register Self Key on Local MLS';
+    mlsAddSelfKeyBtn.className = 'primary';
+    mlsAddSelfKeyBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;';
+    mlsAddSelfKeyBtn.addEventListener('click', function() {
+      mlsAddSelfKeyBtn.disabled = true;
+      mlsAddSelfKeyBtn.textContent = 'Registering…';
+      getMaximaInfo(function(err, info) {
+        if (err) {
+          alert('Error: ' + err.message);
+          mlsAddSelfKeyBtn.disabled = false;
+          mlsAddSelfKeyBtn.textContent = 'Register Self Key on Local MLS';
+          return;
+        }
+        var pk = info.publickey;
+        MDS.cmd('maxextra action:addpermanent publickey:' + pk, function(res) {
+          mlsAddSelfKeyBtn.disabled = false;
+          mlsAddSelfKeyBtn.textContent = 'Register Self Key on Local MLS';
+          if (res.status) {
+            alert('Success! Self key registered on local MLS server.');
+          } else {
+            alert('Error: ' + (res.error || 'unknown error'));
+          }
+        });
+      });
+    });
+    selfMlsActions.appendChild(mlsAddSelfKeyBtn);
 
     var mlsCopyBtn = document.createElement('button');
     mlsCopyBtn.textContent = 'Copy Server Address';
@@ -441,12 +469,12 @@
     connMlsSub.appendChild(mlsInputRow);
     clientSec.appendChild(connMlsSub);
 
-    // Sub-item 2.2: MLS Permanent Registration
+    // Sub-item 2.2: MLS Permanent Registration (Remote handshake)
     var regSub = document.createElement('div');
     regSub.style.cssText = 'display:flex;flex-direction:column;gap:0.4rem;border-top:1px dashed var(--pico-muted-border-color);padding-top:0.75rem;';
 
     var regSubTitle = document.createElement('span');
-    regSubTitle.textContent = 'MLS Permanent Registration';
+    regSubTitle.textContent = 'Remote MLS Registration';
     regSubTitle.style.cssText = 'font-size:0.75rem;font-weight:700;color:var(--pico-muted-color);text-transform:uppercase;letter-spacing:0.05em;';
     regSub.appendChild(regSubTitle);
 
@@ -456,42 +484,62 @@
     regStatus.textContent = 'Checking MLS server registration...';
     regSub.appendChild(regStatus);
 
-    getMaximaInfo(function(err, info) {
-      if (err) {
-        regStatus.textContent = 'Failed to fetch Maxima info.';
-      } else {
-        regStatus.textContent = 'Your Maxima PK:\n' + info.publickey + '\n\nReady to register on the MLS server.';
-      }
-    });
+    function updateRegStatus() {
+      getMaximaInfo(function(err, info) {
+        if (err) {
+          regStatus.textContent = 'Failed to fetch Maxima info.';
+        } else {
+          MDS.keypair.get('CREATOR_PERMANENT_ROUTE', function(res) {
+            var route = (res && res.status && res.value) ? res.value : '';
+            if (route) {
+              regStatus.textContent = '✓ Registered Permanent Route:\n' + route;
+              regStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
+            } else {
+              regStatus.textContent = 'Your Maxima PK:\n' + info.publickey + '\n\nNot registered yet. Click below to register on the remote MLS server.';
+              regStatus.style.borderColor = 'var(--pico-muted-border-color)';
+            }
+          });
+        }
+      });
+    }
+    setTimeout(updateRegStatus, 100);
 
-    var registerSelfKeyBtn = document.createElement('button');
-    registerSelfKeyBtn.textContent = 'Register Self Key on MLS';
-    registerSelfKeyBtn.className = 'primary';
-    registerSelfKeyBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;background-color:#a855f7;border-color:#a855f7;';
-    registerSelfKeyBtn.addEventListener('click', function() {
-      registerSelfKeyBtn.disabled = true;
-      registerSelfKeyBtn.textContent = 'Registering…';
+    var registerRemoteKeyBtn = document.createElement('button');
+    registerRemoteKeyBtn.textContent = 'Register Client Key on Remote MLS';
+    registerRemoteKeyBtn.className = 'primary';
+    registerRemoteKeyBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;background-color:#a855f7;border-color:#a855f7;';
+    registerRemoteKeyBtn.addEventListener('click', function() {
+      registerRemoteKeyBtn.disabled = true;
+      registerRemoteKeyBtn.textContent = 'Registering…';
       getMaximaInfo(function(err, info) {
         if (err) {
           alert('Error: ' + err.message);
-          registerSelfKeyBtn.disabled = false;
-          registerSelfKeyBtn.textContent = 'Register Self Key on MLS';
+          registerRemoteKeyBtn.disabled = false;
+          registerRemoteKeyBtn.textContent = 'Register Client Key on Remote MLS';
           return;
         }
-        var pk = info.publickey;
-        MDS.cmd('maxextra action:addpermanent publickey:' + pk, function(res) {
-          registerSelfKeyBtn.disabled = false;
-          registerSelfKeyBtn.textContent = 'Register Self Key on MLS';
-          if (res.status) {
-            regStatus.textContent = 'Success! Key registered on local MLS server:\n' + pk;
-            regStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
-          } else {
-            alert('Error: ' + (res.error || 'unknown error'));
-          }
-        });
+        MDS.comms.solo(JSON.stringify({
+          type: "DO_REGISTER_PERMANENT",
+          publickey: info.publickey,
+          requester_contact: info.contact || ''
+        }));
+        
+        setTimeout(function() {
+          registerRemoteKeyBtn.disabled = false;
+          registerRemoteKeyBtn.textContent = 'Register Client Key on Remote MLS';
+          setCreatorMaximaRoute(function(err2, route) {
+            if (!err2 && route) {
+              updateRegStatus();
+              refreshKeypairInspector();
+              alert('Registration completed! Route: ' + route);
+            } else {
+              alert('Registration requested. Check SW logs for confirmation.');
+            }
+          });
+        }, 2000);
       });
     });
-    regSub.appendChild(registerSelfKeyBtn);
+    regSub.appendChild(registerRemoteKeyBtn);
     clientSec.appendChild(regSub);
 
     // Sub-item 2.3: Platform Creator Route Configuration

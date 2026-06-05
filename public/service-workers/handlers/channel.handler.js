@@ -118,6 +118,32 @@ function handleChannelOpenRequest(payload, senderPk) {
             });
             return;
           }
+          // Stale pending with no split coin — archive to history before retrying fresh.
+          MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): stale pending, no split coin — archiving stale record and opening fresh. campaign: " + campaignId);
+          settleChannel(campaignId, viewerKey, 'publisher', function(staleSettleErr) {
+            if (staleSettleErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): archive stale pending failed: " + staleSettleErr); }
+            openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'publisher', frameId, viewerWalletAddr, function(openErr) {
+              if (openErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): openChannel (after stale archive) failed: " + openErr); return; }
+              sqlQuery(
+                "UPDATE CHANNEL_STATE SET VIEWER_WALLET_PK = '" + escapeSql(viewerWalletPK) + "'" +
+                " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
+                " AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(viewerKey) + "')" +
+                " AND ROLE = 'publisher'",
+                function() {
+                  var bumpSql = "UPDATE CAMPAIGNS SET PUBLISHER_BUDGET_SPENT = COALESCE(PUBLISHER_BUDGET_SPENT, 0) + " + maxAmount +
+                    " WHERE UPPER(ID) = UPPER('" + escapeSql(campaignId) + "')";
+                  sqlQuery(bumpSql, function(bumpErr) {
+                    if (bumpErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): PUBLISHER_BUDGET_SPENT bump failed (after stale archive): " + bumpErr); }
+                    MDS.keypair.set("FRAME_PUBLISHER_" + frameId, viewerKey, function() {
+                      MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): building channel TX after stale archive. campaign: " + campaignId);
+                      _swDispatchChannelOpen(campaignId, viewerKey, viewerMx, maxAmount, 'publisher', frameId, viewerWalletPK, viewerWalletAddr);
+                    });
+                  });
+                }
+              );
+            });
+          });
+          return;
         }
 
         openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'publisher', frameId, viewerWalletAddr, function(openErr) {
@@ -472,8 +498,8 @@ function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumu
       MDS.log("[CHANNEL] REWARD_REQUEST: channel not found. campaign: " + campaignId + " viewer_key: " + viewerKey + " role: " + role);
       return;
     }
-    if (channel.STATUS !== 'open') {
-      MDS.log("[CHANNEL] REWARD_REQUEST: channel not open. status: " + channel.STATUS + " role: " + role);
+    if (channel.STATUS !== 'open' && channel.STATUS !== 'settled') {
+      MDS.log("[CHANNEL] REWARD_REQUEST: channel not active. status: " + channel.STATUS + " role: " + role);
       return;
     }
     if (cumulative > parseFloat(channel.MAX_AMOUNT)) {

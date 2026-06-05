@@ -59,7 +59,51 @@ function onMaxima(msg) {
     handleProfileRequest(payload, msg.data.from || '');
   } else if (payload.type === "PROFILE_RESPONSE") {
     handleProfileResponse(payload);
+  } else if (payload.type === "REGISTER_PERMANENT_REQUEST") {
+    handleRegisterPermanentRequest(payload, msg.data.from || '');
+  } else if (payload.type === "REGISTER_PERMANENT_RESPONSE") {
+    MDS.log("[MAXIMA] REGISTER_PERMANENT_RESPONSE received, status=" + (payload.status ? "ok" : "failed"));
   } else {
     MDS.log("[MAXIMA] unknown type: " + payload.type);
   }
+}
+
+// Handle REGISTER_PERMANENT_REQUEST: execute maxextra action:addpermanent on behalf of requester
+// payload: { type: "REGISTER_PERMANENT_REQUEST", publickey: "0x...", requester_contact: "Mx...@host:port" }
+// fromRoute: the RSA key of the requesting node (not used for response routing)
+function handleRegisterPermanentRequest(payload, fromRoute) {
+  if (!payload.publickey) {
+    MDS.log("[MAXIMA] REGISTER_PERMANENT_REQUEST missing publickey");
+    return;
+  }
+  var pubkey = payload.publickey;
+  var requesterContact = payload.requester_contact || '';
+  MDS.log("[MAXIMA] REGISTER_PERMANENT_REQUEST from " + (fromRoute ? fromRoute.substring(0, 20) + "..." : "unknown") + " for key: " + pubkey.substring(0, 20) + "...");
+
+  var cmd = "maxextra action:addpermanent publickey:" + pubkey;
+  MDS.log("[MAXIMA] Executing: " + cmd);
+  MDS.cmd(cmd, function(cmdRes) {
+    var response = {
+      type: "REGISTER_PERMANENT_RESPONSE",
+      status: cmdRes.status,
+      error: cmdRes.error || ''
+    };
+
+    if (cmdRes.status) {
+      MDS.log("[MAXIMA] REGISTER_PERMANENT executed successfully — permanent route registered");
+      response.message = "Permanent route registered at MLS";
+    } else {
+      MDS.log("[MAXIMA] REGISTER_PERMANENT failed: " + cmdRes.error);
+      response.message = cmdRes.error || "Unknown error";
+    }
+
+    if (requesterContact) {
+      MDS.log("[MAXIMA] Sending REGISTER_PERMANENT_RESPONSE back to " + requesterContact.substring(0, 50) + "...");
+      sendMaxima(null, requesterContact, response, function(ok) {
+        MDS.log("[MAXIMA] REGISTER_PERMANENT_RESPONSE delivery ok=" + ok);
+      });
+    } else {
+      MDS.log("[MAXIMA] REGISTER_PERMANENT: no requester_contact, skipping response");
+    }
+  });
 }

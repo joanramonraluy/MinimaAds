@@ -175,67 +175,74 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
-### Session: 2026-06-05 — Add frame_id to REWARD_REQUEST Payload
+### Session: 2026-06-05 — Include CREATOR_PERMANENT_ROUTE in REWARD_REQUEST Payload
 
-**Task**: Include `frame_id` in the `REWARD_REQUEST` Maxima message so the creator node can identify which frame originated the reward request (specifically, built-in frames).
+**Task**: Add `publisher_mx` field to the `REWARD_REQUEST` Maxima payload in `_sendRewardRequest`, carrying the creator's permanent Maxima route (`CREATOR_PERMANENT_ROUTE` keypair value) so the creator node can send `PUBLISHER_REWARD_NOTIFY` back via a stable route.
 
 **Changes**:
-- **public/service-workers/handlers/comms.handler.js** (`_sendRewardRequest`, line ~349):
-  - Added `frame_id: "builtin:" + MY_MAXIMA_PK.toUpperCase()` to the `payload` object.
-  - `MY_MAXIMA_PK` is already a global initialized at SW startup in `service.js` and was already used in this function — no new dependency introduced.
+- **public/service-workers/handlers/comms.handler.js** (`_sendRewardRequest`, lines ~344–367):
+  - Wrapped the entire payload-build-and-send logic inside a `getCreatorMaximaRoute()` callback.
+  - Added `publisher_mx: creatorRoute || ""` to the `payload` object, alongside the already-present `frame_id`.
+  - `getCreatorMaximaRoute` is defined in `core/minima.js`, which is loaded before this handler in `service.js` — no new dependency.
 
-**Why**: The creator's `PUBLISHER_REWARD_NOTIFY` routing needs to know the frame that generated the reward. For built-in frames, the frame ID is `"builtin:" + viewerMaximaPK`. Without this field the creator could not correlate the reward request to a specific frame.
+**Why**: The creator node needs a permanent routing address to send `PUBLISHER_REWARD_NOTIFY` back. Without `publisher_mx`, the creator has no stable Maxima address for the viewer/publisher and must rely on dynamic routing alone.
 
-**AGENTS.md updated**: yes — §6 added this entry; oldest (Brand Header Navigation to Home) moved to `docs/HISTORY.md §17`.
+**AGENTS.md updated**: yes — §6 added this entry; oldest (Add Creator Permanent Route Configuration to DevTools) moved to `docs/HISTORY.md §17`.
 
 **Verification**:
-  - Open `#viewer` on the viewer node and view an ad for ≥3 s.
-  - In the SW log on the viewer node, confirm `REWARD_REQUEST sent` appears.
-  - On the creator node, receive the `REWARD_REQUEST` and confirm `frame_id` is present in the decoded payload (e.g. `"builtin:0XABC..."`).
-  - No console errors expected on either node.
+- Open `#viewer` on a viewer node and watch an ad for ≥3 s.
+- In SW logs on the viewer node, confirm `REWARD_REQUEST sent` appears.
+- On the creator node, decode the received `REWARD_REQUEST` payload and confirm `publisher_mx` is present (a `MAX#...` string or empty string if route not yet set).
+- No console errors expected on either node.
 
 ---
 
-### Session: 2026-06-05 — Viewer Collapsibles and Expandable Table Rows CSS Polish
+### Session: 2026-06-05 — Unify Settled Channels and Segment Creator Metrics Reward Events
 
-**Task**: Style collapsibles and expandable rows in the viewer earnings dashboard (`dapp/views/earnings.js`) to match the premium aesthetics of the creator campaign metrics (`dapp/views/mycampaigns.js`).
+**Task**: Fix creator campaign metrics where settled viewer channels were not shown under "Settled channels" (due to a `role = 'PUBLISHER'` SQL filter) and duplicate settled reward events were displayed under active nodes in "Rewarded nodes". Also ensure that when channels are settled on the creator's node, they are written to `CHANNEL_HISTORY` rather than just overwritten in `CHANNEL_STATE`.
+
+**Changes**:
+- **dapp/views/mycampaigns.js**:
+  - Removed `AND UPPER(ROLE) = 'PUBLISHER'` from the `CHANNEL_HISTORY` query in `_loadSettledChannels` to load both viewer and publisher settled channels.
+  - Updated `_renderSettledChannelsTable` to add a "Type" column showing "Viewer" or "Publisher" based on the channel role, and updated the details colspan to 7.
+  - Updated `_groupSettledChannelsByPk` to group channels by PK and role.
+  - Refactored `_loadRewardedNodes` to query `CHANNEL_STATE` for active channels, extract their creation timestamps (`CREATED_AT`), and filter out settled events (where event timestamp is less than the active channel's creation timestamp).
+- **public/service-workers/handlers/channel.handler.js**:
+  - Replaced direct `sqlQuery` `UPDATE CHANNEL_STATE SET STATUS = 'settled'` with a call to `settleChannel` (from `core/channels.js`) for both viewer and publisher settlement paths on the creator node.
+  - Implemented `checkOpenChannelsSettled()`, which queries all open channels, verifies if their channel coins have been spent on-chain at the `CHANNEL_SCRIPT_ADDRESS`, and automatically transitions/archives them to `CHANNEL_HISTORY` on the creator node when spent.
+- **service.js**:
+  - Registered/called `checkOpenChannelsSettled()` on the `NEWBLOCK` event listener.
+
+**Why**: Ensures all settled payment channels are archived and visible on the creator's dashboard, and partitions the individual views/clicks so that already-settled rewards do not duplicate under active nodes. It also solves the sync issue between nodes by automatically detecting on-chain channel settlements via block checks.
+
+**Testing required**:
+- Navigate to `#creator` (My Campaigns view).
+- Check "Settled channels": verify both settled publisher and viewer channels are listed with their respective "Type" (Viewer or Publisher) when they are settled.
+- Check "Rewarded nodes": verify only the active (unsettled) views/clicks of the current channel are listed under each node, and that any older views/clicks that were settled are excluded and do not duplicate.
+
+---
+
+### Session: 2026-06-05 — Segment Reward Events by Channel Open Timestamp
+
+**Task**: Resolve the discrepancy where expanding any settled channel or pending settlement in `dapp/views/earnings.js` showed all reward events of the campaign instead of only those corresponding to the active channel instance.
 
 **Changes**:
 - **dapp/views/earnings.js**:
-  - For "Pending settlements" (lines ~364–386), updated the `<details>`/`<summary>` element to use `className = 'ma-campaign-details'` and `className = 'ma-campaign-details-summary'` and removed the inline style.
-  - For "Settled channels" (lines ~203–240), refactored the expandable table row to use `className = 'ma-expandable-row'`, `tabindex = '0'`, and `aria-expanded = 'false'`. Replaced the plain `▶`/`▼` toggle button with an animated `›` span chevron. Configured row-level click and keyboard Enter/Space event listeners to toggle the expansion and transition the rotation of the chevron, using the `ma-nested-detail` class on the inner detail cell.
+  - Updated `_loadChannelEvents(campaignId, role, isSettled, targetEl)`:
+    - Queries `CHANNEL_STATE` to find the open/pending channel's `CREATED_AT` timestamp (`openCreatedAt`).
+    - Partitioned `REWARD_EVENTS` using `openCreatedAt` as the boundary:
+      - For settled channels (`isSettled === true`), filters for `TIMESTAMP < openCreatedAt` (or no filter if no open channel exists).
+      - For open/pending channels (`isSettled === false`), filters for `TIMESTAMP >= openCreatedAt` (or `1=0` to return empty if no open channel exists).
+  - Updated callsites in `renderSettlementHistory` (line ~234) to pass `r.ROLE` and `true`.
+  - Updated callsite in `_renderChannelRewardRows` (line ~398) to pass `role` and `false`.
 
-**Why**: Unifies the UI layout, brings the custom focus states, hover backgrounds, and smooth chevron transitions from the Campaign card accordion lists to the viewer's personal Earnings views.
+**Why**: Solves duplicate event visibility by ensuring that as channels cycle from pending → open → settled → reset, their associated events are cleanly partitioned at the timestamp boundary of the currently open channel.
 
 **Testing required**:
 - Navigate to `#earnings`.
-- Check the "Pending settlements" section: the "Show events" details collapsible should have hover styling matching the creator activity chart collapsibles.
-- Check the "Settled channels" section: click anywhere on a settled campaign row to expand/collapse it, verifying the `›` chevron transitions to 90 degrees and the detail table loads correctly.
-
----
-
-### Session: 2026-06-05 — Publisher Notify on Deferral
-
-**Task**: After `_deferPublisherReward()` saves a pending publisher reward, the publisher (e.g. platform creator for built-in frames) was never notified to open a channel. Without the notify, the deferred reward remained orphaned indefinitely.
-
-**Root cause**: `_maybeGeneratePublisherVoucher` called `_deferPublisherReward()` on both its fast path (publisherKey provided) and legacy path (no publisherKey, FRAMES lookup), but neither path sent `PUBLISHER_REWARD_NOTIFY` afterward. The existing `_maybeNotifyPublisher()` requires a FRAMES row with `PUBLISHER_MX` — which doesn't exist on the creator node for built-in frames where `publisherKey = MINIMAADS_CREATOR_PK`.
-
-**Changes**:
-- **public/service-workers/handlers/channel.handler.js**:
-  - Added `_notifyPublisherByKey(campaignId, frameId, publisherKey)` — sends `PUBLISHER_REWARD_NOTIFY` directly via `sendMaxima(publisherKey, null, ...)` (no FRAMES lookup). Guards against sending if channel already open/pending.
-  - Fast-path deferral (line ~1056): added `_notifyPublisherByKey(campaignId, frameId || publisherKey, publisherKey)` after `_deferPublisherReward`.
-  - Legacy-path deferral (line ~1090): added `_maybeNotifyPublisher(campaignId, frameId)` after `_deferPublisherReward`. (Legacy path still needs FRAMES to get `PUBLISHER_MX` for non-builtin frames; `_notifyPublisherByKey` isn't applicable since no key is available.)
-
-**Assumption/Gap**: `sendMaxima(publisherKey, null, ...)` uses `publickey:` Maxima routing, which requires the creator node to have a route to the publisher's node. For the built-in frame (MINIMAADS_CREATOR_PK), the platform creator's node must be reachable via Maxima. If no route is cached, the notify will fail silently (`ok=false` logged). The `_replayDeferredPublisherRewards` NEWBLOCK sweep remains the safety net for this case.
-
-**AGENTS.md updated**: yes — §6 added this entry; oldest (Settings Page Accordions) moved to docs/HISTORY.md §17.
-
-**Verification**: Open `#viewer`, view an ad ≥3s. In the SW log on the creator node, look for:
-  - `[CHANNEL] _maybeGeneratePublisherVoucher: publisher channel not open — DEFERRING.`
-  - Immediately after: `[CHANNEL] PUBLISHER_REWARD_NOTIFY (by-key) sent pubKey: ... ok=true`
-  - On the platform creator's node: `[CHANNEL] PUBLISHER_REWARD_NOTIFY` received + `CHANNEL_OPEN_REQUEST (role=publisher)` sent back.
-  No console errors expected.
-
+- With at least one settled channel and one pending settlement for a campaign, expand both:
+  - Verify that the pending settlement dropdown only lists events logged during the current open channel.
+  - Verify that the settled channel row dropdown only lists events logged before the current open channel's creation.
 
 ---
 

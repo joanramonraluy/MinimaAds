@@ -46,6 +46,52 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-05 — Add Creator Permanent Route Configuration to DevTools
+
+**Task**: Add a new option to the Ctrl+Shift+D DevTools menu allowing developers/users to manually view, set, copy, clear, and save custom creator permanent Maxima routes (`MAX#` format). Also remove the obsolete "Register MinimaAds Creator as Permanent (Server Mode)" section.
+
+**Changes**:
+- **dapp/views/devtools.js**:
+  - Added "Section 1.2: Creator Permanent Route Configuration" underneath the Platform Key Configuration.
+    - Implemented real-time display of the current route by querying MDS keypair (`CREATOR_PERMANENT_ROUTE`).
+    - Added "Set as Self Route" button (uses `setCreatorMaximaRoute` to save current node's permanent route).
+    - Added "Clear Route" button (clears `CREATOR_PERMANENT_ROUTE` in keypair).
+    - Added "Copy Route" button (copies the current route to the clipboard, displaying a temporary success status).
+    - Added text input field (with placeholder `Custom permanent route (MAX#pk#mls)`) and a "Save" button to validate and manually save custom routes to `CREATOR_PERMANENT_ROUTE` in keypair.
+  - Removed "Section 1.9: Register MinimaAds Creator as Permanent (Server Mode)" entirely since route registration is now handled via Settings or custom inputs.
+
+**Why**: Allows manually configuring or overriding the creator's Maxima permanent route for testing or running nodes in a multi-node topology, and cleans up obsolete UI options.
+
+**AGENTS.md updated**: yes — §6 added this entry; oldest (Add frame_id to REWARD_REQUEST Payload) moved to `docs/HISTORY.md §17`.
+
+**Verification**:
+- Press Ctrl+Shift+D to open the DevTools panel and check the new "Creator Permanent Route Configuration" section.
+- Confirm that the "Register MinimaAds Creator as Permanent (Server Mode)" section is completely gone.
+- Verify that setting self, clearing, copying, and manually saving custom routes function as expected without console errors.
+
+---
+
+### Session: 2026-06-05 — Add frame_id to REWARD_REQUEST Payload
+
+**Task**: Include `frame_id` in the `REWARD_REQUEST` Maxima message so the creator node can identify which frame originated the reward request (specifically, built-in frames).
+
+**Changes**:
+- **public/service-workers/handlers/comms.handler.js** (`_sendRewardRequest`, line ~349):
+  - Added `frame_id: "builtin:" + MY_MAXIMA_PK.toUpperCase()` to the `payload` object.
+  - `MY_MAXIMA_PK` is already a global initialized at SW startup in `service.js` and was already used in this function — no new dependency introduced.
+
+**Why**: The creator's `PUBLISHER_REWARD_NOTIFY` routing needs to know the frame that generated the reward. For built-in frames, the frame ID is `"builtin:" + viewerMaximaPK`. Without this field the creator could not correlate the reward request to a specific frame.
+
+**AGENTS.md updated**: yes — §6 added this entry; oldest (Brand Header Navigation to Home) moved to `docs/HISTORY.md §17`.
+
+**Verification**:
+  - Open `#viewer` on the viewer node and view an ad for ≥3 s.
+  - In the SW log on the viewer node, confirm `REWARD_REQUEST sent` appears.
+  - On the creator node, receive the `REWARD_REQUEST` and confirm `frame_id` is present in the decoded payload (e.g. `"builtin:0XABC..."`).
+  - No console errors expected on either node.
+
+---
+
 ### Session: 2026-06-05 — Brand Header Navigation to Home
 
 **Task**: Clicking the MinimaAds title/brand in the header should navigate to the active role's home/start tab (e.g. `#viewer` for viewer, `#creator` for creator, and `#frames` for publisher) without reloading the page.
@@ -315,3 +361,28 @@ The remaining DEFERRED state is expected (no open publisher channel yet), not a 
       - Otherwise → `routeKey = publisherKey` (existing behaviour for custom frames)
     - Call `sendMaxima(routeKey, null, notify, cb)` instead of `sendMaxima(publisherKey, ...)`.
 - **AGENTS.md updated**: yes.
+
+---
+
+### 2026-06-05 (style: Viewer and Publisher Collapsibles and Expandable Table Rows CSS Polish)
+- **Task**: Style collapsibles and expandable rows in both the viewer earnings dashboard (`dapp/views/earnings.js`) and the publisher's Frames page (`dapp/views/frames.js`) to match the premium aesthetics of the creator campaign metrics (`dapp/views/mycampaigns.js`).
+- **Changes**:
+  - **dapp/views/earnings.js**:
+    - For "Pending settlements" (lines ~364–386), updated the `<details>`/`<summary>` element to use `className = 'ma-campaign-details'` and `className = 'ma-campaign-details-summary'` and removed the inline style.
+    - For "Settled channels" (lines ~203–240), refactored the expandable table row to use `className = 'ma-expandable-row'`, `tabindex = '0'`, and `aria-expanded = 'false'`. Replaced the plain `▶`/`▼` toggle button with an animated `›` span chevron. Configured row-level click and keyboard Enter/Space event listeners to toggle the expansion and transition the rotation of the chevron, using the `ma-nested-detail` class on the inner detail cell.
+  - **dapp/views/frames.js**:
+    - For the "Snippet" collapsible (lines ~138–185) and the "Earnings" collapsible (lines ~187–208) on custom and built-in frame cards, replaced their inline styles with `className = 'ma-campaign-details'` and `className = 'ma-campaign-details-summary'` to use the unified stylesheet.
+- **Why**: Unifies the UI layout across viewer and publisher screens, bringing custom focus states, hover backgrounds, and smooth chevron transitions from the Campaign card accordion lists to personal Earnings and Frames views.
+
+---
+
+### 2026-06-05 (feat: Publisher Notify on Deferral)
+- **Task**: After `_deferPublisherReward()` saves a pending publisher reward, the publisher (e.g. platform creator for built-in frames) was never notified to open a channel. Without the notify, the deferred reward remained orphaned indefinitely.
+- **Root cause**: `_maybeGeneratePublisherVoucher` called `_deferPublisherReward()` on both its fast path (publisherKey provided) and legacy path (no publisherKey, FRAMES lookup), but neither path sent `PUBLISHER_REWARD_NOTIFY` afterward. The existing `_maybeNotifyPublisher()` requires a FRAMES row with `PUBLISHER_MX` — which doesn't exist on the creator node for built-in frames where `publisherKey = MINIMAADS_CREATOR_PK`.
+- **Changes**:
+  - **public/service-workers/handlers/channel.handler.js**:
+    - Added `_notifyPublisherByKey(campaignId, frameId, publisherKey)` — sends `PUBLISHER_REWARD_NOTIFY` directly via `sendMaxima(publisherKey, null, ...)` (no FRAMES lookup). Guards against sending if channel already open/pending.
+    - Fast-path deferral (line ~1056): added `_notifyPublisherByKey(campaignId, frameId || publisherKey, publisherKey)` after `_deferPublisherReward`.
+    - Legacy-path deferral (line ~1090): added `_maybeNotifyPublisher(campaignId, frameId)` after `_deferPublisherReward`. (Legacy path still needs FRAMES to get `PUBLISHER_MX` for non-builtin frames; `_notifyPublisherByKey` isn't applicable since no key is available.)
+- **AGENTS.md updated**: yes.
+

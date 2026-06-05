@@ -46,6 +46,23 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-04 — Fix: MAXIMA_ROUTE_DISCOVERY Campaign Platform_Key Mismatch
+
+**Task**: Diagnose and fix campaign discovery rejection caused by `platform_key mismatch` error blocking user4 (MinimaAds creator) from accepting campaigns from other nodes.
+
+**Root Cause**: The MAXIMA_ROUTE_DISCOVERY changes enabled reliable cross-node campaign discovery, which exposed a latent bug: the `platform_key` validation in `campaign.handler.js` (lines 33-37) compared the announced key from the Maxima payload against the receiver's local `PLATFORM_KEY` override. When nodes had different `PLATFORM_KEY` values (per-node overrides set via DevTools), campaigns were silently rejected as mismatches. The payload-based check is also spoofable — the real authority is the on-chain `PREVSTATE(5)` in the escrow coin.
+
+**Changes**:
+- **public/service-workers/handlers/campaign.handler.js** (lines 33-41): Commented out the spoofable payload-based `platform_key` check. Added explanation: the authoritative validation is on-chain via `PREVSTATE(5)`.
+- **public/service-workers/handlers/campaign.handler.js** (lines 59): Updated the on-chain `PREVSTATE(5)` validation to accept campaigns where `PREVSTATE(5) = 0x00` (creator had no platform fee). Old logic: `!onChainPk || onChainPk !== PLATFORM_KEY` would reject. New logic: `onChainPk && onChainPk !== '0x00' && onChainPk !== PLATFORM_KEY` accepts 0x00 regardless of receiver's local setting.
+- **sdk/index.js** (lines 970-972): Applied the same fix to the SDK path's `_persistCampaignPayload` function. Commented out the equivalent payload-based platform_key check for consistency.
+
+**Why**: The payload-based check breaks cross-node discovery and is a security anti-pattern (payload is attacker-controlled). The on-chain validation already exists and is authoritative. See KNOWN_ISSUES.md #31 principle: "never read PREVSTATE from announced JSON payload as primary verification — always verify on-chain."
+
+**Note on Commission**: Platform creation fees are **already paid as part of the escrow funding tx** (creator.js line 1500-1604). User1 either includes a fee output (output[0] to PLATFORM_KEY, output[1] to escrow) or does not. This is a wallet-level transfer, not a DB reward event. The commission was never "missing" — it was either created or not at creator's choice. The bug only prevented the campaign from being visible on user4's node.
+
+---
+
 ### 2026-06-04 (fix: DevTools Polish & SQL Console Removal)
 - **Task**: Fix DevTools CSS layout, remove the SQL console, adjust button styling, remove the Copy command button, add "Copy Address" helper buttons, and ensure MLS Save configures static MLS.
 - **Changes**: 

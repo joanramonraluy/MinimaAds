@@ -175,6 +175,30 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-06-04 — Built-in Frame Owned by Platform Creator (MINIMAADS_CREATOR_PK)
+
+**Task**: Make the built-in viewer Frame belong to the platform creator instead of the viewing node. Previously each node attributed its built-in-viewer publisher rewards to itself (`publisherKey: MY_ADDRESS`). The built-in surface is a platform-owned Frame; its publisher-side rewards must accrue to one canonical key shared by all nodes.
+
+**Design decision**: Introduced `MINIMAADS_CREATOR_PK` as a constant in `config.js`, alongside `PLATFORM_KEY` and `APP_NAME`. `config.js` is loaded first in BOTH runtimes (SW via `MDS.load`, FE via `<script>` in index.html), so the constant resolves as a global in `core/*` and `dapp/views/*` with no init plumbing. This mirrors the existing shared-constant model (§4.6) — identical on every node, no per-node sync needed. It is the node's *attribution* key on the wire; it is NOT made a per-node mutable global like `MY_ADDRESS`. Value extracted from the platform creator's Maxima PK (DER format) in logs/user4.txt.
+
+**Changes**:
+- **config.js**: Added `var MINIMAADS_CREATOR_PK = '0X3081...0203010001';` (platform creator's Maxima PK, DER format) with a comment explaining ownership and dual-runtime loading.
+- **dapp/views/viewer.js** (lines 313, 331): `publisherKey: MY_ADDRESS` → `publisherKey: MINIMAADS_CREATOR_PK` in both `MA_TRACK_VIEW` and `MA_TRACK_CLICK`. Now every built-in-viewer impression attributes its publisher reward to the platform creator.
+
+**Not changed (deliberate)**:
+- **SW (`service.js` / `core/frames.js`)**: `initBuiltinFrame` still registers the local `builtin:<node_pk>` FRAMES row keyed on the node's own Maxima PK. That row is a per-node SDK default-frame artifact and is independent of on-the-wire publisher attribution (`_tryOpenPublisherChannelForAllFrames` already skips built-in frames). No SW change is required for attribution.
+- **dapp/views/frames.js** SDK snippet (line 242): custom Frames keep their own `publisherKey` (the registering publisher's key) — unchanged.
+
+**Operational note**: For the platform creator to actually collect the built-in-frame publisher reward, the creator's node must hold an open publisher channel for `MINIMAADS_CREATOR_PK`. That is an operational/runtime concern, out of scope for this attribution change.
+
+**Spec updated**: MinimaAds.md §4.6.1 (new — MINIMAADS_CREATOR_PK), §6.9 (frame ownership model + built-in impression attribution), FRAMES schema comment (§3.5), file-tree config.js comment.
+
+**Verification**: Open `#viewer`, view an ad ≥3s (and click one). In the SW log, the `MA_TRACK_VIEW`/`MA_TRACK_CLICK` publisher attribution and any `REWARD_REQUEST` (role='publisher') / DEFERRED_PUB_REWARD should now carry the platform creator's Maxima PK (`0X3081...`), not the viewing node's wallet address. No console errors expected.
+
+**AGENTS.md updated**: yes — §6 added this entry; oldest entry (Platform_Key Mismatch) moved to docs/HISTORY.md §17.
+
+---
+
 ### Session: 2026-06-04 — Fix: Built-in Viewer Publisher Rewards Not Earned
 
 **Task**: Diagnose and fix why the built-in viewer (integrated snippet in MinimaAds) produces viewer rewards but publisher rewards are never generated or sent.
@@ -212,32 +236,6 @@ The remaining DEFERRED state is expected (no open publisher channel yet), not a 
 5. **§13 gap** — SDK section was silent on campaign discovery responsibility. Added 3-line note: "Campaign discovery is SW responsibility, not SDK call. SDK reads from pre-populated CAMPAIGNS table via getAd()."
 
 **Result**: Documentation now accurately describes MAXIMA_ROUTE_DISCOVERY system end-to-end, from on-chain escrow discovery through publisher snippet campaign retrieval.
-
-**AGENTS.md updated**: yes — §6 added this session entry.
-
----
-
-### Session: 2026-06-04 — Fix: MAXIMA_ROUTE_DISCOVERY Campaign Platform_Key Mismatch
-
-**Task**: Diagnose and fix campaign discovery rejection caused by `platform_key mismatch` error blocking user4 (MinimaAds creator) from accepting campaigns from other nodes.
-
-**Root Cause**: The MAXIMA_ROUTE_DISCOVERY changes enabled reliable cross-node campaign discovery, which exposed a latent bug: the `platform_key` validation in `campaign.handler.js` (lines 33-37) compared the announced key from the Maxima payload against the receiver's local `PLATFORM_KEY` override. When nodes had different `PLATFORM_KEY` values (per-node overrides set via DevTools), campaigns were silently rejected as mismatches. The payload-based check is also spoofable — the real authority is the on-chain `PREVSTATE(5)` in the escrow coin.
-
-**Changes**:
-- **public/service-workers/handlers/campaign.handler.js** (lines 33-41): Commented out the spoofable payload-based `platform_key` check. Added explanation: the authoritative validation is on-chain via `PREVSTATE(5)`.
-- **public/service-workers/handlers/campaign.handler.js** (lines 59): Updated the on-chain `PREVSTATE(5)` validation to accept campaigns where `PREVSTATE(5) = 0x00` (creator had no platform fee). Old logic: `!onChainPk || onChainPk !== PLATFORM_KEY` would reject. New logic: `onChainPk && onChainPk !== '0x00' && onChainPk !== PLATFORM_KEY` accepts 0x00 regardless of receiver's local setting.
-- **sdk/index.js** (lines 970-972): Applied the same fix to the SDK path's `_persistCampaignPayload` function. Commented out the equivalent payload-based platform_key check for consistency.
-
-**Why**: The payload-based check breaks cross-node discovery and is a security anti-pattern (payload is attacker-controlled). The on-chain validation already exists and is authoritative. See KNOWN_ISSUES.md #31 principle: "never read PREVSTATE from announced JSON payload as primary verification — always verify on-chain."
-
-**Testing required**:
-- User1 creates campaign without fee (PREVSTATE(5) = 0x00).
-- User4 (with PLATFORM_KEY override) discovers the escrow coin.
-- User4 receives `CAMPAIGN_DATA_RESPONSE` from user1.
-- Campaign is accepted and persisted (no "platform_key mismatch" log).
-- Same test with both nodes having different PLATFORM_KEY overrides (should still accept).
-
-**Note on Commission**: Platform creation fees are **already paid as part of the escrow funding tx** (creator.js line 1500-1604). User1 either includes a fee output (output[0] to PLATFORM_KEY, output[1] to escrow) or does not. This is a wallet-level transfer, not a DB reward event. The commission was never "missing" — it was either created or not at creator's choice. The bug only prevented the campaign from being visible on user4's node.
 
 **AGENTS.md updated**: yes — §6 added this session entry.
 

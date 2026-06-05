@@ -989,7 +989,7 @@ function _maybeNotifyPublisher(campaignId, frameId) {
 // known from the REWARD_REQUEST payload (e.g. MINIMAADS_CREATOR_PK).
 // ---------------------------------------------------------------------------
 function _notifyPublisherByKey(campaignId, frameId, publisherKey, publisherMx) {
-  if (!publisherKey || !publisherMx) { return; }
+  if (!publisherMx) { return; }
   getChannelState(campaignId, publisherKey, 'publisher', function(chErr, ch) {
     if (!chErr && ch && (ch.STATUS === 'open' || ch.STATUS === 'pending')) { return; }
     var notify = {
@@ -997,20 +997,12 @@ function _notifyPublisherByKey(campaignId, frameId, publisherKey, publisherMx) {
       campaign_id: campaignId,
       frame_id:    frameId
     };
-    // publisherMx format: MAX#0xMAXIMA_PK#Mx...@host:port
-    // Extract the Maxima EC key from the route for Maxima routing
-    var routeKey = '';
-    if (publisherMx && publisherMx.indexOf('MAX#') === 0) {
-      var parts = publisherMx.split('#');
-      if (parts.length >= 2) {
-        routeKey = parts[1].toUpperCase();
-      }
-    }
-    if (!routeKey) { return; }
-    var mxAddress = publisherMx || null;
-    MDS.log("[CHANNEL] _notifyPublisherByKey: publisherMx=" + publisherMx.substring(0, 30) + "... routeKey=" + routeKey.substring(0, 16) + "... mxAddress=yes");
-    sendMaxima(routeKey, mxAddress, notify, function(ok) {
-      MDS.log("[CHANNEL] PUBLISHER_REWARD_NOTIFY (by-key) sent routeKey: " + routeKey.substring(0, 16) + "... ok=" + ok);
+    // publisherMx is the permanent route MAX#...#Mx...@host:port
+    // Send directly using Maxima's route resolution: use null for publicKey,
+    // and pass the entire route as mxAddress for Maxima to parse
+    MDS.log("[CHANNEL] _notifyPublisherByKey: sending via permanent route " + publisherMx.substring(0, 30) + "...");
+    sendMaxima(null, publisherMx, notify, function(ok) {
+      MDS.log("[CHANNEL] PUBLISHER_REWARD_NOTIFY sent via route, ok=" + ok);
     });
   });
 }

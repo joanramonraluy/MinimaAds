@@ -46,6 +46,28 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-05 — Unify Settled Channels and Segment Creator Metrics Reward Events
+
+**Task**: Fix creator campaign metrics where settled viewer channels were not shown under "Settled channels" (due to a `role = 'PUBLISHER'` SQL filter) and duplicate settled reward events were displayed under active nodes in "Rewarded nodes". Also ensure that when channels are settled on the creator's node, they are written to `CHANNEL_HISTORY` rather than just overwritten in `CHANNEL_STATE`.
+
+**Changes**:
+- **dapp/views/mycampaigns.js**:
+  - Removed `AND UPPER(ROLE) = 'PUBLISHER'` from the `CHANNEL_HISTORY` query in `_loadSettledChannels` to load both viewer and publisher settled channels.
+  - Updated `_renderSettledChannelsTable` to add a "Type" column showing "Viewer" or "Publisher" based on the channel role, and updated the details colspan to 7.
+  - Updated `_groupSettledChannelsByPk` to group channels by PK and role.
+  - Refactored `_loadRewardedNodes` to query `CHANNEL_STATE` for active channels, extract their creation timestamps (`CREATED_AT`), and filter out settled events (where event timestamp is less than the active channel's creation timestamp).
+- **public/service-workers/handlers/channel.handler.js**:
+  - Replaced direct `sqlQuery` `UPDATE CHANNEL_STATE SET STATUS = 'settled'` with a call to `settleChannel` (from `core/channels.js`) for both viewer and publisher settlement paths on the creator node.
+  - Implemented `checkOpenChannelsSettled()`, which queries all open channels, verifies if their channel coins have been spent on-chain at the `CHANNEL_SCRIPT_ADDRESS`, and automatically transitions/archives them to `CHANNEL_HISTORY` on the creator node when spent.
+- **service.js**:
+  - Registered/called `checkOpenChannelsSettled()` on the `NEWBLOCK` event listener.
+
+**Why**: Ensures all settled payment channels are archived and visible on the creator's dashboard, and partitions the individual views/clicks so that already-settled rewards do not duplicate under active nodes.
+
+**AGENTS.md updated**: yes — §6 added this entry; oldest session moved to `docs/HISTORY.md §17`.
+
+---
+
 ### Session: 2026-06-05 — Add Creator Permanent Route Configuration to DevTools
 
 **Task**: Add a new option to the Ctrl+Shift+D DevTools menu allowing developers/users to manually view, set, copy, clear, and save custom creator permanent Maxima routes (`MAX#` format). Also remove the obsolete "Register MinimaAds Creator as Permanent (Server Mode)" section.

@@ -554,7 +554,8 @@ function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumu
             channel_coinid: channelCoinId,
             role:           role,
             frame_id:       channelFrameId,
-            publisher_key:  publisherKey
+            publisher_key:  publisherKey,
+            publisher_mx:   publisherMx
           });
           var kpKey = "PENDING_VOUCHER_" + campaignId + "_" + viewerKey.toUpperCase() + "_" + role.toUpperCase();
           MDS.keypair.set(kpKey, pending, function() {
@@ -989,7 +990,26 @@ function _maybeNotifyPublisher(campaignId, frameId) {
 // known from the REWARD_REQUEST payload (e.g. MINIMAADS_CREATOR_PK).
 // ---------------------------------------------------------------------------
 function _notifyPublisherByKey(campaignId, frameId, publisherKey, publisherMx) {
-  if (!publisherMx) { return; }
+  var targetMx = publisherMx;
+  if (targetMx) {
+    _doNotifyPublisherByKey(campaignId, frameId, publisherKey, targetMx);
+  } else {
+    if (publisherKey && publisherKey.toUpperCase() === MINIMAADS_CREATOR_PK.toUpperCase()) {
+      MDS.keypair.get("MINIMAADS_CREATOR_ROUTE", function(res) {
+        var savedRoute = (res && res.status && res.value) ? res.value : '';
+        if (savedRoute) {
+          _doNotifyPublisherByKey(campaignId, frameId, publisherKey, savedRoute);
+        } else {
+          MDS.log("[CHANNEL] _notifyPublisherByKey: no publisherMx and no MINIMAADS_CREATOR_ROUTE saved");
+        }
+      });
+    } else {
+      MDS.log("[CHANNEL] _notifyPublisherByKey: no publisherMx provided");
+    }
+  }
+}
+
+function _doNotifyPublisherByKey(campaignId, frameId, publisherKey, publisherMx) {
   getChannelState(campaignId, publisherKey, 'publisher', function(chErr, ch) {
     if (!chErr && ch && (ch.STATUS === 'open' || ch.STATUS === 'pending')) { return; }
     var notify = {
@@ -997,9 +1017,6 @@ function _notifyPublisherByKey(campaignId, frameId, publisherKey, publisherMx) {
       campaign_id: campaignId,
       frame_id:    frameId
     };
-    // publisherMx is the permanent route MAX#...#Mx...@host:port
-    // Send directly using Maxima's route resolution: use null for publicKey,
-    // and pass the entire route as mxAddress for Maxima to parse
     MDS.log("[CHANNEL] _notifyPublisherByKey: sending via permanent route " + publisherMx.substring(0, 30) + "...");
     sendMaxima(null, publisherMx, notify, function(ok) {
       MDS.log("[CHANNEL] PUBLISHER_REWARD_NOTIFY sent via route, ok=" + ok);
@@ -1388,7 +1405,7 @@ function checkOnePendingVoucher(campaignId, viewerKey, role, channelCoinId) {
           }
           _swDispatchVoucher(pending.campaign_id, pending.viewer_key, pending.viewer_mx, pending.event_id, pending.cumulative, ch, r, pending.frame_id || '');
           if (r === 'viewer' && (pending.frame_id || pending.publisher_key)) {
-            _maybeGeneratePublisherVoucher(pending.campaign_id, pending.frame_id || '', pending.event_id, pending.publisher_key || '');
+            _maybeGeneratePublisherVoucher(pending.campaign_id, pending.frame_id || '', pending.event_id, pending.publisher_key || '', pending.publisher_mx || '');
           }
         });
       });

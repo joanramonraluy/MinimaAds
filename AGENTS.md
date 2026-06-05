@@ -175,82 +175,98 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
-### Session: 2026-06-05 — Fix Missing Settled Channels on Creator Dashboard
+### Session: 2026-06-05 — Platform Creator Permanent Address Registration
 
-**Task**: Diagnose and fix why settled channels never appeared in the creator's `CHANNEL_HISTORY` / Settled channels UI section, even after viewer nodes settled their channels on-chain. Also fix the viewer's `#earnings` view showing all settled cycles merged into one row.
-
-**Root cause**: Three silent data-loss/display paths:
-1. **`handleChannelOpen`** (viewer side): when the creator sends a `CHANNEL_OPEN` for a second channel cycle, raw `MERGE INTO CHANNEL_STATE KEY (CAMPAIGN_ID, VIEWER_KEY, ROLE)` silently overwrote the existing row without archiving to `CHANNEL_HISTORY`.
-2. **`CHANNEL_OPEN_REQUEST` stale-pending path** (both viewer and publisher sides): when an existing `pending` channel was older than 5 minutes and had no split-coin, the code fell through to `openChannel()` directly, again overwriting without archiving.
-3. **`_refreshSettlementHistory`** in `earnings.js`: a `GROUP BY (CAMPAIGN_ID, ROLE)` merged all settled channel cycles for the same campaign into a single row — hiding individual channel instances.
+**Task**: Implement an input field in the settings UI to register the Platform Creator's stable Maxima permanent route (MAX#...). Ensure the viewer node uses this route for built-in frame reward requests, and campaign creator/publisher nodes fallback to it when routing notifications. Also support client nodes registering their own permanent routes through a remote MLS server.
 
 **Changes**:
+- **core/minima.js** (`setCreatorMaximaRoute`):
+  - Removed the strict `staticmls === true` requirement so that client nodes connected to a remote MLS server can also build and save their permanent route (validating only that a static `mls` server host is configured).
+- **dapp/views/settings-maxima-routes.js**:
+  - Consolidated the permanent registration flow: removed the redundant Section 3 ("Finalise Route Registration") and integrated the permanent route status display directly into Section 2.
+  - Section 2 now displays the verified registered permanent route (saved under `CREATOR_PERMANENT_ROUTE`) and styles/renames the button dynamically ("Register as Permanent" / "Re-register as Permanent") based on registration status.
+  - Added Section 3 (formerly Section 4): "MinimaAds Platform Creator Route" containing a status display, text input field, "Save Route" button, and "Clear" button.
+  - Users can save the stable route of the platform creator (saved under `MINIMAADS_CREATOR_ROUTE` keypair) or clear it.
+  - Added auto-extraction of raw Maxima contact address if the user inputs a full `MAX#...` permanent route as the MLS Server Address.
+- **dapp/views/devtools.js**:
+  - Added Section 4: "Platform Creator Route Configuration" with an input field to paste the route, a "Save" button, and a "Clear" button to easily manage the creator route during development.
+  - Added auto-extraction of raw Maxima contact address if the user inputs a full `MAX#...` permanent route as the MLS Server Address.
+  - Fixed a bug in the "Register This Node as MLS Server" action by ensuring it uses the node's own P2P identity (`info.p2pidentity || info.localidentity`) instead of the currently configured remote MLS address.
+  - Redesigned the MLS status block to show a detailed comparison of DApp Stored MLS address, System staticmls, System MLS host, and System P2P identity, turning green when properly configured.
+  - Added Section 5: "SQL Console" at the bottom of the panel allowing developers to execute raw H2 database queries with formatted output, a copy-to-clipboard utility, and automatic status indicators.
+- **public/service-workers/handlers/comms.handler.js**:
+  - Modified `_sendRewardRequest` to read `MINIMAADS_CREATOR_ROUTE` from keypairs if the reward is for the built-in frame (`publisherKey` equals `MINIMAADS_CREATOR_PK`), sending it as `publisher_mx`. Falls back to the local node's own `CREATOR_PERMANENT_ROUTE` otherwise.
 - **public/service-workers/handlers/channel.handler.js**:
-  - `handleChannelOpen`: before the `MERGE`, query `CHANNEL_STATE` for an existing open/pending row with a **different** coinid. If found, call `settleChannel()` first to archive it, then delegate to a new helper `_doChannelOpenUpsert()`.
-  - `_doChannelOpenUpsert()` (new helper): extracted the raw MERGE + post-open logic from `handleChannelOpen` to keep both paths DRY.
-  - `CHANNEL_OPEN_REQUEST` stale-pending, no split-coin path (**viewer**): now calls `settleChannel()` to archive the stale record, then proceeds to `openChannel()` + `_swDispatchChannelOpen()`.
-  - `CHANNEL_OPEN_REQUEST (publisher)` stale-pending, no split-coin path: same fix as viewer — archive stale record via `settleChannel()` before opening a new channel, preserving the `VIEWER_WALLET_PK` and `PUBLISHER_BUDGET_SPENT` updates.
-- **dapp/views/earnings.js**:
-  - `_refreshSettlementHistory`: removed `GROUP BY` — now selects each `CHANNEL_HISTORY` row individually so multiple settlement cycles appear as separate rows.
-  - `_loadChannelEvents`: added `channelCreatedAt` param; for settled channels, determines the per-channel event range as `[channelCreatedAt, nextChannelCreatedAt)` by querying `CHANNEL_HISTORY` for the next cycle and `CHANNEL_STATE` for the current open channel.
-  - `_doLoadEvents()` (new helper): extracted event-table rendering logic shared by both settled and active paths.
+  - Propagated `publisher_mx` through the pending voucher queue by adding it to the JSON-serialized payload of `PENDING_VOUCHER_*`.
+  - Updated `_notifyPublisherByKey` to query `MINIMAADS_CREATOR_ROUTE` keypair if the destination publisher is `MINIMAADS_CREATOR_PK` and `publisherMx` is empty.
+  - Added the fifth argument `publisherMx` when checkOnePendingVoucher calls `_maybeGeneratePublisherVoucher`.
 
-**Why**: Ensures every channel lifecycle transition is fully archived and individually visible.
+**Why**: Allows non-operator nodes (campaign creators, custom publishers, viewers) to route platform publisher rewards/notifications correctly to the platform creator's permanent Maxima identity without relying on local routes, and allows client nodes to successfully register and save their own permanent routes using a remote MLS server.
 
-**AGENTS.md updated**: yes — §6 updated this entry.
+**AGENTS.md updated**: yes — §6 updated.
 
 **Verification**:
-- Let viewer earn rewards → settle → earn again (2nd channel) → settle → earn (3rd channel).
-- On viewer `#earnings` → "Settled channels": should show 2 separate rows, each with its own earned amount and correct per-channel events.
-- On creator `#creator` → "Settled channels": should show both settled channels.
-- Publisher stale-pending: same behaviour as viewer for publisher channels.
+- Go to Settings → Configure Maxima Routes or press Ctrl+Shift+D to open the DevTools panel.
+- Verify "Platform Creator Route Configuration" is visible in both places.
+- Input/paste a valid `MAX#` route, click "Save" / "Save Route", verify status changes.
+- Click "Clear", verify status changes to (not set) / red cross.
+- Set/Save it again.
+- No console/SW errors.
 
 ---
 
+### Session: 2026-06-05 — Reorder, Automate, and Clean Creator Permanent Route Registration in DevTools
 
-### Session: 2026-06-05 — Include CREATOR_PERMANENT_ROUTE in REWARD_REQUEST Payload
-
-**Task**: Add `publisher_mx` field to the `REWARD_REQUEST` Maxima payload in `_sendRewardRequest`, carrying the creator's permanent Maxima route (`CREATOR_PERMANENT_ROUTE` keypair value) so the creator node can send `PUBLISHER_REWARD_NOTIFY` back via a stable route.
+**Task**: Swap positions of MLS Server Configuration and Creator Permanent Route Configuration in DevTools (Ctrl+Shift+D). Also, add a new explicit "MLS Permanent Registration" section in DevTools to register the node's key locally on the MLS server, and remove the unnecessary custom route input field and "Save" button from DevTools.
 
 **Changes**:
-- **public/service-workers/handlers/comms.handler.js** (`_sendRewardRequest`, lines ~344–367):
-  - Wrapped the entire payload-build-and-send logic inside a `getCreatorMaximaRoute()` callback.
-  - Added `publisher_mx: creatorRoute || ""` to the `payload` object, alongside the already-present `frame_id`.
-  - `getCreatorMaximaRoute` is defined in `core/minima.js`, which is loaded before this handler in `service.js` — no new dependency.
+- **dapp/views/devtools.js**:
+  - Moved the MLS Server Configuration section code block above the Creator Permanent Route Configuration section.
+  - Added a new middle section: "MLS Permanent Registration" with a "Register Self Key on MLS" button, which executes `maxextra action:addpermanent publickey:<local_pk>` locally.
+  - Removed the custom route input field and "Save" button from the Creator Permanent Route Configuration section.
+- **core/minima.js** (`setCreatorMaximaRoute`):
+  - Reverted the temporary background registration change so that Option 3 (Set as Self Route) only sets the `CREATOR_PERMANENT_ROUTE` keypair value without running MLS server commands.
 
-**Why**: The creator node needs a permanent routing address to send `PUBLISHER_REWARD_NOTIFY` back. Without `publisher_mx`, the creator has no stable Maxima address for the viewer/publisher and must rely on dynamic routing alone.
+**Why**: Arranges setup steps logically, structures registration into three clean, separate stages (server host configuration, permanent registration, and route keypair setting), and declutters DevTools by removing unused custom input.
 
-**AGENTS.md updated**: yes — §6 added this entry; oldest (Add Creator Permanent Route Configuration to DevTools) moved to `docs/HISTORY.md §17`.
+**AGENTS.md updated**: yes — §6 updated.
 
 **Verification**:
-- Open `#viewer` on a viewer node and watch an ad for ≥3 s.
-- In SW logs on the viewer node, confirm `REWARD_REQUEST sent` appears.
-- On the creator node, decode the received `REWARD_REQUEST` payload and confirm `publisher_mx` is present (a `MAX#...` string or empty string if route not yet set).
-- No console errors expected on either node.
+- Press Ctrl+Shift+D to open the DevTools panel.
+- Verify that "MLS Server Configuration", "MLS Permanent Registration", and "Creator Permanent Route Configuration" appear in that order.
+- Click "Register Self Key on MLS" and verify that it registers the local key on the MLS server.
+- Click "Set as Self Route" to save the route in keypairs.
+- Verify there is no custom input text field or "Save" button.
+- No console errors.
 
 ---
 
-### Session: 2026-06-05 — Segment Reward Events by Channel Open Timestamp
+### Session: 2026-06-05 — Remote Permanent Route Registration via Service Worker
 
-**Task**: Resolve the discrepancy where expanding any settled channel or pending settlement in `dapp/views/earnings.js` showed all reward events of the campaign instead of only those corresponding to the active channel instance.
+**Task**: Implement background registration of permanent route at MLS. FE requests SW to register (so it works even if DApp is closed); SW sends Maxima message to MLS in background.
 
 **Changes**:
-- **dapp/views/earnings.js**:
-  - Updated `_loadChannelEvents(campaignId, role, isSettled, targetEl)`:
-    - Queries `CHANNEL_STATE` to find the open/pending channel's `CREATED_AT` timestamp (`openCreatedAt`).
-    - Partitioned `REWARD_EVENTS` using `openCreatedAt` as the boundary:
-      - For settled channels (`isSettled === true`), filters for `TIMESTAMP < openCreatedAt` (or no filter if no open channel exists).
-      - For open/pending channels (`isSettled === false`), filters for `TIMESTAMP >= openCreatedAt` (or `1=0` to return empty if no open channel exists).
-  - Updated callsites in `renderSettlementHistory` (line ~234) to pass `r.ROLE` and `true`.
-  - Updated callsite in `_renderChannelRewardRows` (line ~398) to pass `role` and `false`.
+- **dapp/views/settings-maxima-routes.js**:
+  - Modified "Register as Permanent" button: instead of local `MDS.cmd("maxima ...")`, now calls `MDS.comms.solo(JSON.stringify({type: "DO_REGISTER_PERMANENT", publickey: ...}))` to request SW asynchronously.
+  - FE waits 2 seconds (for SW to process in background), then calls `setCreatorMaximaRoute()` to fetch and display the newly registered permanent route.
 
-**Why**: Solves duplicate event visibility by ensuring that as channels cycle from pending → open → settled → reset, their associated events are cleanly partitioned at the timestamp boundary of the currently open channel.
+- **service.js** (`onComms` dispatcher + new handler):
+  - Added `DO_REGISTER_PERMANENT` branch to `onComms()`.
+  - New `handleRegisterPermanent(payload)`: fetches `MLS_SERVER_ADDRESS` from keypair, constructs `REGISTER_PERMANENT_REQUEST` with publickey, sends to MLS via `sendMaxima(null, mlsAddr, registerReq, cb)` in background.
 
-**Testing required**:
-- Navigate to `#earnings`.
-- With at least one settled channel and one pending settlement for a campaign, expand both:
-  - Verify that the pending settlement dropdown only lists events logged during the current open channel.
-  - Verify that the settled channel row dropdown only lists events logged before the current open channel's creation.
+- **public/service-workers/handlers/maxima.handler.js** (existing from earlier fix):
+  - `REGISTER_PERMANENT_REQUEST` dispatcher branch + `handleRegisterPermanentRequest()` handler (executes `maxextra action:addpermanent` at MLS and sends back `REGISTER_PERMANENT_RESPONSE`).
+
+**Why**: (1) SW is always running in background — registration works even if DApp is closed. (2) Mirrors campaign/reward Maxima communication pattern — SW handles Maxima outbound, FE requests. (3) MLS (SW) executes command locally so registration applies at correct node.
+
+**AGENTS.md updated**: yes — §6 updated.
+
+**Verification**:
+- Node A (creator): `#settings/maxima-routes` → configure MLS address → click "Register as Permanent".
+- Node A FE: should see "Registering with MLS..." → after 2s, should display permanent route (MAX#...#...).
+- Node A SW logs: should show `DO_REGISTER_PERMANENT received`, `sending request to MLS`, `request sent ok=true`.
+- Node B (MLS) SW logs: should show `REGISTER_PERMANENT_REQUEST from ...`, `REGISTER_PERMANENT executed successfully`.
+- No console errors. Works even if DApp is closed (SW runs in background).
 
 ---
 

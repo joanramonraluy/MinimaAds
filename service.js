@@ -203,7 +203,43 @@ function onComms(msg) {
     handleOpenPublisherChannels(payload);
   } else if (payload.type === "MA_LOCAL_STATUS") {
     handleLocalStatusChange(payload);
+  } else if (payload.type === "DO_REGISTER_PERMANENT") {
+    handleRegisterPermanent(payload);
   }
+}
+
+function handleRegisterPermanent(payload) {
+  if (!payload.publickey) {
+    MDS.log("[SW] DO_REGISTER_PERMANENT: missing publickey");
+    return;
+  }
+  var pubkey = payload.publickey;
+  var requesterContact = payload.requester_contact || '';
+  MDS.log("[SW] DO_REGISTER_PERMANENT received for key: " + pubkey.substring(0, 20) + "... requester: " + (requesterContact ? requesterContact.substring(0, 30) + "..." : "unknown"));
+
+  MDS.keypair.get("MLS_SERVER_ADDRESS", function(res) {
+    var mlsAddr = (res && res.status && res.value) ? res.value : null;
+    if (!mlsAddr) {
+      MDS.log("[SW] DO_REGISTER_PERMANENT: no MLS_SERVER_ADDRESS configured");
+      return;
+    }
+
+    var myContact = MY_MX_ADDRESS || '';
+    MDS.log("[SW] DO_REGISTER_PERMANENT: MY contact=" + myContact.substring(0, 60));
+    MDS.log("[SW] DO_REGISTER_PERMANENT: MLS address=" + mlsAddr.substring(0, 60));
+    var isSelf = myContact && mlsAddr && myContact.substring(0, 60) === mlsAddr.substring(0, 60);
+    MDS.log("[SW] DO_REGISTER_PERMANENT: sending to self=" + isSelf + " (if true, MLS_SERVER_ADDRESS is wrong!)");
+
+    var registerReq = {
+      type: "REGISTER_PERMANENT_REQUEST",
+      publickey: pubkey,
+      requester_contact: requesterContact
+    };
+
+    sendMaxima(null, mlsAddr, registerReq, function(ok) {
+      MDS.log("[SW] DO_REGISTER_PERMANENT: request sent to MLS, ok=" + ok);
+    });
+  });
 }
 
 MDS.init(function(msg) {

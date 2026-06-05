@@ -66,7 +66,7 @@ function sendMaxima(publicKey, mxAddress, payload, cb) {
   }
 }
 
-// Helper: Get current node's Maxima info (publickey, staticmls status, mls address).
+// Helper: Get current node's Maxima info (publickey, staticmls status, mls address, contact).
 // Works in both SW and FE contexts.
 function getMaximaInfo(cb) {
   MDS.cmd("maxima action:info", function(resp) {
@@ -74,7 +74,10 @@ function getMaximaInfo(cb) {
       cb(null, {
         publickey: resp.response.publickey,
         staticmls: resp.response.staticmls === true,
-        mls: resp.response.mls || ""
+        mls: resp.response.mls || "",
+        contact: resp.response.contact || "",
+        p2pidentity: resp.response.p2pidentity || "",
+        localidentity: resp.response.localidentity || ""
       });
     } else {
       cb(new Error("Cannot read maxima info"));
@@ -97,10 +100,9 @@ function parseMaximaRoute(route) {
 function setCreatorMaximaRoute(cb) {
   MDS.cmd("maxima action:info", function(resp) {
     if (!resp.status || !resp.response) { return cb(new Error("Cannot read maxima info")); }
-    var staticmls = resp.response.staticmls === true;
-    if (!staticmls) { return cb(new Error("Node does not have static MLS configured")); }
-    var contact = resp.response.contact || "";
     var mls = resp.response.mls || "";
+    if (!mls) { return cb(new Error("Node does not have static MLS configured")); }
+    var contact = resp.response.contact || "";
     // Extract Maxima PK (Mx...) from contact address (Mx...@host:port)
     var maximaPk = '';
     if (contact && contact.indexOf('@') > 0) {

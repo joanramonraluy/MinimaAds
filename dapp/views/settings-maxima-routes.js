@@ -3,6 +3,24 @@
 // Rendered by renderSettings() when route is #settings/maxima-routes
 // or when a Creator/Publisher view redirects here (no permanent route set).
 
+function utf8ToHex(str) {
+  var hex = '';
+  for (var i = 0; i < str.length; i++) {
+    var code = str.charCodeAt(i);
+    if (code < 128) {
+      hex += ('0' + code.toString(16)).slice(-2);
+    } else if (code < 2048) {
+      hex += ('0' + (192 | (code >> 6)).toString(16)).slice(-2);
+      hex += ('0' + (128 | (code & 63)).toString(16)).slice(-2);
+    } else {
+      hex += ('0' + (224 | (code >> 12)).toString(16)).slice(-2);
+      hex += ('0' + (128 | ((code >> 6) & 63)).toString(16)).slice(-2);
+      hex += ('0' + (128 | (code & 63)).toString(16)).slice(-2);
+    }
+  }
+  return hex;
+}
+
 function renderMaximaRoutesSettings(root) {
   root.innerHTML = '';
 
@@ -50,6 +68,12 @@ function renderMaximaRoutesSettings(root) {
     if (!addr) {
       alert('Please enter an MLS server address');
       return;
+    }
+    if (addr.indexOf('MAX#') === 0) {
+      var parts = addr.split('#');
+      if (parts.length === 3) {
+        addr = parts[2];
+      }
     }
     mlsSaveBtn.disabled = true;
     mlsSaveBtn.textContent = 'Applying…';
@@ -113,27 +137,31 @@ function renderMaximaRoutesSettings(root) {
 
   // Status display for permanent registration
   var permanentStatusDisplay = document.createElement('div');
-  permanentStatusDisplay.style.cssText = 'padding:0.75rem;margin-bottom:0.75rem;border-radius:0.375rem;font-family:monospace;font-size:0.8rem;border:1px solid var(--pico-muted-border-color);';
+  permanentStatusDisplay.style.cssText = 'padding:0.75rem;margin-bottom:0.75rem;border-radius:0.375rem;font-family:monospace;font-size:0.8rem;border:1px solid var(--pico-muted-border-color);word-break:break-all;';
   permanentStatusDisplay.textContent = 'Checking registration status…';
   permanentSection.appendChild(permanentStatusDisplay);
-
-  // Check if already registered
-  MDS.keypair.get('CREATOR_PERMANENT_ROUTE', function(res) {
-    if (res && res.status && res.value) {
-      permanentStatusDisplay.textContent = '✓ Registered as permanent';
-      permanentStatusDisplay.style.borderColor = 'var(--pico-ins-color, #27ae60)';
-      permanentStatusDisplay.style.color = 'var(--pico-ins-color, #27ae60)';
-    } else {
-      permanentStatusDisplay.textContent = '✗ Not yet registered as permanent';
-      permanentStatusDisplay.style.borderColor = 'var(--pico-del-color, #c0392b)';
-      permanentStatusDisplay.style.color = 'var(--pico-del-color, #c0392b)';
-    }
-  });
 
   var permanentBtn = document.createElement('button');
   permanentBtn.textContent = 'Register as Permanent';
   permanentBtn.className = 'primary';
   permanentBtn.style.cssText = 'width:auto;margin:0;';
+
+  // Check if already registered
+  MDS.keypair.get('CREATOR_PERMANENT_ROUTE', function(res) {
+    if (res && res.status && res.value) {
+      permanentStatusDisplay.textContent = '✓ Registered permanent route: ' + res.value;
+      permanentStatusDisplay.style.borderColor = 'var(--pico-ins-color, #27ae60)';
+      permanentStatusDisplay.style.color = 'var(--pico-ins-color, #27ae60)';
+      permanentBtn.textContent = 'Re-register as Permanent';
+      permanentBtn.className = 'secondary outline';
+    } else {
+      permanentStatusDisplay.textContent = '✗ Not yet registered as permanent';
+      permanentStatusDisplay.style.borderColor = 'var(--pico-del-color, #c0392b)';
+      permanentStatusDisplay.style.color = 'var(--pico-del-color, #c0392b)';
+      permanentBtn.textContent = 'Register as Permanent';
+      permanentBtn.className = 'primary';
+    }
+  });
 
   var permanentStatus = document.createElement('small');
   permanentStatus.style.cssText = 'display:block;margin-top:0.5rem;';
@@ -161,33 +189,39 @@ function renderMaximaRoutesSettings(root) {
         return;
       }
 
-      var cmd = 'maxextra action:addpermanent publickey:' + info.publickey;
-      MDS.cmd(cmd, function(res) {
+      permanentStatus.style.color = 'var(--pico-ins-color,#27ae60)';
+      permanentStatus.textContent = 'Registering with MLS...';
+
+      // Request SW to register permanent route (runs in background even if DApp closed)
+      MDS.comms.solo(JSON.stringify({
+        type: "DO_REGISTER_PERMANENT",
+        publickey: info.publickey,
+        requester_contact: info.contact || ''
+      }));
+
+      // Check route after 2 seconds (SW processes asynchronously)
+      setTimeout(function() {
         permanentBtn.disabled = false;
         permanentBtn.textContent = 'Register as Permanent';
 
-        if (res.status) {
-          // Success: now register the permanent route in MinimaAds
-          if (typeof setCreatorMaximaRoute === 'function') {
-            setCreatorMaximaRoute(function(err, route) {
-              if (!err && route) {
-                permanentStatus.style.color = 'var(--pico-ins-color,#27ae60)';
-                permanentStatus.textContent = 'Success! Route registered: ' + route;
-                permanentStatusDisplay.textContent = '✓ Registered as permanent';
-                permanentStatusDisplay.style.borderColor = 'var(--pico-ins-color, #27ae60)';
-                permanentStatusDisplay.style.color = 'var(--pico-ins-color, #27ae60)';
-                setTimeout(function() { location.reload(); }, 1500);
-              } else {
-                permanentStatus.style.color = 'var(--pico-del-color,#c0392b)';
-                permanentStatus.textContent = 'Error: ' + (err ? err.message : 'Make sure you have static MLS configured on your node (see Step 1 above)');
-              }
-            });
-          }
-        } else {
-          permanentStatus.style.color = 'var(--pico-del-color,#c0392b)';
-          permanentStatus.textContent = 'Error: ' + (res.error || 'Unknown error. Make sure you have static MLS configured.');
+        if (typeof setCreatorMaximaRoute === 'function') {
+          setCreatorMaximaRoute(function(err, route) {
+            if (!err && route) {
+              permanentStatus.style.color = 'var(--pico-ins-color,#27ae60)';
+              permanentStatus.textContent = 'Success! Route registered: ' + route;
+              permanentStatusDisplay.textContent = '✓ Registered permanent route: ' + route;
+              permanentStatusDisplay.style.borderColor = 'var(--pico-ins-color, #27ae60)';
+              permanentStatusDisplay.style.color = 'var(--pico-ins-color, #27ae60)';
+              permanentBtn.textContent = 'Re-register as Permanent';
+              permanentBtn.className = 'secondary outline';
+              setTimeout(function() { location.reload(); }, 1500);
+            } else {
+              permanentStatus.style.color = 'var(--pico-del-color,#c0392b)';
+              permanentStatus.textContent = 'Error retrieving route: ' + (err ? err.message : 'Check MLS configuration');
+            }
+          });
         }
-      });
+      }, 2000);
     });
   });
 
@@ -195,76 +229,92 @@ function renderMaximaRoutesSettings(root) {
   permanentSection.appendChild(permanentStatus);
   root.appendChild(permanentSection);
 
-  // ── Section 3: Finalise — Register Permanent Route in MinimaAds ─────────
-  var routeSection = document.createElement('section');
-  routeSection.className = 'ma-section';
+  // ── Section 3: MinimaAds Platform Creator Route Configuration ───────────
+  var platformCreatorSection = document.createElement('section');
+  platformCreatorSection.className = 'ma-section';
+  platformCreatorSection.style.cssText = 'margin-top:1.5rem;padding:1rem;background:var(--pico-card-sectionning-background-color,rgba(0,0,0,0.03));border-radius:0.5rem;';
 
-  var routeTitle = mkSectionTitle('Finalise Route Registration');
-  routeSection.appendChild(routeTitle);
+  var pcTitle = document.createElement('h3');
+  pcTitle.textContent = 'MinimaAds Platform Creator Route';
+  pcTitle.style.cssText = 'margin-top:0;margin-bottom:0.5rem;';
+  platformCreatorSection.appendChild(pcTitle);
 
-  var routeDesc = document.createElement('p');
-  routeDesc.textContent = 'After registering as permanent above, click the button below to save your MAX# permanent route into MinimaAds. This must be done once before creating campaigns or managing frames.';
-  routeDesc.style.cssText = 'font-size:.875rem;color:var(--pico-muted-color,#6c757d);margin:.25rem 0 .75rem;';
-  routeSection.appendChild(routeDesc);
+  var pcDesc = document.createElement('p');
+  pcDesc.textContent = 'Register the stable Maxima route (MAX#...) of the MinimaAds platform creator node. This is used by campaign creators and publishers to route reward notifications correctly.';
+  pcDesc.style.cssText = 'font-size:0.875rem;color:var(--pico-muted-color,#6c757d);margin:0.25rem 0 1rem;';
+  platformCreatorSection.appendChild(pcDesc);
 
-  var routeStatus = document.createElement('small');
-  routeStatus.style.cssText = 'display:block;margin-top:.5rem;';
+  // Status display for current route
+  var pcStatus = document.createElement('div');
+  pcStatus.style.cssText = 'padding:0.75rem;margin-bottom:0.75rem;border-radius:0.375rem;font-family:monospace;font-size:0.8rem;word-break:break-all;border:1px solid var(--pico-muted-border-color);';
+  pcStatus.textContent = 'Loading…';
+  platformCreatorSection.appendChild(pcStatus);
 
-  // Show current stored route if any
-  var currentRouteEl = document.createElement('p');
-  currentRouteEl.style.cssText = 'font-size:.8rem;color:var(--pico-muted-color,#6c757d);margin-bottom:.75rem;word-break:break-all;';
-  currentRouteEl.textContent = 'Checking stored route…';
-  routeSection.appendChild(currentRouteEl);
+  // Input row for setting/updating
+  var pcInputRow = document.createElement('div');
+  pcInputRow.style.cssText = 'display:flex;gap:0.5rem;align-items:stretch;flex-wrap:wrap;';
 
-  if (typeof getCreatorMaximaRoute === 'function') {
-    getCreatorMaximaRoute(function(route) {
-      var el = currentRouteEl;
-      if (!el) { return; }
-      if (route) {
-        el.textContent = 'Current route: ' + route;
-        el.style.color = 'var(--pico-ins-color,#27ae60)';
-      } else {
-        el.textContent = 'No route registered yet.';
-      }
-    });
-  } else {
-    currentRouteEl.textContent = '';
-  }
+  var pcInput = document.createElement('input');
+  pcInput.type = 'text';
+  pcInput.placeholder = 'MAX#pk#mls_address';
+  pcInput.style.cssText = 'flex:1;min-width:200px;margin:0;';
 
-  var registerRouteBtn = document.createElement('button');
-  registerRouteBtn.textContent = 'Check & Register Route';
-  registerRouteBtn.style.cssText = 'width:auto;margin:0;';
+  var pcSaveBtn = document.createElement('button');
+  pcSaveBtn.textContent = 'Save Route';
+  pcSaveBtn.className = 'primary';
+  pcSaveBtn.style.cssText = 'width:auto;margin:0;white-space:nowrap;';
 
-  registerRouteBtn.addEventListener('click', function() {
-    registerRouteBtn.disabled = true;
-    registerRouteBtn.textContent = 'Checking…';
-    routeStatus.textContent = '';
-    routeStatus.style.color = '';
+  var pcClearBtn = document.createElement('button');
+  pcClearBtn.textContent = 'Clear';
+  pcClearBtn.className = 'secondary';
+  pcClearBtn.style.cssText = 'width:auto;margin:0;white-space:nowrap;';
 
-    if (typeof setCreatorMaximaRoute !== 'function') {
-      registerRouteBtn.disabled = false;
-      registerRouteBtn.textContent = 'Check & Register Route';
-      routeStatus.style.color = 'var(--pico-del-color,#c0392b)';
-      routeStatus.textContent = 'Error: setCreatorMaximaRoute() not available';
+  pcSaveBtn.addEventListener('click', function() {
+    var route = (pcInput.value || '').trim();
+    if (!route) {
+      alert('Please enter a Maxima route');
       return;
     }
-
-    setCreatorMaximaRoute(function(err, route) {
-      registerRouteBtn.disabled = false;
-      registerRouteBtn.textContent = 'Check & Register Route';
-      if (err) {
-        routeStatus.style.color = 'var(--pico-del-color,#c0392b)';
-        routeStatus.textContent = 'Error: ' + err.message + '. Make sure your static MLS is configured.';
-      } else {
-        routeStatus.style.color = 'var(--pico-ins-color,#27ae60)';
-        routeStatus.textContent = 'Route registered: ' + route;
-        currentRouteEl.textContent = 'Current route: ' + route;
-        currentRouteEl.style.color = 'var(--pico-ins-color,#27ae60)';
-      }
+    if (route.indexOf('MAX#') !== 0) {
+      alert('Invalid format. Route must start with MAX#');
+      return;
+    }
+    pcSaveBtn.disabled = true;
+    MDS.keypair.set('MINIMAADS_CREATOR_ROUTE', route, function() {
+      pcSaveBtn.disabled = false;
+      pcInput.value = '';
+      pcStatus.textContent = '✓ Saved Creator Route: ' + route;
+      pcStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
+      pcStatus.style.color = 'var(--pico-ins-color, #27ae60)';
     });
   });
 
-  routeSection.appendChild(registerRouteBtn);
-  routeSection.appendChild(routeStatus);
-  root.appendChild(routeSection);
+  pcClearBtn.addEventListener('click', function() {
+    MDS.keypair.set('MINIMAADS_CREATOR_ROUTE', '', function() {
+      pcStatus.textContent = '✗ No Platform Creator Route saved';
+      pcStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
+      pcStatus.style.color = 'var(--pico-del-color, #c0392b)';
+    });
+  });
+
+  pcInputRow.appendChild(pcInput);
+  pcInputRow.appendChild(pcSaveBtn);
+  pcInputRow.appendChild(pcClearBtn);
+  platformCreatorSection.appendChild(pcInputRow);
+
+  // Load currently saved Platform Creator Route
+  MDS.keypair.get('MINIMAADS_CREATOR_ROUTE', function(res) {
+    var savedRoute = (res && res.status && res.value) ? res.value : null;
+    if (savedRoute) {
+      pcStatus.textContent = '✓ ' + savedRoute;
+      pcStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
+      pcStatus.style.color = 'var(--pico-ins-color, #27ae60)';
+    } else {
+      pcStatus.textContent = '✗ No Platform Creator Route saved';
+      pcStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
+      pcStatus.style.color = 'var(--pico-del-color, #c0392b)';
+    }
+  });
+
+  root.appendChild(platformCreatorSection);
 }

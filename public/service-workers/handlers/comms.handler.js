@@ -348,23 +348,35 @@ function _sendRewardRequest(campaignId, campaign, channel, eventId, cumulative, 
     MDS.log("[COMMS] REWARD_REQUEST skipped — MY_MAXIMA_PK or CREATOR_ADDRESS missing");
     return;
   }
-  getCreatorMaximaRoute(function(creatorRoute) {
-    var payload = {
-      type:          "REWARD_REQUEST",
-      campaign_id:   campaignId,
-      viewer_key:    MY_MAXIMA_PK,
-      event_id:      eventId,
-      cumulative:    cumulative,
-      role:          "viewer",
-      publisher_key: publisherKey || "",
-      frame_id:      "builtin:" + MY_MAXIMA_PK.toUpperCase(),
-      publisher_mx:  creatorRoute || ""
-    };
-    MDS.keypair.get("CREATOR_MX_" + campaignId, function(kpRes) {
-      var creatorMx = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : null;
-      sendMaxima(campaign.CREATOR_ADDRESS, creatorMx, payload, function(ok) {
-        MDS.log("[COMMS] REWARD_REQUEST sent: campaign=" + campaignId + " cumulative=" + cumulative + " ok=" + ok);
-      });
+  var isBuiltinFrame = (publisherKey && publisherKey.toUpperCase() === MINIMAADS_CREATOR_PK.toUpperCase());
+  if (isBuiltinFrame) {
+    MDS.keypair.get("MINIMAADS_CREATOR_ROUTE", function(res) {
+      var platformCreatorRoute = (res && res.status && res.value) ? res.value : '';
+      _doSendRewardRequestWithRoute(campaignId, campaign, channel, eventId, cumulative, publisherKey, platformCreatorRoute);
+    });
+  } else {
+    getCreatorMaximaRoute(function(creatorRoute) {
+      _doSendRewardRequestWithRoute(campaignId, campaign, channel, eventId, cumulative, publisherKey, creatorRoute);
+    });
+  }
+}
+
+function _doSendRewardRequestWithRoute(campaignId, campaign, channel, eventId, cumulative, publisherKey, pubMxRoute) {
+  var payload = {
+    type:          "REWARD_REQUEST",
+    campaign_id:   campaignId,
+    viewer_key:    MY_MAXIMA_PK,
+    event_id:      eventId,
+    cumulative:    cumulative,
+    role:          "viewer",
+    publisher_key: publisherKey || "",
+    frame_id:      "builtin:" + MY_MAXIMA_PK.toUpperCase(),
+    publisher_mx:  pubMxRoute || ""
+  };
+  MDS.keypair.get("CREATOR_MX_" + campaignId, function(kpRes) {
+    var creatorMx = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : null;
+    sendMaxima(campaign.CREATOR_ADDRESS, creatorMx, payload, function(ok) {
+      MDS.log("[COMMS] REWARD_REQUEST sent: campaign=" + campaignId + " cumulative=" + cumulative + " ok=" + ok);
     });
   });
 }

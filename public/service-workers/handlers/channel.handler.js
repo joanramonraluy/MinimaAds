@@ -245,6 +245,18 @@ function handleChannelOpenRequest(payload, senderPk) {
             });
             return;
           }
+          // Stale pending with no split coin — archive to history before retrying fresh.
+          MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: stale pending, no split coin — archiving stale record and opening fresh. campaign: " + campaignId);
+          settleChannel(campaignId, viewerKey, 'viewer', function(staleSettleErr) {
+            if (staleSettleErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: archive stale pending failed: " + staleSettleErr); }
+            openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', '', viewerWalletAddr, function(openErr) {
+              if (openErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: openChannel (after stale archive) failed: " + openErr); return; }
+              _signalCampaignUpdated(campaignId);
+              MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: building channel TX after stale archive. campaign: " + campaignId);
+              _swDispatchChannelOpen(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', '', viewerWalletPK, viewerWalletAddr);
+            });
+          });
+          return;
         }
 
         openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', '', viewerWalletAddr, function(openErr) {
@@ -292,6 +304,25 @@ function handleChannelOpen(payload) {
     var creatorMx = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : '';
     MDS.keypair.get("VIEWER_WALLET_ADDR_" + campaignId, function(waRes) {
       var viewerWalletAddr = (waRes && waRes.status && waRes.value) ? waRes.value : '';
+      // Archive any existing channel for this campaign+viewer+role before overwriting,
+      // so the old record is preserved in CHANNEL_HISTORY.
+      getChannelState(campaignId, viewerKey, role, function(gsErr, existing) {
+        if (!gsErr && existing && (existing.STATUS === 'open' || existing.STATUS === 'pending') &&
+            existing.CHANNEL_COINID !== channelCoinId) {
+          MDS.log("[CHANNEL] CHANNEL_OPEN: archiving existing " + existing.STATUS + " channel before new open. campaign: " + campaignId + " old coin: " + existing.CHANNEL_COINID);
+          settleChannel(campaignId, viewerKey, role, function(archErr) {
+            if (archErr) { MDS.log("[CHANNEL] CHANNEL_OPEN: archive old channel failed (non-fatal): " + archErr); }
+            _doChannelOpenUpsert(campaignId, viewerKey, role, channelCoinId, maxAmount, now, creatorMx, viewerWalletAddr);
+          });
+        } else {
+          _doChannelOpenUpsert(campaignId, viewerKey, role, channelCoinId, maxAmount, now, creatorMx, viewerWalletAddr);
+        }
+      });
+    });
+  });
+}
+
+function _doChannelOpenUpsert(campaignId, viewerKey, role, channelCoinId, maxAmount, now, creatorMx, viewerWalletAddr) {
       var sql = "MERGE INTO CHANNEL_STATE " +
         "(CAMPAIGN_ID, VIEWER_KEY, ROLE, FRAME_ID, CREATOR_MX, CHANNEL_COINID, MAX_AMOUNT, " +
         "CUMULATIVE_EARNED, LATEST_TX_HEX, STATUS, CREATED_AT, VIEWER_WALLET_ADDR) " +
@@ -327,7 +358,7 @@ function handleChannelOpen(payload) {
         if (!pending || !pending.event_id || !pending.creator_address) { return; }
         MDS.keypair.set("PENDING_REWARD_" + campaignId, '', function() {});
         MDS.keypair.get("CREATOR_MX_" + campaignId, function(mxRes) {
-          var creatorMx = (mxRes && mxRes.status && mxRes.value) ? mxRes.value : null;
+          var creatorMxInner = (mxRes && mxRes.status && mxRes.value) ? mxRes.value : null;
           var rewardPayload = {
             type:          "REWARD_REQUEST",
             campaign_id:   campaignId,
@@ -337,14 +368,12 @@ function handleChannelOpen(payload) {
             role:          role,
             publisher_key: pending.publisher_key || ""
           };
-          sendMaxima(pending.creator_address, creatorMx, rewardPayload, function(ok) {
+          sendMaxima(pending.creator_address, creatorMxInner, rewardPayload, function(ok) {
             MDS.log("[CHANNEL] CHANNEL_OPEN: auto REWARD_REQUEST sent cumulative=" + pending.cumulative + " ok=" + ok);
           });
         });
       });
     });
-    });
-  });
 }
 
 function handleRewardRequest(payload, senderPk) {
@@ -934,7 +963,7 @@ function _maybeNotifyPublisher(campaignId, frameId) {
 // known from the REWARD_REQUEST payload (e.g. MINIMAADS_CREATOR_PK).
 // ---------------------------------------------------------------------------
 function _notifyPublisherByKey(campaignId, frameId, publisherKey, publisherMx) {
-  if (!publisherKey) { return; }
+  if (!publisherKey || !publisherMx) { return; }
   getChannelState(campaignId, publisherKey, 'publisher', function(chErr, ch) {
     if (!chErr && ch && (ch.STATUS === 'open' || ch.STATUS === 'pending')) { return; }
     var notify = {
@@ -942,17 +971,18 @@ function _notifyPublisherByKey(campaignId, frameId, publisherKey, publisherMx) {
       campaign_id: campaignId,
       frame_id:    frameId
     };
-    // For built-in frames, frameId encodes the publisher's Maxima PK (EC key).
-    // publisherKey is the RSA identity key (MINIMAADS_CREATOR_PK) — not routable.
-    // Extract the Maxima PK from the frameId prefix for actual routing.
-    var routeKey;
-    if (frameId && frameId.indexOf('builtin:') === 0) {
-      routeKey = frameId.substring(8).toUpperCase();
-    } else {
-      routeKey = publisherKey;
+    // publisherMx format: MAX#0xMAXIMA_PK#Mx...@host:port
+    // Extract the Maxima EC key from the route for Maxima routing
+    var routeKey = '';
+    if (publisherMx && publisherMx.indexOf('MAX#') === 0) {
+      var parts = publisherMx.split('#');
+      if (parts.length >= 2) {
+        routeKey = parts[1].toUpperCase();
+      }
     }
+    if (!routeKey) { return; }
     var mxAddress = publisherMx || null;
-    MDS.log("[CHANNEL] _notifyPublisherByKey: frameId=" + frameId + " publisherKey=" + publisherKey.substring(0, 16) + "... routeKey=" + routeKey.substring(0, 16) + "... mxAddress=" + (mxAddress ? 'yes (' + mxAddress.substring(0, 20) + '...)' : 'null'));
+    MDS.log("[CHANNEL] _notifyPublisherByKey: publisherMx=" + publisherMx.substring(0, 30) + "... routeKey=" + routeKey.substring(0, 16) + "... mxAddress=yes");
     sendMaxima(routeKey, mxAddress, notify, function(ok) {
       MDS.log("[CHANNEL] PUBLISHER_REWARD_NOTIFY (by-key) sent routeKey: " + routeKey.substring(0, 16) + "... ok=" + ok);
     });

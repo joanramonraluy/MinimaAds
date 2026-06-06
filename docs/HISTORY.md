@@ -46,6 +46,18 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-06 — Auto-Sync Platform Creator Route
+
+**Task**: Fix the contradiction where `CREATOR_PERMANENT_ROUTE` was registered but `MINIMAADS_CREATOR_ROUTE` remained `(not set)`, breaking built-in frame reward routing.
+
+**Changes**: **config.js**, **service.js**, **core/minima.js**, **dapp/app.js**, **dapp/views/devtools.js** — auto-sync `MINIMAADS_CREATOR_ROUTE` from `CREATOR_PERMANENT_ROUTE` on boot and on registration.
+
+**AGENTS.md updated**: yes — §6 updated.
+
+**Verification**: All modified JS files compile cleanly with `node -c`.
+
+---
+
 ### Session: 2026-06-05 — Invalidate and Auto-Clear Outdated Route Formats
 
 **Task**: Fix off-chain campaign discovery failing with "Unknown publickey" error on the MLS Server for nodes using pre-existing/outdated route configurations by automatically detecting, invalidating, and clearing them, and adding a self-healing fallback to parse direct contact addresses from legacy formats.
@@ -656,6 +668,21 @@ The remaining DEFERRED state is expected (no open publisher channel yet), not a 
 
 **Verification**:
 - Verified that all modified JS files compile cleanly with `node -c`.
+
+---
+
+### Session: 2026-06-06 — Fix Viewer and Publisher Reward Delivery (3 bugs)
+
+**Task**: Diagnose and fix why viewers and platform creator (publisher) were not receiving rewards. Root cause traced via live node logs.
+
+**Root Cause (3 bugs encadenats)**:
+1. **Race condition** (`checkOpenChannelsSettled`).
+2. **Pending voucher lost** (`checkPendingVouchers` only queried open channels).
+3. **`publisherMx` absent** on viewer nodes.
+
+**Fixes**: `channel.handler.js` (fixes 1–3a), `comms.handler.js` (fix 3b). See `logs/rewards-snippet-debug.md` for full detail.
+
+**AGENTS.md updated**: yes — §6 updated.
 
 ---
 

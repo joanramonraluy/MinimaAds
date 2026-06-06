@@ -214,7 +214,14 @@ function renderMaximaRoutesSettings(root) {
               permanentStatusDisplay.style.color = 'var(--pico-ins-color, #27ae60)';
               permanentBtn.textContent = 'Re-register as Permanent';
               permanentBtn.className = 'secondary outline';
-              setTimeout(function() { location.reload(); }, 1500);
+              setTimeout(function() {
+                if (typeof goHome === 'function') {
+                  goHome();
+                } else {
+                  window.location.hash = 'viewer';
+                }
+                location.reload();
+              }, 1500);
             } else {
               permanentStatus.style.color = 'var(--pico-del-color,#c0392b)';
               permanentStatus.textContent = 'Error retrieving route: ' + (err ? err.message : 'Check MLS configuration');

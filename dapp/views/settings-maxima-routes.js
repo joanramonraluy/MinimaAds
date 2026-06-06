@@ -147,7 +147,7 @@ function renderMaximaRoutesSettings(root) {
   permanentBtn.style.cssText = 'width:auto;margin:0;';
 
   // Check if already registered
-  MDS.keypair.get('CREATOR_PERMANENT_ROUTE', function(res) {
+  MDS.keypair.get('USER_PERMANENT_ROUTE', function(res) {
     if (res && res.status && res.value) {
       permanentStatusDisplay.textContent = '✓ Registered permanent route: ' + res.value;
       permanentStatusDisplay.style.borderColor = 'var(--pico-ins-color, #27ae60)';

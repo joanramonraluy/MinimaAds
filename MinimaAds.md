@@ -309,7 +309,7 @@ In MVP phase, creators' permanent Maxima routes are stored in local KeyPair stor
 
 | Key | Value | Semantics |
 |---|---|---|
-| `CREATOR_PERMANENT_ROUTE` | `MAX#<publickey>#<staticMLS>` | Creator's permanent, MLS-resolved address. Set once at campaign creation; used in escrow STATE(4). |
+| `USER_PERMANENT_ROUTE` | `MAX#<publickey>#<staticMLS>` | User's permanent, MLS-resolved address. Set once at campaign creation; used in escrow STATE(4). |
 
 **On-chain storage**: The escrow coin's `STATE(4)` now contains the creator's permanent route instead of a mutable `Mx...` contact address. This enables campaign discovery even if the creator's contact address changes.
 

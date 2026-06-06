@@ -108,6 +108,11 @@ function _renderFramesList(rows) {
       var fid    = r.FRAME_ID || '';
       var label  = DOMPurify.sanitize(r.LABEL || '');
       var isB    = (r.IS_BUILTIN === 'true' || r.IS_BUILTIN === true);
+      var isCreator = MY_ADDRESS && MY_ADDRESS === MINIMAADS_CREATOR_PK.toUpperCase();
+
+      // Skip built-in frame if user is not the platform creator
+      if (isB && !isCreator) { return; }
+
       var earned = (parseFloat(r.TOTAL_EARNED) || 0).toFixed(6);
       var sid    = _safeId(fid);
 

@@ -90,13 +90,56 @@ function onInited() {
   MDS.load("public/service-workers/handlers/channel.handler.js");
   MDS.load("public/service-workers/handlers/comms.handler.js");
   initDB(function() {
-    MDS.keypair.get("PLATFORM_KEY_OVERRIDE", function(kpRes) {
-      if (kpRes && kpRes.status && kpRes.value) {
-        PLATFORM_KEY = kpRes.value;
-        MDS.log("[ADS] PLATFORM_KEY overridden: " + PLATFORM_KEY);
+    MDS.keypair.get("CREATOR_PERMANENT_ROUTE", function(oldRes) {
+      var oldRoute = (oldRes && oldRes.status && oldRes.value) ? oldRes.value : "";
+      if (oldRoute) {
+        MDS.log("[MIGRATION] Migrating CREATOR_PERMANENT_ROUTE to USER_PERMANENT_ROUTE");
+        MDS.keypair.set("USER_PERMANENT_ROUTE", oldRoute, function() {
+          MDS.keypair.set("CREATOR_PERMANENT_ROUTE", "", function() {
+            proceedBootstrap();
+          });
+        });
+      } else {
+        proceedBootstrap();
       }
-      _initAfterDb();
     });
+
+    function proceedBootstrap() {
+      MDS.keypair.get("PLATFORM_KEY_OVERRIDE", function(kpRes) {
+        if (kpRes && kpRes.status && kpRes.value) {
+          PLATFORM_KEY = kpRes.value;
+          MDS.log("[ADS] PLATFORM_KEY overridden: " + PLATFORM_KEY);
+        }
+        MDS.keypair.get("MINIMAADS_CREATOR_ROUTE", function(routeRes) {
+          var creatorRoute = (routeRes && routeRes.status && routeRes.value) ? routeRes.value : "";
+          if (creatorRoute) {
+            var routeParts = creatorRoute.split("#");
+            if (routeParts.length === 3 && routeParts[0] === "MAX") {
+              MINIMAADS_CREATOR_PK = routeParts[1].toUpperCase();
+            }
+          }
+          MDS.keypair.get("USER_PERMANENT_ROUTE", function(permRes) {
+            var permRoute = (permRes && permRes.status && permRes.value) ? permRes.value : "";
+            MDS.keypair.get("MLS_SERVER_ADDRESS", function(mlsRes) {
+              var mlsAddr = (mlsRes && mlsRes.status && mlsRes.value) ? mlsRes.value : "";
+              MDS.log("[CONFIG] =========== NODE CONFIGURATION ===========");
+              MDS.log("[CONFIG] PLATFORM_KEY:             " + (PLATFORM_KEY || "(not set — config.js default null)"));
+              MDS.log("[CONFIG] MINIMAADS_CREATOR_ROUTE:  " + (creatorRoute || "(not set)"));
+              MDS.log("[CONFIG] MINIMAADS_CREATOR_PK:     " + (MINIMAADS_CREATOR_PK ? MINIMAADS_CREATOR_PK.substring(0, 30) + "..." : "(from config.js: " + (MINIMAADS_CREATOR_PK ? MINIMAADS_CREATOR_PK.substring(0, 20) : "null") + ")"));
+              MDS.log("[CONFIG] USER_PERMANENT_ROUTE:     " + (permRoute || "(not set)"));
+              MDS.log("[CONFIG] MLS_SERVER_ADDRESS:       " + (mlsAddr || "(not set)"));
+              MDS.log("[CONFIG] =============================================");
+              if (creatorRoute && creatorRoute.indexOf("MAX#") === 0) {
+                MDS.cmd("maxima action:addcontact contact:" + creatorRoute, function(acRes) {
+                  MDS.log("[CONFIG] addcontact for MINIMAADS_CREATOR_ROUTE: " + (acRes && acRes.status ? "ok" : "failed"));
+                });
+              }
+              _initAfterDb();
+            });
+          });
+        });
+      });
+    }
   });
 }
 
@@ -109,6 +152,23 @@ function _initAfterDb() {
     MY_MAXIMA_PK  = resp.response.publickey ? resp.response.publickey.toUpperCase() : "";
     MY_MX_ADDRESS = resp.response.contact || "";
     MDS.log("[ADS] Maxima PK: " + MY_MAXIMA_PK + " contact: " + MY_MX_ADDRESS);
+
+    // Auto-sync Platform Creator Route on boot if this node is the Platform Creator
+    if (MY_MAXIMA_PK && MY_MAXIMA_PK === MINIMAADS_CREATOR_PK.toUpperCase()) {
+      MDS.keypair.get("USER_PERMANENT_ROUTE", function(permRes) {
+        var permRoute = (permRes && permRes.status && permRes.value) ? permRes.value : "";
+        if (permRoute) {
+          MDS.keypair.get("MINIMAADS_CREATOR_ROUTE", function(curCrRes) {
+            var curCrRoute = (curCrRes && curCrRes.status && curCrRes.value) ? curCrRes.value : "";
+            if (curCrRoute !== permRoute) {
+              MDS.log("[CONFIG] Auto-syncing MINIMAADS_CREATOR_ROUTE with USER_PERMANENT_ROUTE for Platform Creator");
+              MDS.keypair.set("MINIMAADS_CREATOR_ROUTE", permRoute, function() {});
+            }
+          });
+        }
+      });
+    }
+
     registerEscrowScript();
     MDS.cmd("getaddress", function(addrRes) {
       var walletAddr = (addrRes.status && addrRes.response && addrRes.response.address) ? addrRes.response.address : "";
@@ -228,17 +288,24 @@ function handleRegisterPermanent(payload) {
     MDS.log("[SW] DO_REGISTER_PERMANENT: MY contact=" + myContact.substring(0, 60));
     MDS.log("[SW] DO_REGISTER_PERMANENT: MLS address=" + mlsAddr.substring(0, 60));
     var isSelf = myContact && mlsAddr && myContact.substring(0, 60) === mlsAddr.substring(0, 60);
-    MDS.log("[SW] DO_REGISTER_PERMANENT: sending to self=" + isSelf + " (if true, MLS_SERVER_ADDRESS is wrong!)");
 
-    var registerReq = {
-      type: "REGISTER_PERMANENT_REQUEST",
-      publickey: pubkey,
-      requester_contact: requesterContact
-    };
+    if (isSelf) {
+      MDS.log("[SW] DO_REGISTER_PERMANENT: MLS is self, executing locally");
+      MDS.cmd("maxextra action:addpermanent publickey:" + pubkey, function(cmdRes) {
+        MDS.log("[SW] DO_REGISTER_PERMANENT: local execution ok=" + cmdRes.status);
+      });
+    } else {
+      MDS.log("[SW] DO_REGISTER_PERMANENT: sending request to MLS");
+      var registerReq = {
+        type: "REGISTER_PERMANENT_REQUEST",
+        publickey: pubkey,
+        requester_contact: requesterContact
+      };
 
-    sendMaxima(null, mlsAddr, registerReq, function(ok) {
-      MDS.log("[SW] DO_REGISTER_PERMANENT: request sent to MLS, ok=" + ok);
-    });
+      sendMaxima(null, mlsAddr, registerReq, function(ok) {
+        MDS.log("[SW] DO_REGISTER_PERMANENT: request sent to MLS, ok=" + ok);
+      });
+    }
   });
 }
 

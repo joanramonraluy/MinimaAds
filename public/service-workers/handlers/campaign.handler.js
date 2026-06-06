@@ -64,6 +64,19 @@ function handleCampaignAnnounce(payload) {
   });
 }
 
+function _replayPendingPublisherNotify(campaignId) {
+  MDS.keypair.get("PENDING_PUB_NOTIFY_" + campaignId, function(kpRes) {
+    if (!kpRes || !kpRes.status || !kpRes.value) { return; }
+    var data;
+    try { data = JSON.parse(kpRes.value); } catch (e) { return; }
+    MDS.keypair.set("PENDING_PUB_NOTIFY_" + campaignId, "", function() {});
+    MDS.log("[CHANNEL] replaying deferred PUBLISHER_REWARD_NOTIFY for: " + campaignId);
+    if (typeof handlePublisherRewardNotify === 'function') {
+      handlePublisherRewardNotify(data, data.creator_key || '');
+    }
+  });
+}
+
 function persistCampaign(payload, campaignId) {
   saveCampaign(payload.campaign, payload.ad, function(err) {
     if (err) {
@@ -75,6 +88,7 @@ function persistCampaign(payload, campaignId) {
     if (typeof _tryOpenPublisherChannelForAllFrames === 'function') {
       _tryOpenPublisherChannelForAllFrames(campaignId);
     }
+    _replayPendingPublisherNotify(campaignId);
   });
 }
 
@@ -111,6 +125,23 @@ function getStateVar(states, port) {
   return '';
 }
 
+// Fix C helper: reads own permanent route from keypair, builds REQUEST_CAMPAIGN_DATA
+// with requester_mx = permanent route (if registered) or MY_MX_ADDRESS (fallback),
+// then dispatches via PK routing (creatorPk) or direct contact (creatorMx).
+// creatorPk = hex public key string or null; creatorMx = Mx... address or null.
+function _sendRequestCampaignData(campaignId, creatorPk, creatorMx, cb) {
+  MDS.keypair.get("USER_PERMANENT_ROUTE", function(kpRes) {
+    var myRoute = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : "";
+    var requesterMx = (myRoute && myRoute.indexOf("MAX#") === 0) ? myRoute : MY_MX_ADDRESS;
+    var payload = {
+      type: "REQUEST_CAMPAIGN_DATA",
+      campaign_id: campaignId,
+      requester_mx: requesterMx
+    };
+    sendMaxima(creatorPk, creatorMx, payload, cb);
+  });
+}
+
 // Called from main.js scanEscrowCoins for each coin at ESCROW_ADDRESS.
 // Reads STATE(3)=campaign_id_hex, STATE(4)=creator_mx_address.
 // If campaign is unknown locally, sends REQUEST_CAMPAIGN_DATA to creator.
@@ -130,8 +161,36 @@ function processEscrowCoin(coin) {
   }
 
   var campaignId    = hexToUtf8(campaignIdHex);
-  var creatorMxAddr = hexToUtf8(creatorContactHex);
-  MDS.log("[DISCOVERY] coin: " + coinId + " campaignId: " + campaignId + " creatorContact: " + creatorMxAddr);
+  var creatorRaw    = hexToUtf8(creatorContactHex);
+
+  // Fix B: Determine routing mode from STATE(4).
+  // If it encodes a permanent route (MAX#<hexPK>#<mls>), use PK-based routing.
+  // If it encodes the legacy "MAX#Mx...#mls" format, fall back to direct contact.
+  // Otherwise treat as a direct Mx contact address.
+  var creatorPkRoute = null;  // hex public key for PK routing
+  var creatorMxAddr = creatorRaw;  // direct contact fallback
+
+  if (creatorRaw.indexOf("MAX#") === 0) {
+    var routeParts = creatorRaw.split("#");
+    if (routeParts.length === 3) {
+      var routePk = routeParts[1];
+      if (routePk.indexOf("Mx") === 0 || routePk.indexOf("mx") === 0 || routePk.indexOf("MX") === 0) {
+        // Legacy format: extract direct contact address
+        MDS.log("[DISCOVERY] Outdated route format in coin: " + creatorRaw + " — falling back to direct contact: " + routePk);
+        creatorMxAddr = routePk;
+      } else {
+        // Valid permanent route: use PK routing with full route as fallback
+        creatorPkRoute = routePk;
+        creatorMxAddr = creatorRaw;
+        MDS.log("[DISCOVERY] Permanent route in coin: " + creatorRaw + " — using PK routing: " + routePk.substring(0, 10) + "...");
+      }
+    }
+  }
+
+  MDS.log("[DISCOVERY] coin: " + coinId + " campaignId: " + campaignId + " creatorContact: " + (creatorPkRoute ? ("PK:" + creatorPkRoute.substring(0, 10) + "...") : creatorMxAddr));
+
+  // Always refresh routing keypair from on-chain STATE(4) — ensures stale values are overwritten.
+  MDS.keypair.set("CREATOR_MX_" + campaignId, creatorMxAddr ? creatorMxAddr : creatorPkRoute, function() {});
 
   getCampaign(campaignId, function(err, campaign) {
     if (campaign) {
@@ -146,15 +205,8 @@ function processEscrowCoin(coin) {
           function(patchErr) {
             if (patchErr) {
               MDS.log("[DISCOVERY] patch failed: " + patchErr + " — falling back to REQUEST_CAMPAIGN_DATA");
-              MDS.keypair.set("CREATOR_MX_" + campaignId, creatorMxAddr, function() {
-                var refreshPayload = {
-                  type: "REQUEST_CAMPAIGN_DATA",
-                  campaign_id: campaignId,
-                  requester_mx: MY_MX_ADDRESS
-                };
-                sendMaxima(null, creatorMxAddr, refreshPayload, function(ok) {
-                  MDS.log("[DISCOVERY] refresh REQUEST_CAMPAIGN_DATA sent for: " + campaignId + " ok: " + ok);
-                });
+              _sendRequestCampaignData(campaignId, creatorPkRoute, creatorMxAddr, function(ok) {
+                MDS.log("[DISCOVERY] refresh REQUEST_CAMPAIGN_DATA sent for: " + campaignId + " ok: " + ok);
               });
             } else {
               MDS.log("[DISCOVERY] MAX_PUBLISHER_BUDGET patched: " + campaignId + " = " + onChainPubBudget);
@@ -237,15 +289,7 @@ function processEscrowCoin(coin) {
         return;
       }
 
-      // Persist creator Mx so viewer SDK can send CHANNEL_OPEN_REQUEST via to: routing.
-      MDS.keypair.set("CREATOR_MX_" + campaignId, creatorMxAddr, function() {});
-
-      var payload = {
-        type: "REQUEST_CAMPAIGN_DATA",
-        campaign_id: campaignId,
-        requester_mx: MY_MX_ADDRESS
-      };
-      sendMaxima(null, creatorMxAddr, payload, function(ok) {
+      _sendRequestCampaignData(campaignId, creatorPkRoute, creatorMxAddr, function(ok) {
         MDS.log("[DISCOVERY] REQUEST_CAMPAIGN_DATA sent for: " + campaignId + " ok: " + ok);
       });
     });
@@ -323,7 +367,20 @@ function handleRequestCampaignData(payload) {
           cooldown_ms: campaignObj.cooldown_ms,
           platform_key: (typeof PLATFORM_KEY !== 'undefined' && PLATFORM_KEY) ? PLATFORM_KEY : null
         };
-        sendMaxima(null, requesterMx, response, function(ok) {
+        // Fix D: route response via PK if viewer sent a permanent route as requester_mx.
+        var respPk = null;
+        var respMx = requesterMx;
+        if (requesterMx && requesterMx.indexOf("MAX#") === 0) {
+          var rParts = requesterMx.split("#");
+          if (rParts.length === 3) {
+            var rPk = rParts[1];
+            if (rPk.indexOf("Mx") !== 0 && rPk.indexOf("mx") !== 0 && rPk.indexOf("MX") !== 0) {
+              respPk = rPk;
+              respMx = requesterMx;
+            }
+          }
+        }
+        sendMaxima(respPk, respMx, response, function(ok) {
           MDS.log("[CAMPAIGN] CAMPAIGN_DATA_RESPONSE sent for: " + campaignId + " ok: " + ok);
         });
       }
@@ -397,6 +454,7 @@ function onPending(msg) {
       MDS.log("[PENDING] campaign saved: " + campaign.id);
       signalFE("NEW_CAMPAIGN", { campaign_id: campaign.id });
       MDS.keypair.set("PENDING_CAMPAIGN_" + campaign.id, "", function() {});
+      _replayPendingPublisherNotify(campaign.id);
     });
   });
 }
@@ -484,7 +542,8 @@ function checkCampaignStatuses() {
         var campaignId = row.ID;
         var creatorPk  = row.CREATOR_ADDRESS || '';
         MDS.keypair.get("CREATOR_MX_" + campaignId, function(kpRes) {
-          var creatorMx = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : null;
+          var _cmxRaw = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : null;
+          var creatorMx = (_cmxRaw && (_cmxRaw.indexOf("Mx") === 0 || _cmxRaw.indexOf("MAX#") === 0)) ? _cmxRaw : null;
           if (!creatorPk && !creatorMx) { return; }
           var ping = {
             type:        "CREATOR_LIVENESS_PING",

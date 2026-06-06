@@ -73,131 +73,22 @@
     }
 
     // ==========================================
-    // SECTION 1: Platform Creator Configuration
+    // SECTION 1: MLS Configuration
     // ==========================================
-    var creatorSec = document.createElement('section');
-    creatorSec.style.cssText = 'background:var(--pico-card-sectionning-background-color, rgba(0,0,0,0.02));border:1px solid var(--pico-muted-border-color);border-left:4px solid var(--pico-primary);border-radius:0.75rem;padding:1.25rem;display:flex;flex-direction:column;gap:1.25rem;margin:0;';
+    var mlsSec = document.createElement('section');
+    mlsSec.style.cssText = 'background:var(--pico-card-sectionning-background-color, rgba(0,0,0,0.02));border:1px solid var(--pico-muted-border-color);border-left:4px solid var(--pico-primary);border-radius:0.75rem;padding:1.25rem;display:flex;flex-direction:column;gap:1.25rem;margin:0;';
 
-    var creatorTitle = document.createElement('strong');
-    creatorTitle.textContent = '1. Platform Creator Configuration';
-    creatorTitle.style.cssText = 'display:block;font-size:0.95rem;font-weight:700;color:var(--pico-primary);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.1rem;';
-    creatorSec.appendChild(creatorTitle);
+    var mlsTitle = document.createElement('strong');
+    mlsTitle.textContent = '1. MLS';
+    mlsTitle.style.cssText = 'display:block;font-size:0.95rem;font-weight:700;color:var(--pico-primary);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.1rem;';
+    mlsSec.appendChild(mlsTitle);
 
-    // Sub-item 1.1: Platform Key (PLATFORM_KEY)
-    var pkSub = document.createElement('div');
-    pkSub.style.cssText = 'display:flex;flex-direction:column;gap:0.4rem;';
-    
-    var pkSubTitle = document.createElement('span');
-    pkSubTitle.textContent = 'Platform Key (PLATFORM_KEY)';
-    pkSubTitle.style.cssText = 'font-size:0.75rem;font-weight:700;color:var(--pico-muted-color);text-transform:uppercase;letter-spacing:0.05em;';
-    pkSub.appendChild(pkSubTitle);
-
-    var pkStatus = document.createElement('div');
-    pkStatus.id = 'ma-dev-pk-status';
-    pkStatus.style.cssText = 'font-family:monospace;font-size:0.75rem;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);padding:0.6rem 0.75rem;border-radius:0.375rem;margin:0;word-break:break-all;color:var(--pico-color);line-height:1.4;';
-    pkStatus.textContent = 'Current PLATFORM_KEY: ' + (typeof PLATFORM_KEY !== 'undefined' && PLATFORM_KEY ? PLATFORM_KEY : '(not set)');
-    pkSub.appendChild(pkStatus);
-
-    var pkActions = document.createElement('div');
-    pkActions.style.cssText = 'display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;';
-
-    var setSelfBtn = document.createElement('button');
-    setSelfBtn.textContent = 'Set Self Wallet';
-    setSelfBtn.className = 'primary';
-    setSelfBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;';
-    setSelfBtn.addEventListener('click', function() {
-      setSelfBtn.disabled = true;
-      setSelfBtn.textContent = 'Reading…';
-      MDS.cmd('getaddress', function(res) {
-        setSelfBtn.disabled = false;
-        setSelfBtn.textContent = 'Set Self Wallet';
-        if (!res || !res.status || !res.response || !res.response.address) {
-          pkStatus.textContent = 'ERROR: could not read wallet address';
-          pkStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
-          return;
-        }
-        var addr = res.response.address;
-        MDS.keypair.set('PLATFORM_KEY_OVERRIDE', addr, function() {
-          PLATFORM_KEY = addr;
-          pkStatus.textContent = 'PLATFORM_KEY set to: ' + addr + '\n(reload SW to apply)';
-          pkStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
-          refreshKeypairInspector();
-        });
-      });
-    });
-    pkActions.appendChild(setSelfBtn);
-
-    var clearBtn = document.createElement('button');
-    clearBtn.textContent = 'Clear Override';
-    clearBtn.className = 'outline secondary';
-    clearBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;';
-    clearBtn.addEventListener('click', function() {
-      MDS.keypair.set('PLATFORM_KEY_OVERRIDE', '', function() {
-        pkStatus.textContent = 'PLATFORM_KEY override cleared\n(reload SW to apply)';
-        pkStatus.style.borderColor = 'var(--pico-muted-border-color)';
-        refreshKeypairInspector();
-      });
-    });
-    pkActions.appendChild(clearBtn);
-
-    var pkCopyBtn = document.createElement('button');
-    pkCopyBtn.textContent = 'Copy';
-    pkCopyBtn.className = 'outline secondary';
-    pkCopyBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;';
-    pkCopyBtn.addEventListener('click', function() {
-      var currentKey = (typeof PLATFORM_KEY !== 'undefined' && PLATFORM_KEY) ? PLATFORM_KEY : '';
-      if (!currentKey) {
-        pkStatus.textContent = 'ERROR: No Platform Key is set to copy';
-        pkStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
-        return;
-      }
-      navigator.clipboard.writeText(currentKey);
-      var oldText = pkStatus.textContent;
-      pkStatus.textContent = 'Platform Key copied to clipboard!';
-      pkStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
-      setTimeout(function() {
-        pkStatus.textContent = oldText;
-        pkStatus.style.borderColor = 'var(--pico-muted-border-color)';
-      }, 2000);
-    });
-    pkActions.appendChild(pkCopyBtn);
-    pkSub.appendChild(pkActions);
-
-    var extRow = document.createElement('div');
-    extRow.style.cssText = 'display:flex;gap:0.5rem;align-items:stretch;';
-    var extInput = document.createElement('input');
-    extInput.type = 'text';
-    extInput.placeholder = 'Or paste custom creator address (0xABC…)';
-    extInput.style.cssText = 'flex:1;margin:0;padding:0 0.5rem;font-size:0.75rem;font-family:monospace;height:2rem;box-sizing:border-box;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);color:var(--pico-color);border-radius:0.375rem;';
-    var extBtn = document.createElement('button');
-    extBtn.textContent = 'Save';
-    extBtn.className = 'primary';
-    extBtn.style.cssText = 'width:auto;margin:0;padding:0 1rem;font-size:0.75rem;height:2rem;box-sizing:border-box;display:flex;align-items:center;justify-content:center;line-height:2rem;white-space:nowrap;';
-    extBtn.addEventListener('click', function() {
-      var pk = (extInput.value || '').trim();
-      if (!pk) {
-        pkStatus.textContent = 'ERROR: enter a wallet address first';
-        pkStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
-        return;
-      }
-      MDS.keypair.set('PLATFORM_KEY_OVERRIDE', pk, function() {
-        pkStatus.textContent = 'PLATFORM_KEY set to: ' + pk + '\n(reload SW to apply)';
-        pkStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
-        extInput.value = '';
-        refreshKeypairInspector();
-      });
-    });
-    extRow.appendChild(extInput);
-    extRow.appendChild(extBtn);
-    pkSub.appendChild(extRow);
-    creatorSec.appendChild(pkSub);
-
-    // Sub-item 1.2: Register Self as MLS Server
+    // Sub-item 1.1: MLS Server Node & Permanent Registration
     var selfMlsSub = document.createElement('div');
-    selfMlsSub.style.cssText = 'display:flex;flex-direction:column;gap:0.4rem;border-top:1px dashed var(--pico-muted-border-color);padding-top:0.75rem;';
+    selfMlsSub.style.cssText = 'display:flex;flex-direction:column;gap:0.4rem;';
     
     var selfMlsSubTitle = document.createElement('span');
-    selfMlsSubTitle.textContent = 'MLS Server Node & Permanent Registration';
+    selfMlsSubTitle.textContent = '1.1 MLS Server Node';
     selfMlsSubTitle.style.cssText = 'font-size:0.75rem;font-weight:700;color:var(--pico-muted-color);text-transform:uppercase;letter-spacing:0.05em;';
     selfMlsSub.appendChild(selfMlsSubTitle);
 
@@ -240,38 +131,6 @@
     });
     selfMlsActions.appendChild(mlsRegisterBtn);
 
-    var mlsAddSelfKeyBtn = document.createElement('button');
-    mlsAddSelfKeyBtn.textContent = 'Register Self Key on Local MLS';
-    mlsAddSelfKeyBtn.className = 'primary';
-    mlsAddSelfKeyBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;';
-    mlsAddSelfKeyBtn.addEventListener('click', function() {
-      mlsAddSelfKeyBtn.disabled = true;
-      mlsAddSelfKeyBtn.textContent = 'Registering…';
-      getMaximaInfo(function(err, info) {
-        if (err) {
-          mlsAddSelfKeyBtn.disabled = false;
-          mlsAddSelfKeyBtn.textContent = '✕ Error: ' + err.message;
-          setTimeout(function() {
-            mlsAddSelfKeyBtn.textContent = 'Register Self Key on Local MLS';
-          }, 2000);
-          return;
-        }
-        var pk = info.publickey;
-        MDS.cmd('maxextra action:addpermanent publickey:' + pk, function(res) {
-          mlsAddSelfKeyBtn.disabled = false;
-          if (res.status) {
-            mlsAddSelfKeyBtn.textContent = '✓ Success!';
-          } else {
-            mlsAddSelfKeyBtn.textContent = '✕ Error!';
-          }
-          setTimeout(function() {
-            mlsAddSelfKeyBtn.textContent = 'Register Self Key on Local MLS';
-          }, 2000);
-        });
-      });
-    });
-    selfMlsActions.appendChild(mlsAddSelfKeyBtn);
-
     var mlsCopyBtn = document.createElement('button');
     mlsCopyBtn.textContent = 'Copy Server Address';
     mlsCopyBtn.className = 'outline secondary';
@@ -295,109 +154,14 @@
     });
     selfMlsActions.appendChild(mlsCopyBtn);
     selfMlsSub.appendChild(selfMlsActions);
-    creatorSec.appendChild(selfMlsSub);
+    mlsSec.appendChild(selfMlsSub);
 
-    // Sub-item 1.3: Creator Permanent Route Registration
-    var crSub = document.createElement('div');
-    crSub.style.cssText = 'display:flex;flex-direction:column;gap:0.4rem;border-top:1px dashed var(--pico-muted-border-color);padding-top:0.75rem;';
-    
-    var crSubTitle = document.createElement('span');
-    crSubTitle.textContent = 'Creator Permanent Route';
-    crSubTitle.style.cssText = 'font-size:0.75rem;font-weight:700;color:var(--pico-muted-color);text-transform:uppercase;letter-spacing:0.05em;';
-    crSub.appendChild(crSubTitle);
-
-    var crStatus = document.createElement('div');
-    crStatus.id = 'ma-dev-cr-status';
-    crStatus.style.cssText = 'font-family:monospace;font-size:0.75rem;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);padding:0.6rem 0.75rem;border-radius:0.375rem;margin:0;word-break:break-all;color:var(--pico-color);line-height:1.4;';
-    crStatus.textContent = 'Loading Creator Permanent Route…';
-    MDS.keypair.get('CREATOR_PERMANENT_ROUTE', function(res) {
-      var route = (res && res.status && res.value) ? res.value : '';
-      crStatus.textContent = route ? 'Current Route: ' + route : 'Current Route: (not set)';
-    });
-    crSub.appendChild(crStatus);
-
-    var crActions = document.createElement('div');
-    crActions.style.cssText = 'display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;';
-
-    var setSelfCrBtn = document.createElement('button');
-    setSelfCrBtn.textContent = 'Set as Self Route';
-    setSelfCrBtn.className = 'primary';
-    setSelfCrBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;';
-    setSelfCrBtn.addEventListener('click', function() {
-      setSelfCrBtn.disabled = true;
-      setSelfCrBtn.textContent = 'Setting…';
-      setCreatorMaximaRoute(function(err, route) {
-        setSelfCrBtn.disabled = false;
-        setSelfCrBtn.textContent = 'Set as Self Route';
-        if (err) {
-          crStatus.textContent = 'ERROR: ' + err.message;
-          crStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
-        } else {
-          crStatus.textContent = 'Route set to: ' + route;
-          crStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
-          refreshKeypairInspector();
-        }
-      });
-    });
-    crActions.appendChild(setSelfCrBtn);
-
-    var clearCrBtn = document.createElement('button');
-    clearCrBtn.textContent = 'Clear Route';
-    clearCrBtn.className = 'outline secondary';
-    clearCrBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;';
-    clearCrBtn.addEventListener('click', function() {
-      MDS.keypair.set('CREATOR_PERMANENT_ROUTE', '', function() {
-        crStatus.textContent = 'Creator permanent route cleared';
-        crStatus.style.borderColor = 'var(--pico-muted-border-color)';
-        refreshKeypairInspector();
-      });
-    });
-    crActions.appendChild(clearCrBtn);
-
-    var crCopyBtn = document.createElement('button');
-    crCopyBtn.textContent = 'Copy';
-    crCopyBtn.className = 'outline secondary';
-    crCopyBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;';
-    crCopyBtn.addEventListener('click', function() {
-      MDS.keypair.get('CREATOR_PERMANENT_ROUTE', function(res) {
-        var currentRoute = (res && res.status && res.value) ? res.value : '';
-        if (!currentRoute) {
-          crCopyBtn.textContent = '✕ No Route';
-          setTimeout(function() {
-            crCopyBtn.textContent = 'Copy';
-          }, 1500);
-          return;
-        }
-        navigator.clipboard.writeText(currentRoute);
-        crCopyBtn.textContent = '✓ Copied!';
-        setTimeout(function() {
-          crCopyBtn.textContent = 'Copy';
-        }, 1500);
-      });
-    });
-    crActions.appendChild(crCopyBtn);
-    crSub.appendChild(crActions);
-    creatorSec.appendChild(crSub);
-
-    panel.appendChild(creatorSec);
-
-    // ==========================================
-    // SECTION 2: Client / User Configuration
-    // ==========================================
-    var clientSec = document.createElement('section');
-    clientSec.style.cssText = 'background:var(--pico-card-sectionning-background-color, rgba(0,0,0,0.02));border:1px solid var(--pico-muted-border-color);border-left:4px solid #a855f7;border-radius:0.75rem;padding:1.25rem;display:flex;flex-direction:column;gap:1.25rem;margin:0;';
-
-    var clientTitle = document.createElement('strong');
-    clientTitle.textContent = '2. Client / User Configuration';
-    clientTitle.style.cssText = 'display:block;font-size:0.95rem;font-weight:700;color:#a855f7;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.1rem;';
-    clientSec.appendChild(clientTitle);
-
-    // Sub-item 2.1: MLS Server Connection
+    // Sub-item 1.2: Connect to MLS Server
     var connMlsSub = document.createElement('div');
-    connMlsSub.style.cssText = 'display:flex;flex-direction:column;gap:0.4rem;';
+    connMlsSub.style.cssText = 'display:flex;flex-direction:column;gap:0.4rem;border-top:1px dashed var(--pico-muted-border-color);padding-top:0.75rem;';
 
     var connMlsSubTitle = document.createElement('span');
-    connMlsSubTitle.textContent = 'Connect to MLS Server';
+    connMlsSubTitle.textContent = '1.2 Connect to MLS Server';
     connMlsSubTitle.style.cssText = 'font-size:0.75rem;font-weight:700;color:var(--pico-muted-color);text-transform:uppercase;letter-spacing:0.05em;';
     connMlsSub.appendChild(connMlsSubTitle);
 
@@ -426,17 +190,9 @@
           }
           mlsStatus.textContent = text;
           
-          var isOwnMls = info && (
-            (info.p2pidentity && stored === info.p2pidentity) || 
-            (info.localidentity && stored === info.localidentity) || 
-            (info.contact && stored === info.contact)
-          );
-          if (isOwnMls) {
+          if (stored) {
             mlsStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
             mlsStatus.style.color = 'var(--pico-ins-color, #27ae60)';
-          } else if (stored) {
-            mlsStatus.style.borderColor = '#a855f7';
-            mlsStatus.style.color = 'var(--pico-color)';
           } else {
             mlsStatus.style.borderColor = 'var(--pico-muted-border-color)';
             mlsStatus.style.color = 'var(--pico-color)';
@@ -455,7 +211,7 @@
     var mlsBtn = document.createElement('button');
     mlsBtn.textContent = 'Connect';
     mlsBtn.className = 'primary';
-    mlsBtn.style.cssText = 'width:auto;margin:0;padding:0 1rem;font-size:0.75rem;height:2rem;box-sizing:border-box;display:flex;align-items:center;justify-content:center;line-height:2rem;white-space:nowrap;background-color:#a855f7;border-color:#a855f7;';
+    mlsBtn.style.cssText = 'width:auto;margin:0;padding:0 1rem;font-size:0.75rem;height:2rem;box-sizing:border-box;display:flex;align-items:center;justify-content:center;line-height:2rem;white-space:nowrap;';
     mlsBtn.addEventListener('click', function() {
       var addr = (mlsInput.value || '').trim();
       if (!addr) {
@@ -494,104 +250,114 @@
     mlsInputRow.appendChild(mlsInput);
     mlsInputRow.appendChild(mlsBtn);
     connMlsSub.appendChild(mlsInputRow);
-    clientSec.appendChild(connMlsSub);
+    mlsSec.appendChild(connMlsSub);
 
-    // Sub-item 2.2: MLS Permanent Registration (Remote handshake)
-    var regSub = document.createElement('div');
-    regSub.style.cssText = 'display:flex;flex-direction:column;gap:0.4rem;border-top:1px dashed var(--pico-muted-border-color);padding-top:0.75rem;';
 
-    var regSubTitle = document.createElement('span');
-    regSubTitle.textContent = 'Remote MLS Registration';
-    regSubTitle.style.cssText = 'font-size:0.75rem;font-weight:700;color:var(--pico-muted-color);text-transform:uppercase;letter-spacing:0.05em;';
-    regSub.appendChild(regSubTitle);
 
-    var regStatus = document.createElement('div');
-    regStatus.id = 'ma-dev-reg-status';
-    regStatus.style.cssText = 'font-family:monospace;font-size:0.75rem;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);padding:0.6rem 0.75rem;border-radius:0.375rem;margin:0;word-break:break-all;color:var(--pico-color);line-height:1.4;';
-    regStatus.textContent = 'Checking MLS server registration...';
-    regSub.appendChild(regStatus);
+    panel.appendChild(mlsSec);
 
-    function updateRegStatus() {
+    // ==========================================
+    // SECTION 2: MinimaAds Creator Configuration
+    // ==========================================
+    var creatorSec = document.createElement('section');
+    creatorSec.style.cssText = 'background:var(--pico-card-sectionning-background-color, rgba(0,0,0,0.02));border:1px solid var(--pico-muted-border-color);border-left:4px solid #a855f7;border-radius:0.75rem;padding:1.25rem;display:flex;flex-direction:column;gap:1.25rem;margin:0;';
+
+    var creatorTitle = document.createElement('strong');
+    creatorTitle.textContent = '2. MinimaAds Creator';
+    creatorTitle.style.cssText = 'display:block;font-size:0.95rem;font-weight:700;color:#a855f7;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.1rem;';
+    creatorSec.appendChild(creatorTitle);
+
+    // Sub-item 2.1: Platform Creator Route (MinimaAds Developer)
+    var pcDevSub = document.createElement('div');
+    pcDevSub.style.cssText = 'display:flex;flex-direction:column;gap:0.4rem;';
+
+    var pcDevSubTitle = document.createElement('span');
+    pcDevSubTitle.textContent = '2.1 Platform Creator Route (MinimaAds Developer)';
+    pcDevSubTitle.style.cssText = 'font-size:0.75rem;font-weight:700;color:var(--pico-muted-color);text-transform:uppercase;letter-spacing:0.05em;';
+    pcDevSub.appendChild(pcDevSubTitle);
+
+    var registerPlatformBtn = document.createElement('button');
+    registerPlatformBtn.textContent = 'Register as Permanent User';
+    registerPlatformBtn.className = 'primary';
+    registerPlatformBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;background-color:#a855f7;border-color:#a855f7;align-self:flex-start;';
+    registerPlatformBtn.addEventListener('click', function() {
+      registerPlatformBtn.disabled = true;
+      registerPlatformBtn.textContent = 'Registering…';
       getMaximaInfo(function(err, info) {
         if (err) {
-          regStatus.textContent = 'Failed to fetch Maxima info.';
-        } else {
-          MDS.keypair.get('CREATOR_PERMANENT_ROUTE', function(res) {
-            var route = (res && res.status && res.value) ? res.value : '';
-            if (route) {
-              regStatus.textContent = '✓ Registered Permanent Route:\n' + route;
-              regStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
-            } else {
-              regStatus.textContent = 'Your Maxima PK:\n' + info.publickey + '\n\nNot registered yet. Click below to register on the remote MLS server.';
-              regStatus.style.borderColor = 'var(--pico-muted-border-color)';
-            }
-          });
-        }
-      });
-    }
-    setTimeout(updateRegStatus, 100);
-
-    var registerRemoteKeyBtn = document.createElement('button');
-    registerRemoteKeyBtn.textContent = 'Register Client Key on Remote MLS';
-    registerRemoteKeyBtn.className = 'primary';
-    registerRemoteKeyBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;background-color:#a855f7;border-color:#a855f7;';
-    registerRemoteKeyBtn.addEventListener('click', function() {
-      registerRemoteKeyBtn.disabled = true;
-      registerRemoteKeyBtn.textContent = 'Registering…';
-      getMaximaInfo(function(err, info) {
-        if (err) {
-          registerRemoteKeyBtn.disabled = false;
-          registerRemoteKeyBtn.textContent = 'Register Client Key on Remote MLS';
-          regStatus.textContent = 'Error: ' + err.message;
-          regStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
+          registerPlatformBtn.disabled = false;
+          registerPlatformBtn.textContent = 'Register as Permanent User';
+          pcDevStatus.textContent = 'ERROR: ' + err.message;
+          pcDevStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
+          pcDevStatus.style.color = 'var(--pico-del-color, #c0392b)';
           return;
         }
+        
         MDS.comms.solo(JSON.stringify({
           type: "DO_REGISTER_PERMANENT",
           publickey: info.publickey,
           requester_contact: info.contact || ''
         }));
-        
+
         setTimeout(function() {
-          registerRemoteKeyBtn.disabled = false;
-          registerRemoteKeyBtn.textContent = 'Register Client Key on Remote MLS';
+          registerPlatformBtn.disabled = false;
+          registerPlatformBtn.textContent = 'Register as Permanent User';
           setCreatorMaximaRoute(function(err2, route) {
-            if (!err2 && route) {
-              updateRegStatus();
-              refreshKeypairInspector();
-              regStatus.textContent = '✓ Registration completed!\nRoute: ' + route;
-              regStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
+            if (err2) {
+              pcDevStatus.textContent = 'ERROR: ' + err2.message;
+              pcDevStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
+              pcDevStatus.style.color = 'var(--pico-del-color, #c0392b)';
             } else {
-              regStatus.textContent = 'Requested registration.\nCheck SW logs for status.';
+              MDS.keypair.set('MINIMAADS_CREATOR_ROUTE', route, function() {
+                updatePcDevStatus();
+                refreshKeypairInspector();
+              });
             }
           });
         }, 2000);
       });
     });
-    regSub.appendChild(registerRemoteKeyBtn);
-    clientSec.appendChild(regSub);
-
-    // Sub-item 2.3: Platform Creator Route Configuration
-    var pcDevSub = document.createElement('div');
-    pcDevSub.style.cssText = 'display:flex;flex-direction:column;gap:0.4rem;border-top:1px dashed var(--pico-muted-border-color);padding-top:0.75rem;';
-
-    var pcDevSubTitle = document.createElement('span');
-    pcDevSubTitle.textContent = 'MinimaAds Platform Creator Route';
-    pcDevSubTitle.style.cssText = 'font-size:0.75rem;font-weight:700;color:var(--pico-muted-color);text-transform:uppercase;letter-spacing:0.05em;';
-    pcDevSub.appendChild(pcDevSubTitle);
+    pcDevSub.appendChild(registerPlatformBtn);
 
     var pcDevStatus = document.createElement('div');
     pcDevStatus.id = 'ma-dev-pc-status';
     pcDevStatus.style.cssText = 'font-family:monospace;font-size:0.75rem;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);padding:0.6rem 0.75rem;border-radius:0.375rem;margin:0;word-break:break-all;color:var(--pico-color);line-height:1.4;';
     pcDevStatus.textContent = 'Loading Platform Creator Route…';
-    MDS.keypair.get('MINIMAADS_CREATOR_ROUTE', function(res) {
-      var route = (res && res.status && res.value) ? res.value : '';
-      pcDevStatus.textContent = route ? 'Current Route: ' + route : 'Current Route: (not set)';
-      if (route) {
-        pcDevStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
-      }
-    });
+    
+    function updatePcDevStatus() {
+      MDS.keypair.get('MINIMAADS_CREATOR_ROUTE', function(res) {
+        var route = (res && res.status && res.value) ? res.value : '';
+        pcDevStatus.textContent = route ? 'Current Route: ' + route : 'Current Route: (not set)';
+        if (route) {
+          pcDevStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
+          pcDevStatus.style.color = 'var(--pico-ins-color, #27ae60)';
+        } else {
+          pcDevStatus.style.borderColor = 'var(--pico-muted-border-color)';
+          pcDevStatus.style.color = 'var(--pico-color)';
+        }
+      });
+    }
+    setTimeout(updatePcDevStatus, 100);
     pcDevSub.appendChild(pcDevStatus);
+
+    var pcDevCopyBtn = document.createElement('button');
+    pcDevCopyBtn.textContent = 'Copy';
+    pcDevCopyBtn.className = 'outline secondary';
+    pcDevCopyBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;align-self:flex-start;';
+    pcDevCopyBtn.addEventListener('click', function() {
+      MDS.keypair.get('MINIMAADS_CREATOR_ROUTE', function(res) {
+        var currentRoute = (res && res.status && res.value) ? res.value : '';
+        if (!currentRoute) {
+          pcDevCopyBtn.textContent = '✕ No Route';
+          setTimeout(function() { pcDevCopyBtn.textContent = 'Copy'; }, 1500);
+          return;
+        }
+        navigator.clipboard.writeText(currentRoute);
+        pcDevCopyBtn.textContent = '✓ Copied!';
+        setTimeout(function() { pcDevCopyBtn.textContent = 'Copy'; }, 1500);
+      });
+    });
+    pcDevSub.appendChild(pcDevCopyBtn);
 
     var pcDevInputRow = document.createElement('div');
     pcDevInputRow.style.cssText = 'display:flex;gap:0.5rem;align-items:center;';
@@ -620,8 +386,7 @@
         pcDevSaveBtn.disabled = false;
         pcDevSaveBtn.textContent = '✓ Saved';
         pcDevInput.value = '';
-        pcDevStatus.textContent = 'Route set to: ' + route;
-        pcDevStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
+        updatePcDevStatus();
         refreshKeypairInspector();
         setTimeout(function() { pcDevSaveBtn.textContent = 'Save'; }, 1500);
       });
@@ -632,8 +397,7 @@
     pcDevClearBtn.style.cssText = 'width:auto;margin:0;padding:0 1rem;font-size:0.75rem;height:2rem;box-sizing:border-box;display:flex;align-items:center;justify-content:center;line-height:2rem;white-space:nowrap;';
     pcDevClearBtn.addEventListener('click', function() {
       MDS.keypair.set('MINIMAADS_CREATOR_ROUTE', '', function() {
-        pcDevStatus.textContent = 'Current Route: (not set)';
-        pcDevStatus.style.borderColor = 'var(--pico-muted-border-color)';
+        updatePcDevStatus();
         refreshKeypairInspector();
       });
     });
@@ -641,9 +405,135 @@
     pcDevInputRow.appendChild(pcDevSaveBtn);
     pcDevInputRow.appendChild(pcDevClearBtn);
     pcDevSub.appendChild(pcDevInputRow);
-    clientSec.appendChild(pcDevSub);
+    creatorSec.appendChild(pcDevSub);
 
-    panel.appendChild(clientSec);
+    // Sub-item 2.2: Platform Key (PLATFORM_KEY)
+    var pkSub = document.createElement('div');
+    pkSub.style.cssText = 'display:flex;flex-direction:column;gap:0.4rem;border-top:1px dashed var(--pico-muted-border-color);padding-top:0.75rem;';
+    
+    var pkSubTitle = document.createElement('span');
+    pkSubTitle.textContent = '2.2 Platform Key (PLATFORM_KEY)';
+    pkSubTitle.style.cssText = 'font-size:0.75rem;font-weight:700;color:var(--pico-muted-color);text-transform:uppercase;letter-spacing:0.05em;';
+    pkSub.appendChild(pkSubTitle);
+
+    var pkStatus = document.createElement('div');
+    pkStatus.id = 'ma-dev-pk-status';
+    pkStatus.style.cssText = 'font-family:monospace;font-size:0.75rem;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);padding:0.6rem 0.75rem;border-radius:0.375rem;margin:0;word-break:break-all;color:var(--pico-color);line-height:1.4;';
+    pkStatus.textContent = 'Loading Platform Key…';
+    
+    function updatePlatformKeyStatus() {
+      MDS.keypair.get('PLATFORM_KEY_OVERRIDE', function(res) {
+        var override = (res && res.status && res.value) ? res.value : '';
+        var activeKey = override || (typeof PLATFORM_KEY !== 'undefined' && PLATFORM_KEY ? PLATFORM_KEY : '');
+        
+        var displayLabel = override ? 'Current PLATFORM_KEY (overridden): ' + activeKey : 'Current PLATFORM_KEY: ' + (activeKey || '(not set)');
+        pkStatus.textContent = displayLabel;
+
+        if (activeKey) {
+          pkStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
+          pkStatus.style.color = 'var(--pico-ins-color, #27ae60)';
+        } else {
+          pkStatus.style.borderColor = 'var(--pico-muted-border-color)';
+          pkStatus.style.color = 'var(--pico-color)';
+        }
+      });
+    }
+    setTimeout(updatePlatformKeyStatus, 100);
+    pkSub.appendChild(pkStatus);
+
+    var pkActions = document.createElement('div');
+    pkActions.style.cssText = 'display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;';
+
+    var setSelfBtn = document.createElement('button');
+    setSelfBtn.textContent = 'Set Self Wallet';
+    setSelfBtn.className = 'primary';
+    setSelfBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;background-color:#a855f7;border-color:#a855f7;';
+    setSelfBtn.addEventListener('click', function() {
+      setSelfBtn.disabled = true;
+      setSelfBtn.textContent = 'Reading…';
+      MDS.cmd('getaddress', function(res) {
+        setSelfBtn.disabled = false;
+        setSelfBtn.textContent = 'Set Self Wallet';
+        if (!res || !res.status || !res.response || !res.response.address) {
+          pkStatus.textContent = 'ERROR: could not read wallet address';
+          pkStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
+          pkStatus.style.color = 'var(--pico-del-color, #c0392b)';
+          return;
+        }
+        var addr = res.response.address;
+        MDS.keypair.set('PLATFORM_KEY_OVERRIDE', addr, function() {
+          PLATFORM_KEY = addr;
+          updatePlatformKeyStatus();
+          refreshKeypairInspector();
+        });
+      });
+    });
+    pkActions.appendChild(setSelfBtn);
+
+    var clearBtn = document.createElement('button');
+    clearBtn.textContent = 'Clear Override';
+    clearBtn.className = 'outline secondary';
+    clearBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;';
+    clearBtn.addEventListener('click', function() {
+      MDS.keypair.set('PLATFORM_KEY_OVERRIDE', '', function() {
+        updatePlatformKeyStatus();
+        refreshKeypairInspector();
+      });
+    });
+    pkActions.appendChild(clearBtn);
+
+    var pkCopyBtn = document.createElement('button');
+    pkCopyBtn.textContent = 'Copy';
+    pkCopyBtn.className = 'outline secondary';
+    pkCopyBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;';
+    pkCopyBtn.addEventListener('click', function() {
+      MDS.keypair.get('PLATFORM_KEY_OVERRIDE', function(res) {
+        var override = (res && res.status && res.value) ? res.value : '';
+        var currentKey = override || (typeof PLATFORM_KEY !== 'undefined' && PLATFORM_KEY ? PLATFORM_KEY : '');
+        if (!currentKey) {
+          pkCopyBtn.textContent = '✕ No Key';
+          setTimeout(function() { pkCopyBtn.textContent = 'Copy'; }, 1500);
+          return;
+        }
+        navigator.clipboard.writeText(currentKey);
+        pkCopyBtn.textContent = '✓ Copied!';
+        setTimeout(function() { pkCopyBtn.textContent = 'Copy'; }, 1500);
+      });
+    });
+    pkActions.appendChild(pkCopyBtn);
+    pkSub.appendChild(pkActions);
+
+    var extRow = document.createElement('div');
+    extRow.style.cssText = 'display:flex;gap:0.5rem;align-items:stretch;';
+    var extInput = document.createElement('input');
+    extInput.type = 'text';
+    extInput.placeholder = 'Or paste custom platform address (0xABC…)';
+    extInput.style.cssText = 'flex:1;margin:0;padding:0 0.5rem;font-size:0.75rem;font-family:monospace;height:2rem;box-sizing:border-box;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);color:var(--pico-color);border-radius:0.375rem;';
+    var extBtn = document.createElement('button');
+    extBtn.textContent = 'Save';
+    extBtn.className = 'primary';
+    extBtn.style.cssText = 'width:auto;margin:0;padding:0 1rem;font-size:0.75rem;height:2rem;box-sizing:border-box;display:flex;align-items:center;justify-content:center;line-height:2rem;white-space:nowrap;background-color:#a855f7;border-color:#a855f7;';
+    extBtn.addEventListener('click', function() {
+      var pk = (extInput.value || '').trim();
+      if (!pk) {
+        pkStatus.textContent = 'ERROR: enter a wallet address first';
+        pkStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
+        pkStatus.style.color = 'var(--pico-del-color, #c0392b)';
+        return;
+      }
+      MDS.keypair.set('PLATFORM_KEY_OVERRIDE', pk, function() {
+        PLATFORM_KEY = pk;
+        updatePlatformKeyStatus();
+        extInput.value = '';
+        refreshKeypairInspector();
+      });
+    });
+    extRow.appendChild(extInput);
+    extRow.appendChild(extBtn);
+    pkSub.appendChild(extRow);
+    creatorSec.appendChild(pkSub);
+
+    panel.appendChild(creatorSec);
 
     // ==========================================
     // SECTION 3: Database & storage console
@@ -669,7 +559,7 @@
     dbSec.appendChild(kpSub);
 
     addKpRow('MLS_SERVER_ADDRESS');
-    addKpRow('CREATOR_PERMANENT_ROUTE');
+    addKpRow('USER_PERMANENT_ROUTE');
     addKpRow('MINIMAADS_CREATOR_ROUTE');
     addKpRow('PLATFORM_KEY_OVERRIDE');
     refreshKeypairInspector();

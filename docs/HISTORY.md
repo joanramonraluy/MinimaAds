@@ -46,6 +46,97 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-05 — Invalidate and Auto-Clear Outdated Route Formats
+
+**Task**: Fix off-chain campaign discovery failing with "Unknown publickey" error on the MLS Server for nodes using pre-existing/outdated route configurations by automatically detecting, invalidating, and clearing them, and adding a self-healing fallback to parse direct contact addresses from legacy formats.
+
+**Changes**:
+- **core/minima.js** (`parseMaximaRoute`):
+  - Updated to reject routes where the publickey segment starts with `Mx`, `mx`, or `MX` (since they represent direct contact strings rather than hex public keys).
+- **core/minima.js** (`getCreatorMaximaRoute`):
+  - Updated to validate the retrieved route; if the route is invalid or outdated, it prints a log and automatically deletes the keypair `CREATOR_PERMANENT_ROUTE` to trigger the re-registration flow in the UI.
+- **public/service-workers/handlers/campaign.handler.js** (`processEscrowCoin`):
+  - Added a self-healing parser fallback: if the discovered creator route starts with `MAX#` but the node key starts with `Mx` (legacy format), the handler automatically extracts the direct contact address `Mx...` and routes the `REQUEST_CAMPAIGN_DATA` Maxima message to it directly instead of trying a MLS lookup.
+
+**Why**: (1) Ensures that any node containing a legacy `MAX#Mx...` route in their local database automatically clears it, forcing them to re-register the correct hex format. (2) Protects campaign availability by falling back to direct contact communication if a viewer node discovers an on-chain campaign funded with the legacy route format.
+
+**AGENTS.md updated**: yes — §6 updated.
+
+**Verification**:
+- Verify that `parseMaximaRoute` successfully invalidates any route with an `Mx` node key.
+- Verify that calling `getCreatorMaximaRoute()` with an outdated route deletes it from keypairs.
+- Verify that a viewer scanning an escrow coin with the legacy route falls back to sending directly to the extracted `Mx` address.
+
+---
+
+### Session: 2026-06-05 — Platform Creator Permanent Address Registration
+
+**Task**: Implement an input field in the settings UI to register the Platform Creator's stable Maxima permanent route (MAX#...). Ensure the viewer node uses this route for built-in frame reward requests, and campaign creator/publisher nodes fallback to it when routing notifications. Also support client nodes registering their own permanent routes through a remote MLS server.
+
+**Changes**:
+- **core/minima.js** (`setCreatorMaximaRoute`): Removed strict `staticmls === true` requirement so client nodes with remote MLS can also build and save their permanent route.
+- **dapp/views/settings-maxima-routes.js**: Consolidated permanent registration flow; Section 2 shows verified registered route; Section 3 added "MinimaAds Platform Creator Route" with input, Save, and Clear buttons (saved under `MINIMAADS_CREATOR_ROUTE` keypair).
+- **dapp/views/devtools.js**: Restructured into three clean visual sections; added SQL Console; partitioned MLS actions; fixed "Register This Node as MLS Server" to use node's own P2P identity.
+- **public/service-workers/handlers/comms.handler.js** (`_sendRewardRequest`): Reads `MINIMAADS_CREATOR_ROUTE` when publisherKey equals `MINIMAADS_CREATOR_PK`.
+- **public/service-workers/handlers/channel.handler.js**: Propagated `publisher_mx` through PENDING_VOUCHER queue; `_notifyPublisherByKey` queries `MINIMAADS_CREATOR_ROUTE` for platform creator; `checkOnePendingVoucher` passes publisherMx to `_maybeGeneratePublisherVoucher`.
+
+**AGENTS.md updated**: yes — §6 updated.
+
+---
+
+### Session: 2026-06-05 — Reorder, Automate, and Clean Creator Permanent Route Registration in DevTools
+
+**Task**: Swap positions of MLS Server Configuration and Creator Permanent Route Configuration in DevTools (Ctrl+Shift+D). Also, add a new explicit "MLS Permanent Registration" section in DevTools to register the node's key locally on the MLS server, and remove the unnecessary custom route input field and "Save" button from DevTools.
+
+**Changes**:
+- **dapp/views/devtools.js**:
+  - Moved the MLS Server Configuration section code block above the Creator Permanent Route Configuration section.
+  - Added a new middle section: "MLS Permanent Registration" with a "Register Self Key on MLS" button, which executes `maxextra action:addpermanent publickey:<local_pk>` locally.
+  - Removed the custom route input field and "Save" button from the Creator Permanent Route Configuration section.
+- **core/minima.js** (`setCreatorMaximaRoute`):
+  - Reverted the temporary background registration change so that Option 3 (Set as Self Route) only sets the `CREATOR_PERMANENT_ROUTE` keypair value without running MLS server commands.
+
+**Why**: Arranges setup steps logically, structures registration into three clean, separate stages (server host configuration, permanent registration, and route keypair setting), and declutters DevTools by removing unused custom input.
+
+**AGENTS.md updated**: yes — §6 updated.
+
+**Verification**:
+- Press Ctrl+Shift+D to open the DevTools panel.
+- Verify that "MLS Server Configuration", "MLS Permanent Registration", and "Creator Permanent Route Configuration" appear in that order.
+- Click "Register Self Key on MLS" and verify that it registers the local key on the MLS server.
+- Click "Set as Self Route" to save the route in keypairs.
+- Verify there is no custom input text field or "Save" button.
+- No console errors.
+
+---
+
+### Session: 2026-06-05 — Remote Permanent Route Registration via Service Worker
+
+**Task**: Implement background registration of permanent route at MLS. FE requests SW to register (so it works even if DApp is closed); SW sends Maxima message to MLS in background.
+
+**Changes**:
+- **dapp/views/settings-maxima-routes.js**:
+  - Modified "Register as Permanent" button: instead of local `MDS.cmd("maxima ...")`, now calls `MDS.comms.solo(JSON.stringify({type: "DO_REGISTER_PERMANENT", publickey: ...}))` to request SW asynchronously.
+  - FE waits 2 seconds (for SW to process in background), then calls `setCreatorMaximaRoute()` to fetch and display the newly registered permanent route.
+- **service.js** (`onComms` dispatcher + new handler):
+  - Added `DO_REGISTER_PERMANENT` branch to `onComms()`.
+  - New `handleRegisterPermanent(payload)`: fetches `MLS_SERVER_ADDRESS` from keypair, constructs `REGISTER_PERMANENT_REQUEST` with publickey, sends to MLS via `sendMaxima(null, mlsAddr, registerReq, cb)` in background.
+- **public/service-workers/handlers/maxima.handler.js** (existing from earlier fix):
+  - `REGISTER_PERMANENT_REQUEST` dispatcher branch + `handleRegisterPermanentRequest()` handler (executes `maxextra action:addpermanent` at MLS and sends back `REGISTER_PERMANENT_RESPONSE`).
+
+**Why**: (1) SW is always running in background — registration works even if DApp is closed. (2) Mirrors campaign/reward Maxima communication pattern — SW handles Maxima outbound, FE requests. (3) MLS (SW) executes command locally so registration applies at correct node.
+
+**AGENTS.md updated**: yes — §6 updated.
+
+**Verification**:
+- Node A (creator): `#settings/maxima-routes` → configure MLS address → click "Register as Permanent".
+- Node A FE: should see "Registering with MLS..." → after 2s, should display permanent route (MAX#...#...).
+- Node A SW logs: should show `DO_REGISTER_PERMANENT received`, `sending request to MLS`, `request sent ok=true`.
+- Node B (MLS) SW logs: should show `REGISTER_PERMANENT_REQUEST from ...`, `REGISTER_PERMANENT executed successfully`.
+- No console errors. Works even if DApp is closed (SW runs in background).
+
+---
+
 ### Session: 2026-06-05 — Include CREATOR_PERMANENT_ROUTE in REWARD_REQUEST Payload
 
 **Task**: Add `publisher_mx` field to the `REWARD_REQUEST` Maxima payload in `_sendRewardRequest`, carrying the creator's permanent Maxima route (`CREATOR_PERMANENT_ROUTE` keypair value) so the creator node can send `PUBLISHER_REWARD_NOTIFY` back via a stable route.
@@ -474,4 +565,118 @@ The remaining DEFERRED state is expected (no open publisher channel yet), not a 
     - `_doLoadEvents()` (new helper): extracted event-table rendering logic shared by both settled and active paths.
 - **Why**: Ensures every channel lifecycle transition is fully archived and individually visible.
 - **AGENTS.md updated**: yes.
+
+---
+
+### Session: 2026-06-05 — Use Permanent Route in STATE(4) and PK-Routing for Campaign Discovery
+
+**Task**: Fix viewers being unable to discover campaigns when creator nodes have no static IP or stale direct contact in STATE(4) of the escrow coin. Apply four targeted fixes using the permanent Maxima route (`MAX#<hexPK>#<mls>`) instead of `MY_MX_ADDRESS`.
+
+**Changes**:
+- **public/service-workers/handlers/channel.handler.js** (`swBuildAndPostChannelTx`):
+  - Wrapped body in `MDS.keypair.get("CREATOR_PERMANENT_ROUTE", ...)`. If a valid `MAX#...` route is registered, encodes it as STATE(4) instead of `MY_MX_ADDRESS`. Inner work moved to `_swBuildAndPostChannelTxInner`.
+- **public/service-workers/handlers/campaign.handler.js** (`processEscrowCoin`):
+  - When STATE(4) decodes to `MAX#<hexPK>#<mls>` with a valid hex PK, sets `creatorPkRoute = pk` and `creatorMxAddr = null` to enable PK-based MLS routing.
+- **public/service-workers/handlers/campaign.handler.js** (new `_sendRequestCampaignData` helper):
+  - Reads `CREATOR_PERMANENT_ROUTE` keypair and sets `requester_mx` to the permanent route if available; falls back to `MY_MX_ADDRESS`. All `REQUEST_CAMPAIGN_DATA` sends go through this helper.
+- **public/service-workers/handlers/campaign.handler.js** (`handleRequestCampaignData`):
+  - If `requester_mx` starts with `MAX#` and has a hex PK, routes `CAMPAIGN_DATA_RESPONSE` via `sendMaxima(respPk, null, ...)` instead of `sendMaxima(null, requesterMx, ...)`.
+
+**Why**: Both the creator's STATE(4) and the viewer's `requester_mx` were using `MY_MX_ADDRESS` (direct contact), which is empty/stale on nodes without a static IP or MLS. The permanent route is stable across IP changes and is routed via MLS, so using it in both directions makes campaign discovery resilient.
+
+**AGENTS.md updated**: yes — §6 updated.
+
+**Verification**:
+- Creator node: register permanent route in DevTools (Ctrl+Shift+D), then create a new campaign. Verify the new escrow coin's STATE(4) (visible in SQL console: `SELECT * FROM CAMPAIGNS`) stores a `MAX#...` hex route.
+- Viewer node: on a node with no static IP (`MY_MX_ADDRESS` empty), wait for escrow coin scan. Verify `[DISCOVERY] Permanent route in coin:` log appears and `REQUEST_CAMPAIGN_DATA` is sent via PK routing.
+- Creator node: verify `CAMPAIGN_DATA_RESPONSE` is routed back to the viewer's permanent route (check SW log for `[CAMPAIGN] CAMPAIGN_DATA_RESPONSE sent`).
+- Viewer receives campaign in `#viewer` view without errors.
+
+---
+
+### Session: 2026-06-05 — Fix Rewards for Built-in Viewer and Custom Snippet
+
+**Task**: Rewards (viewer + publisher) were not arriving when ads were viewed via the built-in viewer (`viewer.js`) or the embedded snippet. Root cause: wrong `frame_id` in REWARD_REQUEST caused the creator to silently drop publisher `CHANNEL_OPEN_REQUEST` for the built-in frame, and snippets were missing `frameId`/`publisherMx` in tracking calls.
+
+**Changes**:
+- **public/service-workers/handlers/comms.handler.js**:
+  - `handleTrackView` and `handleTrackClick`: extract `frameId` and `publisherMx` from MA_TRACK_VIEW/MA_TRACK_CLICK payload and thread them through `_triggerChannelPayment`.
+  - `_triggerChannelPayment`, `_sendChannelOpenRequest`, `_resolveViewerAddrAndSend`, `_doSendChannelOpenRequest`: all now accept and thread `frameId` and `publisherMx`.
+  - `_doSendChannelOpenRequest`: stores `frame_id` and `publisher_mx` in `PENDING_REWARD_` keypair.
+  - `_sendRewardRequest`: when `publisherKey == MINIMAADS_CREATOR_PK`, uses `"builtin:" + MINIMAADS_CREATOR_PK.toUpperCase()` as `frame_id` (was `MY_MAXIMA_PK` — wrong). For custom snippets, uses snippet-provided `frameId`.
+  - `_doSendRewardRequestWithRoute`: signature updated to take `resolvedFrameId` and `pubMxRoute` as separate args.
+- **public/service-workers/handlers/channel.handler.js**:
+  - `handleChannelOpen` auto-REWARD_REQUEST: now includes `frame_id` and `publisher_mx` from the `PENDING_REWARD_` keypair.
+- **dapp/views/frames.js**:
+  - `_loadSnippet`: also reads `PUBLISHER_MX` from FRAMES table.
+  - `_buildSnippet(fid, pubKey, pubMx)`: embeds `frameId` and `publisherMx` as snippet constants.
+  - Snippet `_trackView` and `_trackClick`: now include `frameId` and `publisherMx` in the broadcast payload.
+
+**Why**: `frame_id = "builtin:" + viewer_PK` in REWARD_REQUEST caused `handleChannelOpenRequest` to drop publisher CHANNEL_OPEN_REQUEST because `claimedPk (viewer_PK) !== sndrPk (MINIMAADS_CREATOR_PK)`. The fix sets the platform creator's built-in frame ID for built-in viewer rewards, and threads the custom frame ID/publisherMx for snippets.
+
+**AGENTS.md updated**: yes — §6 updated.
+
+**Verification**:
+- User3 (viewer) opens `#viewer`, waits for ad, views it. Confirm `MA_TRACK_VIEW confirmed` in SW log.
+- Confirm REWARD_REQUEST is sent with `frame_id = "builtin:<MINIMAADS_CREATOR_PK>"` (not viewer's PK).
+- User4 (platform creator/publisher) receives PUBLISHER_REWARD_NOTIFY, opens publisher channel, receives publisher reward.
+- For custom snippet: embed snippet in a MiniDapp, view an ad, confirm correct `frameId` logged in SW.
+- No console errors on either node.
+
+---
+
+### Session: 2026-06-06 — Rename CREATOR_PERMANENT_ROUTE to USER_PERMANENT_ROUTE
+
+**Task**: Globally rename the keypair key `CREATOR_PERMANENT_ROUTE` to `USER_PERMANENT_ROUTE` (as it represents the node's permanent route, independent of role), implement seamless database migration on boot for both Service Worker and Front-End runtimes, and update all usages across all layers.
+
+**Changes**:
+- **service.js**:
+  - In `initBootstrap` (inside `initDB` callback), added a migration step: if the legacy key `CREATOR_PERMANENT_ROUTE` exists, it copies its value to `USER_PERMANENT_ROUTE`, sets the legacy key to `""` to clear it, and then continues boot-up using `USER_PERMANENT_ROUTE`.
+  - Updated auto-sync logic for Platform Creator to read/update `USER_PERMANENT_ROUTE`.
+- **core/minima.js**:
+  - In `setCreatorMaximaRoute` and `getCreatorMaximaRoute`, changed `CREATOR_PERMANENT_ROUTE` references to `USER_PERMANENT_ROUTE`.
+- **public/service-workers/handlers/channel.handler.js**:
+  - Updated calls to `MDS.keypair.get` to query `USER_PERMANENT_ROUTE` instead of `CREATOR_PERMANENT_ROUTE`.
+- **public/service-workers/handlers/campaign.handler.js**:
+  - Updated `_sendRequestCampaignData` to check `USER_PERMANENT_ROUTE` instead of `CREATOR_PERMANENT_ROUTE`.
+- **dapp/app.js**:
+  - In `onInited`, added the same front-end boot-time migration sequence checking for legacy `CREATOR_PERMANENT_ROUTE` and writing to `USER_PERMANENT_ROUTE`.
+- **dapp/views/settings-maxima-routes.js**:
+  - Updated checked key from `CREATOR_PERMANENT_ROUTE` to `USER_PERMANENT_ROUTE`.
+- **dapp/views/devtools.js**:
+  - Replaced all query, copy, clear, and save actions target keys from `CREATOR_PERMANENT_ROUTE` to `USER_PERMANENT_ROUTE`.
+  - Updated `addKpRow` to inspect and show `USER_PERMANENT_ROUTE` directly, removing the legacy parenthesis label.
+  - Removed the "Copy" button from Section 1.3 ("Remote MLS Registration").
+- **MinimaAds.md**:
+  - Updated documentation table in Section 3.6 to refer to `USER_PERMANENT_ROUTE`.
+
+**Why**: Unifies permanent MLS routing identification to a role-agnostic name `USER_PERMANENT_ROUTE`, preventing data loss for existing setups via runtime migration blocks.
+
+**AGENTS.md updated**: yes — §6 updated.
+
+**Verification**:
+- Verified that all modified JS files compile cleanly with `node -c`.
+
+---
+
+### Session: 2026-06-06 — Unify MLS Route Registration and Clean DevTools
+
+**Task**: Review DevTools panel (Ctrl+Shift+D), unify static route/MLS registration flows, remove the redundant "Register Self Key on Local MLS" button, and handle local registration in the Service Worker when MLS address is self.
+
+**Changes**:
+- **service.js**:
+  - In `handleRegisterPermanent`, check if the configured `MLS_SERVER_ADDRESS` is equal to `MY_MX_ADDRESS` (isSelf).
+  - If self, execute `maxextra action:addpermanent publickey:<pubkey>` locally using `MDS.cmd` directly.
+  - If remote, send the `REGISTER_PERMANENT_REQUEST` Maxima message to the remote MLS server.
+- **dapp/views/devtools.js**:
+  - Removed the `mlsAddSelfKeyBtn` button ("Register Self Key on Local MLS") and its click listener block.
+
+**Why**: Removes the redundant manual registration button from DevTools and routes the registration flow locally in the SW when the configured MLS is self, maintaining a single unified front-end flow.
+
+**AGENTS.md updated**: yes — §6 updated.
+
+**Verification**:
+- Opened DevTools modal (Ctrl+Shift+D) and verified "Register Self Key on Local MLS" button is removed.
+- Verified local and remote execution paths in `service.js` work correctly.
+
 

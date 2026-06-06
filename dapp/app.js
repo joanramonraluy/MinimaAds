@@ -1831,6 +1831,13 @@ function onInited() {
       if (kpRes && kpRes.status && kpRes.value) {
         PLATFORM_KEY = kpRes.value;
       }
+      MDS.keypair.get('MINIMAADS_CREATOR_ROUTE', function(crRes) {
+        if (crRes && crRes.status && crRes.value) {
+          var crParts = crRes.value.split('#');
+          if (crParts.length === 3 && crParts[0] === 'MAX') {
+            MINIMAADS_CREATOR_PK = crParts[1].toUpperCase();
+          }
+        }
       MDS.keypair.get('USER_MODE', function(modeRes) {
         if (modeRes && modeRes.status && modeRes.value && MODE_VIEWS[modeRes.value]) {
           _activeMode = modeRes.value;
@@ -1850,18 +1857,52 @@ function onInited() {
             if (res.response.name)      { MY_MX_NAME    = res.response.name; }
             if (res.response.icon && res.response.icon !== '0x00') { MY_MX_ICON = res.response.icon; }
           }
-          initFEFrames(function() {
-            initFEChannelState(function() {
-              initFEChannelHistory(function() {
-                renderNav();
-                probeDb();
-                doRender();
+          // Migration of legacy CREATOR_PERMANENT_ROUTE to USER_PERMANENT_ROUTE
+          MDS.keypair.get('CREATOR_PERMANENT_ROUTE', function(oldRes) {
+            var oldRoute = (oldRes && oldRes.status && oldRes.value) ? oldRes.value : '';
+            if (oldRoute) {
+              MDS.keypair.set('USER_PERMANENT_ROUTE', oldRoute, function() {
+                MDS.keypair.set('CREATOR_PERMANENT_ROUTE', '', function() {
+                  proceedBootFE();
+                });
+              });
+            } else {
+              proceedBootFE();
+            }
+          });
+
+          function proceedBootFE() {
+            if (MY_ADDRESS && MY_ADDRESS === MINIMAADS_CREATOR_PK.toUpperCase()) {
+              MDS.keypair.get('USER_PERMANENT_ROUTE', function(permRes) {
+                var permRoute = (permRes && permRes.status && permRes.value) ? permRes.value : '';
+                if (permRoute) {
+                  MDS.keypair.get('MINIMAADS_CREATOR_ROUTE', function(curCrRes) {
+                    var curCrRoute = (curCrRes && curCrRes.status && curCrRes.value) ? curCrRes.value : '';
+                    if (curCrRoute !== permRoute) {
+                      MDS.keypair.set('MINIMAADS_CREATOR_ROUTE', permRoute, function() {
+                        if (currentRoute() === 'settings/maxima-routes') {
+                          doRender();
+                        }
+                      });
+                    }
+                  });
+                }
+              });
+            }
+            initFEFrames(function() {
+              initFEChannelState(function() {
+                initFEChannelHistory(function() {
+                  renderNav();
+                  probeDb();
+                  doRender();
+                });
               });
             });
-          });
+          }
         });
         });
         });
+      });
       });
     });
   });

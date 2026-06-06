@@ -92,7 +92,11 @@ function parseMaximaRoute(route) {
   if (route.indexOf("MAX#") !== 0) { return null; }
   var parts = route.split("#");
   if (parts.length !== 3) { return null; }
-  return { publickey: parts[1], mls: parts[2] };
+  var pk = parts[1];
+  if (pk.indexOf("Mx") === 0 || pk.indexOf("mx") === 0 || pk.indexOf("MX") === 0) {
+    return null;
+  }
+  return { publickey: pk, mls: parts[2] };
 }
 
 // Helper: Build and store the creator permanent route MAX#<pk>#<mls>.
@@ -102,25 +106,43 @@ function setCreatorMaximaRoute(cb) {
     if (!resp.status || !resp.response) { return cb(new Error("Cannot read maxima info")); }
     var mls = resp.response.mls || "";
     if (!mls) { return cb(new Error("Node does not have static MLS configured")); }
-    var contact = resp.response.contact || "";
-    // Extract Maxima PK (Mx...) from contact address (Mx...@host:port)
-    var maximaPk = '';
-    if (contact && contact.indexOf('@') > 0) {
-      maximaPk = contact.substring(0, contact.indexOf('@'));
-    }
-    if (!maximaPk) { return cb(new Error("Cannot extract Maxima PK from contact")); }
+    var maximaPk = resp.response.publickey || "";
+    if (!maximaPk) { return cb(new Error("Node does not have a Maxima public key")); }
     var permanentRoute = "MAX#" + maximaPk + "#" + mls;
-    MDS.keypair.set("CREATOR_PERMANENT_ROUTE", permanentRoute, function() {
-      cb(null, permanentRoute);
+    MDS.keypair.set("USER_PERMANENT_ROUTE", permanentRoute, function() {
+      if (maximaPk.toUpperCase() === MINIMAADS_CREATOR_PK.toUpperCase()) {
+        MDS.keypair.set("MINIMAADS_CREATOR_ROUTE", permanentRoute, function() {
+          cb(null, permanentRoute);
+        });
+      } else {
+        cb(null, permanentRoute);
+      }
     });
   });
 }
 
 // Helper: Get the stored creator permanent route.
 // Calls cb(route) where route is the MAX# string, or null if not set.
+// If stored route is in the outdated/invalid format, automatically clears it.
 function getCreatorMaximaRoute(cb) {
-  MDS.keypair.get("CREATOR_PERMANENT_ROUTE", function(res) {
+  MDS.keypair.get("USER_PERMANENT_ROUTE", function(res) {
     var route = (res && res.status && res.value) ? res.value : null;
+    if (route && !parseMaximaRoute(route)) {
+      MDS.log("[MINIMA] Outdated permanent route format detected (" + route + "), clearing from keypairs");
+      MDS.keypair.set("USER_PERMANENT_ROUTE", "", function() {
+        MDS.cmd("maxima action:info", function(infoRes) {
+          var pk = (infoRes && infoRes.status && infoRes.response && infoRes.response.publickey) ? infoRes.response.publickey.toUpperCase() : "";
+          if (pk && pk === MINIMAADS_CREATOR_PK.toUpperCase()) {
+            MDS.keypair.set("MINIMAADS_CREATOR_ROUTE", "", function() {
+              cb(null);
+            });
+          } else {
+            cb(null);
+          }
+        });
+      });
+      return;
+    }
     cb(route);
   });
 }

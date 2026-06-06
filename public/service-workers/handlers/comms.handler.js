@@ -91,6 +91,8 @@ function handleTrackView(payload) {
   var campaignId   = payload.campaignId || "";
   var userAddress  = payload.userAddress || "";
   var publisherKey = payload.publisherKey || "";
+  var frameId      = payload.frameId || "";
+  var publisherMx  = payload.publisherMx || "";
 
   MDS.log("[COMMS] MA_TRACK_VIEW received: userAddress format=" + (userAddress && userAddress.indexOf('MAX#')===0 ? 'PERMANENT_ROUTE' : 'DIRECT_ADDRESS') + " publisherKey format=" + (publisherKey && publisherKey.indexOf('MAX#')===0 ? 'PERMANENT_ROUTE' : 'RSA_KEY'));
 
@@ -123,7 +125,7 @@ function handleTrackView(payload) {
         }
         MDS.log("[COMMS] MA_TRACK_VIEW confirmed: campaign=" + campaignId + " amount=" + amount);
         MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: true, amount: amount}), function() {});
-        _triggerChannelPayment(campaignId, campaign, userAddress, amount, eventId, publisherKey);
+        _triggerChannelPayment(campaignId, campaign, userAddress, amount, eventId, publisherKey, frameId, publisherMx);
       });
     });
   });
@@ -133,6 +135,8 @@ function handleTrackClick(payload) {
   var campaignId   = payload.campaignId || "";
   var userAddress  = payload.userAddress || "";
   var publisherKey = payload.publisherKey || "";
+  var frameId      = payload.frameId || "";
+  var publisherMx  = payload.publisherMx || "";
 
   if (!campaignId || !userAddress) {
     MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "missing fields"}), function() {});
@@ -163,33 +167,33 @@ function handleTrackClick(payload) {
         }
         MDS.log("[COMMS] MA_TRACK_CLICK confirmed: campaign=" + campaignId + " amount=" + amount);
         MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: true, amount: amount}), function() {});
-        _triggerChannelPayment(campaignId, campaign, userAddress, amount, eventId, publisherKey);
+        _triggerChannelPayment(campaignId, campaign, userAddress, amount, eventId, publisherKey, frameId, publisherMx);
       });
     });
   });
 }
 
-function _triggerChannelPayment(campaignId, campaign, userAddress, amount, eventId, publisherKey) {
+function _triggerChannelPayment(campaignId, campaign, userAddress, amount, eventId, publisherKey, frameId, publisherMx) {
   getChannelState(campaignId, MY_MAXIMA_PK, 'viewer', function(err, channel) {
     if (err || !channel || channel.STATUS === 'settled') {
-      _sendChannelOpenRequest(campaignId, campaign, userAddress, amount, eventId, publisherKey);
+      _sendChannelOpenRequest(campaignId, campaign, userAddress, amount, eventId, publisherKey, frameId, publisherMx);
     } else if (channel.STATUS === 'open') {
       var cumulative = parseFloat(channel.CUMULATIVE_EARNED) + amount;
-      _sendRewardRequest(campaignId, campaign, channel, eventId, cumulative, publisherKey);
+      _sendRewardRequest(campaignId, campaign, channel, eventId, cumulative, publisherKey, frameId, publisherMx);
     } else {
       MDS.log("[COMMS] channel " + channel.STATUS + " for campaign: " + campaignId + " — reward pending channel open");
     }
   });
 }
 
-function _sendChannelOpenRequest(campaignId, campaign, _viewerMxContact, amount, eventId, publisherKey) {
+function _sendChannelOpenRequest(campaignId, campaign, _viewerMxContact, amount, eventId, publisherKey, frameId, publisherMx) {
   if (!MY_MAXIMA_PK || !campaign.CREATOR_ADDRESS) {
     MDS.log("[COMMS] CHANNEL_OPEN_REQUEST skipped — MY_MAXIMA_PK or CREATOR_ADDRESS missing");
     return;
   }
   MDS.keypair.get("VIEWER_WALLET_PK_" + campaignId, function(pkRes) {
     if (pkRes && pkRes.status && pkRes.value) {
-      _resolveViewerAddrAndSend(campaignId, campaign, pkRes.value, amount, eventId, publisherKey);
+      _resolveViewerAddrAndSend(campaignId, campaign, pkRes.value, amount, eventId, publisherKey, frameId, publisherMx);
     } else {
       MDS.cmd("keys action:new", function(keysRes) {
         if (!keysRes || !keysRes.status || !keysRes.response || !keysRes.response.publickey) {
@@ -198,7 +202,7 @@ function _sendChannelOpenRequest(campaignId, campaign, _viewerMxContact, amount,
         }
         var walletPK = keysRes.response.publickey;
         MDS.keypair.set("VIEWER_WALLET_PK_" + campaignId, walletPK, function() {
-          _resolveViewerAddrAndSend(campaignId, campaign, walletPK, amount, eventId, publisherKey);
+          _resolveViewerAddrAndSend(campaignId, campaign, walletPK, amount, eventId, publisherKey, frameId, publisherMx);
         });
       });
     }
@@ -207,10 +211,10 @@ function _sendChannelOpenRequest(campaignId, campaign, _viewerMxContact, amount,
 
 // Gets a coinbase wallet address via getaddress (cached in keypair).
 // Settlement coins sent here are immediately available in the wallet.
-function _resolveViewerAddrAndSend(campaignId, campaign, walletPK, amount, eventId, publisherKey) {
+function _resolveViewerAddrAndSend(campaignId, campaign, walletPK, amount, eventId, publisherKey, frameId, publisherMx) {
   MDS.keypair.get("VIEWER_WALLET_ADDR_" + campaignId, function(addrRes) {
     if (addrRes && addrRes.status && addrRes.value) {
-      _doSendChannelOpenRequest(campaignId, campaign, addrRes.value, amount, eventId, publisherKey, walletPK);
+      _doSendChannelOpenRequest(campaignId, campaign, addrRes.value, amount, eventId, publisherKey, walletPK, frameId, publisherMx);
       return;
     }
     MDS.cmd("getaddress", function(gaRes) {
@@ -220,13 +224,13 @@ function _resolveViewerAddrAndSend(campaignId, campaign, walletPK, amount, event
       }
       var walletAddr = gaRes.response.address;
       MDS.keypair.set("VIEWER_WALLET_ADDR_" + campaignId, walletAddr, function() {
-        _doSendChannelOpenRequest(campaignId, campaign, walletAddr, amount, eventId, publisherKey, walletPK);
+        _doSendChannelOpenRequest(campaignId, campaign, walletAddr, amount, eventId, publisherKey, walletPK, frameId, publisherMx);
       });
     });
   });
 }
 
-function _doSendChannelOpenRequest(campaignId, campaign, viewerWalletAddr, amount, eventId, publisherKey, viewerWalletPK) {
+function _doSendChannelOpenRequest(campaignId, campaign, viewerWalletAddr, amount, eventId, publisherKey, viewerWalletPK, frameId, publisherMx) {
   var capExplicit = parseFloat(campaign.MAX_VIEWER_REWARD) || 0;
   var perView = parseFloat(campaign.REWARD_VIEW) || 0;
   var maxAmount = capExplicit > 0 ? capExplicit : perView * 10;
@@ -244,11 +248,14 @@ function _doSendChannelOpenRequest(campaignId, campaign, viewerWalletAddr, amoun
     event_id:        eventId || '',
     cumulative:      amount,
     publisher_key:   publisherKey || '',
+    frame_id:        frameId || '',
+    publisher_mx:    publisherMx || '',
     creator_address: campaign.CREATOR_ADDRESS
   });
   MDS.keypair.set("PENDING_REWARD_" + campaignId, pendingReward, function() {
     MDS.keypair.get("CREATOR_MX_" + campaignId, function(kpRes) {
-      var creatorMx = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : null;
+      var _cmxRaw = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : null;
+      var creatorMx = (_cmxRaw && (_cmxRaw.indexOf("Mx") === 0 || _cmxRaw.indexOf("MAX#") === 0)) ? _cmxRaw : null;
       sendMaxima(campaign.CREATOR_ADDRESS, creatorMx, payload, function(ok) {
         MDS.log("[COMMS] CHANNEL_OPEN_REQUEST sent: campaign=" + campaignId + " max=" + maxAmount + " ok=" + ok);
       });
@@ -343,25 +350,44 @@ function _tryOpenPublisherChannelForAllFrames(campaignId) {
   });
 }
 
-function _sendRewardRequest(campaignId, campaign, channel, eventId, cumulative, publisherKey) {
+function _sendRewardRequest(campaignId, campaign, channel, eventId, cumulative, publisherKey, frameId, publisherMx) {
   if (!MY_MAXIMA_PK || !campaign.CREATOR_ADDRESS) {
     MDS.log("[COMMS] REWARD_REQUEST skipped — MY_MAXIMA_PK or CREATOR_ADDRESS missing");
     return;
   }
   var isBuiltinFrame = (publisherKey && publisherKey.toUpperCase() === MINIMAADS_CREATOR_PK.toUpperCase());
   if (isBuiltinFrame) {
+    // Built-in viewer: frame belongs to the platform creator (MINIMAADS_CREATOR_PK).
+    // frame_id must be "builtin:<MINIMAADS_CREATOR_PK>" (creator's frame, not viewer's).
+    // publisher_mx: prefer MINIMAADS_CREATOR_ROUTE; fall back to PUBLISHER_MX_<campaignId>
+    // which was cached by Fix 3a when the channel first opened (via PENDING_REWARD).
     MDS.keypair.get("MINIMAADS_CREATOR_ROUTE", function(res) {
       var platformCreatorRoute = (res && res.status && res.value) ? res.value : '';
-      _doSendRewardRequestWithRoute(campaignId, campaign, channel, eventId, cumulative, publisherKey, platformCreatorRoute);
+      var builtinFrameId = "builtin:" + MINIMAADS_CREATOR_PK.toUpperCase();
+      if (platformCreatorRoute) {
+        _doSendRewardRequestWithRoute(campaignId, campaign, channel, eventId, cumulative, publisherKey, builtinFrameId, platformCreatorRoute);
+      } else {
+        // Fix 3b: MINIMAADS_CREATOR_ROUTE not set on this viewer node — try the
+        // cached PUBLISHER_MX_<campaignId> stored when the channel first opened.
+        MDS.keypair.get("PUBLISHER_MX_" + campaignId, function(pmRes) {
+          var cachedPubMx = (pmRes && pmRes.status && pmRes.value) ? pmRes.value : '';
+          if (!cachedPubMx) {
+            MDS.log("[COMMS] REWARD_REQUEST builtin: no publisher_mx available (MINIMAADS_CREATOR_ROUTE and PUBLISHER_MX_" + campaignId + " both empty) — sending without publisher routing");
+          }
+          _doSendRewardRequestWithRoute(campaignId, campaign, channel, eventId, cumulative, publisherKey, builtinFrameId, cachedPubMx);
+        });
+      }
     });
   } else {
-    getCreatorMaximaRoute(function(creatorRoute) {
-      _doSendRewardRequestWithRoute(campaignId, campaign, channel, eventId, cumulative, publisherKey, creatorRoute);
-    });
+    // Custom snippet: frameId and publisherMx come from the MA_TRACK_VIEW payload.
+    // Use snippet-provided frameId if available; fallback to viewer's own builtin frame id.
+    var resolvedFrameId = frameId || ("builtin:" + MY_MAXIMA_PK.toUpperCase());
+    // publisherMx from snippet payload (stored at snippet generation time from FRAMES.PUBLISHER_MX).
+    _doSendRewardRequestWithRoute(campaignId, campaign, channel, eventId, cumulative, publisherKey, resolvedFrameId, publisherMx || "");
   }
 }
 
-function _doSendRewardRequestWithRoute(campaignId, campaign, channel, eventId, cumulative, publisherKey, pubMxRoute) {
+function _doSendRewardRequestWithRoute(campaignId, campaign, channel, eventId, cumulative, publisherKey, resolvedFrameId, pubMxRoute) {
   var payload = {
     type:          "REWARD_REQUEST",
     campaign_id:   campaignId,
@@ -370,11 +396,12 @@ function _doSendRewardRequestWithRoute(campaignId, campaign, channel, eventId, c
     cumulative:    cumulative,
     role:          "viewer",
     publisher_key: publisherKey || "",
-    frame_id:      "builtin:" + MY_MAXIMA_PK.toUpperCase(),
+    frame_id:      resolvedFrameId || ("builtin:" + MY_MAXIMA_PK.toUpperCase()),
     publisher_mx:  pubMxRoute || ""
   };
   MDS.keypair.get("CREATOR_MX_" + campaignId, function(kpRes) {
-    var creatorMx = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : null;
+    var _cmxRaw2 = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : null;
+    var creatorMx = (_cmxRaw2 && (_cmxRaw2.indexOf("Mx") === 0 || _cmxRaw2.indexOf("MAX#") === 0)) ? _cmxRaw2 : null;
     sendMaxima(campaign.CREATOR_ADDRESS, creatorMx, payload, function(ok) {
       MDS.log("[COMMS] REWARD_REQUEST sent: campaign=" + campaignId + " cumulative=" + cumulative + " ok=" + ok);
     });

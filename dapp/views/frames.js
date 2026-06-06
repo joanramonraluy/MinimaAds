@@ -229,17 +229,21 @@ function _showSnippet(fid) {
 }
 
 function _loadSnippet(fid, cb) {
-  MDS.sql("SELECT PUBLISHER_KEY FROM FRAMES WHERE UPPER(FRAME_ID) = UPPER('" + fid.replace(/'/g, "''") + "') LIMIT 1", function(res) {
-    var pubKey = (res && res.status && res.rows && res.rows.length > 0) ? (res.rows[0].PUBLISHER_KEY || '') : '';
-    cb(_buildSnippet(fid, pubKey));
+  MDS.sql("SELECT PUBLISHER_KEY, PUBLISHER_MX FROM FRAMES WHERE UPPER(FRAME_ID) = UPPER('" + fid.replace(/'/g, "''") + "') LIMIT 1", function(res) {
+    var row = (res && res.status && res.rows && res.rows.length > 0) ? res.rows[0] : null;
+    var pubKey = row ? (row.PUBLISHER_KEY || '') : '';
+    var pubMx  = row ? (row.PUBLISHER_MX  || '') : '';
+    cb(_buildSnippet(fid, pubKey, pubMx));
   });
 }
 
-function _buildSnippet(fid, pubKey) {
+function _buildSnippet(fid, pubKey, pubMx) {
   return "<div id=\"minimaads-slot\"></div>\n"
     + "<script>\n"
     + "(function() {\n"
     + "  var publisherKey = '" + pubKey + "';\n"
+    + "  var publisherMx  = '" + (pubMx || '') + "';\n"
+    + "  var frameId      = '" + fid + "';\n"
     + "  var slotId  = 'minimaads-slot';\n"
     + "  var started = false;\n"
     + "  var contact = '';\n"
@@ -354,14 +358,16 @@ function _buildSnippet(fid, pubKey) {
     + "  function _trackView(campaignId) {\n"
     + "    window.MDS.comms.broadcast(JSON.stringify({\n"
     + "      type: 'MA_TRACK_VIEW', campaignId: campaignId,\n"
-    + "      userAddress: contact, publisherKey: publisherKey\n"
+    + "      userAddress: contact, publisherKey: publisherKey,\n"
+    + "      frameId: frameId, publisherMx: publisherMx\n"
     + "    }), function() {});\n"
     + "  }\n"
     + "\n"
     + "  function _trackClick(campaignId) {\n"
     + "    window.MDS.comms.broadcast(JSON.stringify({\n"
     + "      type: 'MA_TRACK_CLICK', campaignId: campaignId,\n"
-    + "      userAddress: contact, publisherKey: publisherKey\n"
+    + "      userAddress: contact, publisherKey: publisherKey,\n"
+    + "      frameId: frameId, publisherMx: publisherMx\n"
     + "    }), function() {});\n"
     + "  }\n"
     + "\n"
@@ -389,11 +395,10 @@ function _buildSnippet(fid, pubKey) {
     + "  function _getMxContact(cb) {\n"
     + "    _cmdRaw('maxima action:info', function(res) {\n"
     + "      if (!res || !res.status || !res.response) { cb(''); return; }\n"
-    + "      var contact = res.response.contact || '';\n"
+    + "      var pubkey = res.response.publickey || '';\n"
     + "      var mls = res.response.mls || '';\n"
-    + "      if (!contact || !mls) { cb(''); return; }\n"
-    + "      var mxPart = contact.indexOf('@') > 0 ? contact.substring(0, contact.indexOf('@')) : contact;\n"
-    + "      var permanentRoute = 'MAX#' + mxPart + '#' + mls;\n"
+    + "      if (!pubkey || !mls) { cb(''); return; }\n"
+    + "      var permanentRoute = 'MAX#' + pubkey + '#' + mls;\n"
     + "      console.log('[MA-PUBLISHER] constructed PERMANENT_ROUTE: ' + permanentRoute);\n"
     + "      cb(permanentRoute);\n"
     + "    });\n"

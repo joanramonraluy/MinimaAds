@@ -40,8 +40,12 @@ function handleChannelOpenRequest(payload, senderPk) {
     if (sndrPk) {
       if (frameId.toLowerCase().indexOf('builtin:') === 0) {
         var claimedPk = frameId.substring(8);
-        if (claimedPk.toUpperCase() !== sndrPk.toUpperCase()) {
-          MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): builtin frame_id/sender PK mismatch — dropping");
+        // Use viewer_key (MY_MAXIMA_PK sent explicitly) for the check — msg.data.from can
+        // differ from MY_MAXIMA_PK when routed via MLS, causing spurious mismatches.
+        var publisherSelfKey = viewerKey || sndrPk;
+        MDS.log("[CHANNEL] builtin check: claimed=" + claimedPk.substring(18, 28) + " viewerKey=" + (viewerKey ? viewerKey.substring(18, 28) : "EMPTY") + " sndrPk=" + (sndrPk ? sndrPk.substring(18, 28) : "EMPTY"));
+        if (claimedPk.toUpperCase() !== publisherSelfKey.toUpperCase()) {
+          MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): builtin frame_id/viewer_key mismatch — dropping");
           return;
         }
       } else {
@@ -327,7 +331,8 @@ function handleChannelOpen(payload) {
   var now           = Date.now();
 
   MDS.keypair.get("CREATOR_MX_" + campaignId, function(kpRes) {
-    var creatorMx = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : '';
+    var _cmxRaw = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : null;
+    var creatorMx = (_cmxRaw && (_cmxRaw.indexOf("Mx") === 0 || _cmxRaw.indexOf("MAX#") === 0)) ? _cmxRaw : '';
     MDS.keypair.get("VIEWER_WALLET_ADDR_" + campaignId, function(waRes) {
       var viewerWalletAddr = (waRes && waRes.status && waRes.value) ? waRes.value : '';
       // Archive any existing channel for this campaign+viewer+role before overwriting,
@@ -392,8 +397,16 @@ function _doChannelOpenUpsert(campaignId, viewerKey, role, channelCoinId, maxAmo
             event_id:      pending.event_id,
             cumulative:    pending.cumulative,
             role:          role,
-            publisher_key: pending.publisher_key || ""
+            publisher_key: pending.publisher_key || "",
+            frame_id:      pending.frame_id || "",
+            publisher_mx:  pending.publisher_mx || ""
           };
+          // Fix 3a: persist publisher_mx so subsequent REWARD_REQUESTs (sent
+          // after the channel is already open, via _sendRewardRequest) can look
+          // it up without needing MINIMAADS_CREATOR_ROUTE set on this viewer node.
+          if (pending.publisher_mx) {
+            MDS.keypair.set("PUBLISHER_MX_" + campaignId, pending.publisher_mx, function() {});
+          }
           sendMaxima(pending.creator_address, creatorMxInner, rewardPayload, function(ok) {
             MDS.log("[CHANNEL] CHANNEL_OPEN: auto REWARD_REQUEST sent cumulative=" + pending.cumulative + " ok=" + ok);
           });
@@ -938,8 +951,13 @@ function _enqueuePendingChOpenSplitRetry(ctx) {
 // Rhino-safe: var, function(), string concat, no arrow functions, no trailing commas.
 // ---------------------------------------------------------------------------
 function checkPendingVouchers() {
+  // Also include recently-settled channels (within 5 min) to recover from the
+  // race where checkOpenChannelsSettled prematurely settled a just-activated
+  // channel before its coin was locally indexed (Fix 2).
+  var fiveMinAgo = Date.now() - 300000;
   var sql = "SELECT CAMPAIGN_ID, VIEWER_KEY, ROLE, CHANNEL_COINID, CREATOR_MX"
-          + " FROM CHANNEL_STATE WHERE STATUS = 'open'";
+          + " FROM CHANNEL_STATE WHERE STATUS = 'open'"
+          + " OR (STATUS = 'settled' AND CREATED_AT > " + fiveMinAgo + ")";
   sqlQuery(sql, function(err, rows) {
     if (err) {
       MDS.log("[CHANNEL] checkPendingVouchers query error: " + err);
@@ -1017,8 +1035,8 @@ function _doNotifyPublisherByKey(campaignId, frameId, publisherKey, publisherMx)
       campaign_id: campaignId,
       frame_id:    frameId
     };
-    MDS.log("[CHANNEL] _notifyPublisherByKey: sending via permanent route " + publisherMx.substring(0, 30) + "...");
-    sendMaxima(null, publisherMx, notify, function(ok) {
+    MDS.log("[CHANNEL] _notifyPublisherByKey: sending to publisherKey=" + (publisherKey ? publisherKey.substring(0, 20) : "null") + " route=" + publisherMx.substring(0, 30) + "...");
+    sendMaxima(publisherKey || null, publisherMx, notify, function(ok) {
       MDS.log("[CHANNEL] PUBLISHER_REWARD_NOTIFY sent via route, ok=" + ok);
     });
   });
@@ -1040,7 +1058,9 @@ function handlePublisherRewardNotify(payload, senderPk) {
 
   getCampaign(campaignId, function(err, campaign) {
     if (err || !campaign) {
-      MDS.log("[CHANNEL] PUBLISHER_REWARD_NOTIFY: campaign not found: " + campaignId);
+      MDS.log("[CHANNEL] PUBLISHER_REWARD_NOTIFY: campaign not found, deferring: " + campaignId);
+      var deferred = JSON.stringify({ campaign_id: campaignId, frame_id: frameId, creator_key: creatorKey });
+      MDS.keypair.set("PENDING_PUB_NOTIFY_" + campaignId, deferred, function() {});
       return;
     }
     if (campaign.STATUS !== 'active') {
@@ -1085,25 +1105,30 @@ function _doSendPublisherChannelOpenRequest(campaignId, campaign, frameId, creat
       MDS.log("[CHANNEL] _doSendPublisherChannelOpenRequest: getaddress failed. campaign: " + campaignId);
       return;
     }
-    var capExplicit = parseFloat(campaign.MAX_PUBLISHER_BUDGET) || 0;
-    var pubView     = parseFloat(campaign.PUBLISHER_REWARD_VIEW) || 0;
-    var maxAmount   = capExplicit > 0 ? capExplicit : pubView * 10;
-    var targetKey   = creatorKey || campaign.CREATOR_ADDRESS;
-    var payload = {
-      type:               "CHANNEL_OPEN_REQUEST",
-      campaign_id:        campaignId,
-      viewer_key:         MY_MAXIMA_PK,
-      viewer_mx:          MY_MX_ADDRESS,
-      viewer_wallet_addr: walletAddr,
-      viewer_wallet_pk:   walletPK,
-      max_amount:         maxAmount,
-      role:               "publisher",
-      frame_id:           frameId
-    };
-    MDS.keypair.get("CREATOR_MX_" + campaignId, function(kpRes) {
-      var creatorMx = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : null;
-      sendMaxima(targetKey, creatorMx, payload, function(ok) {
-        MDS.log("[CHANNEL] publisher CHANNEL_OPEN_REQUEST sent: campaign=" + campaignId + " frameId=" + frameId + " ok=" + ok);
+    MDS.keypair.get("USER_PERMANENT_ROUTE", function(prRes) {
+      var prVal = (prRes && prRes.status && prRes.value) ? prRes.value : null;
+      var publisherMxAddr = (prVal && prVal.indexOf("MAX#") === 0) ? prVal : MY_MX_ADDRESS;
+      var capExplicit = parseFloat(campaign.MAX_PUBLISHER_BUDGET) || 0;
+      var pubView     = parseFloat(campaign.PUBLISHER_REWARD_VIEW) || 0;
+      var maxAmount   = capExplicit > 0 ? capExplicit : pubView * 10;
+      var targetKey   = creatorKey || campaign.CREATOR_ADDRESS;
+      var payload = {
+        type:               "CHANNEL_OPEN_REQUEST",
+        campaign_id:        campaignId,
+        viewer_key:         MY_MAXIMA_PK,
+        viewer_mx:          publisherMxAddr,
+        viewer_wallet_addr: walletAddr,
+        viewer_wallet_pk:   walletPK,
+        max_amount:         maxAmount,
+        role:               "publisher",
+        frame_id:           frameId
+      };
+      MDS.keypair.get("CREATOR_MX_" + campaignId, function(kpRes) {
+        var _cmxRaw = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : null;
+        var creatorMx = (_cmxRaw && (_cmxRaw.indexOf("Mx") === 0 || _cmxRaw.indexOf("MAX#") === 0)) ? _cmxRaw : null;
+        sendMaxima(targetKey, creatorMx, payload, function(ok) {
+          MDS.log("[CHANNEL] publisher CHANNEL_OPEN_REQUEST sent: campaign=" + campaignId + " frameId=" + frameId + " ok=" + ok);
+        });
       });
     });
   });
@@ -1623,7 +1648,18 @@ function swBuildAndExportVoucherTx(ctx, afterSend) {
 function swBuildAndPostChannelTx(ctx) {
   var txId         = "sp_" + swGenerateUID();
   var campaignHex  = "0x" + utf8ToHex(ctx.campaignId).toUpperCase();
-  var creatorMxHex = "0x" + utf8ToHex(MY_MX_ADDRESS).toUpperCase();
+  // Fix A: prefer permanent route (MAX#<hexPK>#<mls>) in STATE(4) so viewers can
+  // route REQUEST_CAMPAIGN_DATA via PK even when this node has no static IP.
+  // Fall back to direct contact address if permanent route not registered.
+  MDS.keypair.get("USER_PERMANENT_ROUTE", function(kpRouteRes) {
+    var routeVal = (kpRouteRes && kpRouteRes.status && kpRouteRes.value) ? kpRouteRes.value : "";
+    var contactForState4 = (routeVal && routeVal.indexOf("MAX#") === 0) ? routeVal : MY_MX_ADDRESS;
+    _swBuildAndPostChannelTxInner(ctx, txId, campaignHex, contactForState4);
+  });
+}
+
+function _swBuildAndPostChannelTxInner(ctx, txId, campaignHex, contactForState4) {
+  var creatorMxHex = "0x" + utf8ToHex(contactForState4).toUpperCase();
   var escrowAddrFallback = ESCROW_ADDRESS_V3 || ESCROW_ADDRESS_V2 || ESCROW_ADDRESS;
 
   function fail(stage) {
@@ -1883,12 +1919,17 @@ function swBuildAndPostChannelOpenTx(ctx) {
 // ---------------------------------------------------------------------------
 // checkOpenChannelsSettled — runs on NEWBLOCK to detect on-chain settlement
 // of open channels (spent coins) and transition them to settled in DB.
+// Fix 1: adds a 60-second grace period to avoid settling a channel whose coin
+// was just created by swBuildAndPostChannelOpenTx and isn't yet locally
+// indexed, even though the TX has been mined. This prevents the race where
+// checkOpenChannelsSettled fires in the same NEWBLOCK event as Tx2 and
+// immediately settles the channel before checkPendingVouchers can process it.
 // ---------------------------------------------------------------------------
 function checkOpenChannelsSettled() {
   var chAddr = CHANNEL_SCRIPT_ADDRESS || '';
   if (!chAddr) { return; }
 
-  var sql = "SELECT CAMPAIGN_ID, VIEWER_KEY, ROLE, CHANNEL_COINID FROM CHANNEL_STATE WHERE STATUS = 'open'";
+  var sql = "SELECT CAMPAIGN_ID, VIEWER_KEY, ROLE, CHANNEL_COINID, CREATED_AT FROM CHANNEL_STATE WHERE STATUS = 'open'";
   sqlQuery(sql, function(err, rows) {
     if (err || !rows || rows.length === 0) { return; }
 
@@ -1901,20 +1942,29 @@ function checkOpenChannelsSettled() {
         }
       }
 
+      var now = Date.now();
       for (var j = 0; j < rows.length; j++) {
         var row = rows[j];
         var coinId = row.CHANNEL_COINID || '';
         if (coinId && !activeCoinIds[coinId.toUpperCase()]) {
-          MDS.log("[CHANNEL] checkOpenChannelsSettled: channel coin " + coinId + " spent/settled on-chain! Settling locally.");
-          (function(r) {
-            settleChannel(r.CAMPAIGN_ID, r.VIEWER_KEY, r.ROLE || 'viewer', function(settleErr) {
-              if (settleErr) {
-                MDS.log("[CHANNEL] checkOpenChannelsSettled: settleChannel failed for " + r.CAMPAIGN_ID + " error: " + settleErr);
-              } else {
-                _signalCampaignUpdated(r.CAMPAIGN_ID);
-              }
-            });
-          })(row);
+          // Grace period: skip settling channels activated within the last 60 s.
+          // The channel coin may not be locally indexed yet even though the TX
+          // was mined in this block — indexation lags by up to one block event.
+          var age = now - parseInt(row.CREATED_AT || 0);
+          if (age < 60000) {
+            MDS.log("[CHANNEL] checkOpenChannelsSettled: coin " + coinId.substring(0, 18) + "... not found but channel is new (age=" + age + "ms) — grace period, skipping settle.");
+          } else {
+            MDS.log("[CHANNEL] checkOpenChannelsSettled: channel coin " + coinId + " spent/settled on-chain! Settling locally.");
+            (function(r) {
+              settleChannel(r.CAMPAIGN_ID, r.VIEWER_KEY, r.ROLE || 'viewer', function(settleErr) {
+                if (settleErr) {
+                  MDS.log("[CHANNEL] checkOpenChannelsSettled: settleChannel failed for " + r.CAMPAIGN_ID + " error: " + settleErr);
+                } else {
+                  _signalCampaignUpdated(r.CAMPAIGN_ID);
+                }
+              });
+            })(row);
+          }
         }
       }
     });

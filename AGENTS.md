@@ -176,49 +176,61 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
-### Session: 2026-06-06 — Fix Viewer and Publisher Reward Delivery (3 bugs)
+### Session: 2026-06-06 — Fix Stale-Pending Publisher Channel Deadlock
 
-**Task**: Diagnose and fix why viewers and platform creator (publisher) were not receiving rewards. Root cause traced via live node logs.
+**Task**: Publisher rewards from snippets (and built-in frame) not reaching publishers. Diagnosed via `logs/user1.txt`, `logs/user2.txt`, `logs/user4.txt`.
 
-**Root Cause (3 bugs encadenats)**:
-1. **Race condition** (`checkOpenChannelsSettled`): when Tx2 (channel open) mines and `swBuildAndPostChannelOpenTx` calls `activateChannel`, the same NEWBLOCK event triggers `checkOpenChannelsSettled` which queries `coins address:<CHANNEL_SCRIPT_ADDRESS>`. The new coin is not yet locally indexed (latency up to ~20s after mining), so `checkOpenChannelsSettled` immediately settles the channel. Subsequent `checkPendingVouchers` finds the channel as `settled` and stops processing the pending voucher.
-2. **Pending voucher lost**: `checkPendingVouchers` only queried `STATUS = 'open'` channels, so prematurely-settled channels never had their pending vouchers retried.
-3. **`publisherMx` absent**: viewer nodes don't have `MINIMAADS_CREATOR_ROUTE` set locally, so `_sendRewardRequest` sent `publisher_mx: ""` for built-in frame reward requests. The creator then couldn't notify the publisher (user4) to open a publisher channel.
+**Root Cause**: A stale `pending` publisher channel on the creator node caused a deadlock. When a REWARD_REQUEST arrives and no `open` publisher channel exists, `_maybeGeneratePublisherVoucher` defers and calls `_doNotifyPublisherByKey`. That function previously suppressed `PUBLISHER_REWARD_NOTIFY` for **both** `open` AND `pending` channels (line: `ch.STATUS === 'open' || ch.STATUS === 'pending'`). A `pending` channel means the creator ran Tx1+Tx2 but the `CHANNEL_OPEN` Maxima message never reached the publisher. With no notification, the publisher never re-sent `CHANNEL_OPEN_REQUEST`, so the channel stayed stuck in `pending` indefinitely. No deferred publisher rewards were ever replayed. Same bug existed in `_maybeNotifyPublisher` (the legacy frame-lookup path).
 
-**Fixes**:
-- **`channel.handler.js` (Fix 1)**: `checkOpenChannelsSettled` now adds a 60-second grace period (`CREATED_AT`-based) before settling a channel whose coin isn't yet locally indexed.
-- **`channel.handler.js` (Fix 2)**: `checkPendingVouchers` SQL now also includes `STATUS = 'settled' AND CREATED_AT > (now - 5 min)` so prematurely-settled channels still have their pending vouchers processed.
-- **`channel.handler.js` (Fix 3a)**: `handleChannelOpen` now caches `pending.publisher_mx` as `PUBLISHER_MX_<campaignId>` keypair on the viewer node when processing `PENDING_REWARD`.
-- **`comms.handler.js` (Fix 3b)**: `_sendRewardRequest` for built-in frames now falls back to `PUBLISHER_MX_<campaignId>` if `MINIMAADS_CREATOR_ROUTE` is not set on the viewer node.
+**Fix** (`channel.handler.js`, two functions):
+- `_doNotifyPublisherByKey`: changed suppression from `open || pending` to `open` only. Added stale-pending guard: if `pending` but channel was created < 5 min ago → skip (TX in flight). If `pending` and ≥ 5 min old → log and send `PUBLISHER_REWARD_NOTIFY` anyway. The publisher has no channel state on its side (it never received `CHANNEL_OPEN`), so it will re-send `CHANNEL_OPEN_REQUEST`, which triggers the creator's stale-pending retry/archive logic.
+- `_maybeNotifyPublisher`: same fix applied symmetrically.
 
 **AGENTS.md updated**: yes — §6 updated.
 
 **Verification**:
-- Both `channel.handler.js` and `comms.handler.js` compile cleanly with `node -c`.
-- Live logs confirmed: viewer receives `REWARD_VOUCHER cumulative:1`, publisher receives `REWARD_VOUCHER cumulative:10`, both reward events created on respective nodes.
+- `channel.handler.js` compiles cleanly with `node -c`.
+- Trigger a view on a snippet after the creator already has a stale `pending` publisher channel (> 5 min old): creator should log `_notifyPublisherByKey: stale pending channel (age=Xms) — re-notifying publisher`. Publisher should then log `PUBLISHER_REWARD_NOTIFY: ...`, send `CHANNEL_OPEN_REQUEST`, and creator should log stale-pending retry. Deferred rewards should replay after new channel opens.
 
 ---
 
-### Session: 2026-06-06 — Unify MLS Naming in DevTools
+### Session: 2026-06-06 — Fix Publisher Budget (Multi-Publisher Support)
 
-**Task**: Fix terminology contradictions in the DevTools console (Ctrl+Shift+D): rename sections and buttons to match the actual underlying actions and be consistent with settings terminology.
+**Task**: Second iteration of publisher budget fix. New diagnosis: `PUBLISHER_BUDGET_SPENT` was tracking MAX_AMOUNT *reservations* (100) when a channel opens, not actual payouts (10). After user4's builtin-frame channel opened, `PUBLISHER_BUDGET_SPENT = 100 = MAX_PUBLISHER_BUDGET`, blocking all subsequent publishers (user2 snippet, etc.).
 
-**Changes**: **dapp/views/devtools.js** — renamed section titles and button labels.
+**Root Cause (two sub-bugs)**:
+1. **Wrong tracking field**: budget check used `PUBLISHER_BUDGET_SPENT` (tracks channel MAX_AMOUNT reservations) instead of `SUM(CUMULATIVE_EARNED)` (actual payouts). After one channel opens, even with minimal payout, the whole budget appeared exhausted.
+2. **Wrong maxAmount for publisher channel**: `_doSendPublisherChannelOpenRequest` sent `max_amount = MAX_PUBLISHER_BUDGET` (total campaign publisher budget) instead of `PUBLISHER_REWARD_VIEW * 10` (a per-session cap mirroring viewer logic). This caused one channel to reserve the entire budget.
+
+**Fixes** (`channel.handler.js`):
+- Budget check now uses `SELECT SUM(CUMULATIVE_EARNED)` from all publisher `CHANNEL_STATE` rows. Multiple publishers can open channels concurrently as long as total actual payouts < `MAX_PUBLISHER_BUDGET`.
+- `effectiveCap = min(requested, remaining)` — publisher's requested channel max is capped at remaining budget, so a publisher can still open even if their session cap > remaining.
+- Reject only if `effectiveCap < PUBLISHER_REWARD_VIEW` (not enough for a single view).
+- `_doSendPublisherChannelOpenRequest`: changed `maxAmount` from `MAX_PUBLISHER_BUDGET` to `PUBLISHER_REWARD_VIEW * 10`.
 
 **AGENTS.md updated**: yes — §6 updated.
 
-**Verification**: `devtools.js` compiles cleanly with `node -c`.
+**Verification**:
+- `channel.handler.js` compiles cleanly with `node -c`.
+- Budget log now shows: `max=100 earned=10 remaining=90 requestedCap=100 effectiveCap=90` for user2 snippet after user4 earned 10.
 
 ---
 
-### Session: 2026-06-06 — Auto-Sync Platform Creator Route
+### Session: 2026-06-06 — Fix Publisher Budget Check (snippet publishers blocked)
 
-**Task**: Fix the contradiction where `CREATOR_PERMANENT_ROUTE` was registered but `MINIMAADS_CREATOR_ROUTE` remained `(not set)`, breaking built-in frame reward routing.
+**Task**: Publisher nodes using the SDK snippet (custom frames) were being rejected by the creator with "insufficient publisher budget. remaining: 0 requested: 100", even though no budget had been exhausted.
 
-**Changes**: **config.js**, **service.js**, **core/minima.js**, **dapp/app.js**, **dapp/views/devtools.js** — auto-sync `MINIMAADS_CREATOR_ROUTE` from `CREATOR_PERMANENT_ROUTE` on boot and on registration.
+**Root Cause**: `handleChannelOpenRequest` (publisher path) computed `pubRemaining` as `MAX_PUBLISHER_BUDGET - SUM(open channel MAX_AMOUNT)`. If a previous publisher's channel (e.g. builtin frame user4, MAX_AMOUNT=100) was still `STATUS='open'` on the creator DB (voucher sent but not yet settled on-chain), `pubAllocated=100` → `pubRemaining=0` → all new publishers were blocked.
+
+**Fix**: `channel.handler.js` — replaced the `sqlQuery` over `CHANNEL_STATE` with a direct read of `campaign.PUBLISHER_BUDGET_SPENT` (already incremented when a channel is opened). `pubRemaining = MAX_PUBLISHER_BUDGET - PUBLISHER_BUDGET_SPENT`. A new publisher log line shows the full budget state for future debugging.
 
 **AGENTS.md updated**: yes — §6 updated.
 
-**Verification**: All modified JS files compile cleanly with `node -c`.
+**Verification**:
+- `channel.handler.js` compiles cleanly with `node -c`.
+- With a first publisher channel open (STATUS='open'), a second publisher's CHANNEL_OPEN_REQUEST must be accepted (budget log shows max=100 spent=100 if first channel has been fully committed, or spent=0 if no channel has been opened yet).
 
-> Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, and all earlier) are archived in `docs/HISTORY.md §17`.
+---
+
+> Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, Auto-Sync Platform Creator Route, Unify MLS DevTools, Fix Viewer and Publisher Reward Delivery, and all earlier) are archived in `docs/HISTORY.md §17`.
+

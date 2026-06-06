@@ -69,16 +69,29 @@ function handleChannelOpenRequest(payload, senderPk) {
         MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): campaign has no publisher reward. campaign: " + campaignId);
         return;
       }
+      // Budget check: use SUM(CUMULATIVE_EARNED) from all publisher channels — i.e. what
+      // has actually been paid out. PUBLISHER_BUDGET_SPENT tracks MAX_AMOUNT reservations
+      // (channels opened) which may be higher than actual earnings, incorrectly blocking
+      // new publishers. Using CUMULATIVE_EARNED lets multiple publishers participate
+      // concurrently as long as actual payouts haven't exhausted MAX_PUBLISHER_BUDGET.
       sqlQuery(
-        "SELECT COALESCE(SUM(MAX_AMOUNT), 0) AS ALLOC FROM CHANNEL_STATE WHERE " +
-        "UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') AND ROLE = 'publisher' AND STATUS = 'open'",
-        function(allocErr, allocRows) {
-          var pubAllocated = (allocRows && allocRows.length > 0) ? parseFloat(allocRows[0].ALLOC) : 0;
-          var pubRemaining = (parseFloat(campaign.MAX_PUBLISHER_BUDGET) || 0) - pubAllocated;
-          if (pubRemaining < maxAmount) {
+        "SELECT COALESCE(SUM(CUMULATIVE_EARNED), 0) AS EARNED FROM CHANNEL_STATE WHERE " +
+        "UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') AND ROLE = 'publisher'",
+        function(earnErr, earnRows) {
+          var pubEarned    = (earnRows && earnRows.length > 0) ? parseFloat(earnRows[0].EARNED) : 0;
+          var pubMaxBudget = parseFloat(campaign.MAX_PUBLISHER_BUDGET || 0) || 0;
+          var pubView      = parseFloat(campaign.PUBLISHER_REWARD_VIEW || 0) || 0;
+          var pubRemaining = pubMaxBudget - pubEarned;
+          // Cap the channel max at remaining budget (publisher may request more than is left)
+          var effectiveCap = Math.min(maxAmount, pubRemaining);
+          MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): budget — max=" + pubMaxBudget + " earned=" + pubEarned + " remaining=" + pubRemaining + " requestedCap=" + maxAmount + " effectiveCap=" + effectiveCap);
+          // Reject only if remaining is less than one view's reward
+          if (effectiveCap < pubView || effectiveCap <= 0) {
             MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): insufficient publisher budget. remaining: " + pubRemaining + " requested: " + maxAmount);
             return;
           }
+          // Use the capped value for all subsequent channel operations
+          maxAmount = effectiveCap;
 
       getChannelState(campaignId, viewerKey, 'publisher', function(chErr, existing) {
         if (!chErr && existing && existing.STATUS === 'open') {
@@ -176,9 +189,8 @@ function handleChannelOpenRequest(payload, senderPk) {
           );
         });
       });
-        }
-      );
-    });
+        }); // end sqlQuery SUM(CUMULATIVE_EARNED) callback
+      });   // end getCampaign callback + call
   } else {
     getCampaign(campaignId, function(err, campaign) {
       if (err || !campaign) {
@@ -988,7 +1000,15 @@ function _maybeNotifyPublisher(campaignId, frameId) {
     var publisherKey = frame.PUBLISHER_KEY || '';
     if (!publisherKey) { return; }
     getChannelState(campaignId, publisherKey, 'publisher', function(chErr, ch) {
-      if (!chErr && ch && (ch.STATUS === 'open' || ch.STATUS === 'pending')) { return; }
+      if (!chErr && ch && ch.STATUS === 'open') { return; }
+      if (!chErr && ch && ch.STATUS === 'pending') {
+        var pendingAge = Date.now() - parseInt(ch.CREATED_AT || 0);
+        if (pendingAge < 300000) {
+          MDS.log("[CHANNEL] _maybeNotifyPublisher: pending channel is fresh (age=" + pendingAge + "ms) — skipping. frame: " + frameId);
+          return;
+        }
+        MDS.log("[CHANNEL] _maybeNotifyPublisher: stale pending (age=" + pendingAge + "ms) — re-notifying. frame: " + frameId);
+      }
       var notify = {
         type:        "PUBLISHER_REWARD_NOTIFY",
         campaign_id: campaignId,
@@ -1029,7 +1049,19 @@ function _notifyPublisherByKey(campaignId, frameId, publisherKey, publisherMx) {
 
 function _doNotifyPublisherByKey(campaignId, frameId, publisherKey, publisherMx) {
   getChannelState(campaignId, publisherKey, 'publisher', function(chErr, ch) {
-    if (!chErr && ch && (ch.STATUS === 'open' || ch.STATUS === 'pending')) { return; }
+    if (!chErr && ch && ch.STATUS === 'open') { return; }
+    // Stale-pending guard: a pending channel within 5 minutes means Tx is in flight — wait.
+    // After 5 minutes the TX is assumed lost; re-notify so the publisher resends CHANNEL_OPEN_REQUEST,
+    // which triggers the stale-pending retry/archive logic on the creator side.
+    if (!chErr && ch && ch.STATUS === 'pending') {
+      var staleCutoff = 300000;
+      var pendingAge = Date.now() - parseInt(ch.CREATED_AT || 0);
+      if (pendingAge < staleCutoff) {
+        MDS.log("[CHANNEL] _notifyPublisherByKey: pending channel is fresh (age=" + pendingAge + "ms) — skipping notify. campaign: " + campaignId);
+        return;
+      }
+      MDS.log("[CHANNEL] _notifyPublisherByKey: stale pending channel (age=" + pendingAge + "ms) — re-notifying publisher. campaign: " + campaignId);
+    }
     var notify = {
       type:        "PUBLISHER_REWARD_NOTIFY",
       campaign_id: campaignId,
@@ -1108,9 +1140,11 @@ function _doSendPublisherChannelOpenRequest(campaignId, campaign, frameId, creat
     MDS.keypair.get("USER_PERMANENT_ROUTE", function(prRes) {
       var prVal = (prRes && prRes.status && prRes.value) ? prRes.value : null;
       var publisherMxAddr = (prVal && prVal.indexOf("MAX#") === 0) ? prVal : MY_MX_ADDRESS;
-      var capExplicit = parseFloat(campaign.MAX_PUBLISHER_BUDGET) || 0;
       var pubView     = parseFloat(campaign.PUBLISHER_REWARD_VIEW) || 0;
-      var maxAmount   = capExplicit > 0 ? capExplicit : pubView * 10;
+      // Per-session cap mirrors viewer logic (REWARD_VIEW * 10).
+      // Do NOT use MAX_PUBLISHER_BUDGET here — that is the total campaign budget,
+      // not a per-channel cap. Using it would reserve the entire budget for one publisher.
+      var maxAmount   = pubView * 10;
       var targetKey   = creatorKey || campaign.CREATOR_ADDRESS;
       var payload = {
         type:               "CHANNEL_OPEN_REQUEST",

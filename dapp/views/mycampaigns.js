@@ -55,7 +55,7 @@ function loadMyCampaigns(isAutoRefresh) {
     section.appendChild(mkLoading('Loading campaigns…'));
   }
 
-  var sql = "SELECT c.*,"
+  var sql = "SELECT c.*, a.TITLE AS AD_TITLE, a.BODY, a.CTA_LABEL, a.CTA_URL, a.IMAGE_DATA, a.SHOW_TITLE, a.SHOW_BODY, a.SHOW_CTA, a.BG_COLOR, a.TEXT_COLOR, a.IMAGE_POSITION, a.IMAGE_ZOOM, a.IMAGE_WIDTH_PCT,"
     + " (SELECT COUNT(*) FROM REWARD_EVENTS re WHERE UPPER(re.CAMPAIGN_ID) = UPPER(c.ID) AND re.TYPE = 'view') AS VIEW_COUNT,"
     + " (SELECT COUNT(*) FROM REWARD_EVENTS re WHERE UPPER(re.CAMPAIGN_ID) = UPPER(c.ID) AND re.TYPE = 'click') AS CLICK_COUNT,"
     + " (SELECT COUNT(DISTINCT re.USER_ADDRESS) FROM REWARD_EVENTS re WHERE UPPER(re.CAMPAIGN_ID) = UPPER(c.ID) AND re.TYPE IN ('view', 'click')) AS UNIQUE_VIEWERS,"
@@ -75,6 +75,7 @@ function loadMyCampaigns(isAutoRefresh) {
     // ── Publisher actual spent ──
     + " (SELECT COALESCE(SUM(re.AMOUNT), 0) FROM REWARD_EVENTS re WHERE UPPER(re.CAMPAIGN_ID) = UPPER(c.ID) AND re.TYPE = 'publisher_view') AS PUB_SPENT_ACTUAL"
     + " FROM CAMPAIGNS c"
+    + " LEFT JOIN ADS a ON UPPER(c.ID) = UPPER(a.CAMPAIGN_ID)"
     + " WHERE UPPER(c.CREATOR_ADDRESS) = UPPER('" + escapeSql(MY_ADDRESS) + "')"
     + " ORDER BY c.CREATED_AT DESC";
 
@@ -303,6 +304,60 @@ function _buildCampaignCard(c, openDetails) {
     budgetDetails.open = true;
   }
   cardBody.appendChild(budgetDetails);
+
+  // ── Ad Preview (expandable) ──────────────────────────────────────────────
+  var previewDetails = document.createElement('details');
+  previewDetails.className = 'ma-campaign-details';
+  previewDetails.setAttribute('data-details-id', 'ad-preview');
+  
+  var previewSummary = document.createElement('summary');
+  previewSummary.textContent = 'Ad Preview';
+  previewSummary.className = 'ma-campaign-details-summary';
+  previewDetails.appendChild(previewSummary);
+
+  var previewBody = document.createElement('div');
+  previewBody.style.cssText = 'padding:.75rem 0 .25rem;';
+
+  var adContainer = document.createElement('div');
+  adContainer.id = 'ma-ad-preview-container-' + c.ID;
+  adContainer.style.cssText = 'max-width:600px;width:100%;margin:0 auto;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.08);';
+  previewBody.appendChild(adContainer);
+  previewDetails.appendChild(previewBody);
+
+  var previewLoaded = false;
+  function doRenderPreview() {
+    if (typeof renderAd !== 'function') { return; }
+    var previewAd = {
+      title:           c.AD_TITLE || c.TITLE || '',
+      body:            c.BODY || '',
+      cta_label:       c.CTA_LABEL || '',
+      cta_url:         c.CTA_URL || '',
+      image_data:      c.IMAGE_DATA || null,
+      show_title:      c.SHOW_TITLE !== undefined ? parseInt(c.SHOW_TITLE, 10) : 1,
+      show_body:       c.SHOW_BODY !== undefined ? parseInt(c.SHOW_BODY, 10) : 1,
+      show_cta:        c.SHOW_CTA !== undefined ? parseInt(c.SHOW_CTA, 10) : 1,
+      bg_color:        c.BG_COLOR || '#ffffff',
+      text_color:      c.TEXT_COLOR || '#111111',
+      image_position:  c.IMAGE_POSITION || 'center',
+      image_zoom:      c.IMAGE_ZOOM !== undefined ? parseFloat(c.IMAGE_ZOOM) : 1.0,
+      image_width_pct: c.IMAGE_WIDTH_PCT !== undefined ? parseInt(c.IMAGE_WIDTH_PCT, 10) : 40
+    };
+    renderAd(previewAd, adContainer.id);
+  }
+
+  previewDetails.addEventListener('toggle', function() {
+    if (previewDetails.open && !previewLoaded) {
+      previewLoaded = true;
+      doRenderPreview();
+    }
+  });
+
+  if (openDetails && openDetails[c.ID + '-ad-preview']) {
+    previewDetails.open = true;
+    previewLoaded = true;
+    setTimeout(doRenderPreview, 0);
+  }
+  cardBody.appendChild(previewDetails);
 
   // ── Campaign configuration (expandable) ──────────────────────────────────
   var configDetails = document.createElement('details');

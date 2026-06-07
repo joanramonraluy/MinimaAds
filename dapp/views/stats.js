@@ -11,7 +11,7 @@ function renderStats(root) {
 
   var summaryRow = document.createElement('div');
   summaryRow.id = 'ma-stats-summary';
-  summaryRow.style.cssText = 'display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1.25rem;';
+  summaryRow.style.cssText = 'display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1.5rem;padding:.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(0,0,0,0.015);border-left:3px solid #2ecc71;';
   root.appendChild(summaryRow);
 
   var campaignsSection = document.createElement('section');
@@ -52,16 +52,23 @@ function loadStats() {
 }
 
 function renderCampaignsTable(target, campaigns) {
+  var tableWrapper = document.createElement('div');
+  tableWrapper.style.cssText = 'padding:.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(0,0,0,0.015);border-left:3px solid #3498db;overflow-x:auto;';
+
   var h3 = document.createElement('h3');
+  h3.style.cssText = 'margin-top:0;font-size:.9rem;text-transform:uppercase;color:var(--pico-muted-color,#6c757d);letter-spacing:.04em;margin-bottom:.75rem;';
   h3.textContent = 'Campaigns (' + campaigns.length + ')';
-  target.appendChild(h3);
+  tableWrapper.appendChild(h3);
 
   if (!campaigns.length) {
-    target.appendChild(mkEmptyState('No active campaigns in the system.'));
+    var empty = mkEmptyState('No active campaigns in the system.');
+    tableWrapper.appendChild(empty);
+    target.appendChild(tableWrapper);
     return;
   }
 
   var table = document.createElement('table');
+  table.style.cssText = 'width:100%;margin:0;font-size:.9rem;';
   var thead = document.createElement('thead');
   var headerRow = document.createElement('tr');
   var headers = ['Title', 'Status', 'Creator', 'Budget left', 'Reward/view', 'Reward/click'];
@@ -101,7 +108,8 @@ function renderCampaignsTable(target, campaigns) {
     tbody.appendChild(tr);
   }
   table.appendChild(tbody);
-  target.appendChild(table);
+  tableWrapper.appendChild(table);
+  target.appendChild(tableWrapper);
 }
 
 function td(value) {

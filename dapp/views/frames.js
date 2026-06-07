@@ -24,7 +24,8 @@ function renderFrames(root) {
 
   var createSection = document.createElement('div');
   createSection.className = 'ma-section';
-  createSection.innerHTML = '<p class="ma-section-title">Create new Frame</p>'
+  createSection.style.cssText = 'padding:.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(0,0,0,0.015);border-left:3px solid #2ecc71;margin-bottom:1.5rem;';
+  createSection.innerHTML = '<p class="ma-section-title" style="display:block;font-size:.78rem;color:var(--pico-muted-color,#6c757d);margin-top:0;text-transform:uppercase;letter-spacing:.04em;margin-bottom:.75rem;">Create new Frame</p>'
     + '<form id="ma-frames-form">'
     + '<label>Frame label'
     + '  <input name="label" required maxlength="256" placeholder="My website">'
@@ -39,9 +40,9 @@ function renderFrames(root) {
   var helpDetails = document.createElement('details');
   helpDetails.id = 'ma-frames-help';
   helpDetails.className = 'ma-section';
-  helpDetails.style.cssText = 'padding:.75rem 1rem;';
+  helpDetails.style.cssText = 'padding:.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(0,0,0,0.015);border-left:3px solid #3498db;';
   var helpSummary = document.createElement('summary');
-  helpSummary.style.cssText = 'font-weight:600;cursor:pointer;';
+  helpSummary.style.cssText = 'font-weight:600;cursor:pointer;margin:-.75rem -1rem .35rem;padding:.75rem 1rem;';
   helpSummary.textContent = 'How to embed a custom Frame';
   helpDetails.appendChild(helpSummary);
   var helpBody = document.createElement('div');
@@ -117,11 +118,11 @@ function _renderFramesList(rows) {
       var sid    = _safeId(fid);
 
       var card = document.createElement('article');
-      card.style.cssText = 'margin-bottom:1rem;';
+      card.style.cssText = 'margin-bottom:1.5rem;padding:.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(0,0,0,0.015);border-left:3px solid #9b59b6;';
 
       // Card header: label + type badge (left) | earned stat card (right)
       var cardHeader = document.createElement('header');
-      cardHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap;';
+      cardHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap;margin:-.75rem -1rem .75rem;padding:0 1rem;';
 
       var titleGroup = document.createElement('div');
       titleGroup.style.cssText = 'display:flex;align-items:center;gap:.5rem;';
@@ -144,8 +145,10 @@ function _renderFramesList(rows) {
         var snippetDetails = document.createElement('details');
         snippetDetails.id = 'ma-snippet-' + sid;
         snippetDetails.className = 'ma-campaign-details';
+        snippetDetails.style.cssText = 'margin-top:.5rem;';
         var snippetSummary = document.createElement('summary');
         snippetSummary.className = 'ma-campaign-details-summary';
+        snippetSummary.style.cssText = 'font-weight:600;cursor:pointer;';
         var snippetSummaryRow = document.createElement('span');
         snippetSummaryRow.style.cssText = 'display:inline-flex;align-items:center;gap:.5rem;';
         var snippetLabel = document.createElement('span');
@@ -193,9 +196,11 @@ function _renderFramesList(rows) {
       var earningsDetails = document.createElement('details');
       earningsDetails.id = 'ma-earnings-' + sid;
       earningsDetails.className = 'ma-campaign-details';
+      earningsDetails.style.cssText = 'margin-top:.5rem;';
       var earningsSummary = document.createElement('summary');
       earningsSummary.textContent = 'Earnings';
       earningsSummary.className = 'ma-campaign-details-summary';
+      earningsSummary.style.cssText = 'font-weight:600;cursor:pointer;';
       earningsDetails.appendChild(earningsSummary);
       var earningsBody = document.createElement('div');
       earningsBody.id = 'ma-earnings-body-' + sid;

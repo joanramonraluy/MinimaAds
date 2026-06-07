@@ -15,7 +15,7 @@ function renderEarnings(root) {
   // 3 stat cards in a row
   var summaryRow = document.createElement('div');
   summaryRow.id = 'ma-earnings-summary';
-  summaryRow.style.cssText = 'display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1.5rem;';
+  summaryRow.style.cssText = 'display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1.5rem;padding:.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(0,0,0,0.015);border-left:3px solid #27ae60;';
 
   var totalCard = mkStatCard('Total earned', '—');
   totalCard.id = 'ma-stat-total';
@@ -38,13 +38,14 @@ function renderEarnings(root) {
 
   // Pending settlements
   var pendingSection = document.createElement('section');
-  pendingSection.style.cssText = 'margin-bottom:1.5rem;';
+  pendingSection.style.cssText = 'margin-bottom:1.5rem;padding:.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(0,0,0,0.015);border-left:3px solid #f39c12;';
   var pendingH3 = document.createElement('h3');
   pendingH3.id = 'ma-pending-settlements-title';
+  pendingH3.style.cssText = 'margin-top:0;font-size:.9rem;text-transform:uppercase;color:var(--pico-muted-color,#6c757d);letter-spacing:.04em;margin-bottom:.75rem;';
   pendingH3.textContent = 'Pending settlements';
   pendingSection.appendChild(pendingH3);
   var settlementHint = document.createElement('p');
-  settlementHint.style.cssText = 'margin:-.35rem 0 1rem;color:var(--pico-muted-color,#6c757d);font-size:.875rem;';
+  settlementHint.style.cssText = 'margin:0 0 .75rem;color:var(--pico-muted-color,#6c757d);font-size:.75rem;';
   settlementHint.textContent = 'Tip: settlement posts to L1. To avoid doing that too often, it is usually better to settle when the campaign ends or when the channel has reached its reward cap, unless you need the funds sooner.';
   pendingSection.appendChild(settlementHint);
   var channelList = document.createElement('div');
@@ -55,6 +56,7 @@ function renderEarnings(root) {
   // Settlement history
   var historySection = document.createElement('section');
   historySection.id = 'ma-settlement-history';
+  historySection.style.cssText = 'padding:.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(0,0,0,0.015);border-left:3px solid #27ae60;overflow-x:auto;';
   root.appendChild(historySection);
 
   loadEarnings();
@@ -165,6 +167,7 @@ function _refreshSettlementHistory() {
 
 function renderSettlementHistory(target, settlements) {
   var h3 = document.createElement('h3');
+  h3.style.cssText = 'margin-top:0;font-size:.9rem;text-transform:uppercase;color:var(--pico-muted-color,#6c757d);letter-spacing:.04em;margin-bottom:.75rem;';
   h3.textContent = 'Settled channels (' + settlements.length + ')';
   target.appendChild(h3);
 
@@ -174,6 +177,7 @@ function renderSettlementHistory(target, settlements) {
   }
 
   var table = document.createElement('table');
+  table.style.cssText = 'width:100%;margin:0;font-size:.9rem;';
   var thead = document.createElement('thead');
   var headerRow = document.createElement('tr');
   var headers = ['Campaign', 'Status', 'Earned', 'Date', ''];
@@ -411,11 +415,11 @@ function _renderChannelRewardRows(rows, container) {
       var amount     = parseFloat(row.CUMULATIVE_EARNED || 0);
 
       var card = document.createElement('article');
-      card.style.cssText = 'margin-bottom:1rem;';
+      card.style.cssText = 'margin-bottom:1.5rem;padding:.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(0,0,0,0.015);border-left:3px solid #f39c12;';
 
       // Card header: name + badge + settle button
       var cardHeader = document.createElement('header');
-      cardHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:.75rem;';
+      cardHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin:-.75rem -1rem .75rem;padding:0 1rem;';
 
       var titleGroup = document.createElement('div');
       titleGroup.style.cssText = 'display:flex;align-items:center;gap:.5rem;min-width:0;';
@@ -447,9 +451,11 @@ function _renderChannelRewardRows(rows, container) {
       // Expandable event detail
       var details = document.createElement('details');
       details.className = 'ma-campaign-details';
+      details.style.cssText = 'margin-top:.5rem;';
       var summary = document.createElement('summary');
       summary.textContent = 'Show events';
       summary.className = 'ma-campaign-details-summary';
+      summary.style.cssText = 'font-weight:600;cursor:pointer;';
       details.appendChild(summary);
       var detailBody = document.createElement('div');
       detailBody.style.cssText = 'margin-top:.5rem;';

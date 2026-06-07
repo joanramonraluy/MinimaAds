@@ -4,9 +4,15 @@
 function renderProfile(root) {
   root.innerHTML = '';
 
-  // ── Avatar + name header ─────────────────────────────────────────────────
+  var h2 = document.createElement('h2');
+  h2.textContent = 'Profile';
+  h2.style.cssText = 'margin:0 0 1.5rem 0;padding:1rem;background:rgba(0,0,0,0.02);border-left:4px solid #3498db;border-radius:0.375rem;';
+  root.appendChild(h2);
+
+  // ── Identity card (Avatar + Name) ────────────────────────────────────────
   var heroSection = document.createElement('section');
-  heroSection.style.cssText = 'display:flex;align-items:center;gap:1.25rem;margin-bottom:2rem;';
+  heroSection.className = 'ma-section-group';
+  heroSection.style.cssText = 'border-left-color:#3498db;display:flex;align-items:center;gap:1.25rem;';
 
   // Avatar — clickable to change photo
   var avatarWrap = document.createElement('div');
@@ -49,6 +55,11 @@ function renderProfile(root) {
   var nameGroup = document.createElement('div');
   nameGroup.style.cssText = 'min-width:0;flex:1;display:flex;flex-direction:column;gap:.25rem;';
 
+  var nameLabel = document.createElement('small');
+  nameLabel.style.cssText = 'display:block;color:var(--pico-muted-color,#6c757d);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;margin-bottom:.25rem;';
+  nameLabel.textContent = 'Maxima Name';
+  nameGroup.appendChild(nameLabel);
+
   var nameInput = document.createElement('input');
   nameInput.type = 'text';
   nameInput.value = MY_MX_NAME || '';
@@ -77,21 +88,29 @@ function renderProfile(root) {
 
   root.appendChild(heroSection);
 
-  // ── Maxima address ───────────────────────────────────────────────────────
+  // ── Maxima Address Card ──────────────────────────────────────────────────
   var addrSection = document.createElement('section');
-  addrSection.style.cssText = 'margin-bottom:1.5rem;';
+  addrSection.className = 'ma-section-group';
+  addrSection.style.cssText = 'border-left-color:#3498db;';
 
-  var addrTitle = mkSectionTitle('Maxima address');
+  var addrTitle = document.createElement('strong');
+  addrTitle.className = 'ma-section-title';
+  addrTitle.textContent = 'Maxima Address';
   addrSection.appendChild(addrTitle);
 
+  var addrDesc = document.createElement('p');
+  addrDesc.style.cssText = 'font-size:.875rem;color:var(--pico-muted-color,#6c757d);margin:0 0 .75rem;';
+  addrDesc.textContent = 'Your unique identifier on the Maxima network. Share this with others to receive messages.';
+  addrSection.appendChild(addrDesc);
+
   var addrRow = document.createElement('div');
-  addrRow.style.cssText = 'display:flex;gap:.4rem;align-items:center;';
+  addrRow.style.cssText = 'display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;';
 
   var addrInput = document.createElement('input');
   addrInput.type = 'text';
   addrInput.readOnly = true;
   addrInput.value = MY_MX_ADDRESS || '—';
-  addrInput.style.cssText = 'flex:1;font-size:.75rem;font-family:monospace;margin:0;';
+  addrInput.style.cssText = 'flex:1;min-width:200px;font-size:.75rem;font-family:monospace;margin:0;';
 
   var copyBtn = document.createElement('button');
   copyBtn.textContent = 'Copy';
@@ -116,12 +135,20 @@ function renderProfile(root) {
   addrSection.appendChild(addrRow);
   root.appendChild(addrSection);
 
-  // ── Interests ────────────────────────────────────────────────────────────
+  // ── Interests Card ───────────────────────────────────────────────────────
   var intSection = document.createElement('section');
-  intSection.style.cssText = 'margin-bottom:1.5rem;';
+  intSection.className = 'ma-section-group';
+  intSection.style.cssText = 'border-left-color:#3498db;';
 
-  var intTitle = mkSectionTitle('My interests');
+  var intTitle = document.createElement('strong');
+  intTitle.className = 'ma-section-title';
+  intTitle.textContent = 'My Interests';
   intSection.appendChild(intTitle);
+
+  var intDesc = document.createElement('p');
+  intDesc.style.cssText = 'font-size:.875rem;color:var(--pico-muted-color,#6c757d);margin:0 0 .75rem;';
+  intDesc.textContent = 'Help creators target ads more effectively by sharing your interests.';
+  intSection.appendChild(intDesc);
 
   var intInput = document.createElement('input');
   intInput.type = 'text';
@@ -137,13 +164,24 @@ function renderProfile(root) {
   intSection.appendChild(intInput);
   root.appendChild(intSection);
 
-  // ── Total earned ─────────────────────────────────────────────────────────
+  // ── Total Earned Card ────────────────────────────────────────────────────
   var earnedSection = document.createElement('section');
-  earnedSection.style.cssText = 'margin-bottom:1.5rem;';
-  earnedSection.appendChild(mkSectionTitle('Total earned'));
+  earnedSection.className = 'ma-section-group';
+  earnedSection.style.cssText = 'border-left-color:#27ae60;';
+
+  var earnedTitle = document.createElement('strong');
+  earnedTitle.className = 'ma-section-title';
+  earnedTitle.textContent = 'Total Earned';
+  earnedSection.appendChild(earnedTitle);
+
+  var earnedDesc = document.createElement('p');
+  earnedDesc.style.cssText = 'font-size:.875rem;color:var(--pico-muted-color,#6c757d);margin:0 0 .75rem;';
+  earnedDesc.textContent = 'Rewards accumulated from viewing ads and publishing content.';
+  earnedSection.appendChild(earnedDesc);
+
   var earnedVal = document.createElement('p');
   earnedVal.id = 'ma-profile-total-earned-card';
-  earnedVal.style.cssText = 'margin:0;font-size:1rem;';
+  earnedVal.style.cssText = 'margin:0;font-size:1.35rem;font-weight:700;color:var(--pico-primary,#6366f1);';
   earnedVal.textContent = '—';
   earnedSection.appendChild(earnedVal);
   root.appendChild(earnedSection);

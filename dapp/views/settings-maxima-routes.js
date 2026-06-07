@@ -24,35 +24,40 @@ function utf8ToHex(str) {
 function renderMaximaRoutesSettings(root) {
   root.innerHTML = '';
 
+  var h2 = document.createElement('h2');
+  h2.textContent = 'Maxima Routes';
+  h2.style.cssText = 'margin:0 0 1.5rem 0;padding:1rem;background:rgba(0,0,0,0.02);border-left:4px solid #2ecc71;border-radius:0.375rem;';
+  root.appendChild(h2);
+
   var desc = document.createElement('p');
-  desc.textContent = 'Configure how your node connects to an MLS server and registers as a permanent user.';
-  desc.style.cssText = 'color:var(--pico-muted-color,#6c757d);margin-bottom:1.5rem;';
+  desc.textContent = 'Configure how your node connects to an MLS server and registers as a permanent user. These settings enable stable communication on the Maxima network.';
+  desc.style.cssText = 'color:var(--pico-muted-color,#6c757d);margin-bottom:1.5rem;font-size:.9rem;';
   root.appendChild(desc);
 
   // ── Section 1: MLS Server Address ───────────────────────────────────────
   var mlsSection = document.createElement('section');
-  mlsSection.className = 'ma-section';
-  mlsSection.style.cssText = 'margin-bottom:1.5rem;padding:1rem;background:var(--pico-card-sectionning-background-color,rgba(0,0,0,0.03));border-radius:0.5rem;';
+  mlsSection.className = 'ma-section-group';
+  mlsSection.style.cssText = 'border-left-color:#3498db;';
 
-  var mlsTitle = document.createElement('h3');
+  var mlsTitle = document.createElement('strong');
+  mlsTitle.className = 'ma-section-title';
   mlsTitle.textContent = 'MLS Server Address';
-  mlsTitle.style.cssText = 'margin-top:0;margin-bottom:0.5rem;';
   mlsSection.appendChild(mlsTitle);
 
   var mlsDesc = document.createElement('p');
   mlsDesc.textContent = 'The Maxima Location Service (MLS) server your node connects to for permanent route registration.';
-  mlsDesc.style.cssText = 'font-size:0.875rem;color:var(--pico-muted-color,#6c757d);margin:0.25rem 0 1rem;';
+  mlsDesc.style.cssText = 'font-size:0.875rem;color:var(--pico-muted-color,#6c757d);margin:0 0 1rem;';
   mlsSection.appendChild(mlsDesc);
 
   // Status display
   var mlsStatus = document.createElement('div');
-  mlsStatus.style.cssText = 'padding:0.75rem;margin-bottom:0.75rem;border-radius:0.375rem;font-family:monospace;font-size:0.8rem;word-break:break-all;border:1px solid var(--pico-muted-border-color);';
+  mlsStatus.style.cssText = 'padding:0.75rem;margin-bottom:0.75rem;border-radius:0.375rem;font-family:monospace;font-size:0.8rem;word-break:break-all;border:1px solid var(--pico-muted-border-color);background:var(--pico-card-sectionning-background-color,rgba(0,0,0,0.03));';
   mlsStatus.textContent = 'Loading…';
   mlsSection.appendChild(mlsStatus);
 
   // Input row for changing MLS
   var mlsInputRow = document.createElement('div');
-  mlsInputRow.style.cssText = 'display:flex;gap:0.5rem;align-items:stretch;flex-wrap:wrap;';
+  mlsInputRow.style.cssText = 'display:flex;gap:0.5rem;align-items:stretch;flex-wrap:wrap;margin-bottom:.75rem;';
 
   var mlsInput = document.createElement('input');
   mlsInput.type = 'text';
@@ -122,22 +127,22 @@ function renderMaximaRoutesSettings(root) {
 
   // ── Section 2: Register as Permanent ────────────────────────────────────
   var permanentSection = document.createElement('section');
-  permanentSection.className = 'ma-section';
-  permanentSection.style.cssText = 'margin-bottom:1.5rem;padding:1rem;background:var(--pico-card-sectionning-background-color,rgba(0,0,0,0.03));border-radius:0.5rem;';
+  permanentSection.className = 'ma-section-group';
+  permanentSection.style.cssText = 'border-left-color:#f39c12;';
 
-  var permanentTitle = document.createElement('h3');
+  var permanentTitle = document.createElement('strong');
+  permanentTitle.className = 'ma-section-title';
   permanentTitle.textContent = 'Register as Permanent User';
-  permanentTitle.style.cssText = 'margin-top:0;margin-bottom:0.5rem;';
   permanentSection.appendChild(permanentTitle);
 
   var permanentDesc = document.createElement('p');
-  permanentDesc.innerHTML = 'Creates a stable MAX# address on the MLS server. Other nodes can discover and contact you directly using this permanent address, even if your contact address changes. <strong>This feature is essential for both campaign creators and publishers.</strong>';
-  permanentDesc.style.cssText = 'font-size:0.875rem;color:var(--pico-muted-color,#6c757d);margin:0.25rem 0 1rem;';
+  permanentDesc.innerHTML = 'Creates a stable MAX# address on the MLS server. Other nodes can discover and contact you directly using this permanent address, even if your contact address changes. <strong>Essential for both creators and publishers.</strong>';
+  permanentDesc.style.cssText = 'font-size:0.875rem;color:var(--pico-muted-color,#6c757d);margin:0 0 1rem;';
   permanentSection.appendChild(permanentDesc);
 
   // Status display for permanent registration
   var permanentStatusDisplay = document.createElement('div');
-  permanentStatusDisplay.style.cssText = 'padding:0.75rem;margin-bottom:0.75rem;border-radius:0.375rem;font-family:monospace;font-size:0.8rem;border:1px solid var(--pico-muted-border-color);word-break:break-all;';
+  permanentStatusDisplay.style.cssText = 'padding:0.75rem;margin-bottom:0.75rem;border-radius:0.375rem;font-family:monospace;font-size:0.8rem;border:1px solid var(--pico-muted-border-color);word-break:break-all;background:var(--pico-card-sectionning-background-color,rgba(0,0,0,0.03));';
   permanentStatusDisplay.textContent = 'Checking registration status…';
   permanentSection.appendChild(permanentStatusDisplay);
 
@@ -238,28 +243,28 @@ function renderMaximaRoutesSettings(root) {
 
   // ── Section 3: MinimaAds Platform Creator Route Configuration ───────────
   var platformCreatorSection = document.createElement('section');
-  platformCreatorSection.className = 'ma-section';
-  platformCreatorSection.style.cssText = 'margin-top:1.5rem;padding:1rem;background:var(--pico-card-sectionning-background-color,rgba(0,0,0,0.03));border-radius:0.5rem;';
+  platformCreatorSection.className = 'ma-section-group';
+  platformCreatorSection.style.cssText = 'border-left-color:#9b59b6;';
 
-  var pcTitle = document.createElement('h3');
-  pcTitle.textContent = 'MinimaAds Platform Creator Route';
-  pcTitle.style.cssText = 'margin-top:0;margin-bottom:0.5rem;';
+  var pcTitle = document.createElement('strong');
+  pcTitle.className = 'ma-section-title';
+  pcTitle.textContent = 'Platform Creator Route';
   platformCreatorSection.appendChild(pcTitle);
 
   var pcDesc = document.createElement('p');
-  pcDesc.textContent = 'Register the stable Maxima route (MAX#...) of the MinimaAds platform creator node. This is used by campaign creators and publishers to route reward notifications correctly.';
-  pcDesc.style.cssText = 'font-size:0.875rem;color:var(--pico-muted-color,#6c757d);margin:0.25rem 0 1rem;';
+  pcDesc.textContent = 'Register the stable Maxima route (MAX#...) of the MinimaAds platform creator. Creators and publishers use this to route reward notifications correctly.';
+  pcDesc.style.cssText = 'font-size:0.875rem;color:var(--pico-muted-color,#6c757d);margin:0 0 1rem;';
   platformCreatorSection.appendChild(pcDesc);
 
   // Status display for current route
   var pcStatus = document.createElement('div');
-  pcStatus.style.cssText = 'padding:0.75rem;margin-bottom:0.75rem;border-radius:0.375rem;font-family:monospace;font-size:0.8rem;word-break:break-all;border:1px solid var(--pico-muted-border-color);';
+  pcStatus.style.cssText = 'padding:0.75rem;margin-bottom:0.75rem;border-radius:0.375rem;font-family:monospace;font-size:0.8rem;word-break:break-all;border:1px solid var(--pico-muted-border-color);background:var(--pico-card-sectionning-background-color,rgba(0,0,0,0.03));';
   pcStatus.textContent = 'Loading…';
   platformCreatorSection.appendChild(pcStatus);
 
   // Input row for setting/updating
   var pcInputRow = document.createElement('div');
-  pcInputRow.style.cssText = 'display:flex;gap:0.5rem;align-items:stretch;flex-wrap:wrap;';
+  pcInputRow.style.cssText = 'display:flex;gap:0.5rem;align-items:stretch;flex-wrap:wrap;margin-bottom:.75rem;';
 
   var pcInput = document.createElement('input');
   pcInput.type = 'text';

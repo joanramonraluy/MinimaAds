@@ -10,6 +10,7 @@ function renderEarnings(root) {
 
   var h2 = document.createElement('h2');
   h2.textContent = 'Earnings';
+  h2.style.cssText = 'margin:0 0 1.5rem 0;padding:1rem;background:rgba(0,0,0,0.02);border-left:4px solid #27ae60;border-radius:0.375rem;';
   root.appendChild(h2);
 
   // 3 stat cards in a row

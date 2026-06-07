@@ -14,6 +14,7 @@ function renderMyCampaigns(root) {
   root.innerHTML = '';
   var h2 = document.createElement('h2');
   h2.textContent = 'My Campaigns';
+  h2.style.cssText = 'margin:0 0 1.5rem 0;padding:1rem;background:rgba(0,0,0,0.02);border-left:4px solid #f59e0b;border-radius:0.375rem;';
   root.appendChild(h2);
   var section = document.createElement('section');
   section.id = 'ma-mycampaigns-section';

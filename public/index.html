@@ -99,31 +99,38 @@
     #ma-drawer-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 100; display: none; }
     #ma-drawer-overlay.open { display: block; }
     /* Drawer panel */
-    #ma-drawer { position: fixed; top: 0; left: 0; bottom: 0; width: 280px; background: var(--pico-background-color, #fff); box-shadow: 2px 0 16px rgba(0,0,0,.18); z-index: 101; transform: translateX(-100%); transition: transform .25s ease; padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+    #ma-drawer { position: fixed; top: 0; left: 0; bottom: 0; width: 280px; background: var(--pico-background-color, #fff); box-shadow: 2px 0 16px rgba(0,0,0,.18); z-index: 101; transform: translateX(-100%); transition: transform .25s ease; padding: 0.5rem 0; display: flex; flex-direction: column; overflow: hidden; }
+    [data-theme="dark"] #ma-drawer { background: var(--pico-background-color, #0f172a); }
     #ma-drawer.open { transform: translateX(0); }
-    .ma-drawer-section { padding: 1.25rem 1rem; border-bottom: 1px solid var(--pico-muted-border-color, #ddd); }
+    .ma-drawer-section { padding: 1rem 0.75rem; margin: 0.75rem; background: var(--pico-card-background-color, #fff); border: 1px solid var(--pico-muted-border-color, #ddd); border-radius: 0.4rem; box-shadow: 0 1px 3px rgba(0,0,0,0.06); transition: box-shadow 0.2s ease, border-color 0.2s ease; }
+    [data-theme="dark"] .ma-drawer-section { border-color: rgba(255,255,255,0.08); box-shadow: 0 1px 3px rgba(0,0,0,0.18); }
     .ma-drawer-header { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
     .ma-drawer-identity { display: flex; align-items: center; gap: .75rem; min-width: 0; }
-    .ma-drawer-avatar { width: 2.75rem; height: 2.75rem; border-radius: 50%; background: var(--pico-primary-background, #0172ad); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; font-weight: 700; flex-shrink: 0; margin: 0; }
+    .ma-drawer-avatar { width: 2.75rem; height: 2.75rem; border-radius: 50%; background: var(--pico-primary-background, #0172ad); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; font-weight: 700; flex-shrink: 0; margin: 0; box-shadow: 0 2px 8px rgba(0,0,0,0.12); cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease; }
+    .ma-drawer-avatar:hover { transform: scale(1.05); box-shadow: 0 4px 12px rgba(0,0,0,0.18); }
+    [data-theme="dark"] .ma-drawer-avatar:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
     .ma-drawer-mx { font-size: .8rem; color: var(--pico-muted-color, #6c757d); font-family: monospace; word-break: break-all; min-width: 0; }
     .ma-drawer-menu { list-style: none; margin: 0; padding: 0; }
-    .ma-drawer-menu > li { border-bottom: 1px solid var(--pico-muted-border-color, #eee); }
+    .ma-drawer-menu > li { border-bottom: 0; }
     .ma-drawer-menu > li:last-child { border-bottom: 0; }
-    .ma-drawer-menu-btn { display: flex; justify-content: space-between; align-items: center; width: 100%; background: none; border: none; padding: .8rem 1rem; font-size: 1rem; cursor: pointer; color: inherit; text-align: left; border-radius: 0; margin: 0; }
-    .ma-drawer-menu-btn:hover:not([disabled]) { background: var(--pico-card-sectionning-background-color, #f0f4f8); }
-    [data-theme="dark"] .ma-drawer-menu-btn:hover:not([disabled]) { background: rgba(255,255,255,.08); }
-    [data-theme="dark"] .ma-drawer-submenu { background: rgba(255,255,255,.04); }
-    [data-theme="dark"] .ma-drawer-submenu li button:hover { background: rgba(255,255,255,.1); }
+    .ma-drawer-menu-btn { display: flex; justify-content: space-between; align-items: center; width: 100%; background: none; border: none; padding: 0.65rem 0.75rem; font-size: 0.95rem; cursor: pointer; color: inherit; text-align: left; border-radius: 0.3rem; margin: 0.3rem 0; transition: background-color 0.15s ease, color 0.15s ease; font-weight: 500; }
+    .ma-drawer-menu-btn:hover:not([disabled]) { background: var(--pico-card-sectionning-background-color, #f0f4f8); color: var(--pico-primary, #0172ad); }
+    [data-theme="dark"] .ma-drawer-menu-btn:hover:not([disabled]) { background: rgba(255,255,255,.08); color: var(--pico-primary, #818cf8); }
+    [data-theme="dark"] .ma-drawer-submenu { background: rgba(255,255,255,.04); border-radius: 0.3rem; }
+    [data-theme="dark"] .ma-drawer-submenu li button:hover { background: rgba(255,255,255,.12); }
     .ma-drawer-menu-btn[disabled] { opacity: .45; cursor: default; }
-    .ma-drawer-role-arrow { font-size: .85rem; color: var(--pico-muted-color, #6c757d); transition: transform .2s; }
+    .ma-drawer-role-arrow { font-size: .85rem; color: var(--pico-muted-color, #6c757d); transition: transform .2s ease; flex-shrink: 0; }
     .ma-drawer-role-arrow.open { transform: rotate(90deg); }
-    .ma-drawer-submenu { list-style: none; margin: 0; padding: 0; background: var(--pico-card-sectionning-background-color, #f0f4f8); }
-    .ma-drawer-submenu li button { display: block; width: 100%; background: none; border: none; padding: .65rem 1.75rem; font-size: .95rem; cursor: pointer; text-align: left; color: inherit; margin: 0; border-radius: 0; }
-    .ma-drawer-submenu li button:hover { background: var(--pico-muted-border-color, #ddd); }
-    .ma-drawer-submenu li button[aria-selected="true"] { font-weight: 700; color: var(--pico-primary, #0172ad); }
+    .ma-drawer-submenu { list-style: none; margin: 0.5rem 0 0 0; padding: 0.5rem 0; background: var(--pico-card-sectionning-background-color, #f0f4f8); border-radius: 0.3rem; box-shadow: inset 0 1px 3px rgba(0,0,0,0.04); }
+    [data-theme="dark"] .ma-drawer-submenu { background: rgba(255,255,255,.04); box-shadow: inset 0 1px 3px rgba(0,0,0,0.1); }
+    .ma-drawer-submenu li button { display: block; width: 100%; background: none; border: none; padding: 0.55rem 1.5rem; font-size: .9rem; cursor: pointer; text-align: left; color: inherit; margin: 0; border-radius: 0.25rem; transition: background-color 0.15s ease, color 0.15s ease; }
+    .ma-drawer-submenu li button:hover { background: var(--pico-muted-border-color, #ddd); color: inherit; }
+    [data-theme="dark"] .ma-drawer-submenu li button:hover { background: rgba(255,255,255,.1); }
+    .ma-drawer-submenu li button[aria-selected="true"] { font-weight: 700; color: var(--pico-primary, #0172ad); background: rgba(99,102,241,.1); }
+    [data-theme="dark"] .ma-drawer-submenu li button[aria-selected="true"] { background: rgba(129,140,248,.12); color: var(--pico-primary, #818cf8); }
     /* Menu Footer */
-    .ma-drawer-footer { padding: 1.25rem 1rem; border-top: 1px solid var(--pico-muted-border-color, #ddd); background: var(--pico-card-sectionning-background-color, #f8f9fa); font-size: 0.8rem; line-height: 1.4; color: var(--pico-muted-color, #6c757d); }
-    [data-theme="dark"] .ma-drawer-footer { background: rgba(255,255,255,0.02); border-top-color: rgba(255,255,255,0.08); }
+    .ma-drawer-footer { padding: 1rem 0.75rem; margin: 0.75rem; background: var(--pico-card-background-color, #fff); border: 1px solid var(--pico-muted-border-color, #ddd); border-radius: 0.4rem; font-size: 0.8rem; line-height: 1.4; color: var(--pico-muted-color, #6c757d); box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+    [data-theme="dark"] .ma-drawer-footer { background: var(--pico-card-background-color, #1e293b); border-color: rgba(255,255,255,0.08); box-shadow: 0 1px 3px rgba(0,0,0,0.18); }
     .ma-drawer-footer-title { display: flex; justify-content: space-between; align-items: center; font-weight: 600; color: var(--pico-color, inherit); margin-bottom: 0.4rem; }
     .ma-drawer-version { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.75rem; opacity: 0.8; background: var(--pico-muted-border-color, rgba(0,0,0,0.05)); padding: 0.1rem 0.35rem; border-radius: 0.25rem; }
     [data-theme="dark"] .ma-drawer-version { background: rgba(255,255,255,0.08); }

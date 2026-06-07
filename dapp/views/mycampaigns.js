@@ -187,36 +187,43 @@ function _buildCampaignCard(c, openDetails) {
 
   // Card body (visible when expanded)
   var cardBody = document.createElement('div');
-  cardBody.style.cssText = 'padding:1rem;border-top:1px solid var(--pico-border-color);background-color:var(--pico-card-background-color);';
+  cardBody.style.cssText = 'padding:1rem;border-top:1px solid var(--pico-border-color);background-color:var(--pico-card-background-color);overflow:hidden;';
 
-  // ── Performance row ──────────────────────────────────────────────────────
+  // ── Performance row (card-style grouping) ────────────────────────────────
+  var perfGroup = document.createElement('div');
+  perfGroup.className = 'ma-section-group';
+  perfGroup.style.cssText = 'margin-bottom:.75rem;padding:.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(0,0,0,0.015);border-left:3px solid #2ecc71;';
+
   var perfTitle = mkSectionTitle('Performance');
   perfTitle.style.cssText = 'display:block;font-size:.78rem;color:var(--pico-muted-color,#6c757d);margin-top:0;text-transform:uppercase;letter-spacing:.04em;';
-  cardBody.appendChild(perfTitle);
+  perfGroup.appendChild(perfTitle);
 
   var ctr = viewCount > 0 ? (clickCount / viewCount * 100) : 0;
 
   var perfRow = document.createElement('div');
-  perfRow.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:.6rem;margin:.35rem 0 .75rem;';
+  perfRow.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:.6rem;margin:.35rem 0 0;';
   perfRow.appendChild(mkStatCard('Views', String(viewCount)));
   perfRow.appendChild(mkStatCard('Clicks', String(clickCount)));
   perfRow.appendChild(mkStatCard('CTR', fmtAmt(ctr, 2) + '%'));
   perfRow.appendChild(mkStatCard('Viewers', String(uniqueViewers)));
   perfRow.appendChild(mkStatCard('Publishers', String(uniquePublishers)));
-  cardBody.appendChild(perfRow);
+  perfGroup.appendChild(perfRow);
+  cardBody.appendChild(perfGroup);
 
-  // ── Budget Allocation (Collapsible) ──────────────────────────────────────
+  // ── Budget Allocation (Collapsible, card-style) ──────────────────────────
   var budgetDetails = document.createElement('details');
   budgetDetails.className = 'ma-campaign-details';
   budgetDetails.setAttribute('data-details-id', 'budget-allocation');
-  
+  budgetDetails.style.cssText = 'margin-bottom:.75rem;padding:.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(0,0,0,0.015);border-left:3px solid #f39c12;';
+
   var budgetSummary = document.createElement('summary');
   budgetSummary.textContent = 'Budget Allocation';
   budgetSummary.className = 'ma-campaign-details-summary';
+  budgetSummary.style.cssText = 'font-weight:600;cursor:pointer;margin:-.75rem -1rem .35rem;padding:.75rem 1rem;';
   budgetDetails.appendChild(budgetSummary);
 
   var budgetBody = document.createElement('div');
-  budgetBody.style.cssText = 'padding:.75rem 0 .25rem;';
+  budgetBody.style.cssText = 'margin-top:.5rem;';
 
   // ── Combined Totals ──
   var totalBudgetTitle = mkSectionTitle('Combined Totals');
@@ -305,18 +312,20 @@ function _buildCampaignCard(c, openDetails) {
   }
   cardBody.appendChild(budgetDetails);
 
-  // ── Ad Preview (expandable) ──────────────────────────────────────────────
+  // ── Ad Preview (expandable, card-style) ──────────────────────────────────
   var previewDetails = document.createElement('details');
   previewDetails.className = 'ma-campaign-details';
   previewDetails.setAttribute('data-details-id', 'ad-preview');
-  
+  previewDetails.style.cssText = 'margin-bottom:.75rem;padding:.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(0,0,0,0.015);border-left:3px solid #3498db;';
+
   var previewSummary = document.createElement('summary');
   previewSummary.textContent = 'Ad Preview';
   previewSummary.className = 'ma-campaign-details-summary';
+  previewSummary.style.cssText = 'font-weight:600;cursor:pointer;margin:-.75rem -1rem .35rem;padding:.75rem 1rem;';
   previewDetails.appendChild(previewSummary);
 
   var previewBody = document.createElement('div');
-  previewBody.style.cssText = 'padding:.75rem 0 .25rem;';
+  previewBody.style.cssText = 'margin-top:.5rem;';
 
   var adContainer = document.createElement('div');
   adContainer.id = 'ma-ad-preview-container-' + c.ID;
@@ -359,17 +368,19 @@ function _buildCampaignCard(c, openDetails) {
   }
   cardBody.appendChild(previewDetails);
 
-  // ── Campaign configuration (expandable) ──────────────────────────────────
+  // ── Campaign configuration (expandable, card-style) ──────────────────────
   var configDetails = document.createElement('details');
   configDetails.className = 'ma-campaign-details';
   configDetails.setAttribute('data-details-id', 'campaign-config');
+  configDetails.style.cssText = 'margin-bottom:.75rem;padding:.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(0,0,0,0.015);border-left:3px solid #9b59b6;';
   var configSummary = document.createElement('summary');
   configSummary.textContent = 'Campaign configuration';
   configSummary.className = 'ma-campaign-details-summary';
+  configSummary.style.cssText = 'font-weight:600;cursor:pointer;margin:-.75rem -1rem .35rem;padding:.75rem 1rem;';
   configDetails.appendChild(configSummary);
 
   var configBody = document.createElement('div');
-  configBody.style.cssText = 'padding:.75rem 0 .25rem;';
+  configBody.style.cssText = 'margin-top:.5rem;';
 
   var sections = [
     {
@@ -452,18 +463,20 @@ function _buildCampaignCard(c, openDetails) {
   }
   cardBody.appendChild(configDetails);
 
-  // ── Activity chart (expandable) ─────────────────────────────────────────
+  // ── Activity chart (expandable, card-style) ─────────────────────────────
   var details = document.createElement('details');
   details.className = 'ma-campaign-details';
   details.setAttribute('data-details-id', 'activity-chart');
+  details.style.cssText = 'margin-bottom:.75rem;padding:.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(0,0,0,0.015);border-left:3px solid #1abc9c;';
   var summary = document.createElement('summary');
   summary.textContent = 'Activity chart';
   summary.className = 'ma-campaign-details-summary';
+  summary.style.cssText = 'font-weight:600;cursor:pointer;margin:-.75rem -1rem .35rem;padding:.75rem 1rem;';
   details.appendChild(summary);
 
   var detailBody = document.createElement('div');
   detailBody.id = 'ma-detail-' + c.ID;
-  detailBody.style.cssText = 'padding:.75rem 0 .25rem;';
+  detailBody.style.cssText = 'margin-top:.5rem;';
   details.appendChild(detailBody);
 
   var chartLoaded = false;
@@ -489,17 +502,19 @@ function _buildCampaignCard(c, openDetails) {
   }
   cardBody.appendChild(details);
 
-  // ── Pending settlement (expandable) ────────────────────────────────────
+  // ── Pending settlement (expandable, card-style) ────────────────────────
   var nodesDetails = document.createElement('details');
   nodesDetails.className = 'ma-campaign-details';
   nodesDetails.setAttribute('data-details-id', 'pending-settlement');
+  nodesDetails.style.cssText = 'margin-bottom:.75rem;padding:.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(0,0,0,0.015);border-left:3px solid #e74c3c;';
   var nodesSummary = document.createElement('summary');
   nodesSummary.textContent = 'Pending settlement';
   nodesSummary.className = 'ma-campaign-details-summary';
+  nodesSummary.style.cssText = 'font-weight:600;cursor:pointer;margin:-.75rem -1rem .35rem;padding:.75rem 1rem;';
   nodesDetails.appendChild(nodesSummary);
 
   var nodesBody = document.createElement('div');
-  nodesBody.style.cssText = 'padding:.75rem 0 .25rem;';
+  nodesBody.style.cssText = 'margin-top:.5rem;';
   nodesDetails.appendChild(nodesBody);
 
   var nodesLoaded = false;
@@ -523,17 +538,19 @@ function _buildCampaignCard(c, openDetails) {
   }
   cardBody.appendChild(nodesDetails);
 
-  // ── Settled channels (expandable) ─────────────────────────────────────────
+  // ── Settled channels (expandable, card-style) ─────────────────────────────
   var settledDetails = document.createElement('details');
   settledDetails.className = 'ma-campaign-details';
   settledDetails.setAttribute('data-details-id', 'settled-channels');
+  settledDetails.style.cssText = 'margin-bottom:.75rem;padding:.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(0,0,0,0.015);border-left:3px solid #27ae60;';
   var settledSummary = document.createElement('summary');
   settledSummary.textContent = 'Settled channels';
   settledSummary.className = 'ma-campaign-details-summary';
+  settledSummary.style.cssText = 'font-weight:600;cursor:pointer;margin:-.75rem -1rem .35rem;padding:.75rem 1rem;';
   settledDetails.appendChild(settledSummary);
 
   var settledBody = document.createElement('div');
-  settledBody.style.cssText = 'padding:.75rem 0 .25rem;';
+  settledBody.style.cssText = 'margin-top:.5rem;';
   settledDetails.appendChild(settledBody);
 
   var settledLoaded = false;

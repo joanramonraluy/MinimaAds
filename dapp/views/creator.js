@@ -68,6 +68,7 @@ function renderCreator(root) {
 
   var h2 = document.createElement('h2');
   h2.textContent = 'Create Campaign';
+  h2.style.cssText = 'margin:0 0 1.5rem 0;padding:1rem;background:rgba(0,0,0,0.02);border-left:4px solid #9b59b6;border-radius:0.375rem;';
   root.appendChild(h2);
 
   // Check for permanent Maxima route — redirect to settings if not registered.

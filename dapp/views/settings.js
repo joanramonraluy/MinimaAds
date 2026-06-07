@@ -18,14 +18,15 @@ function renderSettings(root) {
   if (!openRoutes) {
     appDetails.setAttribute('open', '');
   }
-  
+  appDetails.style.cssText = 'margin-bottom:1.5rem;padding:0.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:var(--pico-card-background-color);box-shadow:var(--pico-card-box-shadow,0 1px 3px rgba(0,0,0,0.05));border-left:3px solid #3498db;';
+
   var appSummary = document.createElement('summary');
-  appSummary.style.cssText = 'font-weight:700;font-size:1.1rem;cursor:pointer;margin-bottom:0.5rem;';
+  appSummary.style.cssText = 'font-weight:700;font-size:1.1rem;cursor:pointer;margin:-0.75rem -1rem 0.5rem;padding:0.75rem 1rem;display:block;';
   appSummary.textContent = 'Appearance';
   appDetails.appendChild(appSummary);
 
   var appearanceContent = document.createElement('div');
-  appearanceContent.style.cssText = 'padding:0.5rem 0.75rem 1.5rem;';
+  appearanceContent.style.cssText = 'padding-top:0.5rem;';
 
   // Theme mode
   var themeLabel = document.createElement('small');
@@ -117,14 +118,15 @@ function renderSettings(root) {
   if (openRoutes) {
     routesDetails.setAttribute('open', '');
   }
+  routesDetails.style.cssText = 'margin-bottom:1.5rem;padding:0.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:var(--pico-card-background-color);box-shadow:var(--pico-card-box-shadow,0 1px 3px rgba(0,0,0,0.05));border-left:3px solid #2ecc71;';
 
   var routesSummary = document.createElement('summary');
-  routesSummary.style.cssText = 'font-weight:700;font-size:1.1rem;cursor:pointer;margin-bottom:0.5rem;';
+  routesSummary.style.cssText = 'font-weight:700;font-size:1.1rem;cursor:pointer;margin:-0.75rem -1rem 0.5rem;padding:0.75rem 1rem;display:block;';
   routesSummary.textContent = 'Configure Maxima Routes';
   routesDetails.appendChild(routesSummary);
 
   var routesContent = document.createElement('div');
-  routesContent.style.cssText = 'padding:0.5rem 0.75rem 1.5rem;';
+  routesContent.style.cssText = 'padding-top:0.5rem;';
 
   if (typeof renderMaximaRoutesSettings === 'function') {
     renderMaximaRoutesSettings(routesContent);
@@ -135,14 +137,15 @@ function renderSettings(root) {
 
   // ── Accordion 3: Privacy ──────────────────────────────────────────────────
   var privacyDetails = document.createElement('details');
+  privacyDetails.style.cssText = 'margin-bottom:1.5rem;padding:0.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:var(--pico-card-background-color);box-shadow:var(--pico-card-box-shadow,0 1px 3px rgba(0,0,0,0.05));border-left:3px solid #f39c12;';
 
   var privacySummary = document.createElement('summary');
-  privacySummary.style.cssText = 'font-weight:700;font-size:1.1rem;cursor:pointer;margin-bottom:0.5rem;';
+  privacySummary.style.cssText = 'font-weight:700;font-size:1.1rem;cursor:pointer;margin:-0.75rem -1rem 0.5rem;padding:0.75rem 1rem;display:block;';
   privacySummary.textContent = 'Privacy';
   privacyDetails.appendChild(privacySummary);
 
   var privacyContent = document.createElement('div');
-  privacyContent.style.cssText = 'padding:0.5rem 0.75rem 1.5rem;';
+  privacyContent.style.cssText = 'padding-top:0.5rem;';
 
   var privMsg = document.createElement('p');
   privMsg.style.cssText = 'color:var(--pico-muted-color,#6c757d);font-size:.875rem;margin:0;';

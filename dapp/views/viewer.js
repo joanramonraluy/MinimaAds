@@ -37,21 +37,34 @@ function _buildListShell(root) {
   h2.textContent = 'View Ads';
   root.appendChild(h2);
 
-  var earnedRow = document.createElement('div');
-  earnedRow.style.cssText = 'display:flex;gap:.75rem;margin-bottom:1rem;';
+  var summarySection = document.createElement('section');
+  summarySection.style.cssText = 'margin-bottom:1.5rem;padding:.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(0,0,0,0.015);border-left:3px solid #10b981;';
+  var summaryRow = document.createElement('div');
+  summaryRow.style.cssText = 'display:flex;gap:.75rem;flex-wrap:wrap;';
   var earnedCard = mkStatCard('Today earned', '—');
   earnedCard.id = 'ma-earned-card';
-  earnedRow.appendChild(earnedCard);
-  root.appendChild(earnedRow);
+  summaryRow.appendChild(earnedCard);
+  summarySection.appendChild(summaryRow);
+  root.appendChild(summarySection);
+
+  var listSection = document.createElement('section');
+  listSection.style.cssText = 'margin-bottom:1.5rem;';
+  var listTitle = document.createElement('p');
+  listTitle.className = 'ma-section-title';
+  listTitle.textContent = 'Available campaigns';
+  listTitle.style.cssText = 'display:block;font-size:.78rem;color:var(--pico-muted-color,#6c757d);margin-top:0;text-transform:uppercase;letter-spacing:.04em;margin-bottom:.75rem;';
+  listSection.appendChild(listTitle);
 
   var listEl = document.createElement('div');
   listEl.id = 'ma-campaign-list';
+  listEl.style.cssText = 'border:1px solid var(--pico-muted-border-color,#ddd);border-radius:var(--pico-border-radius);overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06);';
   var loading = document.createElement('p');
   loading.setAttribute('aria-busy', 'true');
-  loading.style.cssText = 'color:var(--pico-muted-color,#6c757d);';
+  loading.style.cssText = 'color:var(--pico-muted-color,#6c757d);padding:1rem;margin:0;';
   loading.textContent = 'Loading campaigns…';
   listEl.appendChild(loading);
-  root.appendChild(listEl);
+  listSection.appendChild(listEl);
+  root.appendChild(listSection);
 
   loadTodayEarned();
 }
@@ -91,8 +104,11 @@ function _loadAndRenderList() {
       listEl.innerHTML = '';
 
       if (err) {
+        listEl.innerHTML = '';
+        listEl.style.border = 'none';
+        listEl.style.boxShadow = 'none';
         var errP = document.createElement('p');
-        errP.style.cssText = 'color:var(--pico-muted-color,#6c757d);';
+        errP.style.cssText = 'color:var(--pico-del-color,#c0392b);padding:1rem;margin:0;text-align:center;';
         errP.textContent = 'Error loading campaigns.';
         listEl.appendChild(errP);
         return;
@@ -106,10 +122,12 @@ function _loadAndRenderList() {
       });
 
       if (campaigns.length === 0) {
-        var emptyP = document.createElement('p');
-        emptyP.style.cssText = 'color:var(--pico-muted-color,#6c757d);text-align:center;padding:2rem 0;';
-        emptyP.textContent = 'No ads available right now.';
-        listEl.appendChild(emptyP);
+        listEl.innerHTML = '';
+        listEl.style.border = 'none';
+        listEl.style.boxShadow = 'none';
+        var emptyState = mkEmptyState('No ads available right now.', null, null);
+        emptyState.style.cssText = 'padding:3rem 1rem;';
+        listEl.appendChild(emptyState);
         return;
       }
 
@@ -127,10 +145,10 @@ function _buildCampaignRow(campaign, contact) {
   var row = document.createElement('button');
   row.type = 'button';
   row.style.cssText = 'display:flex;width:100%;align-items:center;gap:.85rem;'
-    + 'padding:.75rem .85rem;background:transparent;border:none;border-radius:0;'
+    + 'padding:1rem .85rem;background:transparent;border:none;border-radius:0;'
     + 'border-bottom:1px solid var(--pico-muted-border-color,#ddd);'
     + 'cursor:pointer;text-align:left;color:inherit;margin:0;box-shadow:none;'
-    + 'transition:background .12s;';
+    + 'transition:background .12s,border-color .12s;';
 
   // Deterministic hue from campaign ID for a stable fallback colour
   var hue = 0;
@@ -206,8 +224,16 @@ function _buildCampaignRow(campaign, contact) {
   row.setAttribute('data-creator-pk', (campaign.CREATOR_ADDRESS || '').toUpperCase());
   row.addEventListener('mouseover', function() {
     row.style.background = _viewerRowHoverBackground();
+    row.style.borderLeftColor = '#10b981';
+    row.style.borderLeft = '3px solid #10b981';
+    row.style.paddingLeft = 'calc(.85rem - 2px)';
   });
-  row.addEventListener('mouseout', function() { row.style.background = 'transparent'; });
+  row.addEventListener('mouseout', function() {
+    row.style.background = 'transparent';
+    row.style.borderLeft = 'none';
+    row.style.paddingLeft = '.85rem';
+    row.style.borderLeftColor = 'transparent';
+  });
   row.addEventListener('click', function() { _openCampaign(campaign); });
 
   return row;
@@ -235,7 +261,7 @@ function _openCampaign(campaign) {
 
 function _buildDetailShell(root) {
   var backRow = document.createElement('div');
-  backRow.style.cssText = 'margin-bottom:.75rem;';
+  backRow.style.cssText = 'margin-bottom:1rem;';
   var backBtn = document.createElement('button');
   backBtn.type = 'button';
   backBtn.className = 'outline secondary';
@@ -245,16 +271,19 @@ function _buildDetailShell(root) {
   backRow.appendChild(backBtn);
   root.appendChild(backRow);
 
-  var earnedRow = document.createElement('div');
-  earnedRow.style.cssText = 'display:flex;gap:.75rem;margin-bottom:1rem;';
+  var summarySection = document.createElement('section');
+  summarySection.style.cssText = 'margin-bottom:1.5rem;padding:.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(0,0,0,0.015);border-left:3px solid #10b981;';
+  var summaryRow = document.createElement('div');
+  summaryRow.style.cssText = 'display:flex;gap:.75rem;flex-wrap:wrap;';
   var earnedCard = mkStatCard('Today earned', '—');
   earnedCard.id = 'ma-earned-card';
-  earnedRow.appendChild(earnedCard);
-  root.appendChild(earnedRow);
+  summaryRow.appendChild(earnedCard);
+  summarySection.appendChild(summaryRow);
+  root.appendChild(summarySection);
 
   var adArticle = document.createElement('article');
   adArticle.id = 'ma-ad-article';
-  adArticle.style.cssText = 'padding:0;overflow:hidden;margin-bottom:.75rem;';
+  adArticle.style.cssText = 'padding:0;overflow:hidden;margin-bottom:1.5rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);box-shadow:0 2px 8px rgba(0,0,0,0.08);';
 
   var slot = document.createElement('div');
   slot.id = 'ma-ad-slot';
@@ -262,12 +291,12 @@ function _buildDetailShell(root) {
 
   var progressWrap = document.createElement('div');
   progressWrap.id = 'ma-view-progress-wrap';
-  progressWrap.style.cssText = 'padding:.5rem .85rem .65rem;display:none;';
+  progressWrap.style.cssText = 'padding:.75rem 1rem;display:none;border-top:1px solid var(--pico-muted-border-color,#ddd);background:rgba(0,0,0,0.02);';
   var progressBar = document.createElement('progress');
   progressBar.id = 'ma-view-progress';
   progressBar.max = 100;
   progressBar.value = 0;
-  progressBar.style.cssText = 'width:100%;height:.35rem;margin:0 0 .25rem;';
+  progressBar.style.cssText = 'width:100%;height:.35rem;margin:0 0 .5rem;';
   progressBar.setAttribute('aria-label', 'Viewing ad…');
   var progressLbl = document.createElement('small');
   progressLbl.style.cssText = 'color:var(--pico-muted-color,#6c757d);font-size:.7rem;';

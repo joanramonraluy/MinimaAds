@@ -176,61 +176,88 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
-### Session: 2026-06-06 — Fix Stale-Pending Publisher Channel Deadlock
+### Session: 2026-06-07 — Collapsible Campaign Cards & Combined Totals
 
-**Task**: Publisher rewards from snippets (and built-in frame) not reaching publishers. Diagnosed via `logs/user1.txt`, `logs/user2.txt`, `logs/user4.txt`.
+**Task**: Re-architect the campaign cards view in the creator dashboard to make campaign cards and their budget allocation sections collapsible to keep the UI tidy, introduce a "Combined Totals" budget overview, and preserve details open states across page updates.
 
-**Root Cause**: A stale `pending` publisher channel on the creator node caused a deadlock. When a REWARD_REQUEST arrives and no `open` publisher channel exists, `_maybeGeneratePublisherVoucher` defers and calls `_doNotifyPublisherByKey`. That function previously suppressed `PUBLISHER_REWARD_NOTIFY` for **both** `open` AND `pending` channels (line: `ch.STATUS === 'open' || ch.STATUS === 'pending'`). A `pending` channel means the creator ran Tx1+Tx2 but the `CHANNEL_OPEN` Maxima message never reached the publisher. With no notification, the publisher never re-sent `CHANNEL_OPEN_REQUEST`, so the channel stayed stuck in `pending` indefinitely. No deferred publisher rewards were ever replayed. Same bug existed in `_maybeNotifyPublisher` (the legacy frame-lookup path).
+**Root Cause**: When a creator had multiple campaigns, the dashboard cards took up too much vertical space, showing long configuration tables and dual budget grids. In addition, there was no quick "combined totals" summary grouping general budget metrics, and page refreshes/updates would reset any toggle states.
 
-**Fix** (`channel.handler.js`, two functions):
-- `_doNotifyPublisherByKey`: changed suppression from `open || pending` to `open` only. Added stale-pending guard: if `pending` but channel was created < 5 min ago → skip (TX in flight). If `pending` and ≥ 5 min old → log and send `PUBLISHER_REWARD_NOTIFY` anyway. The publisher has no channel state on its side (it never received `CHANNEL_OPEN`), so it will re-send `CHANNEL_OPEN_REQUEST`, which triggers the creator's stale-pending retry/archive logic.
-- `_maybeNotifyPublisher`: same fix applied symmetrically.
-
-**AGENTS.md updated**: yes — §6 updated.
-
-**Verification**:
-- `channel.handler.js` compiles cleanly with `node -c`.
-- Trigger a view on a snippet after the creator already has a stale `pending` publisher channel (> 5 min old): creator should log `_notifyPublisherByKey: stale pending channel (age=Xms) — re-notifying publisher`. Publisher should then log `PUBLISHER_REWARD_NOTIFY: ...`, send `CHANNEL_OPEN_REQUEST`, and creator should log stale-pending retry. Deferred rewards should replay after new channel opens.
-
----
-
-### Session: 2026-06-06 — Fix Publisher Budget (Multi-Publisher Support)
-
-**Task**: Second iteration of publisher budget fix. New diagnosis: `PUBLISHER_BUDGET_SPENT` was tracking MAX_AMOUNT *reservations* (100) when a channel opens, not actual payouts (10). After user4's builtin-frame channel opened, `PUBLISHER_BUDGET_SPENT = 100 = MAX_PUBLISHER_BUDGET`, blocking all subsequent publishers (user2 snippet, etc.).
-
-**Root Cause (two sub-bugs)**:
-1. **Wrong tracking field**: budget check used `PUBLISHER_BUDGET_SPENT` (tracks channel MAX_AMOUNT reservations) instead of `SUM(CUMULATIVE_EARNED)` (actual payouts). After one channel opens, even with minimal payout, the whole budget appeared exhausted.
-2. **Wrong maxAmount for publisher channel**: `_doSendPublisherChannelOpenRequest` sent `max_amount = MAX_PUBLISHER_BUDGET` (total campaign publisher budget) instead of `PUBLISHER_REWARD_VIEW * 10` (a per-session cap mirroring viewer logic). This caused one channel to reserve the entire budget.
-
-**Fixes** (`channel.handler.js`):
-- Budget check now uses `SELECT SUM(CUMULATIVE_EARNED)` from all publisher `CHANNEL_STATE` rows. Multiple publishers can open channels concurrently as long as total actual payouts < `MAX_PUBLISHER_BUDGET`.
-- `effectiveCap = min(requested, remaining)` — publisher's requested channel max is capped at remaining budget, so a publisher can still open even if their session cap > remaining.
-- Reject only if `effectiveCap < PUBLISHER_REWARD_VIEW` (not enough for a single view).
-- `_doSendPublisherChannelOpenRequest`: changed `maxAmount` from `MAX_PUBLISHER_BUDGET` to `PUBLISHER_REWARD_VIEW * 10`.
+**Fix**:
+- dapp/views/mycampaigns.js:
+  - Switched the main card element from `<article>` to `<details class="ma-campaign-card-details">`.
+  - Put title, badge, quick stats summary, and action buttons inside the `<summary>` element.
+  - Used `e.stopPropagation()` on the action button click handlers to prevent details toggle when clicking actions.
+  - Put the budget allocation rows and indicators inside a collapsible nested `<details data-details-id="budget-allocation">`.
+  - Added a **"Combined Totals"** row at the top of the budget allocation details body showing aggregated campaign funds (Total Budget, Escrow Left, Locked, Paid).
+  - Modified state saving logic in `loadMyCampaigns` to query all elements matching `[data-campaign-id]` and preserve expanded states of both the campaign details cards and nested details panels using `data-details-id` attribute values.
+  - Replaced the static/non-dynamic "Reward/View" and "Reward/Click" stat cards on the Performance row with dynamic **"Viewers"** and **"Publishers"** counts retrieved via H2 `COUNT(DISTINCT USER_ADDRESS)` and `COUNT(DISTINCT PUBLISHER_ID)` queries from `REWARD_EVENTS`.
+- dapp/views/ui-helpers.js:
+  - Updated `mkStatCard` to use a flex column layout (`display:flex; flex-direction:column;`) and added `margin-top:auto` to the main value element (`val`) to guarantee all numbers align horizontally even if labels wrap on small screens.
+- public/index.html:
+  - Added custom styles for `details.ma-campaign-card-details` to animate open states and render a custom right-aligned chevron arrow indicator.
 
 **AGENTS.md updated**: yes — §6 updated.
 
 **Verification**:
-- `channel.handler.js` compiles cleanly with `node -c`.
-- Budget log now shows: `max=100 earned=10 remaining=90 requestedCap=100 effectiveCap=90` for user2 snippet after user4 earned 10.
+- `mycampaigns.js` and `ui-helpers.js` compile cleanly with `node -c`.
+- Rebuilt `MinimaAds.mds.zip` and verified files packaged successfully.
 
 ---
 
-### Session: 2026-06-06 — Fix Publisher Budget Check (snippet publishers blocked)
+### Session: 2026-06-07 — Detailed Campaign Budget Allocation UI
 
-**Task**: Publisher nodes using the SDK snippet (custom frames) were being rejected by the creator with "insufficient publisher budget. remaining: 0 requested: 100", even though no budget had been exhausted.
+**Task**: Improve the creator's campaign metrics UI to break down the campaign budget into distinct actionable sections (available in escrow, locked in channels, and settled payouts) and introduce CTR performance tracking.
 
-**Root Cause**: `handleChannelOpenRequest` (publisher path) computed `pubRemaining` as `MAX_PUBLISHER_BUDGET - SUM(open channel MAX_AMOUNT)`. If a previous publisher's channel (e.g. builtin frame user4, MAX_AMOUNT=100) was still `STATUS='open'` on the creator DB (voucher sent but not yet settled on-chain), `pubAllocated=100` → `pubRemaining=0` → all new publishers were blocked.
+**Root Cause**: Previously, the campaign cards only showed "Budget left" (which represents the escrow balance), without explaining what was locked in open payment channels or already settled/paid to viewers and publishers. This was confusing because users could not audit the flow of funds or see pending unliquidated channel balances.
 
-**Fix**: `channel.handler.js` — replaced the `sqlQuery` over `CHANNEL_STATE` with a direct read of `campaign.PUBLISHER_BUDGET_SPENT` (already incremented when a channel is opened). `pubRemaining = MAX_PUBLISHER_BUDGET - PUBLISHER_BUDGET_SPENT`. A new publisher log line shows the full budget state for future debugging.
+**Fix**:
+- dapp/views/mycampaigns.js:
+  - Updated `loadMyCampaigns()`'s SQL query to fetch separate viewer and publisher channel aggregates (`VIEWER_LOCKED`, `VIEWER_UNSETTLED`, `VIEWER_SETTLED`, `PUB_LOCKED`, `PUB_UNSETTLED`, `PUB_SETTLED`, and dynamic `PUB_SPENT_ACTUAL`).
+  - Split the "Budget Allocation" section into two distinct rows: "Budget Allocation (Viewer)" (Available Escrow, Locked in Channels, Settled Paid, Unspent Campaign) and "Budget Allocation (Publisher)" (Max Pub Budget, Budget Reserved, Budget Spent, Budget Left) to organize dynamic runtime fons.
+  - Mobile responsiveness: Switched both rows to responsive CSS Grids (`repeat(auto-fit, minmax(120px, 1fr))`).
+  - Exhausted Publisher Budget Warning: Added a dynamic check so if the remaining publisher budget is lower than a single view's reward rate, the "Budget Left" card values turn red, and the subtext changes to "Exhausted (cannot open)".
+  - Collapsible Campaign Configuration: Added an expandable details block showing static parameters divided into themed sub-sections: General Campaign Data, Reward Viewer, Reward Viewer Limits, and Publisher Rewards & Limits (removing dynamic/runtime publisher stats from this static block).
+  - Periodic Auto-Refresh Removed: Completely eliminated the 30-second interval timer which caused disruptive full-page UI refreshes.
+  - Silent Stateful Update: Added `loadMyCampaigns(isAutoRefresh)` parameter to preserve the open/expanded states of all details blocks before reloading.
+  - Polish: updated progress bar labels and footnotes.
+- dapp/views/creator.js:
+  - Added a descriptive note beneath the "Max publisher budget" input field to explain dynamic runtime budget reservation, payment channels, and tracking.
+- dapp/views/help.js:
+  - Expanded the Creator Help panel with dedicated sections detailing the Viewer and Publisher budget allocation categories.
+- dapp/app.js:
+  - Configured handlers for `NEW_CAMPAIGN`, `CAMPAIGN_UPDATED`, and `REWARD_CONFIRMED` to trigger silent/seamless reloads.
 
 **AGENTS.md updated**: yes — §6 updated.
 
 **Verification**:
-- `channel.handler.js` compiles cleanly with `node -c`.
-- With a first publisher channel open (STATUS='open'), a second publisher's CHANNEL_OPEN_REQUEST must be accepted (budget log shows max=100 spent=100 if first channel has been fully committed, or spent=0 if no channel has been opened yet).
+- `mycampaigns.js`, `creator.js`, and `help.js` compile cleanly with `node -c`.
 
 ---
 
-> Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, Auto-Sync Platform Creator Route, Unify MLS DevTools, Fix Viewer and Publisher Reward Delivery, and all earlier) are archived in `docs/HISTORY.md §17`.
+### Session: 2026-06-07 — Log Publisher Reward Events & Rename Active Rewards Label
+
+**Task**: 
+- Campaign creator's "Rewarded nodes" screen not showing publisher earnings when they originate from the built-in snippet/viewer frame.
+- Clarify active reward section name in the campaign dashboard to avoid confusion with settled channels.
+
+**Root Cause**: 
+- On the creator's node, the Service Worker only created a `REWARD_EVENTS` row (type `'view'`) when a viewer voucher was signed and posted. It completely skipped generating `publisher_view` reward events when issuing publisher vouchers. Additionally, in `_swDispatchVoucher`, the `rewardAmount` was hardcoded to `0` when the role was `'publisher'`.
+- "Rewarded nodes" label was ambiguous and did not clearly distinguish active, pending-settlement earnings from archived on-chain settled channels.
+
+**Fix**: 
+- In `channel.handler.js`:
+  - Updated `_swDispatchVoucher` to set `rewardAmount` to the campaign's `PUBLISHER_REWARD_VIEW` when the role is `'publisher'`.
+  - In `swSignAndPostChannelTx`'s `sendMaxima` callback, added the path for `role === 'publisher'` to query the active campaign's ad and write a `'publisher_view'` reward event (passing `publisher_id = fid`). This correctly populates `REWARD_EVENTS` and decrements the campaign budget via the local `updateBudget` call in `createRewardEvent`.
+- In `dapp/views/mycampaigns.js`:
+  - Renamed the section heading and comments from "Rewarded nodes" to "Pending settlement".
+  - Renamed empty state and loading texts accordingly to "No pending settlements yet." and "Loading pending settlements…".
+
+**AGENTS.md updated**: yes — §6 updated.
+
+**Verification**:
+- `channel.handler.js` and `mycampaigns.js` compile cleanly with `node -c`.
+
+---
+
+> Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, Auto-Sync Platform Creator Route, Unify MLS DevTools, Fix Viewer and Publisher Reward Delivery, Fix Publisher Budget (Multi-Publisher Support), Fix Stale-Pending Publisher Channel Deadlock, and all earlier) are archived in `docs/HISTORY.md §17`.
 

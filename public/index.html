@@ -60,6 +60,12 @@
     .ma-nested-detail { background: var(--pico-card-sectionning-background-color, #f8f9fa); }
     [data-theme="dark"] .ma-nested-detail { background: rgba(255,255,255,.04); }
     .ma-campaign-details { margin-top: .35rem; border-top: 1px solid var(--pico-muted-border-color, #ddd); }
+    details.ma-campaign-card-details { transition: border-color 0.2s ease, box-shadow 0.2s ease; }
+    details.ma-campaign-card-details[open] { border-color: var(--pico-primary) !important; box-shadow: 0 4px 12px rgba(0,0,0,0.08) !important; }
+    details.ma-campaign-card-details > summary { list-style: none; }
+    details.ma-campaign-card-details > summary::-webkit-details-marker { display: none; }
+    details.ma-campaign-card-details > summary::after { content: "▼"; font-size: 0.8rem; color: var(--pico-muted-color); transition: transform 0.2s ease; margin-left: 0.75rem; }
+    details.ma-campaign-card-details[open] > summary::after { transform: rotate(180deg); }
     .ma-campaign-details-summary { cursor: pointer; font-size: .875rem; color: var(--pico-muted-color, #6c757d); padding: .45rem .25rem; border-radius: .25rem; }
     .ma-campaign-details-summary:hover { background: var(--pico-card-sectionning-background-color, #f8f9fa); color: var(--pico-color, inherit); }
     [data-theme="dark"] .ma-campaign-details-summary:hover { background: rgba(255,255,255,.06); }

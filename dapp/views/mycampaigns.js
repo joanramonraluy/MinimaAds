@@ -4,13 +4,11 @@
 // Actions (pause/resume/finish) migrated here from the provisional section in creator.js (Sessió 5).
 // Sessió 9: Chart.js line chart inside a <details> per card, auto-refresh every 30s.
 // M4: table → campaign cards with status badge, stat cards, budget progress bar.
-// M5: Rewarded nodes + Settled channels expandable sections per card.
+// M5: Pending settlement + Settled channels expandable sections per card.
 
-var _autoRefreshTimer = 0;
 var _expandedCharts   = {};   // campaignId → Chart instance
 
 function renderMyCampaigns(root) {
-  if (_autoRefreshTimer) { clearInterval(_autoRefreshTimer); _autoRefreshTimer = 0; }
   _destroyAllCharts();
 
   root.innerHTML = '';
@@ -20,8 +18,7 @@ function renderMyCampaigns(root) {
   var section = document.createElement('section');
   section.id = 'ma-mycampaigns-section';
   root.appendChild(section);
-  loadMyCampaigns();
-  _startAutoRefresh();
+  loadMyCampaigns(false);
 }
 
 function _destroyAllCharts() {
@@ -31,26 +28,52 @@ function _destroyAllCharts() {
   _expandedCharts = {};
 }
 
-function _startAutoRefresh() {
-  if (_autoRefreshTimer) { clearInterval(_autoRefreshTimer); }
-  _autoRefreshTimer = setInterval(function() {
-    var section = document.getElementById('ma-mycampaigns-section');
-    if (!section) { clearInterval(_autoRefreshTimer); _autoRefreshTimer = 0; return; }
-    loadMyCampaigns();
-  }, 30000);
-}
-
-function loadMyCampaigns() {
+function loadMyCampaigns(isAutoRefresh) {
   var section = document.getElementById('ma-mycampaigns-section');
   if (!section || !MY_ADDRESS) { return; }
 
-  _destroyAllCharts();
-  section.innerHTML = '';
-  section.appendChild(mkLoading('Loading campaigns…'));
+  // Save the open states of any expanded details blocks
+  var openDetails = {};
+  var cards = section.querySelectorAll('*[data-campaign-id]');
+  for (var i = 0; i < cards.length; i++) {
+    var cId = cards[i].getAttribute('data-campaign-id');
+    if (cards[i].tagName.toLowerCase() === 'details' && cards[i].open) {
+      openDetails[cId + '-campaign-card'] = true;
+    }
+    var detailsList = cards[i].querySelectorAll('details');
+    for (var j = 0; j < detailsList.length; j++) {
+      var detId = detailsList[j].getAttribute('data-details-id') || (detailsList[j].querySelector('summary') ? detailsList[j].querySelector('summary').textContent : '');
+      if (detId && detailsList[j].open) {
+        openDetails[cId + '-' + detId] = true;
+      }
+    }
+  }
+
+  if (!isAutoRefresh) {
+    _destroyAllCharts();
+    section.innerHTML = '';
+    section.appendChild(mkLoading('Loading campaigns…'));
+  }
 
   var sql = "SELECT c.*,"
     + " (SELECT COUNT(*) FROM REWARD_EVENTS re WHERE UPPER(re.CAMPAIGN_ID) = UPPER(c.ID) AND re.TYPE = 'view') AS VIEW_COUNT,"
-    + " (SELECT COUNT(*) FROM REWARD_EVENTS re WHERE UPPER(re.CAMPAIGN_ID) = UPPER(c.ID) AND re.TYPE = 'click') AS CLICK_COUNT"
+    + " (SELECT COUNT(*) FROM REWARD_EVENTS re WHERE UPPER(re.CAMPAIGN_ID) = UPPER(c.ID) AND re.TYPE = 'click') AS CLICK_COUNT,"
+    + " (SELECT COUNT(DISTINCT re.USER_ADDRESS) FROM REWARD_EVENTS re WHERE UPPER(re.CAMPAIGN_ID) = UPPER(c.ID) AND re.TYPE IN ('view', 'click')) AS UNIQUE_VIEWERS,"
+    + " (SELECT COUNT(DISTINCT re.PUBLISHER_ID) FROM REWARD_EVENTS re WHERE UPPER(re.CAMPAIGN_ID) = UPPER(c.ID) AND re.TYPE = 'publisher_view' AND re.PUBLISHER_ID IS NOT NULL) AS UNIQUE_PUBLISHERS,"
+    // ── Viewer stats ──
+    + " (SELECT COALESCE(SUM(MAX_AMOUNT), 0) FROM CHANNEL_STATE cs WHERE UPPER(cs.CAMPAIGN_ID) = UPPER(c.ID) AND cs.STATUS IN ('open', 'pending') AND cs.ROLE = 'viewer') AS VIEWER_LOCKED,"
+    + " (SELECT COALESCE(SUM(CUMULATIVE_EARNED), 0) FROM CHANNEL_STATE cs WHERE UPPER(cs.CAMPAIGN_ID) = UPPER(c.ID) AND cs.STATUS IN ('open', 'pending') AND cs.ROLE = 'viewer') AS VIEWER_UNSETTLED,"
+    + " (SELECT COALESCE(SUM(CUMULATIVE_EARNED), 0) FROM CHANNEL_HISTORY ch WHERE UPPER(ch.CAMPAIGN_ID) = UPPER(c.ID) AND ch.STATUS = 'settled' AND ch.ROLE = 'viewer') AS VIEWER_SETTLED,"
+    + " (SELECT COUNT(*) FROM CHANNEL_STATE cs WHERE UPPER(cs.CAMPAIGN_ID) = UPPER(c.ID) AND cs.STATUS IN ('open', 'pending') AND cs.ROLE = 'viewer') AS VIEWER_ACTIVE_COUNT,"
+    + " (SELECT COUNT(*) FROM CHANNEL_HISTORY ch WHERE UPPER(ch.CAMPAIGN_ID) = UPPER(c.ID) AND ch.STATUS = 'settled' AND ch.ROLE = 'viewer') AS VIEWER_SETTLED_COUNT,"
+    // ── Publisher stats ──
+    + " (SELECT COALESCE(SUM(MAX_AMOUNT), 0) FROM CHANNEL_STATE cs WHERE UPPER(cs.CAMPAIGN_ID) = UPPER(c.ID) AND cs.STATUS IN ('open', 'pending') AND cs.ROLE = 'publisher') AS PUB_LOCKED,"
+    + " (SELECT COALESCE(SUM(CUMULATIVE_EARNED), 0) FROM CHANNEL_STATE cs WHERE UPPER(cs.CAMPAIGN_ID) = UPPER(c.ID) AND cs.STATUS IN ('open', 'pending') AND cs.ROLE = 'publisher') AS PUB_UNSETTLED,"
+    + " (SELECT COALESCE(SUM(CUMULATIVE_EARNED), 0) FROM CHANNEL_HISTORY ch WHERE UPPER(ch.CAMPAIGN_ID) = UPPER(c.ID) AND ch.STATUS = 'settled' AND ch.ROLE = 'publisher') AS PUB_SETTLED,"
+    + " (SELECT COUNT(*) FROM CHANNEL_STATE cs WHERE UPPER(cs.CAMPAIGN_ID) = UPPER(c.ID) AND cs.STATUS IN ('open', 'pending') AND cs.ROLE = 'publisher') AS PUB_ACTIVE_COUNT,"
+    + " (SELECT COUNT(*) FROM CHANNEL_HISTORY ch WHERE UPPER(ch.CAMPAIGN_ID) = UPPER(c.ID) AND ch.STATUS = 'settled' AND ch.ROLE = 'publisher') AS PUB_SETTLED_COUNT,"
+    // ── Publisher actual spent ──
+    + " (SELECT COALESCE(SUM(re.AMOUNT), 0) FROM REWARD_EVENTS re WHERE UPPER(re.CAMPAIGN_ID) = UPPER(c.ID) AND re.TYPE = 'publisher_view') AS PUB_SPENT_ACTUAL"
     + " FROM CAMPAIGNS c"
     + " WHERE UPPER(c.CREATOR_ADDRESS) = UPPER('" + escapeSql(MY_ADDRESS) + "')"
     + " ORDER BY c.CREATED_AT DESC";
@@ -58,16 +81,19 @@ function loadMyCampaigns() {
   sqlQuery(sql, function(err, rows) {
     var target = document.getElementById('ma-mycampaigns-section');
     if (!target) { return; }
-    target.innerHTML = '';
 
     if (err) {
-      var errEl = document.createElement('p');
-      errEl.textContent = 'Error loading campaigns: ' + err;
-      target.appendChild(errEl);
+      if (!isAutoRefresh) {
+        target.innerHTML = '';
+        var errEl = document.createElement('p');
+        errEl.textContent = 'Error loading campaigns: ' + err;
+        target.appendChild(errEl);
+      }
       return;
     }
 
     if (!rows || rows.length === 0) {
+      target.innerHTML = '';
       target.appendChild(mkEmptyState(
         'No campaigns yet.',
         'Create your first campaign',
@@ -76,68 +102,305 @@ function loadMyCampaigns() {
       return;
     }
 
+    _destroyAllCharts();
+
+    var fragment = document.createDocumentFragment();
     for (var i = 0; i < rows.length; i++) {
-      target.appendChild(_buildCampaignCard(rows[i]));
+      fragment.appendChild(_buildCampaignCard(rows[i], openDetails));
     }
+
+    target.innerHTML = '';
+    target.appendChild(fragment);
   });
 }
 
-function _buildCampaignCard(c) {
-  var budgetTotal     = parseFloat(c.BUDGET_TOTAL || 0);
-  var budgetRemaining = parseFloat(c.BUDGET_REMAINING || 0);
-  var budgetSpent     = budgetTotal - budgetRemaining;
-  var budgetPct       = budgetTotal > 0 ? (budgetSpent / budgetTotal) * 100 : 0;
-  var viewCount       = parseInt(c.VIEW_COUNT || 0, 10);
-  var clickCount      = parseInt(c.CLICK_COUNT || 0, 10);
+function _buildCampaignCard(c, openDetails) {
+  var budgetTotal          = parseFloat(c.BUDGET_TOTAL || 0);
+  var budgetRemaining      = parseFloat(c.BUDGET_REMAINING || 0);
+  
+  var viewerLocked         = parseFloat(c.VIEWER_LOCKED || 0);
+  var viewerUnsettled      = parseFloat(c.VIEWER_UNSETTLED || 0);
+  var viewerSettled        = parseFloat(c.VIEWER_SETTLED || 0);
+  var viewerActiveCount    = parseInt(c.VIEWER_ACTIVE_COUNT || 0, 10);
+  var viewerSettledCount   = parseInt(c.VIEWER_SETTLED_COUNT || 0, 10);
+  
+  var pubLocked            = parseFloat(c.PUB_LOCKED || 0);
+  var pubUnsettled         = parseFloat(c.PUB_UNSETTLED || 0);
+  var pubSettled           = parseFloat(c.PUB_SETTLED || 0);
+  var pubActiveCount       = parseInt(c.PUB_ACTIVE_COUNT || 0, 10);
+  var pubSettledCount      = parseInt(c.PUB_SETTLED_COUNT || 0, 10);
+  var pubSpentActual       = parseFloat(c.PUB_SPENT_ACTUAL || 0);
 
-  var card = document.createElement('article');
+  var unspentBudget        = budgetTotal - (viewerSettled + viewerUnsettled + pubSettled + pubUnsettled);
+  if (unspentBudget < 0) { unspentBudget = 0; }
+  
+  var maxPubBudget         = parseFloat(c.MAX_PUBLISHER_BUDGET || 0);
+  var pubRemaining         = maxPubBudget - (pubSettled + pubUnsettled);
+  if (pubRemaining < 0) { pubRemaining = 0; }
+
+  var budgetSpent          = budgetTotal - budgetRemaining;
+  var budgetPct            = budgetTotal > 0 ? (budgetSpent / budgetTotal) * 100 : 0;
+  var viewCount            = parseInt(c.VIEW_COUNT || 0, 10);
+  var clickCount           = parseInt(c.CLICK_COUNT || 0, 10);
+  var uniqueViewers        = parseInt(c.UNIQUE_VIEWERS || 0, 10);
+  var uniquePublishers     = parseInt(c.UNIQUE_PUBLISHERS || 0, 10);
+
+  // Main campaign details block
+  var card = document.createElement('details');
+  card.className = 'ma-campaign-card-details';
   card.setAttribute('data-campaign-id', c.ID);
-  card.style.cssText = 'margin-bottom:1rem;';
+  card.style.cssText = 'margin-bottom:1.5rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:var(--pico-card-background-color);box-shadow:var(--pico-card-box-shadow,0 1px 3px rgba(0,0,0,0.05));overflow:hidden;';
 
-  // ── Header: title + badge (left) | action buttons (right) ──────────────
-  var cardHeader = document.createElement('header');
-  cardHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap;';
-
+  // Card summary / header
+  var cardSummary = document.createElement('summary');
+  cardSummary.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap;padding:.75rem 1rem;cursor:pointer;user-select:none;background-color:var(--pico-card-sectioning-background-color,rgba(0,0,0,0.02));border-bottom:1px solid transparent;';
+  
   var badgeGroup = document.createElement('div');
   badgeGroup.className = 'ma-campaign-badge-group';
-  badgeGroup.style.cssText = 'display:flex;align-items:center;gap:.5rem;min-width:0;flex:1;';
+  badgeGroup.style.cssText = 'display:flex;align-items:center;gap:.5rem;min-width:0;flex:1;flex-wrap:wrap;';
 
   var titleEl = document.createElement('strong');
   titleEl.textContent = c.TITLE;
-  titleEl.style.cssText = 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:18rem;';
+  titleEl.style.cssText = 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:16rem;font-size:1.05rem;';
   badgeGroup.appendChild(titleEl);
   badgeGroup.appendChild(mkStatusBadge(c.STATUS));
-  cardHeader.appendChild(badgeGroup);
 
+  // Quick stats in header
+  var quickStats = document.createElement('small');
+  quickStats.style.cssText = 'color:var(--pico-muted-color,#6c757d);font-size:.78rem;margin-left:.75rem;';
+  quickStats.textContent = 'Views: ' + viewCount + ' • Clicks: ' + clickCount + ' • Escrow Left: ' + budgetRemaining.toFixed(2) + ' M';
+  badgeGroup.appendChild(quickStats);
+
+  cardSummary.appendChild(badgeGroup);
+
+  // Actions
   var actionsDiv = document.createElement('div');
-  actionsDiv.style.cssText = 'display:flex;gap:.35rem;flex-shrink:0;';
+  actionsDiv.style.cssText = 'display:flex;gap:.35rem;flex-shrink:0;align-items:center;';
+  actionsDiv.addEventListener('click', function(e) {
+    e.stopPropagation();
+  });
   _appendCampaignActions(actionsDiv, c);
-  cardHeader.appendChild(actionsDiv);
+  cardSummary.appendChild(actionsDiv);
 
-  card.appendChild(cardHeader);
+  card.appendChild(cardSummary);
 
-  // ── Stat cards row ──────────────────────────────────────────────────────
-  var statsRow = document.createElement('div');
-  statsRow.style.cssText = 'display:flex;gap:.6rem;flex-wrap:wrap;margin:.75rem 0 .5rem;';
-  statsRow.appendChild(mkStatCard('Views', String(viewCount)));
-  statsRow.appendChild(mkStatCard('Clicks', String(clickCount)));
-  statsRow.appendChild(mkStatCard('Budget left', budgetRemaining.toFixed(4) + ' M'));
-  statsRow.appendChild(mkStatCard('Reward/view', parseFloat(c.REWARD_VIEW || 0).toFixed(4) + ' M'));
-  card.appendChild(statsRow);
+  // Card body (visible when expanded)
+  var cardBody = document.createElement('div');
+  cardBody.style.cssText = 'padding:1rem;border-top:1px solid var(--pico-border-color);background-color:var(--pico-card-background-color);';
 
-  // ── Budget progress bar ─────────────────────────────────────────────────
+  // ── Performance row ──────────────────────────────────────────────────────
+  var perfTitle = mkSectionTitle('Performance');
+  perfTitle.style.cssText = 'display:block;font-size:.78rem;color:var(--pico-muted-color,#6c757d);margin-top:0;text-transform:uppercase;letter-spacing:.04em;';
+  cardBody.appendChild(perfTitle);
+
+  var ctr = viewCount > 0 ? (clickCount / viewCount * 100) : 0;
+
+  var perfRow = document.createElement('div');
+  perfRow.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:.6rem;margin:.35rem 0 .75rem;';
+  perfRow.appendChild(mkStatCard('Views', String(viewCount)));
+  perfRow.appendChild(mkStatCard('Clicks', String(clickCount)));
+  perfRow.appendChild(mkStatCard('CTR', ctr.toFixed(2) + '%'));
+  perfRow.appendChild(mkStatCard('Viewers', String(uniqueViewers)));
+  perfRow.appendChild(mkStatCard('Publishers', String(uniquePublishers)));
+  cardBody.appendChild(perfRow);
+
+  // ── Budget Allocation (Collapsible) ──────────────────────────────────────
+  var budgetDetails = document.createElement('details');
+  budgetDetails.className = 'ma-campaign-details';
+  budgetDetails.setAttribute('data-details-id', 'budget-allocation');
+  
+  var budgetSummary = document.createElement('summary');
+  budgetSummary.textContent = 'Budget Allocation';
+  budgetSummary.className = 'ma-campaign-details-summary';
+  budgetDetails.appendChild(budgetSummary);
+
+  var budgetBody = document.createElement('div');
+  budgetBody.style.cssText = 'padding:.75rem 0 .25rem;';
+
+  // ── Combined Totals ──
+  var totalBudgetTitle = mkSectionTitle('Combined Totals');
+  totalBudgetTitle.style.cssText = 'display:block;font-size:.78rem;color:var(--pico-muted-color,#6c757d);margin-top:0;text-transform:uppercase;letter-spacing:.04em;';
+  budgetBody.appendChild(totalBudgetTitle);
+  
+  var totalBudgetRow = document.createElement('div');
+  totalBudgetRow.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:.6rem;margin:.35rem 0 .75rem;';
+  totalBudgetRow.appendChild(mkStatCard('Total Budget', budgetTotal.toFixed(4) + ' M', 'Initial funding'));
+  totalBudgetRow.appendChild(mkStatCard('Total Escrow Left', budgetRemaining.toFixed(4) + ' M', 'Remaining in escrow'));
+  totalBudgetRow.appendChild(mkStatCard('Total Locked', (viewerLocked + pubLocked).toFixed(4) + ' M', 'Reserved in L2 channels'));
+  totalBudgetRow.appendChild(mkStatCard('Total Paid', (viewerSettled + pubSpentActual).toFixed(4) + ' M', 'On-chain settlements'));
+  budgetBody.appendChild(totalBudgetRow);
+
+  // ── Viewer Allocation ──
+  var viewerBudgetTitle = mkSectionTitle('Budget Allocation (Viewer)');
+  viewerBudgetTitle.style.cssText = 'display:block;font-size:.78rem;color:var(--pico-muted-color,#6c757d);margin-top:.75rem;text-transform:uppercase;letter-spacing:.04em;';
+  budgetBody.appendChild(viewerBudgetTitle);
+
+  var viewerBudgetRow = document.createElement('div');
+  viewerBudgetRow.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:.6rem;margin:.35rem 0 .75rem;';
+  
+  var escrowCard = mkStatCard('Available (Escrow)', budgetRemaining.toFixed(4) + ' M', 'Total campaign escrow');
+  var lockedCard = mkStatCard('Locked in Channels', viewerLocked.toFixed(4) + ' M', viewerActiveCount + ' active channel' + (viewerActiveCount === 1 ? '' : 's') + ' (' + viewerUnsettled.toFixed(4) + ' M earned)');
+  var settledCard = mkStatCard('Settled (Paid)', viewerSettled.toFixed(4) + ' M', viewerSettledCount + ' settled channel' + (viewerSettledCount === 1 ? '' : 's') + ' (' + viewerSettled.toFixed(4) + ' M paid)');
+  var unspentCard = mkStatCard('Unspent Campaign', unspentBudget.toFixed(4) + ' M', 'Initial: ' + budgetTotal.toFixed(4) + ' M');
+  
+  viewerBudgetRow.appendChild(escrowCard);
+  viewerBudgetRow.appendChild(lockedCard);
+  viewerBudgetRow.appendChild(settledCard);
+  viewerBudgetRow.appendChild(unspentCard);
+  budgetBody.appendChild(viewerBudgetRow);
+
+  // ── Publisher Allocation ──
+  if (maxPubBudget > 0) {
+    var pubBudgetTitle = mkSectionTitle('Budget Allocation (Publisher)');
+    pubBudgetTitle.style.cssText = 'display:block;font-size:.78rem;color:var(--pico-muted-color,#6c757d);margin-top:.75rem;text-transform:uppercase;letter-spacing:.04em;';
+    budgetBody.appendChild(pubBudgetTitle);
+
+    var pubBudgetRow = document.createElement('div');
+    pubBudgetRow.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:.6rem;margin:.35rem 0 .75rem;';
+
+    var pubLimitCard = mkStatCard('Max Pub Budget', maxPubBudget.toFixed(4) + ' M', 'Configured limit');
+    var pubReservedCard = mkStatCard('Budget Reserved', parseFloat(c.PUBLISHER_BUDGET_SPENT || 0).toFixed(4) + ' M', pubActiveCount + ' active channel' + (pubActiveCount === 1 ? '' : 's') + ' (' + pubUnsettled.toFixed(4) + ' M earned)');
+    var pubSpentCard = mkStatCard('Budget Spent', pubSpentActual.toFixed(4) + ' M', pubSettledCount + ' settled channel' + (pubSettledCount === 1 ? '' : 's') + ' (' + pubSettled.toFixed(4) + ' M paid)');
+    var pubLeftCard = mkStatCard('Budget Left', pubRemaining.toFixed(4) + ' M', 'Unallocated: ' + pubRemaining.toFixed(4) + ' M');
+
+    var pubViewReward = parseFloat(c.PUBLISHER_REWARD_VIEW || 0);
+    if (pubRemaining < pubViewReward) {
+      var valEl = pubLeftCard.querySelector('strong');
+      if (valEl) { valEl.style.color = '#d9534f'; }
+      var subEl = pubLeftCard.querySelector('small:last-of-type');
+      if (subEl) {
+        subEl.textContent = 'Exhausted (cannot open)';
+        subEl.style.color = '#d9534f';
+        subEl.style.fontWeight = 'bold';
+      }
+    }
+
+    pubBudgetRow.appendChild(pubLimitCard);
+    pubBudgetRow.appendChild(pubReservedCard);
+    pubBudgetRow.appendChild(pubSpentCard);
+    pubBudgetRow.appendChild(pubLeftCard);
+    budgetBody.appendChild(pubBudgetRow);
+  }
+
+  // ── Progress & Footnote ──
   var progressWrap = document.createElement('div');
-  progressWrap.style.cssText = 'margin-bottom:.75rem;';
-  progressWrap.appendChild(mkProgressBar(budgetPct, 'Budget used'));
+  progressWrap.style.cssText = 'margin-top:.75rem;';
+  progressWrap.appendChild(mkProgressBar(budgetPct, 'Budget allocated/spent'));
   var progressLbl = document.createElement('small');
-  progressLbl.style.cssText = 'color:var(--pico-muted-color,#6c757d);font-size:.72rem;';
-  progressLbl.textContent = budgetSpent.toFixed(4) + ' / ' + budgetTotal.toFixed(4) + ' MINIMA used';
+  progressLbl.style.cssText = 'color:var(--pico-muted-color,#6c757d);font-size:.72rem;display:block;margin-top:.15rem;';
+  progressLbl.textContent = budgetSpent.toFixed(4) + ' M allocated or spent / ' + budgetTotal.toFixed(4) + ' M initial budget (' + budgetRemaining.toFixed(4) + ' M available in escrow)';
   progressWrap.appendChild(progressLbl);
-  card.appendChild(progressWrap);
+
+  var footnote = document.createElement('div');
+  footnote.style.cssText = 'color:var(--pico-muted-color,#6c757d);font-size:.68rem;margin-top:.25rem;font-style:italic;';
+  footnote.textContent = '* Closed channel refunds and settled rewards are sent directly to your main wallet balance.';
+  progressWrap.appendChild(footnote);
+
+  budgetBody.appendChild(progressWrap);
+  budgetDetails.appendChild(budgetBody);
+
+  if (openDetails && openDetails[c.ID + '-budget-allocation']) {
+    budgetDetails.open = true;
+  }
+  cardBody.appendChild(budgetDetails);
+
+  // ── Campaign configuration (expandable) ──────────────────────────────────
+  var configDetails = document.createElement('details');
+  configDetails.className = 'ma-campaign-details';
+  configDetails.setAttribute('data-details-id', 'campaign-config');
+  var configSummary = document.createElement('summary');
+  configSummary.textContent = 'Campaign configuration';
+  configSummary.className = 'ma-campaign-details-summary';
+  configDetails.appendChild(configSummary);
+
+  var configBody = document.createElement('div');
+  configBody.style.cssText = 'padding:.75rem 0 .25rem;';
+
+  var sections = [
+    {
+      title: 'General Campaign Data',
+      params: [
+        { label: 'Campaign ID', value: c.ID },
+        { label: 'Created At', value: new Date(parseInt(c.CREATED_AT)).toLocaleString() },
+        { label: 'Expires At', value: c.EXPIRES_AT ? new Date(parseInt(c.EXPIRES_AT)).toLocaleString() : 'Never' },
+        { label: 'Initial Escrow Budget', value: parseFloat(c.BUDGET_TOTAL).toFixed(4) + ' M' },
+        { label: 'Escrow Coin ID', value: c.ESCROW_COINID || 'N/A' },
+        { label: 'Creator Maxima PK', value: c.CREATOR_MX || 'N/A' },
+        { label: 'Escrow Signer PK', value: c.ESCROW_WALLET_PK || 'N/A' }
+      ]
+    },
+    {
+      title: 'Reward Viewer',
+      params: [
+        { label: 'Reward / View', value: parseFloat(c.REWARD_VIEW).toFixed(4) + ' M' },
+        { label: 'Reward / Click', value: parseFloat(c.REWARD_CLICK).toFixed(4) + ' M' }
+      ]
+    },
+    {
+      title: 'Reward Viewer Limits',
+      params: [
+        { label: 'Max Reward / Viewer', value: c.MAX_VIEWER_REWARD ? parseFloat(c.MAX_VIEWER_REWARD).toFixed(4) + ' M' : 'Unlimited' },
+        { label: 'Max Daily Views', value: c.MAX_DAILY_VIEWS ? c.MAX_DAILY_VIEWS : 'No limit' },
+        { label: 'Max Daily Clicks', value: c.MAX_DAILY_CLICKS ? c.MAX_DAILY_CLICKS : 'No limit' },
+        { label: 'Reward Cooldown', value: c.COOLDOWN_MS ? (parseInt(c.COOLDOWN_MS) / 1000) + 's' : 'No cooldown' }
+      ]
+    },
+    {
+      title: 'Publisher Rewards & Limits',
+      params: [
+        { label: 'Publisher Reward / View', value: maxPubBudget > 0 ? parseFloat(c.PUBLISHER_REWARD_VIEW).toFixed(4) + ' M' : 'Disabled' },
+        { label: 'Max Publisher Budget', value: maxPubBudget > 0 ? maxPubBudget.toFixed(4) + ' M' : 'Disabled' }
+      ]
+    }
+  ];
+
+  for (var s = 0; s < sections.length; s++) {
+    var sec = sections[s];
+    
+    var sectionHeader = document.createElement('div');
+    sectionHeader.textContent = sec.title;
+    sectionHeader.style.cssText = 'font-weight:bold;font-size:.78rem;text-transform:uppercase;margin:.75rem 0 .4rem;color:var(--pico-color);';
+    if (s === 0) {
+      sectionHeader.style.marginTop = '0';
+    }
+    configBody.appendChild(sectionHeader);
+
+    var detailsGrid = document.createElement('div');
+    detailsGrid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.5rem;padding:.5rem .75rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(0,0,0,0.015);margin-bottom:.75rem;';
+    if (s === sections.length - 1) {
+      detailsGrid.style.marginBottom = '0';
+    }
+
+    for (var k = 0; k < sec.params.length; k++) {
+      var item = document.createElement('div');
+      item.style.cssText = 'display:flex;flex-direction:column;min-width:0;';
+      
+      var labelSpan = document.createElement('span');
+      labelSpan.textContent = sec.params[k].label;
+      labelSpan.style.cssText = 'font-size:.7rem;color:var(--pico-muted-color,#6c757d);font-weight:bold;text-transform:uppercase;';
+      
+      var valSpan = document.createElement('span');
+      valSpan.textContent = sec.params[k].value;
+      valSpan.style.cssText = 'font-size:.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+      valSpan.title = sec.params[k].value;
+      
+      item.appendChild(labelSpan);
+      item.appendChild(valSpan);
+      detailsGrid.appendChild(item);
+    }
+    configBody.appendChild(detailsGrid);
+  }
+
+  configDetails.appendChild(configBody);
+  if (openDetails && openDetails[c.ID + '-campaign-config']) {
+    configDetails.open = true;
+  }
+  cardBody.appendChild(configDetails);
 
   // ── Activity chart (expandable) ─────────────────────────────────────────
   var details = document.createElement('details');
   details.className = 'ma-campaign-details';
+  details.setAttribute('data-details-id', 'activity-chart');
   var summary = document.createElement('summary');
   summary.textContent = 'Activity chart';
   summary.className = 'ma-campaign-details-summary';
@@ -163,13 +426,20 @@ function _buildCampaignCard(c) {
     }
   });
 
-  card.appendChild(details);
+  if (openDetails && openDetails[c.ID + '-activity-chart']) {
+    details.open = true;
+    chartLoaded = true;
+    detailBody.appendChild(mkLoading('Loading chart…'));
+    _loadChartData(c.ID, detailBody);
+  }
+  cardBody.appendChild(details);
 
-  // ── Rewarded nodes (expandable) ────────────────────────────────────────
+  // ── Pending settlement (expandable) ────────────────────────────────────
   var nodesDetails = document.createElement('details');
   nodesDetails.className = 'ma-campaign-details';
+  nodesDetails.setAttribute('data-details-id', 'pending-settlement');
   var nodesSummary = document.createElement('summary');
-  nodesSummary.textContent = 'Rewarded nodes';
+  nodesSummary.textContent = 'Pending settlement';
   nodesSummary.className = 'ma-campaign-details-summary';
   nodesDetails.appendChild(nodesSummary);
 
@@ -181,7 +451,7 @@ function _buildCampaignCard(c) {
   nodesDetails.addEventListener('toggle', function() {
     if (nodesDetails.open && !nodesLoaded) {
       nodesLoaded = true;
-      nodesBody.appendChild(mkLoading('Loading rewarded nodes…'));
+      nodesBody.appendChild(mkLoading('Loading pending settlements…'));
       _loadRewardedNodes(c.ID, nodesBody);
     }
     if (!nodesDetails.open) {
@@ -190,11 +460,18 @@ function _buildCampaignCard(c) {
     }
   });
 
-  card.appendChild(nodesDetails);
+  if (openDetails && openDetails[c.ID + '-pending-settlement']) {
+    nodesDetails.open = true;
+    nodesLoaded = true;
+    nodesBody.appendChild(mkLoading('Loading pending settlements…'));
+    _loadRewardedNodes(c.ID, nodesBody);
+  }
+  cardBody.appendChild(nodesDetails);
 
   // ── Settled channels (expandable) ─────────────────────────────────────────
   var settledDetails = document.createElement('details');
   settledDetails.className = 'ma-campaign-details';
+  settledDetails.setAttribute('data-details-id', 'settled-channels');
   var settledSummary = document.createElement('summary');
   settledSummary.textContent = 'Settled channels';
   settledSummary.className = 'ma-campaign-details-summary';
@@ -217,7 +494,20 @@ function _buildCampaignCard(c) {
     }
   });
 
-  card.appendChild(settledDetails);
+  if (openDetails && openDetails[c.ID + '-settled-channels']) {
+    settledDetails.open = true;
+    settledLoaded = true;
+    settledBody.appendChild(mkLoading('Loading settled channels…'));
+    _loadSettledChannels(c.ID, settledBody);
+  }
+  cardBody.appendChild(settledDetails);
+
+  card.appendChild(cardBody);
+
+  if (openDetails && openDetails[c.ID + '-campaign-card']) {
+    card.open = true;
+  }
+
   return card;
 }
 
@@ -488,7 +778,7 @@ function _renderSettledChannelEvents(target, rows) {
 }
 
 // ---------------------------------------------------------------------------
-// Rewarded nodes per campaign
+// Pending settlement per campaign
 // ---------------------------------------------------------------------------
 
 function _loadRewardedNodes(campaignId, detailEl) {
@@ -528,7 +818,7 @@ function _loadRewardedNodes(campaignId, detailEl) {
 
         if (err) {
           var errEl = document.createElement('p');
-          errEl.textContent = 'Error loading rewarded nodes: ' + err;
+          errEl.textContent = 'Error loading pending settlements: ' + err;
           detailEl.appendChild(errEl);
           return;
         }
@@ -549,7 +839,7 @@ function _loadRewardedNodes(campaignId, detailEl) {
         }
 
         if (activeRows.length === 0) {
-          detailEl.appendChild(mkEmptyState('No rewarded nodes yet.'));
+          detailEl.appendChild(mkEmptyState('No pending settlements yet.'));
           return;
         }
 
@@ -853,7 +1143,7 @@ function onStatusTxPending(parsed) {
 function _renderPendingLabel(campaignId, status) {
   var section = document.getElementById('ma-mycampaigns-section');
   if (!section) { return; }
-  var card = section.querySelector('article[data-campaign-id="' + campaignId + '"]');
+  var card = section.querySelector('*[data-campaign-id="' + campaignId + '"]');
   if (!card) { return; }
   var badgeGroup = card.querySelector('.ma-campaign-badge-group');
   if (!badgeGroup) { return; }

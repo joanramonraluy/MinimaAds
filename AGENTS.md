@@ -191,6 +191,7 @@ For verification procedures, see `docs/VERIFICATION.md`.
   - Added a **"Combined Totals"** row at the top of the budget allocation details body showing aggregated campaign funds (Total Budget, Escrow Left, Locked, Paid).
   - Modified state saving logic in `loadMyCampaigns` to query all elements matching `[data-campaign-id]` and preserve expanded states of both the campaign details cards and nested details panels using `data-details-id` attribute values.
   - Replaced the static/non-dynamic "Reward/View" and "Reward/Click" stat cards on the Performance row with dynamic **"Viewers"** and **"Publishers"** counts retrieved via H2 `COUNT(DISTINCT USER_ADDRESS)` and `COUNT(DISTINCT PUBLISHER_ID)` queries from `REWARD_EVENTS`.
+  - Added a collapsible **"Ad Preview"** (`<details data-details-id="ad-preview">`) section which lazily renders the responsive ad banner using the project's standard `renderAd` function once toggled.
 - dapp/views/ui-helpers.js:
   - Updated `mkStatCard` to use a flex column layout (`display:flex; flex-direction:column;`) and added `margin-top:auto` to the main value element (`val`) to guarantee all numbers align horizontally even if labels wrap on small screens.
 - public/index.html:

@@ -72,48 +72,59 @@ function renderHelp(root) {
     return panel;
   }
 
+  // Helper to create a card-style content block
+  function createContentCard(borderColor, title) {
+    var card = document.createElement('div');
+    card.style.cssText = 'margin-bottom:1rem;padding:1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(0,0,0,0.015);border-left:3px solid ' + borderColor + ';';
+    if (title) {
+      var titleEl = mkSectionTitle(title);
+      titleEl.style.cssText = 'display:block;font-size:.78rem;color:var(--pico-muted-color,#6c757d);margin-top:0;margin-bottom:.5rem;text-transform:uppercase;letter-spacing:.04em;';
+      card.appendChild(titleEl);
+    }
+    return card;
+  }
+
   // --- 1. VIEWER PANEL ---
   var viewerPanel = createPanel('viewer', true);
   viewerPanel.appendChild(mkSectionTitle('Viewer Guide'));
-  
+
   var vIntro = document.createElement('p');
   vIntro.innerHTML = 'As a <strong>Viewer</strong>, you earn Minima tokens simply by viewing advertisements and clicking on calls-to-action (CTA).';
+  vIntro.style.cssText = 'margin-bottom:1.5rem;';
   viewerPanel.appendChild(vIntro);
 
-  var vStepsTitle = document.createElement('h4');
-  vStepsTitle.textContent = 'How to Earn';
-  viewerPanel.appendChild(vStepsTitle);
-
+  // How to Earn card
+  var vStepsCard = createContentCard('#3498db', 'How to Earn');
   var vStepsList = document.createElement('ol');
-  vStepsList.innerHTML = 
-    '<li>Go to the <strong>View Ads</strong> section (set your role to Viewer in the side menu).</li>' +
-    '<li>Browse the available ad campaigns. Your interests profile will automatically prioritize matching ads.</li>' +
-    '<li><strong>View rewards:</strong> Keep the ad in view for at least <strong>3 seconds</strong> to receive the view reward.</li>' +
-    '<li><strong>Click rewards:</strong> Click the "CTA button" or the ad image to navigate and earn the additional click reward.</li>';
-  viewerPanel.appendChild(vStepsList);
+  vStepsList.style.cssText = 'margin:.35rem 0 0;padding-left:1.5rem;';
+  vStepsList.innerHTML =
+    '<li style="margin-bottom:.5rem;">Go to the <strong>View Ads</strong> section (set your role to Viewer in the side menu).</li>' +
+    '<li style="margin-bottom:.5rem;">Browse the available ad campaigns. Your interests profile will automatically prioritize matching ads.</li>' +
+    '<li style="margin-bottom:.5rem;"><strong>View rewards:</strong> Keep the ad in view for at least <strong>3 seconds</strong> to receive the view reward.</li>' +
+    '<li style="margin-bottom:.5rem;"><strong>Click rewards:</strong> Click the "CTA button" or the ad image to navigate and earn the additional click reward.</li>';
+  vStepsCard.appendChild(vStepsList);
+  viewerPanel.appendChild(vStepsCard);
 
-  var vL2Title = document.createElement('h4');
-  vL2Title.textContent = 'Decentralized Layer 2 Channels';
-  viewerPanel.appendChild(vL2Title);
-
+  // Layer 2 Channels card
+  var vL2Card = createContentCard('#9b59b6', 'Decentralized Layer 2 Channels');
   var vL2Desc = document.createElement('p');
-  vL2Desc.style.fontSize = '0.9rem';
+  vL2Desc.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;';
   vL2Desc.innerHTML = 'To prevent on-chain congestion, rewards accumulate off-chain in <strong>unidirectional payment channels</strong>. ' +
     'The first time you interact with a campaign, the system opens a secure Layer 2 channel funded by the creator\'s campaign escrow. ' +
     'Once open, vouchers are sent directly to your node. You can settle these vouchers at any time under the <strong>Earnings</strong> tab to claim your funds directly to your Minima L1 wallet.';
-  viewerPanel.appendChild(vL2Desc);
+  vL2Card.appendChild(vL2Desc);
+  viewerPanel.appendChild(vL2Card);
 
-  var vLimitsTitle = document.createElement('h4');
-  vLimitsTitle.textContent = 'Viewer Limits & Cooldowns';
-  viewerPanel.appendChild(vLimitsTitle);
-
+  // Limits & Cooldowns card
+  var vLimitsCard = createContentCard('#f39c12', 'Limits & Cooldowns');
   var vLimitsList = document.createElement('ul');
-  vLimitsList.style.fontSize = '0.9rem';
-  vLimitsList.innerHTML = 
-    '<li><strong>Cooldown:</strong> There is a cooldown period (default 5 minutes) between rewards for the same campaign to prevent spamming.</li>' +
-    '<li><strong>Daily cap:</strong> Each campaign has a maximum daily limit of views and clicks per user (default 100).</li>' +
-    '<li><strong>Self-rewards:</strong> You cannot earn rewards from campaigns you created yourself.</li>';
-  viewerPanel.appendChild(vLimitsList);
+  vLimitsList.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;padding-left:1.5rem;';
+  vLimitsList.innerHTML =
+    '<li style="margin-bottom:.5rem;"><strong>Cooldown:</strong> There is a cooldown period (default 5 minutes) between rewards for the same campaign to prevent spamming.</li>' +
+    '<li style="margin-bottom:.5rem;"><strong>Daily cap:</strong> Each campaign has a maximum daily limit of views and clicks per user (default 100).</li>' +
+    '<li style="margin-bottom:.5rem;"><strong>Self-rewards:</strong> You cannot earn rewards from campaigns you created yourself.</li>';
+  vLimitsCard.appendChild(vLimitsList);
+  viewerPanel.appendChild(vLimitsCard);
   root.appendChild(viewerPanel);
 
   // --- 2. CREATOR PANEL ---
@@ -122,64 +133,87 @@ function renderHelp(root) {
 
   var cIntro = document.createElement('p');
   cIntro.innerHTML = 'As a <strong>Creator</strong>, you can design ad banners and fund campaigns using Minima tokens to reach users across the network.';
+  cIntro.style.cssText = 'margin-bottom:1.5rem;';
   creatorPanel.appendChild(cIntro);
 
-  var cStepsTitle = document.createElement('h4');
-  cStepsTitle.textContent = 'Creating a Campaign';
-  creatorPanel.appendChild(cStepsTitle);
-
+  // Creating a Campaign card
+  var cStepsCard = createContentCard('#2ecc71', 'Creating a Campaign');
   var cStepsList = document.createElement('ol');
-  cStepsList.innerHTML = 
-    '<li>Set your role to <strong>Creator</strong> in the side menu.</li>' +
-    '<li>Click <strong>Create Campaign</strong>. Fill in the content (title, description, CTA, interests, and optional banner image).</li>' +
-    '<li>Define your total campaign budget and the reward rates (amount paid per view and per click).</li>' +
-    '<li>A platform fee of <strong>6%</strong> is automatically calculated and added to the escrow funding amount.</li>' +
-    '<li>Confirm and approve the transaction. Your funds are locked securely in a smart contract on the Minima blockchain.</li>';
-  creatorPanel.appendChild(cStepsList);
+  cStepsList.style.cssText = 'margin:.35rem 0 0;padding-left:1.5rem;';
+  cStepsList.innerHTML =
+    '<li style="margin-bottom:.5rem;">Set your role to <strong>Creator</strong> in the side menu.</li>' +
+    '<li style="margin-bottom:.5rem;">Click <strong>Create Campaign</strong>. Fill in the content (title, description, CTA, interests, and optional banner image).</li>' +
+    '<li style="margin-bottom:.5rem;">Define your total campaign budget and the reward rates (amount paid per view and per click).</li>' +
+    '<li style="margin-bottom:.5rem;">A platform fee of <strong>6%</strong> is automatically calculated and added to the escrow funding amount.</li>' +
+    '<li style="margin-bottom:.5rem;">Confirm and approve the transaction. Your funds are locked securely in a smart contract on the Minima blockchain.</li>';
+  cStepsCard.appendChild(cStepsList);
+  creatorPanel.appendChild(cStepsCard);
 
-  var cStatusTitle = document.createElement('h4');
-  cStatusTitle.textContent = 'Campaign Management & On-chain Status';
-  creatorPanel.appendChild(cStatusTitle);
-
+  // Campaign Management card
+  var cStatusCard = createContentCard('#3498db', 'Campaign Management & On-chain Status');
   var cStatusDesc = document.createElement('p');
-  cStatusDesc.style.fontSize = '0.9rem';
+  cStatusDesc.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;';
   cStatusDesc.innerHTML = 'In <strong>My Campaigns</strong>, you can track views/clicks in real time and manage status (Pause, Resume, or Finish). ' +
     'Status changes generate an on-chain update transaction. This updates the status state stored directly in the campaign\'s escrow coin, propagating the changes across the peer-to-peer network even if you go offline.';
-  creatorPanel.appendChild(cStatusDesc);
+  cStatusCard.appendChild(cStatusDesc);
+  creatorPanel.appendChild(cStatusCard);
 
-  var cBudgetTitle = document.createElement('h4');
-  cBudgetTitle.textContent = 'Understanding Budget Allocation & Performance';
-  creatorPanel.appendChild(cBudgetTitle);
-
+  // Budget Allocation card
+  var cBudgetCard = createContentCard('#f39c12', 'Budget Allocation & Performance');
   var cBudgetDesc = document.createElement('p');
-  cBudgetDesc.style.fontSize = '0.9rem';
-  cBudgetDesc.innerHTML = 'To give you complete transparency over campaign funding, budgets are split into two dedicated sections in the dashboard: **Viewer** and **Publisher**:' +
-    '<h5>Viewer Budget Allocation</h5>' +
-    '<ul>' +
-    '<li><strong>Available (Escrow):</strong> Budget remaining in the main on-chain smart contract, ready to fund new payment channels as new viewers discover your campaign.</li>' +
-    '<li><strong>Locked in Channels:</strong> Budget currently locked in open viewer payment channels, indicating active viewer capacity.</li>' +
-    '<li><strong>Settled (Paid):</strong> The total viewer rewards that have been settled on-chain and paid directly to viewers\' wallets.</li>' +
-    '<li><strong>Unspent Campaign:</strong> The total campaign budget remaining that has not yet been paid or earned as rewards (Initial Budget minus all Settled and Unsettled earnings).</li>' +
-    '</ul>' +
-    '<h5>Publisher Budget Allocation</h5>' +
-    '<ul>' +
-    '<li><strong>Max Pub Budget:</strong> The total budget cap you configured for publisher rewards when creating the campaign.</li>' +
-    '<li><strong>Budget Reserved:</strong> The sum of maximum capacities currently reserved in active payment channels opened by publishers (used as a cap to prevent channel over-allocation).</li>' +
-    '<li><strong>Budget Spent:</strong> The sum of publisher rewards actually paid and earned dynamically by publishers displaying ads.</li>' +
-    '<li><strong>Budget Left:</strong> The remaining portion of the publisher budget limit that has not yet been reserved or spent by publishers.</li>' +
-    '</ul>' +
-    'Additionally, you can see the **Reward/View** and **Reward/Click** unit rates configured for the campaign, alongside the **CTR (Click-Through Rate)** which measures user engagement as a percentage of views that led to a click: <code>(Clicks / Views) * 100</code>.';
-  creatorPanel.appendChild(cBudgetDesc);
+  cBudgetDesc.style.cssText = 'font-size:0.9rem;margin:0 0 .75rem;';
+  cBudgetDesc.innerHTML = 'To give you complete transparency over campaign funding, budgets are split into two dedicated sections in the dashboard: <strong>Viewer</strong> and <strong>Publisher</strong>.';
+  cBudgetCard.appendChild(cBudgetDesc);
 
-  var cSettleTitle = document.createElement('h4');
-  cSettleTitle.textContent = 'Pending Settlements & Refunds';
-  creatorPanel.appendChild(cSettleTitle);
+  // Viewer Budget sub-card
+  var viewerSubCard = document.createElement('div');
+  viewerSubCard.style.cssText = 'margin-bottom:.75rem;padding:.75rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(52,152,219,0.05);border-left:2px solid #3498db;';
+  var viewerSubTitle = document.createElement('strong');
+  viewerSubTitle.style.cssText = 'display:block;font-size:.78rem;color:var(--pico-muted-color,#6c757d);margin-bottom:.35rem;text-transform:uppercase;letter-spacing:.04em;';
+  viewerSubTitle.textContent = 'Viewer Budget';
+  viewerSubCard.appendChild(viewerSubTitle);
+  var viewerSubList = document.createElement('ul');
+  viewerSubList.style.cssText = 'font-size:0.85rem;margin:.35rem 0 0;padding-left:1.3rem;';
+  viewerSubList.innerHTML =
+    '<li style="margin-bottom:.3rem;"><strong>Available (Escrow):</strong> Budget in the on-chain contract.</li>' +
+    '<li style="margin-bottom:.3rem;"><strong>Locked in Channels:</strong> Budget locked in open viewer channels.</li>' +
+    '<li style="margin-bottom:.3rem;"><strong>Settled (Paid):</strong> Rewards paid to viewers\' wallets.</li>' +
+    '<li style="margin-bottom:.3rem;"><strong>Unspent Campaign:</strong> Total budget not yet allocated.</li>';
+  viewerSubCard.appendChild(viewerSubList);
+  cBudgetCard.appendChild(viewerSubCard);
 
+  // Publisher Budget sub-card
+  var pubSubCard = document.createElement('div');
+  pubSubCard.style.cssText = 'margin-bottom:.75rem;padding:.75rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(244,208,63,0.05);border-left:2px solid #f39c12;';
+  var pubSubTitle = document.createElement('strong');
+  pubSubTitle.style.cssText = 'display:block;font-size:.78rem;color:var(--pico-muted-color,#6c757d);margin-bottom:.35rem;text-transform:uppercase;letter-spacing:.04em;';
+  pubSubTitle.textContent = 'Publisher Budget';
+  pubSubCard.appendChild(pubSubTitle);
+  var pubSubList = document.createElement('ul');
+  pubSubList.style.cssText = 'font-size:0.85rem;margin:.35rem 0 0;padding-left:1.3rem;';
+  pubSubList.innerHTML =
+    '<li style="margin-bottom:.3rem;"><strong>Max Pub Budget:</strong> Your configured publisher reward cap.</li>' +
+    '<li style="margin-bottom:.3rem;"><strong>Budget Reserved:</strong> Capacity in active publisher channels.</li>' +
+    '<li style="margin-bottom:.3rem;"><strong>Budget Spent:</strong> Publisher rewards paid dynamically.</li>' +
+    '<li style="margin-bottom:.3rem;"><strong>Budget Left:</strong> Remaining unallocated publisher budget.</li>';
+  pubSubCard.appendChild(pubSubList);
+  cBudgetCard.appendChild(pubSubCard);
+
+  // Key metrics info
+  var metricsInfo = document.createElement('p');
+  metricsInfo.style.cssText = 'font-size:0.85rem;color:var(--pico-muted-color);margin:0;';
+  metricsInfo.innerHTML = 'You can also see <strong>Reward/View</strong> and <strong>Reward/Click</strong> unit rates, and <strong>CTR (Click-Through Rate)</strong> = (Clicks / Views) × 100%.';
+  cBudgetCard.appendChild(metricsInfo);
+  creatorPanel.appendChild(cBudgetCard);
+
+  // Settlements card
+  var cSettleCard = createContentCard('#9b59b6', 'Pending Settlements & Refunds');
   var cSettleDesc = document.createElement('p');
-  cSettleDesc.style.fontSize = '0.9rem';
-  cSettleDesc.innerHTML = 'The **Pending settlement** section shows open payment channels with active viewers/publishers. ' +
-    'When viewers settle their channels or you mark a campaign as finished, all remaining unspent channel balances are returned directly to your main wallet address (not back to the escrow contract).';
-  creatorPanel.appendChild(cSettleDesc);
+  cSettleDesc.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;';
+  cSettleDesc.innerHTML = 'The <strong>Pending Settlement</strong> section shows open payment channels with active viewers and publishers. ' +
+    'When viewers settle their channels or you mark a campaign as finished, all remaining unspent balances are returned directly to your main wallet (not back to the escrow contract).';
+  cSettleCard.appendChild(cSettleDesc);
+  creatorPanel.appendChild(cSettleCard);
 
   root.appendChild(creatorPanel);
 
@@ -189,30 +223,30 @@ function renderHelp(root) {
 
   var pIntro = document.createElement('p');
   pIntro.innerHTML = 'As a <strong>Publisher</strong>, you can monetize your own MiniDapps or websites by integrating the MinimaAds SDK to show ads.';
+  pIntro.style.cssText = 'margin-bottom:1.5rem;';
   publisherPanel.appendChild(pIntro);
 
-  var pStepsTitle = document.createElement('h4');
-  pStepsTitle.textContent = 'Getting Started';
-  publisherPanel.appendChild(pStepsTitle);
-
+  // Getting Started card
+  var pStepsCard = createContentCard('#2ecc71', 'Getting Started');
   var pStepsList = document.createElement('ol');
-  pStepsList.innerHTML = 
-    '<li>Go to the <strong>Frames</strong> section under the Publisher role.</li>' +
-    '<li>Create a new <strong>Frame</strong> (a named ad slot identifier).</li>' +
-    '<li>Copy the generated integration snippet.</li>' +
-    '<li>Include the MinimaAds SDK script in your dApp and call <code>MinimaAds.init({ frameId: "your-frame-id" })</code>.</li>' +
-    '<li>Place the <code>&lt;div id="minima-ad-slot"&gt;&lt;/div&gt;</code> container where you want the ad banner to render.</li>';
-  publisherPanel.appendChild(pStepsList);
+  pStepsList.style.cssText = 'margin:.35rem 0 0;padding-left:1.5rem;';
+  pStepsList.innerHTML =
+    '<li style="margin-bottom:.5rem;">Go to the <strong>Frames</strong> section under the Publisher role.</li>' +
+    '<li style="margin-bottom:.5rem;">Create a new <strong>Frame</strong> (a named ad slot identifier).</li>' +
+    '<li style="margin-bottom:.5rem;">Copy the generated integration snippet.</li>' +
+    '<li style="margin-bottom:.5rem;">Include the MinimaAds SDK script in your dApp and call <code>MinimaAds.init({ frameId: "your-frame-id" })</code>.</li>' +
+    '<li style="margin-bottom:.5rem;">Place the <code>&lt;div id="minima-ad-slot"&gt;&lt;/div&gt;</code> container where you want the ad banner to render.</li>';
+  pStepsCard.appendChild(pStepsList);
+  publisherPanel.appendChild(pStepsCard);
 
-  var pRewardsTitle = document.createElement('h4');
-  pRewardsTitle.textContent = 'Publisher Rewards';
-  publisherPanel.appendChild(pRewardsTitle);
-
+  // Publisher Rewards card
+  var pRewardsCard = createContentCard('#3498db', 'Publisher Rewards');
   var pRewardsDesc = document.createElement('p');
-  pRewardsDesc.style.fontSize = '0.9rem';
+  pRewardsDesc.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;';
   pRewardsDesc.innerHTML = 'When creators specify a <strong>Publisher reward per view</strong> (optional), your frame accumulates rewards automatically. ' +
     'Like viewers, publisher rewards are accrued in L2 payment channels. You can monitor and settle these pending amounts in the <strong>Earnings</strong> tab under your Publisher dashboard.';
-  publisherPanel.appendChild(pRewardsDesc);
+  pRewardsCard.appendChild(pRewardsDesc);
+  publisherPanel.appendChild(pRewardsCard);
   root.appendChild(publisherPanel);
 
   // --- 4. ABOUT PANEL ---
@@ -222,20 +256,32 @@ function renderHelp(root) {
   var aDesc = document.createElement('p');
   aDesc.innerHTML = '<strong>MinimaAds</strong> is a fully decentralized advertising protocol built on top of the Minima blockchain. ' +
     'Unlike traditional ad networks, it operates without central servers, tracking databases, or intermediaries.';
+  aDesc.style.cssText = 'margin-bottom:1.5rem;';
   aboutPanel.appendChild(aDesc);
 
-  var aFeaturesTitle = document.createElement('h4');
-  aFeaturesTitle.textContent = 'Key Features';
-  aboutPanel.appendChild(aFeaturesTitle);
-
+  // Key Features card
+  var aFeaturesCard = createContentCard('#2ecc71', 'Key Features');
   var aFeaturesList = document.createElement('ul');
-  aFeaturesList.innerHTML = 
-    '<li><strong>Absolute Privacy:</strong> Your interests, browsing patterns, and clicks are processed locally on your node. No data ever leaves your device except cryptographic proofs of validation.</li>' +
-    '<li><strong>P2P Propagation:</strong> Ad campaigns and status changes propagate automatically across the network via Maxima, Minima\'s secure peer-to-peer messaging protocol.</li>' +
-    '<li><strong>Verifiable Escrows:</strong> All budgets are locked inside KissVM smart contracts. Creators can verify where their money goes, and viewers are guaranteed payment.</li>' +
-    '<li><strong>Zero Intermediaries:</strong> Fees are direct, transparent (6% platform fee for protocol maintenance), and payouts go directly from creators to viewers and publishers.</li>';
-  aboutPanel.appendChild(aFeaturesList);
-  
+  aFeaturesList.style.cssText = 'margin:.35rem 0 0;padding-left:1.5rem;';
+  aFeaturesList.innerHTML =
+    '<li style="margin-bottom:.5rem;"><strong>Absolute Privacy:</strong> Your interests, browsing patterns, and clicks are processed locally on your node. No data ever leaves your device except cryptographic proofs of validation.</li>' +
+    '<li style="margin-bottom:.5rem;"><strong>P2P Propagation:</strong> Ad campaigns and status changes propagate automatically across the network via Maxima, Minima\'s secure peer-to-peer messaging protocol.</li>' +
+    '<li style="margin-bottom:.5rem;"><strong>Verifiable Escrows:</strong> All budgets are locked inside KissVM smart contracts. Creators can verify where their money goes, and viewers are guaranteed payment.</li>' +
+    '<li style="margin-bottom:.5rem;"><strong>Zero Intermediaries:</strong> Fees are direct, transparent (6% platform fee for protocol maintenance), and payouts go directly from creators to viewers and publishers.</li>';
+  aFeaturesCard.appendChild(aFeaturesList);
+  aboutPanel.appendChild(aFeaturesCard);
+
+  // Architecture card
+  var aArchCard = createContentCard('#3498db', 'Architecture Highlights');
+  var aArchList = document.createElement('ul');
+  aArchList.style.cssText = 'margin:.35rem 0 0;padding-left:1.5rem;';
+  aArchList.innerHTML =
+    '<li style="margin-bottom:.5rem;"><strong>Service Worker:</strong> Handles background tasks, persistent data storage, and Maxima event processing without relying on your node being online.</li>' +
+    '<li style="margin-bottom:.5rem;"><strong>Layer 2 Channels:</strong> Unidirectional payment channels prevent blockchain congestion while ensuring instant settlement capability.</li>' +
+    '<li style="margin-bottom:.5rem;"><strong>KissVM Contracts:</strong> All campaign budgets are locked in verifiable smart contracts on the Minima blockchain.</li>';
+  aArchCard.appendChild(aArchList);
+  aboutPanel.appendChild(aArchCard);
+
   var aFooter = document.createElement('p');
   aFooter.style.cssText = 'text-align:center;margin-top:2rem;font-size:0.8rem;color:var(--pico-muted-color);';
   aFooter.textContent = 'MinimaAds v1.2.0 • Decentralized Ad Infrastructure';

@@ -82,6 +82,32 @@ function renderSettings(root) {
   }
 
   appearanceContent.appendChild(accentRow);
+
+  // Number format
+  var numFmtLabel = document.createElement('small');
+  numFmtLabel.style.cssText = 'display:block;margin-top:1.25rem;margin-bottom:.5rem;color:var(--pico-muted-color,#6c757d);';
+  numFmtLabel.textContent = 'Number format';
+  appearanceContent.appendChild(numFmtLabel);
+
+  var numFmtRow = document.createElement('div');
+  numFmtRow.style.cssText = 'display:flex;gap:.5rem;margin-bottom:.5rem;max-width:22rem;';
+
+  var euBtn = document.createElement('button');
+  euBtn.id = 'ma-numfmt-eu';
+  euBtn.className = 'ma-theme-mode-btn secondary';
+  euBtn.textContent = 'European (1.234,56)';
+  euBtn.addEventListener('click', function() { setNumberFormat('EU'); });
+
+  var enBtn = document.createElement('button');
+  enBtn.id = 'ma-numfmt-en';
+  enBtn.className = 'ma-theme-mode-btn secondary';
+  enBtn.textContent = 'Anglo-Saxon (1,234.56)';
+  enBtn.addEventListener('click', function() { setNumberFormat('EN'); });
+
+  numFmtRow.appendChild(euBtn);
+  numFmtRow.appendChild(enBtn);
+  appearanceContent.appendChild(numFmtRow);
+
   appDetails.appendChild(appearanceContent);
   root.appendChild(appDetails);
 

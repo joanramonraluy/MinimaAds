@@ -113,7 +113,7 @@ function _renderFramesList(rows) {
       // Skip built-in frame if user is not the platform creator
       if (isB && !isCreator) { return; }
 
-      var earned = (parseFloat(r.TOTAL_EARNED) || 0).toFixed(6);
+      var earned = fmtAmt(parseFloat(r.TOTAL_EARNED) || 0, 6);
       var sid    = _safeId(fid);
 
       var card = document.createElement('article');
@@ -531,7 +531,7 @@ function _showEarnings(fid) {
     }
     var statsRow = document.createElement('div');
     statsRow.style.cssText = 'display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.25rem;';
-    statsRow.appendChild(mkStatCard('Total earned', (data.total_earned || 0).toFixed(6) + ' MINIMA'));
+    statsRow.appendChild(mkStatCard('Total earned', fmtAmt(data.total_earned || 0, 6) + ' MINIMA'));
     statsRow.appendChild(mkStatCard('Publisher views', String(data.event_count || 0)));
     el.appendChild(statsRow);
   });

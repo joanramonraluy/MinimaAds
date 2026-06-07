@@ -28,6 +28,38 @@ var _dbReady = false;
 var _activeMode = 'viewer';
 var _profileInterestsSaveTimer = 0;
 
+// Number format preference: 'EU' = 1.234,56  |  'EN' = 1,234.56
+window.NUMFMT = 'EU';
+
+window.fmtAmt = function(val, decimals) {
+  if (typeof decimals !== 'number') { decimals = 6; }
+  var n = typeof val === 'number' ? val : parseFloat(val);
+  if (!isFinite(n)) { n = 0; }
+  var s = n.toFixed(decimals);
+  var parts = s.split('.');
+  var thouSep = window.NUMFMT === 'EU' ? '.' : ',';
+  var decSep  = window.NUMFMT === 'EU' ? ',' : '.';
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, thouSep);
+  return decimals > 0 ? parts[0] + decSep + parts[1] : parts[0];
+};
+
+window.parseAmt = function(str) {
+  if (typeof str !== 'string') { str = String(str || ''); }
+  str = str.trim();
+  if (window.NUMFMT === 'EU') {
+    str = str.replace(/\./g, '').replace(',', '.');
+  } else {
+    str = str.replace(/,/g, '');
+  }
+  return parseFloat(str);
+};
+
+function setNumberFormat(fmt) {
+  window.NUMFMT = fmt;
+  MDS.keypair.set('UI_NUMBER_FORMAT', fmt, function() {});
+  _updateSettingsUI();
+}
+
 var MODE_VIEWS = {
   viewer:    ['viewer', 'earnings'],
   creator:   ['creator', 'mycampaigns', 'stats'],
@@ -1740,6 +1772,11 @@ function _updateSettingsUI() {
     if (accents[i] === accent) { sw.classList.add('active'); }
     else                       { sw.classList.remove('active'); }
   }
+
+  var numFmtEU = document.getElementById('ma-numfmt-eu');
+  var numFmtEN = document.getElementById('ma-numfmt-en');
+  if (numFmtEU) { numFmtEU.className = 'ma-theme-mode-btn secondary' + (window.NUMFMT === 'EU' ? ' active' : ''); }
+  if (numFmtEN) { numFmtEN.className = 'ma-theme-mode-btn secondary' + (window.NUMFMT === 'EN' ? ' active' : ''); }
 }
 
 
@@ -1853,6 +1890,10 @@ function onInited() {
           if (savedAccent === 'indigo') { document.documentElement.removeAttribute('data-accent'); }
           else { document.documentElement.setAttribute('data-accent', savedAccent); }
           _updateSettingsUI();
+          MDS.keypair.get('UI_NUMBER_FORMAT', function(numFmtRes) {
+            if (numFmtRes && numFmtRes.status && numFmtRes.value) {
+              window.NUMFMT = numFmtRes.value;
+            }
           MDS.cmd('maxima action:info', function(res) {
           if (res && res.status && res.response) {
             if (res.response.publickey) { MY_ADDRESS    = res.response.publickey.toUpperCase(); }
@@ -1903,8 +1944,9 @@ function onInited() {
             });
           }
         });
-        });
-        });
+        });   // closes maxima action:info
+          }); // closes UI_NUMBER_FORMAT
+        });   // closes UI_ACCENT
       });
       });
     });

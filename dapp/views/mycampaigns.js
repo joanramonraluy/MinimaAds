@@ -169,7 +169,7 @@ function _buildCampaignCard(c, openDetails) {
   // Quick stats in header
   var quickStats = document.createElement('small');
   quickStats.style.cssText = 'color:var(--pico-muted-color,#6c757d);font-size:.78rem;margin-left:.75rem;';
-  quickStats.textContent = 'Views: ' + viewCount + ' • Clicks: ' + clickCount + ' • Escrow Left: ' + budgetRemaining.toFixed(2) + ' M';
+  quickStats.textContent = 'Views: ' + viewCount + ' • Clicks: ' + clickCount + ' • Escrow Left: ' + fmtAmt(budgetRemaining, 2) + ' M';
   badgeGroup.appendChild(quickStats);
 
   cardSummary.appendChild(badgeGroup);
@@ -200,7 +200,7 @@ function _buildCampaignCard(c, openDetails) {
   perfRow.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:.6rem;margin:.35rem 0 .75rem;';
   perfRow.appendChild(mkStatCard('Views', String(viewCount)));
   perfRow.appendChild(mkStatCard('Clicks', String(clickCount)));
-  perfRow.appendChild(mkStatCard('CTR', ctr.toFixed(2) + '%'));
+  perfRow.appendChild(mkStatCard('CTR', fmtAmt(ctr, 2) + '%'));
   perfRow.appendChild(mkStatCard('Viewers', String(uniqueViewers)));
   perfRow.appendChild(mkStatCard('Publishers', String(uniquePublishers)));
   cardBody.appendChild(perfRow);
@@ -225,10 +225,10 @@ function _buildCampaignCard(c, openDetails) {
   
   var totalBudgetRow = document.createElement('div');
   totalBudgetRow.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:.6rem;margin:.35rem 0 .75rem;';
-  totalBudgetRow.appendChild(mkStatCard('Total Budget', budgetTotal.toFixed(4) + ' M', 'Initial funding'));
-  totalBudgetRow.appendChild(mkStatCard('Total Escrow Left', budgetRemaining.toFixed(4) + ' M', 'Remaining in escrow'));
-  totalBudgetRow.appendChild(mkStatCard('Total Locked', (viewerLocked + pubLocked).toFixed(4) + ' M', 'Reserved in L2 channels'));
-  totalBudgetRow.appendChild(mkStatCard('Total Paid', (viewerSettled + pubSpentActual).toFixed(4) + ' M', 'On-chain settlements'));
+  totalBudgetRow.appendChild(mkStatCard('Total Budget', fmtAmt(budgetTotal, 4) + ' M', 'Initial funding'));
+  totalBudgetRow.appendChild(mkStatCard('Total Escrow Left', fmtAmt(budgetRemaining, 4) + ' M', 'Remaining in escrow'));
+  totalBudgetRow.appendChild(mkStatCard('Total Locked', fmtAmt(viewerLocked + pubLocked, 4) + ' M', 'Reserved in L2 channels'));
+  totalBudgetRow.appendChild(mkStatCard('Total Paid', fmtAmt(viewerSettled + pubSpentActual, 4) + ' M', 'On-chain settlements'));
   budgetBody.appendChild(totalBudgetRow);
 
   // ── Viewer Allocation ──
@@ -239,10 +239,10 @@ function _buildCampaignCard(c, openDetails) {
   var viewerBudgetRow = document.createElement('div');
   viewerBudgetRow.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:.6rem;margin:.35rem 0 .75rem;';
   
-  var escrowCard = mkStatCard('Available (Escrow)', budgetRemaining.toFixed(4) + ' M', 'Total campaign escrow');
-  var lockedCard = mkStatCard('Locked in Channels', viewerLocked.toFixed(4) + ' M', viewerActiveCount + ' active channel' + (viewerActiveCount === 1 ? '' : 's') + ' (' + viewerUnsettled.toFixed(4) + ' M earned)');
-  var settledCard = mkStatCard('Settled (Paid)', viewerSettled.toFixed(4) + ' M', viewerSettledCount + ' settled channel' + (viewerSettledCount === 1 ? '' : 's') + ' (' + viewerSettled.toFixed(4) + ' M paid)');
-  var unspentCard = mkStatCard('Unspent Campaign', unspentBudget.toFixed(4) + ' M', 'Initial: ' + budgetTotal.toFixed(4) + ' M');
+  var escrowCard = mkStatCard('Available (Escrow)', fmtAmt(budgetRemaining, 4) + ' M', 'Total campaign escrow');
+  var lockedCard = mkStatCard('Locked in Channels', fmtAmt(viewerLocked, 4) + ' M', viewerActiveCount + ' active channel' + (viewerActiveCount === 1 ? '' : 's') + ' (' + fmtAmt(viewerUnsettled, 4) + ' M earned)');
+  var settledCard = mkStatCard('Settled (Paid)', fmtAmt(viewerSettled, 4) + ' M', viewerSettledCount + ' settled channel' + (viewerSettledCount === 1 ? '' : 's') + ' (' + fmtAmt(viewerSettled, 4) + ' M paid)');
+  var unspentCard = mkStatCard('Unspent Campaign', fmtAmt(unspentBudget, 4) + ' M', 'Initial: ' + fmtAmt(budgetTotal, 4) + ' M');
   
   viewerBudgetRow.appendChild(escrowCard);
   viewerBudgetRow.appendChild(lockedCard);
@@ -259,10 +259,10 @@ function _buildCampaignCard(c, openDetails) {
     var pubBudgetRow = document.createElement('div');
     pubBudgetRow.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:.6rem;margin:.35rem 0 .75rem;';
 
-    var pubLimitCard = mkStatCard('Max Pub Budget', maxPubBudget.toFixed(4) + ' M', 'Configured limit');
-    var pubReservedCard = mkStatCard('Budget Reserved', parseFloat(c.PUBLISHER_BUDGET_SPENT || 0).toFixed(4) + ' M', pubActiveCount + ' active channel' + (pubActiveCount === 1 ? '' : 's') + ' (' + pubUnsettled.toFixed(4) + ' M earned)');
-    var pubSpentCard = mkStatCard('Budget Spent', pubSpentActual.toFixed(4) + ' M', pubSettledCount + ' settled channel' + (pubSettledCount === 1 ? '' : 's') + ' (' + pubSettled.toFixed(4) + ' M paid)');
-    var pubLeftCard = mkStatCard('Budget Left', pubRemaining.toFixed(4) + ' M', 'Unallocated: ' + pubRemaining.toFixed(4) + ' M');
+    var pubLimitCard = mkStatCard('Max Pub Budget', fmtAmt(maxPubBudget, 4) + ' M', 'Configured limit');
+    var pubReservedCard = mkStatCard('Budget Reserved', fmtAmt(parseFloat(c.PUBLISHER_BUDGET_SPENT || 0), 4) + ' M', pubActiveCount + ' active channel' + (pubActiveCount === 1 ? '' : 's') + ' (' + fmtAmt(pubUnsettled, 4) + ' M earned)');
+    var pubSpentCard = mkStatCard('Budget Spent', fmtAmt(pubSpentActual, 4) + ' M', pubSettledCount + ' settled channel' + (pubSettledCount === 1 ? '' : 's') + ' (' + fmtAmt(pubSettled, 4) + ' M paid)');
+    var pubLeftCard = mkStatCard('Budget Left', fmtAmt(pubRemaining, 4) + ' M', 'Unallocated: ' + fmtAmt(pubRemaining, 4) + ' M');
 
     var pubViewReward = parseFloat(c.PUBLISHER_REWARD_VIEW || 0);
     if (pubRemaining < pubViewReward) {
@@ -289,7 +289,7 @@ function _buildCampaignCard(c, openDetails) {
   progressWrap.appendChild(mkProgressBar(budgetPct, 'Budget allocated/spent'));
   var progressLbl = document.createElement('small');
   progressLbl.style.cssText = 'color:var(--pico-muted-color,#6c757d);font-size:.72rem;display:block;margin-top:.15rem;';
-  progressLbl.textContent = budgetSpent.toFixed(4) + ' M allocated or spent / ' + budgetTotal.toFixed(4) + ' M initial budget (' + budgetRemaining.toFixed(4) + ' M available in escrow)';
+  progressLbl.textContent = fmtAmt(budgetSpent, 4) + ' M allocated or spent / ' + fmtAmt(budgetTotal, 4) + ' M initial budget (' + fmtAmt(budgetRemaining, 4) + ' M available in escrow)';
   progressWrap.appendChild(progressLbl);
 
   var footnote = document.createElement('div');
@@ -378,7 +378,7 @@ function _buildCampaignCard(c, openDetails) {
         { label: 'Campaign ID', value: c.ID },
         { label: 'Created At', value: new Date(parseInt(c.CREATED_AT)).toLocaleString() },
         { label: 'Expires At', value: c.EXPIRES_AT ? new Date(parseInt(c.EXPIRES_AT)).toLocaleString() : 'Never' },
-        { label: 'Initial Escrow Budget', value: parseFloat(c.BUDGET_TOTAL).toFixed(4) + ' M' },
+        { label: 'Initial Escrow Budget', value: fmtAmt(parseFloat(c.BUDGET_TOTAL), 4) + ' M' },
         { label: 'Escrow Coin ID', value: c.ESCROW_COINID || 'N/A' },
         { label: 'Creator Maxima PK', value: c.CREATOR_MX || 'N/A' },
         { label: 'Escrow Signer PK', value: c.ESCROW_WALLET_PK || 'N/A' }
@@ -387,14 +387,14 @@ function _buildCampaignCard(c, openDetails) {
     {
       title: 'Reward Viewer',
       params: [
-        { label: 'Reward / View', value: parseFloat(c.REWARD_VIEW).toFixed(4) + ' M' },
-        { label: 'Reward / Click', value: parseFloat(c.REWARD_CLICK).toFixed(4) + ' M' }
+        { label: 'Reward / View', value: fmtAmt(parseFloat(c.REWARD_VIEW), 4) + ' M' },
+        { label: 'Reward / Click', value: fmtAmt(parseFloat(c.REWARD_CLICK), 4) + ' M' }
       ]
     },
     {
       title: 'Reward Viewer Limits',
       params: [
-        { label: 'Max Reward / Viewer', value: c.MAX_VIEWER_REWARD ? parseFloat(c.MAX_VIEWER_REWARD).toFixed(4) + ' M' : 'Unlimited' },
+        { label: 'Max Reward / Viewer', value: c.MAX_VIEWER_REWARD ? fmtAmt(parseFloat(c.MAX_VIEWER_REWARD), 4) + ' M' : 'Unlimited' },
         { label: 'Max Daily Views', value: c.MAX_DAILY_VIEWS ? c.MAX_DAILY_VIEWS : 'No limit' },
         { label: 'Max Daily Clicks', value: c.MAX_DAILY_CLICKS ? c.MAX_DAILY_CLICKS : 'No limit' },
         { label: 'Reward Cooldown', value: c.COOLDOWN_MS ? (parseInt(c.COOLDOWN_MS) / 1000) + 's' : 'No cooldown' }
@@ -403,8 +403,8 @@ function _buildCampaignCard(c, openDetails) {
     {
       title: 'Publisher Rewards & Limits',
       params: [
-        { label: 'Publisher Reward / View', value: maxPubBudget > 0 ? parseFloat(c.PUBLISHER_REWARD_VIEW).toFixed(4) + ' M' : 'Disabled' },
-        { label: 'Max Publisher Budget', value: maxPubBudget > 0 ? maxPubBudget.toFixed(4) + ' M' : 'Disabled' }
+        { label: 'Publisher Reward / View', value: maxPubBudget > 0 ? fmtAmt(parseFloat(c.PUBLISHER_REWARD_VIEW), 4) + ' M' : 'Disabled' },
+        { label: 'Max Publisher Budget', value: maxPubBudget > 0 ? fmtAmt(maxPubBudget, 4) + ' M' : 'Disabled' }
       ]
     }
   ];
@@ -727,7 +727,7 @@ function _renderSettledChannelsTable(target, rows, contactsMap) {
     tr.appendChild(_nodeTd(nodeName));
     tr.appendChild(_nodeTd(_shortNodePk(pk)));
     tr.appendChild(_nodeTd(String(group.rows.length)));
-    tr.appendChild(_nodeTd(group.total.toFixed(6) + ' M'));
+    tr.appendChild(_nodeTd(fmtAmt(group.total, 6) + ' M'));
     tr.appendChild(_nodeTd(lastText));
 
     var toggleTd = document.createElement('td');
@@ -824,7 +824,7 @@ function _renderSettledChannelEvents(target, rows) {
       : '—';
     var tr = document.createElement('tr');
     tr.appendChild(_nodeTd(r.STATUS || 'settled'));
-    tr.appendChild(_nodeTd((parseFloat(r.CUMULATIVE_EARNED || 0) || 0).toFixed(6) + ' M'));
+    tr.appendChild(_nodeTd(fmtAmt(parseFloat(r.CUMULATIVE_EARNED || 0) || 0, 6) + ' M'));
     tr.appendChild(_nodeTd(settledDate));
     tbody.appendChild(tr);
   }
@@ -955,7 +955,7 @@ function _renderRewardedNodesTable(target, rows, contactsMap) {
     tr.appendChild(_nodeTd(nodeName));
     tr.appendChild(_nodeTd(_shortNodePk(pk)));
     tr.appendChild(_nodeTd(String(group.rows.length)));
-    tr.appendChild(_nodeTd(group.total.toFixed(6) + ' M'));
+    tr.appendChild(_nodeTd(fmtAmt(group.total, 6) + ' M'));
     tr.appendChild(_nodeTd(lastText));
 
     var toggleTd = document.createElement('td');
@@ -1056,7 +1056,7 @@ function _renderNodeRewardEvents(target, rows) {
       : '—';
     var tr = document.createElement('tr');
     tr.appendChild(_nodeTd(_formatRewardType(r.TYPE)));
-    tr.appendChild(_nodeTd((parseFloat(r.AMOUNT || 0) || 0).toFixed(6) + ' M'));
+    tr.appendChild(_nodeTd(fmtAmt(parseFloat(r.AMOUNT || 0) || 0, 6) + ' M'));
     tr.appendChild(_nodeTd(rewardDate));
     tbody.appendChild(tr);
   }

@@ -19,8 +19,10 @@ var PLATFORM_FEE_RATE = 0.06;
 function formatMinima(val) {
   var s = val.toFixed(6).replace(/\.?0+$/, '');
   var parts = s.split('.');
-  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  return parts.length > 1 ? parts[0] + '.' + parts[1] : parts[0];
+  var thouSep = window.NUMFMT === 'EU' ? '.' : ',';
+  var decSep  = window.NUMFMT === 'EU' ? ',' : '.';
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, thouSep);
+  return parts.length > 1 ? parts[0] + decSep + parts[1] : parts[0];
 }
 
 function computeTextColor(hex) {
@@ -168,15 +170,15 @@ function renderCreator(root) {
     + '  </div>'
     + '  <strong class="ma-section-title">Rewards</strong>'
     + '  <label>Reward per view (MINIMA)'
-    + '    <input name="reward_view" type="number" step="0.000001" min="' + LIMITS.MIN_REWARD_VIEW + '" value="1" required>'
+    + '    <input name="reward_view" type="text" inputmode="decimal" value="1" required>'
     + '    <small id="ma-reward-view-hint" style="display:block;margin-top:0.2rem;"></small>'
     + '  </label>'
     + '  <label>Reward per click (MINIMA)'
-    + '    <input name="reward_click" type="number" step="0.000001" min="' + LIMITS.MIN_REWARD_CLICK + '" value="2" required>'
+    + '    <input name="reward_click" type="text" inputmode="decimal" value="2" required>'
     + '    <small id="ma-reward-click-hint" style="display:block;margin-top:0.2rem;"></small>'
     + '  </label>'
     + '  <label>Max reward per viewer (MINIMA)'
-    + '    <input name="max_viewer_reward" type="number" step="0.000001" min="0.000001" value="10" required>'
+    + '    <input name="max_viewer_reward" type="text" inputmode="decimal" value="10" required>'
     + '    <small id="ma-cap-min-hint" style="display:block;margin-top:0.2rem;"></small>'
     + '    <span id="ma-multiplier-row" style="display:flex;align-items:center;gap:0.5rem;margin-top:0.35rem;">'
     + '      <small style="color:var(--pico-muted-color)">(view + click) &times;</small>'
@@ -202,11 +204,11 @@ function renderCreator(root) {
     + '<div class="ma-section ma-tab-panel" id="ma-panel-publisher" role="tabpanel" aria-labelledby="ma-tab-publisher" hidden>'
     + '  <strong class="ma-section-title">Publisher rewards</strong>'
     + '  <label>Publisher reward per view (MINIMA)'
-    + '    <input name="publisher_reward_view" type="number" step="0.001" min="0" value="10">'
+    + '    <input name="publisher_reward_view" type="text" inputmode="decimal" value="10">'
     + '    <small id="ma-publisher-reward-hint" style="display:block;margin-top:0.2rem;"></small>'
     + '  </label>'
     + '  <label>Max publisher budget (MINIMA)'
-    + '    <input name="max_publisher_budget" type="number" step="0.01" min="0" value="100">'
+    + '    <input name="max_publisher_budget" type="text" inputmode="decimal" value="100">'
     + '    <small id="ma-publisher-budget-hint" style="display:block;margin-top:0.2rem;"></small>'
     + '  </label>'
     + '  <div style="margin-top:0.75rem;padding:0.5rem;border-left:3px solid var(--pico-primary);background-color:rgba(0,0,0,0.015);border-radius:0 var(--pico-border-radius) var(--pico-border-radius) 0;font-size:0.78rem;line-height:1.35;">'
@@ -229,10 +231,11 @@ function renderCreator(root) {
   form.addEventListener('change', onCreatorFormChange);
   var budgetInput = form.querySelector('[name="budget"]');
   budgetInput.addEventListener('focus', function () {
-    this.value = this.value.replace(/,/g, '');
+    var thouSep = window.NUMFMT === 'EU' ? '.' : ',';
+    this.value = this.value.replace(new RegExp('\\' + thouSep, 'g'), '');
   });
   budgetInput.addEventListener('blur', function () {
-    var val = parseFloat(this.value.replace(/,/g, ''));
+    var val = parseAmt(this.value);
     if (isFinite(val) && val > 0) { this.value = formatMinima(val); }
   });
   var daysInput = form.querySelector('[name="campaign_days"]');
@@ -439,9 +442,8 @@ function loadWalletBalance(form) {
     }
     var budgetInput = form.querySelector('[name="budget"]');
     if (!budgetInput) { return; }
-    budgetInput.max = sendable.toFixed(6);
     budgetInput.dataset.walletMax = sendable;
-    var initialBudget = parseFloat(budgetInput.value.replace(/,/g, ''));
+    var initialBudget = parseAmt(budgetInput.value);
     if (isFinite(initialBudget) && initialBudget > 0) {
       budgetInput.value = formatMinima(initialBudget);
     }
@@ -796,7 +798,7 @@ function onCreatorFormInput(e) {
   var form = e.currentTarget;
   var changedName = e.target.name;
   var decimals = FIELD_DECIMALS[changedName];
-  if (decimals !== undefined && e.target.type === 'number') {
+  if (decimals !== undefined) {
     truncateInputDecimals(e.target, decimals);
   }
   if (changedName === 'campaign_days') {
@@ -810,9 +812,9 @@ function onCreatorFormInput(e) {
   if (changedName === 'budget') {
     var budgetInput = form.querySelector('[name="budget"]');
     var walletMax = parseFloat(budgetInput.dataset.walletMax);
-    var budgetVal = parseFloat(e.target.value.replace(/,/g, ''));
+    var budgetVal = parseAmt(e.target.value);
     if (isFinite(walletMax) && isFinite(budgetVal) && budgetVal > walletMax) {
-      e.target.value = walletMax.toFixed(6);
+      e.target.value = fmtAmt(walletMax, 6);
     }
   }
   if (changedName === 'bg_color') {
@@ -833,7 +835,8 @@ function onCreatorFormInput(e) {
 
 function truncateInputDecimals(input, maxDecimals) {
   var val = input.value;
-  var dotIndex = val.indexOf('.');
+  var sep = (window.NUMFMT === 'EU' && input.type !== 'number') ? ',' : '.';
+  var dotIndex = val.indexOf(sep);
   if (dotIndex === -1) { return; }
   if (maxDecimals === 0) {
     input.value = val.slice(0, dotIndex);
@@ -868,22 +871,22 @@ function onCreatorFormChange(e) {
 // Keeps max_viewer_reward >= reward_view + reward_click at all times.
 // Updates the HTML min/max attributes and clamps the current value if needed.
 function enforceCapMinimum(form) {
-  var rewardView = parseFloat(form.querySelector('[name="reward_view"]').value) || 0;
-  var rewardClick = parseFloat(form.querySelector('[name="reward_click"]').value) || 0;
+  var rewardView = parseAmt(form.querySelector('[name="reward_view"]').value) || 0;
+  var rewardClick = parseAmt(form.querySelector('[name="reward_click"]').value) || 0;
   var minCap = rewardView + rewardClick;
-  var budget = parseFloat(form.querySelector('[name="budget"]').value.replace(/,/g, '')) || 0;
-  var maxPubBudget = parseFloat(form.querySelector('[name="max_publisher_budget"]').value) || 0;
+  var budget = parseAmt(form.querySelector('[name="budget"]').value) || 0;
+  var maxPubBudget = parseAmt(form.querySelector('[name="max_publisher_budget"]').value) || 0;
   var maxCap = Math.max(minCap, budget - maxPubBudget);
 
   var capInput = form.querySelector('[name="max_viewer_reward"]');
   capInput.min = minCap > 0 ? minCap.toFixed(6) : '0.000001';
   capInput.max = maxCap.toFixed(6);
-  var currentCap = parseFloat(capInput.value);
+  var currentCap = parseAmt(capInput.value);
   if (isFinite(currentCap) && currentCap < minCap) {
-    capInput.value = minCap.toFixed(6);
+    capInput.value = fmtAmt(minCap, 6);
     currentCap = minCap;
   } else if (isFinite(currentCap) && currentCap > maxCap) {
-    capInput.value = maxCap.toFixed(6);
+    capInput.value = fmtAmt(maxCap, 6);
     currentCap = maxCap;
   }
   var hintEl = document.getElementById('ma-cap-min-hint');
@@ -895,9 +898,9 @@ function enforceCapMinimum(form) {
 // Keeps max_daily_views and max_daily_clicks within bounds so that the daily rewards do not exceed the max reward per viewer.
 // Displays explanatory messages beneath each input.
 function enforceDailyLimits(form) {
-  var rewardView = parseFloat(form.querySelector('[name="reward_view"]').value) || 0;
-  var rewardClick = parseFloat(form.querySelector('[name="reward_click"]').value) || 0;
-  var maxViewerReward = parseFloat(form.querySelector('[name="max_viewer_reward"]').value) || 0;
+  var rewardView = parseAmt(form.querySelector('[name="reward_view"]').value) || 0;
+  var rewardClick = parseAmt(form.querySelector('[name="reward_click"]').value) || 0;
+  var maxViewerReward = parseAmt(form.querySelector('[name="max_viewer_reward"]').value) || 0;
 
   var dailyViewsInput = form.querySelector('[name="max_daily_views"]');
   var dailyViewsHint = document.getElementById('ma-daily-views-hint');
@@ -941,12 +944,12 @@ function enforceDailyLimits(form) {
 // Keeps max_publisher_budget >= publisher_reward_view and <= budget.
 // Displays explanatory messages beneath inputs.
 function enforcePublisherLimits(form) {
-  var budget = parseFloat(form.querySelector('[name="budget"]').value.replace(/,/g, '')) || 0;
-  var publisherRewardView = parseFloat(form.querySelector('[name="publisher_reward_view"]').value) || 0;
+  var budget = parseAmt(form.querySelector('[name="budget"]').value) || 0;
+  var publisherRewardView = parseAmt(form.querySelector('[name="publisher_reward_view"]').value) || 0;
   var maxPubBudgetInput = form.querySelector('[name="max_publisher_budget"]');
   var pubBudgetHint = document.getElementById('ma-publisher-budget-hint');
   var pubRewardHint = document.getElementById('ma-publisher-reward-hint');
-  var maxViewerReward = parseFloat(form.querySelector('[name="max_viewer_reward"]').value) || 0;
+  var maxViewerReward = parseAmt(form.querySelector('[name="max_viewer_reward"]').value) || 0;
 
   var allowedPubBudget = Math.max(publisherRewardView, budget - maxViewerReward);
 
@@ -954,7 +957,7 @@ function enforcePublisherLimits(form) {
     if (publisherRewardView < LIMITS.MIN_PUBLISHER_REWARD_VIEW) {
       publisherRewardView = LIMITS.MIN_PUBLISHER_REWARD_VIEW;
       var prInput = form.querySelector('[name="publisher_reward_view"]');
-      if (prInput) { prInput.value = LIMITS.MIN_PUBLISHER_REWARD_VIEW.toFixed(6); }
+      if (prInput) { prInput.value = fmtAmt(LIMITS.MIN_PUBLISHER_REWARD_VIEW, 6); }
     }
     var allowedPubReward = Math.max(LIMITS.MIN_PUBLISHER_REWARD_VIEW, budget - maxViewerReward);
     if (pubRewardHint) {
@@ -963,9 +966,9 @@ function enforcePublisherLimits(form) {
     var rewardInput = form.querySelector('[name="publisher_reward_view"]');
     if (rewardInput) {
       rewardInput.max = allowedPubReward.toFixed(6);
-      var curReward = parseFloat(rewardInput.value);
+      var curReward = parseAmt(rewardInput.value);
       if (isFinite(curReward) && curReward > allowedPubReward) {
-        rewardInput.value = allowedPubReward.toFixed(6);
+        rewardInput.value = fmtAmt(allowedPubReward, 6);
         publisherRewardView = allowedPubReward;
       }
     }
@@ -973,11 +976,11 @@ function enforcePublisherLimits(form) {
     if (maxPubBudgetInput) {
       maxPubBudgetInput.min = publisherRewardView.toFixed(6);
       maxPubBudgetInput.max = allowedPubBudget.toFixed(6);
-      var curPubBudget = parseFloat(maxPubBudgetInput.value);
+      var curPubBudget = parseAmt(maxPubBudgetInput.value);
       if (isFinite(curPubBudget) && curPubBudget < publisherRewardView) {
-        maxPubBudgetInput.value = publisherRewardView.toFixed(6);
+        maxPubBudgetInput.value = fmtAmt(publisherRewardView, 6);
       } else if (isFinite(curPubBudget) && curPubBudget > allowedPubBudget) {
-        maxPubBudgetInput.value = allowedPubBudget.toFixed(6);
+        maxPubBudgetInput.value = fmtAmt(allowedPubBudget, 6);
       }
 
       if (pubBudgetHint) {
@@ -992,9 +995,9 @@ function enforcePublisherLimits(form) {
     if (maxPubBudgetInput) {
       maxPubBudgetInput.min = '0';
       maxPubBudgetInput.max = allowedPubBudgetNoReward.toFixed(6);
-      var curPubBudget2 = parseFloat(maxPubBudgetInput.value);
+      var curPubBudget2 = parseAmt(maxPubBudgetInput.value);
       if (isFinite(curPubBudget2) && curPubBudget2 > allowedPubBudgetNoReward) {
-        maxPubBudgetInput.value = allowedPubBudgetNoReward.toFixed(6);
+        maxPubBudgetInput.value = fmtAmt(allowedPubBudgetNoReward, 6);
       }
     }
     if (pubBudgetHint) {
@@ -1005,8 +1008,8 @@ function enforcePublisherLimits(form) {
 
 // Keeps reward_view and reward_click within limits and updates hints.
 function enforceViewerRewardLimits(form) {
-  var budget = parseFloat(form.querySelector('[name="budget"]').value.replace(/,/g, '')) || 0;
-  var maxPubBudget = parseFloat(form.querySelector('[name="max_publisher_budget"]').value) || 0;
+  var budget = parseAmt(form.querySelector('[name="budget"]').value) || 0;
+  var maxPubBudget = parseAmt(form.querySelector('[name="max_publisher_budget"]').value) || 0;
   var allowedBudget = Math.max(0, budget - maxPubBudget);
 
   var viewInput = form.querySelector('[name="reward_view"]');
@@ -1014,10 +1017,10 @@ function enforceViewerRewardLimits(form) {
   if (viewInput) {
     viewInput.min = LIMITS.MIN_REWARD_VIEW.toFixed(6);
     viewInput.max = allowedBudget.toFixed(6);
-    var viewVal = parseFloat(viewInput.value) || 0;
+    var viewVal = parseAmt(viewInput.value) || 0;
     if (isFinite(viewVal)) {
       if (viewVal > allowedBudget) {
-        viewInput.value = allowedBudget.toFixed(6);
+        viewInput.value = fmtAmt(allowedBudget, 6);
       }
     }
     if (viewHint) {
@@ -1030,10 +1033,10 @@ function enforceViewerRewardLimits(form) {
   if (clickInput) {
     clickInput.min = LIMITS.MIN_REWARD_CLICK.toFixed(6);
     clickInput.max = allowedBudget.toFixed(6);
-    var clickVal = parseFloat(clickInput.value) || 0;
+    var clickVal = parseAmt(clickInput.value) || 0;
     if (isFinite(clickVal)) {
       if (clickVal > allowedBudget) {
-        clickInput.value = allowedBudget.toFixed(6);
+        clickInput.value = fmtAmt(allowedBudget, 6);
       }
     }
     if (clickHint) {
@@ -1050,9 +1053,9 @@ function applyAutoBalance(form) {
   var multiplierInput = form.querySelector('[name="multiplier"]');
   var hintEl = document.getElementById('ma-max-viewer-hint');
 
-  var rewardView = parseFloat(form.querySelector('[name="reward_view"]').value);
-  var rewardClick = parseFloat(form.querySelector('[name="reward_click"]').value);
-  var budget = parseFloat((form.querySelector('[name="budget"]').value || '').replace(/,/g, ''));
+  var rewardView = parseAmt(form.querySelector('[name="reward_view"]').value);
+  var rewardClick = parseAmt(form.querySelector('[name="reward_click"]').value);
+  var budget = parseAmt(form.querySelector('[name="budget"]').value);
   var multiplierRow = document.getElementById('ma-multiplier-row');
   var multiplier = multiplierInput ? (parseFloat(multiplierInput.value) || 1) : 1;
   if (multiplier < 1) { multiplier = 1; }
@@ -1093,7 +1096,7 @@ function applyAutoBalance(form) {
   if (!isFinite(rewardView) || !isFinite(rewardClick)) return;
 
   var suggested = (rewardView + rewardClick) * multiplier;
-  if (suggested > 0) { capInput.value = suggested.toFixed(6); }
+  if (suggested > 0) { capInput.value = fmtAmt(suggested, 6); }
 }
 
 function updateCampaignSummary(form) {
@@ -1101,11 +1104,11 @@ function updateCampaignSummary(form) {
   var costEl = document.getElementById('ma-campaign-cost');
   if (!reachReviewEl && !costEl) { return; }
 
-  var budget = parseFloat((form.querySelector('[name="budget"]').value || '').replace(/,/g, ''));
-  var rewardView = parseFloat(form.querySelector('[name="reward_view"]').value);
-  var rewardClick = parseFloat(form.querySelector('[name="reward_click"]').value);
+  var budget = parseAmt(form.querySelector('[name="budget"]').value);
+  var rewardView = parseAmt(form.querySelector('[name="reward_view"]').value);
+  var rewardClick = parseAmt(form.querySelector('[name="reward_click"]').value);
   var campaignDays = parseInt(form.querySelector('[name="campaign_days"]').value, 10);
-  var cap = parseFloat(form.querySelector('[name="max_viewer_reward"]').value);
+  var cap = parseAmt(form.querySelector('[name="max_viewer_reward"]').value);
 
   if (!isFinite(budget) || budget <= 0 || !isFinite(rewardView) || !isFinite(rewardClick)
     || !isFinite(campaignDays) || campaignDays <= 0 || !isFinite(cap) || cap <= 0) {
@@ -1116,8 +1119,8 @@ function updateCampaignSummary(form) {
 
   var pubRvInput = form.querySelector('[name="publisher_reward_view"]');
   var pubBudgInput = form.querySelector('[name="max_publisher_budget"]');
-  var publisherRv = pubRvInput ? (parseFloat(pubRvInput.value) || 0) : 0;
-  var maxPubBudget = pubBudgInput ? (parseFloat(pubBudgInput.value) || 0) : 0;
+  var publisherRv = pubRvInput ? (parseAmt(pubRvInput.value) || 0) : 0;
+  var maxPubBudget = pubBudgInput ? (parseAmt(pubBudgInput.value) || 0) : 0;
 
   var maxViewers = Math.floor(budget / cap);
   var platformFee = budget * PLATFORM_FEE_RATE;
@@ -1191,16 +1194,16 @@ function onCreatorSubmit(e) {
   var imagePosition = (data.get('image_position') || 'center').toString().trim();
   var imageZoom = parseFloat((data.get('image_zoom') || '1.0').toString().trim()) || 1.0;
   var imageWidthPct = parseInt((data.get('image_width_pct') || '40').toString().trim(), 10) || 40;
-  var budget = parseFloat((data.get('budget') || '').replace(/,/g, ''));
-  var rewardView = parseFloat(data.get('reward_view'));
-  var rewardClick = parseFloat(data.get('reward_click'));
+  var budget = parseAmt((data.get('budget') || '').toString());
+  var rewardView = parseAmt((data.get('reward_view') || '').toString());
+  var rewardClick = parseAmt((data.get('reward_click') || '').toString());
   var campaignDaysRaw = (data.get('campaign_days') || '').toString().trim();
   var campaignDays = campaignDaysRaw ? parseInt(campaignDaysRaw, 10) : 7;
   var expiresAt = Date.now() + (campaignDays * 24 * 60 * 60 * 1000);
   var maxViewerRewardRaw = (data.get('max_viewer_reward') || '').toString().trim();
-  var maxViewerReward = (maxViewerRewardRaw && parseFloat(maxViewerRewardRaw) > 0) ? parseFloat(maxViewerRewardRaw) : null;
-  var publisherRewardView = parseFloat(data.get('publisher_reward_view') || '0') || 0;
-  var maxPublisherBudget = parseFloat(data.get('max_publisher_budget') || '0') || 0;
+  var maxViewerReward = (maxViewerRewardRaw && parseAmt(maxViewerRewardRaw) > 0) ? parseAmt(maxViewerRewardRaw) : null;
+  var publisherRewardView = parseAmt((data.get('publisher_reward_view') || '0').toString()) || 0;
+  var maxPublisherBudget = parseAmt((data.get('max_publisher_budget') || '0').toString()) || 0;
   var maxDailyViews = parseInt(data.get('max_daily_views') || '100', 10);
   var maxDailyClicks = parseInt(data.get('max_daily_clicks') || '100', 10);
   var cooldownS = parseInt(data.get('cooldown_s') || '300', 10);
@@ -1221,7 +1224,7 @@ function onCreatorSubmit(e) {
   var budgetInput = form.querySelector('[name="budget"]');
   var walletMax = budgetInput ? parseFloat(budgetInput.dataset.walletMax) : NaN;
   if (isFinite(walletMax) && budget > walletMax) {
-    msgEl.textContent = 'Budget exceeds wallet balance (' + walletMax.toFixed(6) + ' MINIMA sendable).';
+    msgEl.textContent = 'Budget exceeds wallet balance (' + fmtAmt(walletMax, 6) + ' MINIMA sendable).';
     return;
   }
   if (!(rewardView >= LIMITS.MIN_REWARD_VIEW)) {
@@ -1241,15 +1244,15 @@ function onCreatorSubmit(e) {
     return;
   }
   if (maxViewerReward < rewardView + rewardClick) {
-    msgEl.textContent = 'Max reward per viewer cannot be less than reward/view + reward/click (' + (rewardView + rewardClick).toFixed(6) + ' MINIMA).';
+    msgEl.textContent = 'Max reward per viewer cannot be less than reward/view + reward/click (' + fmtAmt(rewardView + rewardClick, 6) + ' MINIMA).';
     return;
   }
   if (maxDailyViews * rewardView > maxViewerReward) {
-    msgEl.textContent = 'Daily view reward (' + (maxDailyViews * rewardView).toFixed(6) + ' MINIMA) cannot exceed max reward per viewer (' + maxViewerReward.toFixed(6) + ' MINIMA).';
+    msgEl.textContent = 'Daily view reward (' + fmtAmt(maxDailyViews * rewardView, 6) + ' MINIMA) cannot exceed max reward per viewer (' + fmtAmt(maxViewerReward, 6) + ' MINIMA).';
     return;
   }
   if (maxDailyClicks * rewardClick > maxViewerReward) {
-    msgEl.textContent = 'Daily click reward (' + (maxDailyClicks * rewardClick).toFixed(6) + ' MINIMA) cannot exceed max reward per viewer (' + maxViewerReward.toFixed(6) + ' MINIMA).';
+    msgEl.textContent = 'Daily click reward (' + fmtAmt(maxDailyClicks * rewardClick, 6) + ' MINIMA) cannot exceed max reward per viewer (' + fmtAmt(maxViewerReward, 6) + ' MINIMA).';
     return;
   }
   if (maxViewerReward + maxPublisherBudget > budget) {
@@ -1274,7 +1277,7 @@ function onCreatorSubmit(e) {
       return;
     }
     if (maxPublisherBudget < publisherRewardView) {
-      msgEl.textContent = 'Max publisher budget (' + maxPublisherBudget.toFixed(6) + ' MINIMA) cannot be less than publisher reward per view (' + publisherRewardView.toFixed(6) + ' MINIMA).';
+      msgEl.textContent = 'Max publisher budget (' + fmtAmt(maxPublisherBudget, 6) + ' MINIMA) cannot be less than publisher reward per view (' + fmtAmt(publisherRewardView, 6) + ' MINIMA).';
       return;
     }
   }

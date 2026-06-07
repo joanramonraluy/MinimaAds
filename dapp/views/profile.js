@@ -156,9 +156,9 @@ function renderProfile(root) {
       if (!err && profile) {
         if (profile.INTERESTS && inp) { inp.value = profile.INTERESTS; }
         var total = parseFloat(profile.TOTAL_EARNED) || 0;
-        if (earnedEl) { earnedEl.textContent = total.toFixed(6) + ' MINIMA'; }
+        if (earnedEl) { earnedEl.textContent = fmtAmt(total, 6) + ' MINIMA'; }
       } else {
-        if (earnedEl) { earnedEl.textContent = '0.000000 MINIMA'; }
+        if (earnedEl) { earnedEl.textContent = fmtAmt(0, 6) + ' MINIMA'; }
       }
     });
   }

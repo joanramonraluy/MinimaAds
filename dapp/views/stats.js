@@ -44,7 +44,7 @@ function loadStats() {
         return sum + (parseFloat(c.BUDGET_REMAINING) || 0);
       }, 0);
       summaryEl.appendChild(mkStatCard('Active campaigns', String(active.length)));
-      summaryEl.appendChild(mkStatCard('Total budget in market', totalBudget.toFixed(4) + ' MINIMA'));
+      summaryEl.appendChild(mkStatCard('Total budget in market', fmtAmt(totalBudget, 4) + ' MINIMA'));
     }
 
     renderCampaignsTable(target, campaigns);
@@ -95,9 +95,9 @@ function renderCampaignsTable(target, campaigns) {
     tr.appendChild(statusTd);
 
     tr.appendChild(td(shortAddr(c.CREATOR_ADDRESS)));
-    tr.appendChild(td(parseFloat(c.BUDGET_REMAINING || 0).toFixed(4)));
-    tr.appendChild(td(parseFloat(c.REWARD_VIEW || 0).toFixed(6)));
-    tr.appendChild(td(parseFloat(c.REWARD_CLICK || 0).toFixed(6)));
+    tr.appendChild(td(fmtAmt(parseFloat(c.BUDGET_REMAINING || 0), 4)));
+    tr.appendChild(td(fmtAmt(parseFloat(c.REWARD_VIEW || 0), 6)));
+    tr.appendChild(td(fmtAmt(parseFloat(c.REWARD_CLICK || 0), 6)));
     tbody.appendChild(tr);
   }
   table.appendChild(tbody);

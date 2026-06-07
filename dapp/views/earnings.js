@@ -79,7 +79,7 @@ function _loadTodayEarnedSummary() {
     + " AND TIMESTAMP >= " + startOfDay;
   sqlQuery(sql, function(err, rows) {
     var total = (!err && rows && rows[0]) ? (parseFloat(rows[0].TOTAL) || 0) : 0;
-    _updateStatCard('ma-stat-today', total.toFixed(6) + ' MINIMA');
+    _updateStatCard('ma-stat-today', fmtAmt(total, 6) + ' MINIMA');
   });
 }
 
@@ -95,7 +95,7 @@ function loadEarnings() {
     + " AND TYPE IN (" + types + ")";
   sqlQuery(totalSql, function(err, rows) {
     var total = (!err && rows && rows[0]) ? (parseFloat(rows[0].TOTAL) || 0) : 0;
-    _updateStatCard('ma-stat-total', total.toFixed(6) + ' MINIMA');
+    _updateStatCard('ma-stat-total', fmtAmt(total, 6) + ' MINIMA');
 
     // Show hint below cards when nothing earned yet
     var summaryEl = document.getElementById('ma-earnings-summary');
@@ -200,7 +200,7 @@ function renderSettlementHistory(target, settlements) {
       statusTd.appendChild(mkStatusBadge('settled'));
       tr.appendChild(statusTd);
 
-      tr.appendChild(earningsTd(parseFloat(r.CUMULATIVE_EARNED || 0).toFixed(6) + ' MINIMA'));
+      tr.appendChild(earningsTd(fmtAmt(parseFloat(r.CUMULATIVE_EARNED || 0), 6) + ' MINIMA'));
       tr.appendChild(earningsTd(date));
 
       tr.className = 'ma-expandable-row';
@@ -357,7 +357,7 @@ function _doLoadEvents(campaignId, timeFilter, targetEl) {
           ? new Date(parseInt(eventRow.TIMESTAMP)).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
           : '—';
         tr.appendChild(earningsTd(eventRow.TYPE));
-        tr.appendChild(earningsTd(parseFloat(eventRow.AMOUNT || 0).toFixed(6)));
+        tr.appendChild(earningsTd(fmtAmt(parseFloat(eventRow.AMOUNT || 0), 6)));
         tr.appendChild(earningsTd(date));
         tbody.appendChild(tr);
       }
@@ -439,7 +439,7 @@ function _renderChannelRewardRows(rows, container) {
       // Amount stat card
       var amountWrap = document.createElement('div');
       amountWrap.style.cssText = 'margin:.75rem 0;';
-      var amountCard = mkStatCard('Pending', amount.toFixed(6) + ' MINIMA');
+      var amountCard = mkStatCard('Pending', fmtAmt(amount, 6) + ' MINIMA');
       amountCard.style.flex = 'none';
       amountWrap.appendChild(amountCard);
       card.appendChild(amountWrap);
@@ -604,7 +604,7 @@ function onSettleConfirmed(parsed) {
   console.log('[EARNINGS] onSettleConfirmed campaign:', parsed && parsed.campaign_id, 'amount:', parsed && parsed.amount);
   var statusEl = document.getElementById('ma-channel-settle-status');
   if (statusEl) {
-    var amount = (parsed && parsed.amount) ? parseFloat(parsed.amount).toFixed(6) : '';
+    var amount = (parsed && parsed.amount) ? fmtAmt(parseFloat(parsed.amount), 6) : '';
     statusEl.textContent = amount
       ? 'Reward channel settled. Received: ' + amount + ' MINIMA'
       : 'Reward channel settled.';

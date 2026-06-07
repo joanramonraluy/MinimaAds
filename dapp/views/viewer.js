@@ -187,8 +187,8 @@ function _buildCampaignRow(campaign, contact) {
 
   var rv = parseFloat(campaign.REWARD_VIEW) || 0;
   var rc = parseFloat(campaign.REWARD_CLICK) || 0;
-  var rewardText = rv.toFixed(3) + ' MINIMA/view';
-  if (rc > 0) { rewardText = rewardText + '  ·  ' + rc.toFixed(3) + '/click'; }
+  var rewardText = fmtAmt(rv, 3) + ' MINIMA/view';
+  if (rc > 0) { rewardText = rewardText + '  ·  ' + fmtAmt(rc, 3) + '/click'; }
   var rewardEl = document.createElement('div');
   rewardEl.style.cssText = 'font-size:.75rem;color:var(--pico-primary,#6366f1);margin-top:.2rem;';
   rewardEl.textContent = rewardText;
@@ -394,7 +394,7 @@ function loadTodayEarned() {
     var strong = card.querySelector('strong');
     if (!strong) { return; }
     var total = (!err && rows && rows[0]) ? (parseFloat(rows[0].TOTAL) || 0) : 0;
-    strong.textContent = total.toFixed(6) + ' MINIMA';
+    strong.textContent = fmtAmt(total, 6) + ' MINIMA';
   });
 }
 

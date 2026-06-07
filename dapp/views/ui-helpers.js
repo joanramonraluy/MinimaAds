@@ -24,7 +24,7 @@ function mkStatusBadge(status) {
 
 function mkStatCard(label, value, sub) {
   var card = document.createElement('div');
-  card.style.cssText = 'background:var(--pico-card-background-color,#fff);'
+  card.style.cssText = 'display:flex;flex-direction:column;background:var(--pico-card-background-color,#fff);'
     + 'border:1px solid var(--pico-muted-border-color,#ddd);border-radius:.4rem;'
     + 'padding:.6rem .85rem;min-width:0;flex:1;';
   var lbl = document.createElement('small');
@@ -32,7 +32,7 @@ function mkStatCard(label, value, sub) {
     + 'font-size:.72rem;margin-bottom:.2rem;text-transform:uppercase;letter-spacing:.04em;';
   lbl.textContent = label;
   var val = document.createElement('strong');
-  val.style.cssText = 'display:block;font-size:1.05rem;';
+  val.style.cssText = 'display:block;font-size:1.05rem;margin-top:auto;';
   val.textContent = value;
   card.appendChild(lbl);
   card.appendChild(val);

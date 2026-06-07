@@ -201,7 +201,7 @@ function handleMdsComms(parsed) {
       onCampaignsChanged();
     }
     if (currentRoute() === 'mycampaigns' && typeof loadMyCampaigns === 'function') {
-      loadMyCampaigns();
+      loadMyCampaigns(true);
     }
     if (parsed.type === 'NEW_CAMPAIGN' && currentRoute() === 'creator') {
       var msgEl2 = document.getElementById('ma-creator-msg');
@@ -216,6 +216,9 @@ function handleMdsComms(parsed) {
   if (parsed.type === 'REWARD_CONFIRMED') {
     if (typeof onRewardConfirmed === 'function') {
       onRewardConfirmed(parsed);
+    }
+    if (currentRoute() === 'mycampaigns' && typeof loadMyCampaigns === 'function') {
+      loadMyCampaigns(true);
     }
     return;
   }

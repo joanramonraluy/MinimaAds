@@ -146,6 +146,41 @@ function renderHelp(root) {
   cStatusDesc.innerHTML = 'In <strong>My Campaigns</strong>, you can track views/clicks in real time and manage status (Pause, Resume, or Finish). ' +
     'Status changes generate an on-chain update transaction. This updates the status state stored directly in the campaign\'s escrow coin, propagating the changes across the peer-to-peer network even if you go offline.';
   creatorPanel.appendChild(cStatusDesc);
+
+  var cBudgetTitle = document.createElement('h4');
+  cBudgetTitle.textContent = 'Understanding Budget Allocation & Performance';
+  creatorPanel.appendChild(cBudgetTitle);
+
+  var cBudgetDesc = document.createElement('p');
+  cBudgetDesc.style.fontSize = '0.9rem';
+  cBudgetDesc.innerHTML = 'To give you complete transparency over campaign funding, budgets are split into two dedicated sections in the dashboard: **Viewer** and **Publisher**:' +
+    '<h5>Viewer Budget Allocation</h5>' +
+    '<ul>' +
+    '<li><strong>Available (Escrow):</strong> Budget remaining in the main on-chain smart contract, ready to fund new payment channels as new viewers discover your campaign.</li>' +
+    '<li><strong>Locked in Channels:</strong> Budget currently locked in open viewer payment channels, indicating active viewer capacity.</li>' +
+    '<li><strong>Settled (Paid):</strong> The total viewer rewards that have been settled on-chain and paid directly to viewers\' wallets.</li>' +
+    '<li><strong>Unspent Campaign:</strong> The total campaign budget remaining that has not yet been paid or earned as rewards (Initial Budget minus all Settled and Unsettled earnings).</li>' +
+    '</ul>' +
+    '<h5>Publisher Budget Allocation</h5>' +
+    '<ul>' +
+    '<li><strong>Max Pub Budget:</strong> The total budget cap you configured for publisher rewards when creating the campaign.</li>' +
+    '<li><strong>Budget Reserved:</strong> The sum of maximum capacities currently reserved in active payment channels opened by publishers (used as a cap to prevent channel over-allocation).</li>' +
+    '<li><strong>Budget Spent:</strong> The sum of publisher rewards actually paid and earned dynamically by publishers displaying ads.</li>' +
+    '<li><strong>Budget Left:</strong> The remaining portion of the publisher budget limit that has not yet been reserved or spent by publishers.</li>' +
+    '</ul>' +
+    'Additionally, you can see the **Reward/View** and **Reward/Click** unit rates configured for the campaign, alongside the **CTR (Click-Through Rate)** which measures user engagement as a percentage of views that led to a click: <code>(Clicks / Views) * 100</code>.';
+  creatorPanel.appendChild(cBudgetDesc);
+
+  var cSettleTitle = document.createElement('h4');
+  cSettleTitle.textContent = 'Pending Settlements & Refunds';
+  creatorPanel.appendChild(cSettleTitle);
+
+  var cSettleDesc = document.createElement('p');
+  cSettleDesc.style.fontSize = '0.9rem';
+  cSettleDesc.innerHTML = 'The **Pending settlement** section shows open payment channels with active viewers/publishers. ' +
+    'When viewers settle their channels or you mark a campaign as finished, all remaining unspent channel balances are returned directly to your main wallet address (not back to the escrow contract).';
+  creatorPanel.appendChild(cSettleDesc);
+
   root.appendChild(creatorPanel);
 
   // --- 3. PUBLISHER PANEL ---

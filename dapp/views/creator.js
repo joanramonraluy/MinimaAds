@@ -21,9 +21,7 @@ var AUTO_BALANCE_CONFIG = {
   REWARD_RATIO_CLICK_TO_VIEW: 2.0,
   PUBLISHER_REWARD_RATIO: 0.5,
   PUBLISHER_BUDGET_RATIO: 0.10,
-  MULTIPLIER_MIN: 1.0,
-  MULTIPLIER_MAX: 10.0,
-  MULTIPLIER_DEFAULT: 2.0,
+  CAP_FACTOR_DEFAULT: 2.0,
   BUDGET_TIERS: [
     { max: 500, reward_view: 0.10, reward_click: 0.20 },
     { max: 2000, reward_view: 0.05, reward_click: 0.10 },
@@ -51,41 +49,6 @@ function getAutoBalanceDefaults(budgetTotal) {
   return { reward_view: 0.01, reward_click: 0.02 };
 }
 
-function calculateAutoBalanceMetrics(form) {
-  var autoBalance = form.querySelector('[name="auto_balance"]').checked;
-  if (!autoBalance) { return null; }
-
-  var budget = parseAmt(form.querySelector('[name="budget"]').value);
-  var campaignDays = parseInt(form.querySelector('[name="campaign_days"]').value, 10) || 7;
-  var multiplier = parseFloat(form.querySelector('[name="multiplier"]').value) || AUTO_BALANCE_CONFIG.MULTIPLIER_DEFAULT;
-  var defaults = getAutoBalanceDefaults(budget);
-
-  var rewardView = defaults.reward_view;
-  var rewardClick = defaults.reward_click;
-  var maxPublisherBudget = budget * AUTO_BALANCE_CONFIG.PUBLISHER_BUDGET_RATIO;
-  var budgetForViewers = budget - maxPublisherBudget;
-  var maxViewerReward = (rewardView + rewardClick) * multiplier;
-
-  var perViewerChannelMax = (rewardView + rewardClick) * campaignDays;
-  var maxViewers = Math.floor(budgetForViewers / perViewerChannelMax);
-
-  var dailyRewardPerViewer = (100 * rewardView) + (100 * rewardClick);
-  var publisherRewardView = (rewardView + rewardClick) * AUTO_BALANCE_CONFIG.PUBLISHER_REWARD_RATIO;
-  var totalCostWithFee = budget * (1 + PLATFORM_FEE_RATE);
-
-  return {
-    reward_view: rewardView,
-    reward_click: rewardClick,
-    max_viewer_reward: maxViewerReward,
-    per_viewer_channel_max: perViewerChannelMax,
-    max_viewers: maxViewers,
-    daily_reward_per_viewer: dailyRewardPerViewer,
-    max_publisher_budget: maxPublisherBudget,
-    publisher_reward_view: publisherRewardView,
-    total_cost: totalCostWithFee,
-    campaign_days: campaignDays
-  };
-}
 
 function computeTextColor(hex) {
   hex = (hex || '#ffffff').replace('#', '');
@@ -147,8 +110,7 @@ function renderCreator(root) {
     + '  <div class="ma-tabs" id="ma-creator-tabs" role="tablist" aria-label="Campaign setup">'
     + '    <button type="button" id="ma-tab-content" role="tab" aria-selected="true" aria-controls="ma-panel-content" data-target="ma-panel-content">Add Content</button>'
     + '    <button type="button" id="ma-tab-budget" role="tab" aria-selected="false" aria-controls="ma-panel-budget" data-target="ma-panel-budget">Budget</button>'
-    + '    <button type="button" id="ma-tab-viewer" role="tab" aria-selected="false" aria-controls="ma-panel-viewer" data-target="ma-panel-viewer">Viewer Rewards</button>'
-    + '    <button type="button" id="ma-tab-publisher" role="tab" aria-selected="false" aria-controls="ma-panel-publisher" data-target="ma-panel-publisher">Publisher Rewards</button>'
+    + '    <button type="button" id="ma-tab-limits" role="tab" aria-selected="false" aria-controls="ma-panel-limits" data-target="ma-panel-limits">Limits</button>'
     + '    <button type="button" id="ma-tab-review" role="tab" aria-selected="false" aria-controls="ma-panel-review" data-target="ma-panel-review">Review</button>'
     + '  </div>'
     + '  <span class="ma-tabs-arrow left" id="ma-creator-tabs-arrow-left">&#8249;</span>'
@@ -225,40 +187,62 @@ function renderCreator(root) {
     + '    <div class="ma-section-group budget-section">'
     + '      <strong class="ma-section-title">Campaign budget</strong>'
     + '      <label>Total budget (MINIMA) — min ' + LIMITS.MIN_BUDGET + ' MINIMA'
-    + '        <input name="budget" type="text" inputmode="decimal" min="' + LIMITS.MIN_BUDGET + '" value="1000" required>'
+    + '        <input name="budget" type="text" inputmode="decimal" min="' + LIMITS.MIN_BUDGET + '" value="0" required>'
     + '        <small id="ma-budget-hint">Checking wallet balance…</small>'
     + '      </label>'
     + '    </div>'
     + '    <div class="ma-section-group budget-section">'
     + '      <strong class="ma-section-title">Duration</strong>'
     + '      <label>Campaign duration (days) — max ' + LIMITS.MAX_CAMPAIGN_DAYS
-    + '        <input name="campaign_days" type="number" step="1" min="1" max="' + LIMITS.MAX_CAMPAIGN_DAYS + '" value="7" required>'
+    + '        <input name="campaign_days" type="number" step="1" min="1" max="' + LIMITS.MAX_CAMPAIGN_DAYS + '" value="0" required>'
     + '      </label>'
     + '    </div>'
     + '  </div>'
     + '  <div class="ma-autobalance-control">'
     + '    <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;margin:0;padding:0.75rem;border-radius:0.375rem;transition:background-color 0.15s ease;background-color:var(--pico-form-element-focus-border-color,rgba(99,102,241,0.08));">'
-    + '      <input type="checkbox" name="auto_balance" style="margin:0;">'
-    + '      <span style="font-weight:600;color:var(--pico-primary,#6366f1);">Auto-calculate rewards & cap</span>'
+    + '      <input type="checkbox" name="auto_balance" style="margin:0;" checked>'
+    + '      <span style="font-weight:600;color:var(--pico-primary,#6366f1);">Auto-calculate rewards & limits</span>'
     + '    </label>'
     + '    <small style="display:block;margin-top:0.35rem;margin-left:1.75rem;color:var(--pico-muted-color,#6c757d);font-size:0.8rem;line-height:1.4;">'
-    + '      Automatically fill reward rates and viewer cap based on your budget. Adjust the multiplier to balance reach vs. incentive. Shows estimated viewers, daily rewards, and total cost.'
+    + '      Automatically calculate reward rates based on your budget. You can still edit any field manually.'
     + '    </small>'
     + '  </div>'
-    + '  <div id="ma-autobalance-metrics" style="display:none;margin-top:1.5rem;padding:1rem;background-color:var(--pico-form-element-focus-border-color,rgba(99,102,241,0.08));border-radius:0.5rem;border-left:4px solid var(--pico-primary,#6366f1);">'
-    + '    <strong style="display:block;margin-bottom:1rem;">Estimated metrics</strong>'
-    + '    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1rem;margin-bottom:1.5rem;">'
+    + '  <div style="margin-top:1.5rem;">'
+    + '    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;">'
     + '      <div>'
-    + '        <small style="color:var(--pico-muted-color);display:block;margin-bottom:0.3rem;">Max viewers</small>'
-    + '        <strong id="ma-metric-viewers" style="font-size:1.1rem;">—</strong>'
-    + '        <small id="ma-metric-viewers-calc" style="display:block;margin-top:0.25rem;font-size:0.7rem;color:var(--pico-muted-color);font-family:monospace;">—</small>'
+    + '        <strong style="display:block;margin-bottom:0.75rem;font-size:0.8rem;color:var(--pico-muted-color);text-transform:uppercase;letter-spacing:0.05em;">Viewer</strong>'
+    + '        <label>Channel max (MINIMA)'
+    + '          <input name="max_viewer_reward" type="text" inputmode="decimal" value="0" required>'
+    + '          <small id="ma-cap-min-hint" style="display:block;margin-top:0.2rem;"></small>'
+    + '          <small id="ma-max-viewer-hint"></small>'
+    + '        </label>'
+    + '        <label>Reward / view (MINIMA)'
+    + '          <input name="reward_view" type="text" inputmode="decimal" value="0" required>'
+    + '          <small id="ma-reward-view-hint" style="display:block;margin-top:0.2rem;"></small>'
+    + '        </label>'
+    + '        <label>Reward / click (MINIMA)'
+    + '          <input name="reward_click" type="text" inputmode="decimal" value="0" required>'
+    + '          <small id="ma-reward-click-hint" style="display:block;margin-top:0.2rem;"></small>'
+    + '        </label>'
     + '      </div>'
-    + '      <div><small style="color:var(--pico-muted-color);display:block;margin-bottom:0.3rem;">Daily reward/viewer</small><strong id="ma-metric-daily" style="font-size:1.1rem;">—</strong></div>'
-    + '      <div><small style="color:var(--pico-muted-color);display:block;margin-bottom:0.3rem;">Total for publishers</small><strong id="ma-metric-pub-budget" style="font-size:1.1rem;">—</strong></div>'
+    + '      <div>'
+    + '        <strong style="display:block;margin-bottom:0.75rem;font-size:0.8rem;color:var(--pico-muted-color);text-transform:uppercase;letter-spacing:0.05em;">Publisher</strong>'
+    + '        <label>Channel max (MINIMA)'
+    + '          <input name="max_publisher_budget" type="text" inputmode="decimal" value="0">'
+    + '          <small id="ma-publisher-budget-hint" style="display:block;margin-top:0.2rem;"></small>'
+    + '        </label>'
+    + '        <label>Reward / view (MINIMA)'
+    + '          <input name="publisher_reward_view" type="text" inputmode="decimal" value="0">'
+    + '          <small id="ma-publisher-reward-hint" style="display:block;margin-top:0.2rem;"></small>'
+    + '        </label>'
+    + '      </div>'
     + '    </div>'
-    + '    <div style="padding:0.75rem;background:rgba(0,0,0,0.02);border-radius:0.375rem;margin-bottom:1rem;">'
-    + '      <small style="color:var(--pico-muted-color);display:block;margin-bottom:0.3rem;">Per-viewer channel max</small>'
-    + '      <strong id="ma-metric-channel-max" style="font-size:1rem;">—</strong>'
+    + '  </div>'
+    + '  <div id="ma-autobalance-metrics" style="display:block;margin-top:1.5rem;padding:1rem;background-color:var(--pico-form-element-focus-border-color,rgba(99,102,241,0.08));border-radius:0.5rem;border-left:4px solid var(--pico-primary,#6366f1);">'
+    + '    <strong style="display:block;margin-bottom:1rem;">Estimated metrics</strong>'
+    + '    <div style="margin-bottom:1.5rem;">'
+    + '      <small style="color:var(--pico-muted-color);display:block;margin-bottom:0.3rem;">Max viewers</small>'
+    + '      <strong id="ma-metric-viewers" style="font-size:1.1rem;">—</strong>'
     + '    </div>'
     + '    <div style="border-top:1px solid var(--pico-muted-border-color,#e0e0e0);padding-top:1rem;">'
     + '      <small style="color:var(--pico-muted-color);display:block;margin-bottom:0.5rem;"><strong>Publishers (estimate):</strong></small>'
@@ -278,65 +262,21 @@ function renderCreator(root) {
     + '    </div>'
     + '  </div>'
     + '</div>'
-    + '<div class="ma-tab-panel" id="ma-panel-viewer" role="tabpanel" aria-labelledby="ma-tab-viewer" hidden>'
-    + '  <div class="ma-grid-2col">'
-    + '    <div class="ma-section-group viewer-section">'
-    + '      <strong class="ma-section-title">Rewards</strong>'
-    + '      <label>Reward per view (MINIMA)'
-    + '        <input name="reward_view" type="text" inputmode="decimal" value="1" required>'
-    + '        <small id="ma-reward-view-hint" style="display:block;margin-top:0.2rem;"></small>'
-    + '      </label>'
-    + '      <label>Reward per click (MINIMA)'
-    + '        <input name="reward_click" type="text" inputmode="decimal" value="2" required>'
-    + '        <small id="ma-reward-click-hint" style="display:block;margin-top:0.2rem;"></small>'
-    + '      </label>'
-    + '      <label>Max reward per viewer (MINIMA)'
-    + '        <input name="max_viewer_reward" type="text" inputmode="decimal" value="10" required>'
-    + '        <small id="ma-cap-min-hint" style="display:block;margin-top:0.2rem;"></small>'
-    + '        <span id="ma-multiplier-row" style="display:none;align-items:center;gap:0.5rem;margin-top:0.35rem;">'
-    + '          <small style="color:var(--pico-muted-color)">(view + click) &times;</small>'
-    + '          <input name="multiplier" type="number" step="0.1" min="1" value="2"'
-    + '            style="width:5rem;margin:0;padding:0.2rem 0.4rem;">'
-    + '        </span>'
-    + '        <small id="ma-max-viewer-hint"></small>'
-    + '      </label>'
-    + '    </div>'
-    + '    <div class="ma-section-group viewer-section">'
-    + '      <strong class="ma-section-title">Limits</strong>'
-    + '      <label>Daily view limit (per viewer)'
-    + '        <input name="max_daily_views" type="number" step="1" min="1" value="100" required>'
-    + '        <small id="ma-daily-views-hint" style="display:block;margin-top:0.2rem;"></small>'
-    + '      </label>'
-    + '      <label>Daily click limit (per viewer)'
-    + '        <input name="max_daily_clicks" type="number" step="1" min="1" value="100" required>'
-    + '        <small id="ma-daily-clicks-hint" style="display:block;margin-top:0.2rem;"></small>'
-    + '      </label>'
-    + '      <label>Cooldown between rewards (seconds)'
-    + '        <input name="cooldown_s" type="number" step="1" min="1" value="300" required>'
-    + '        <small>Minimum time between two rewards for the same viewer (default 5 min)</small>'
-    + '      </label>'
-    + '    </div>'
-    + '  </div>'
-    + '</div>'
-    + '<div class="ma-tab-panel" id="ma-panel-publisher" role="tabpanel" aria-labelledby="ma-tab-publisher" hidden>'
-    + '  <div class="ma-grid-2col">'
-    + '    <div class="ma-section-group publisher-section">'
-    + '      <strong class="ma-section-title">Publisher rewards</strong>'
-    + '      <label>Publisher reward per view (MINIMA)'
-    + '        <input name="publisher_reward_view" type="text" inputmode="decimal" value="10">'
-    + '        <small id="ma-publisher-reward-hint" style="display:block;margin-top:0.2rem;"></small>'
-    + '      </label>'
-    + '      <label>Max publisher budget (MINIMA)'
-    + '        <input name="max_publisher_budget" type="text" inputmode="decimal" value="100">'
-    + '        <small id="ma-publisher-budget-hint" style="display:block;margin-top:0.2rem;"></small>'
-    + '      </label>'
-    + '    </div>'
-    + '    <div class="ma-section-group publisher-section" style="display:flex; flex-direction:column; justify-content:center; padding:1.25rem 1rem;">'
-    + '      <strong class="ma-section-title">Budget notes</strong>'
-    + '      <div style="padding:0.75rem 1rem;border-left:3px solid var(--pico-primary);background-color:rgba(0,0,0,0.015);border-radius:0 var(--pico-border-radius) var(--pico-border-radius) 0;font-size:0.78rem;line-height:1.35;margin-bottom:0;">'
-    + '        <strong>Note on Publisher Budget:</strong> The <em>Max publisher budget</em> reserves a portion of the campaign\'s total budget. When publishers embed your ad, their nodes open payment channels. These channels reserve their capacities dynamically (up to this limit) and pay rewards as views accumulate. You can monitor these dynamic metrics in the campaign dashboard.'
-    + '      </div>'
-    + '    </div>'
+    + '<div class="ma-tab-panel" id="ma-panel-limits" role="tabpanel" aria-labelledby="ma-tab-limits" hidden>'
+    + '  <div class="ma-section-group">'
+    + '    <strong class="ma-section-title">Viewer limits</strong>'
+    + '    <label>Daily view limit (per viewer)'
+    + '      <input name="max_daily_views" type="number" step="1" min="1" value="0" required>'
+    + '      <small id="ma-daily-views-hint" style="display:block;margin-top:0.2rem;"></small>'
+    + '    </label>'
+    + '    <label>Daily click limit (per viewer)'
+    + '      <input name="max_daily_clicks" type="number" step="1" min="1" value="0" required>'
+    + '      <small id="ma-daily-clicks-hint" style="display:block;margin-top:0.2rem;"></small>'
+    + '    </label>'
+    + '    <label>Cooldown between rewards (seconds)'
+    + '      <input name="cooldown_s" type="number" step="1" min="1" value="0" required>'
+    + '      <small>Minimum time between two rewards for the same viewer (default 5 min)</small>'
+    + '    </label>'
     + '  </div>'
     + '</div>'
     + '<div class="ma-tab-panel" id="ma-panel-review" role="tabpanel" aria-labelledby="ma-tab-review" hidden>'
@@ -358,14 +298,14 @@ function renderCreator(root) {
   form.addEventListener('submit', onCreatorSubmit);
   form.addEventListener('input', function(e) {
     onCreatorFormInput(e);
-    if (['budget', 'campaign_days', 'multiplier'].includes(e.target.name)) {
+    if (['budget', 'campaign_days', 'reward_view', 'reward_click', 'max_viewer_reward', 'publisher_reward_view', 'max_publisher_budget'].includes(e.target.name)) {
       recalculateAllMetrics(form);
     }
   });
   form.addEventListener('change', function(e) {
     onCreatorFormChange(e);
     if (e.target.name === 'auto_balance') {
-      recalculateAllMetrics(form);
+      applyAutoBalance(form);
     }
   });
   var budgetInput = form.querySelector('[name="budget"]');
@@ -399,7 +339,6 @@ function renderCreator(root) {
         });
         this.classList.add('ma-pub-est-active');
         this.style.fontWeight = '600';
-        console.log('Publisher button clicked:', this.dataset.publishers);
         recalculateAllMetrics(form);
       });
     });
@@ -524,8 +463,8 @@ function setupCreatorTabs(form) {
   }, true);
 
   // Add Previous / Next navigation to each panel
-  var panelIds = ['ma-panel-content', 'ma-panel-budget', 'ma-panel-viewer', 'ma-panel-publisher', 'ma-panel-review'];
-  var panelLabels = ['Add Content', 'Budget', 'Viewer Rewards', 'Publisher Rewards', 'Review'];
+  var panelIds = ['ma-panel-content', 'ma-panel-budget', 'ma-panel-limits', 'ma-panel-review'];
+  var panelLabels = ['Add Content', 'Budget', 'Limits', 'Review'];
   for (var j = 0; j < panelIds.length; j++) {
     (function (idx) {
       var panel = document.getElementById(panelIds[idx]);
@@ -962,10 +901,6 @@ function onCreatorFormInput(e) {
     var days = parseInt(e.target.value, 10);
     if (isFinite(days) && days > LIMITS.MAX_CAMPAIGN_DAYS) { e.target.value = LIMITS.MAX_CAMPAIGN_DAYS; }
   }
-  if (changedName === 'multiplier') {
-    var mult = parseFloat(e.target.value);
-    if (isFinite(mult) && mult < 1) { e.target.value = '1.0'; }
-  }
   if (changedName === 'budget') {
     var budgetInput = form.querySelector('[name="budget"]');
     var walletMax = parseFloat(budgetInput.dataset.walletMax);
@@ -979,8 +914,7 @@ function onCreatorFormInput(e) {
     if (bgInput) { bgInput.dataset.textColor = computeTextColor(bgInput.value); }
   }
   enforceViewerRewardLimits(form);
-  if (changedName === 'reward_view' || changedName === 'reward_click'
-    || changedName === 'auto_balance' || changedName === 'multiplier') {
+  if (changedName === 'budget') {
     applyAutoBalance(form);
   }
   enforceCapMinimum(form);
@@ -1010,7 +944,6 @@ var FIELD_DECIMALS = {
   publisher_reward_view: 6,
   max_publisher_budget: 6,
   campaign_days: 0,
-  multiplier: 1,
   max_daily_views: 0,
   max_daily_clicks: 0
 };
@@ -1204,100 +1137,47 @@ function enforceViewerRewardLimits(form) {
 
 function applyAutoBalance(form) {
   var autoBalance = form.querySelector('[name="auto_balance"]').checked;
-  var rewardViewInput = form.querySelector('[name="reward_view"]');
-  var rewardClickInput = form.querySelector('[name="reward_click"]');
-  var capInput = form.querySelector('[name="max_viewer_reward"]');
-  var multiplierInput = form.querySelector('[name="multiplier"]');
   var metricsPanel = document.getElementById('ma-autobalance-metrics');
   var budget = parseAmt(form.querySelector('[name="budget"]').value);
 
-  if (autoBalance && isFinite(budget) && budget > 0) {
-    var defaults = getAutoBalanceDefaults(budget);
-    rewardViewInput.value = fmtAmt(defaults.reward_view, 6);
-    rewardClickInput.value = fmtAmt(defaults.reward_click, 6);
-
-    var multiplier = parseFloat(multiplierInput.value) || AUTO_BALANCE_CONFIG.MULTIPLIER_DEFAULT;
-    if (multiplier < AUTO_BALANCE_CONFIG.MULTIPLIER_MIN) { multiplier = AUTO_BALANCE_CONFIG.MULTIPLIER_MIN; }
-    if (multiplier > AUTO_BALANCE_CONFIG.MULTIPLIER_MAX) { multiplier = AUTO_BALANCE_CONFIG.MULTIPLIER_MAX; }
-
-    var maxViewerReward = (defaults.reward_view + defaults.reward_click) * multiplier;
-    capInput.value = fmtAmt(maxViewerReward, 6);
-
-    var maxPubBudget = budget * AUTO_BALANCE_CONFIG.PUBLISHER_BUDGET_RATIO;
-    var pubRewardView = (defaults.reward_view + defaults.reward_click) * AUTO_BALANCE_CONFIG.PUBLISHER_REWARD_RATIO;
-    form.querySelector('[name="max_publisher_budget"]').value = fmtAmt(maxPubBudget, 6);
-    form.querySelector('[name="publisher_reward_view"]').value = fmtAmt(pubRewardView, 6);
-
-    rewardViewInput.style.opacity = '0.6';
-    rewardClickInput.style.opacity = '0.6';
-    capInput.style.opacity = '0.6';
-    rewardViewInput.readOnly = true;
-    rewardClickInput.readOnly = true;
-    capInput.readOnly = true;
-
-    multiplierInput.style.display = 'block';
+  if (autoBalance) {
     if (metricsPanel) { metricsPanel.style.display = 'block'; }
+    if (isFinite(budget) && budget > 0) {
+      var autoDays = Math.min(LIMITS.MAX_CAMPAIGN_DAYS, Math.max(1, Math.round(budget / 50)));
+      form.querySelector('[name="campaign_days"]').value = autoDays;
 
-    updateAutoBalanceMetricsDisplay(form);
+      var defaults = getAutoBalanceDefaults(budget);
+      var rewardSum = defaults.reward_view + defaults.reward_click;
+      form.querySelector('[name="reward_view"]').value = fmtAmt(defaults.reward_view, 6);
+      form.querySelector('[name="reward_click"]').value = fmtAmt(defaults.reward_click, 6);
+      form.querySelector('[name="max_viewer_reward"]').value = fmtAmt(rewardSum * AUTO_BALANCE_CONFIG.CAP_FACTOR_DEFAULT, 6);
+      form.querySelector('[name="max_publisher_budget"]').value = fmtAmt(budget * AUTO_BALANCE_CONFIG.PUBLISHER_BUDGET_RATIO, 6);
+      form.querySelector('[name="publisher_reward_view"]').value = fmtAmt(rewardSum * AUTO_BALANCE_CONFIG.PUBLISHER_REWARD_RATIO, 6);
+
+      var capForLimits = rewardSum * AUTO_BALANCE_CONFIG.CAP_FACTOR_DEFAULT;
+      var autoMaxViews = defaults.reward_view > 0 ? Math.max(1, Math.floor(capForLimits / defaults.reward_view)) : 100;
+      var autoMaxClicks = defaults.reward_click > 0 ? Math.max(1, Math.floor(capForLimits / defaults.reward_click)) : 100;
+      var autoCooldown = 300;
+      form.querySelector('[name="max_daily_views"]').value = autoMaxViews;
+      form.querySelector('[name="max_daily_clicks"]').value = autoMaxClicks;
+      form.querySelector('[name="cooldown_s"]').value = autoCooldown;
+    }
+    recalculateAllMetrics(form);
   } else {
-    rewardViewInput.style.opacity = '1';
-    rewardClickInput.style.opacity = '1';
-    capInput.style.opacity = '1';
-    rewardViewInput.readOnly = false;
-    rewardClickInput.readOnly = false;
-    capInput.readOnly = false;
-
-    multiplierInput.style.display = 'none';
-    if (metricsPanel) { metricsPanel.style.display = 'none'; }
+    recalculateAllMetrics(form);
   }
 }
 
-function updateAutoBalanceMetricsDisplay(form) {
-  var metrics = calculateAutoBalanceMetrics(form);
-  if (!metrics) { return; }
-
-  var viewersEl = document.getElementById('ma-metric-viewers');
-  var dailyEl = document.getElementById('ma-metric-daily');
-  var maxReachEl = document.getElementById('ma-metric-maxreach');
-  var costEl = document.getElementById('ma-metric-cost');
-
-  var minCap = metrics.reward_view + metrics.reward_click;
-  var maxReachAt1x = Math.floor(metrics.max_publisher_budget / minCap);
-
-  if (viewersEl) { viewersEl.textContent = metrics.max_viewers.toLocaleString() + ' viewers'; }
-  if (dailyEl) { dailyEl.textContent = fmtAmt(metrics.daily_reward_per_viewer, 2) + ' MINIMA/day'; }
-  if (maxReachEl && !maxReachEl.value) { maxReachEl.value = maxReachAt1x; }
-  if (costEl) { costEl.textContent = fmtAmt(metrics.total_cost, 2) + ' MINIMA'; }
-
-  var pubEstDisplay = document.getElementById('ma-pub-est-display');
-  if (pubEstDisplay) { pubEstDisplay.innerHTML = ''; }
-}
 
 function recalculateAllMetrics(form) {
-  var autoBalanceCheckbox = form.querySelector('[name="auto_balance"]');
   var metricsPanel = document.getElementById('ma-autobalance-metrics');
-
-  if (!autoBalanceCheckbox.checked) {
-    if (metricsPanel) { metricsPanel.style.display = 'none'; }
-    return;
-  }
-
   if (metricsPanel) { metricsPanel.style.display = 'block'; }
 
   var budget = parseAmt(form.querySelector('[name="budget"]').value) || 0;
-  var campaignDays = parseInt(form.querySelector('[name="campaign_days"]').value, 10) || 7;
-  var multiplier = parseFloat(form.querySelector('[name="multiplier"]').value) || AUTO_BALANCE_CONFIG.MULTIPLIER_DEFAULT;
-
-  if (multiplier < AUTO_BALANCE_CONFIG.MULTIPLIER_MIN) { multiplier = AUTO_BALANCE_CONFIG.MULTIPLIER_MIN; }
-  if (multiplier > AUTO_BALANCE_CONFIG.MULTIPLIER_MAX) { multiplier = AUTO_BALANCE_CONFIG.MULTIPLIER_MAX; }
-
-  var defaults = getAutoBalanceDefaults(budget);
-  var rewardView = defaults.reward_view;
-  var rewardClick = defaults.reward_click;
-
-  var rewardSum = rewardView + rewardClick;
-  var maxViewerReward = rewardSum * multiplier;
-  var publisherRewardView = rewardSum * AUTO_BALANCE_CONFIG.PUBLISHER_REWARD_RATIO;
+  var rewardView = parseAmt(form.querySelector('[name="reward_view"]').value) || 0;
+  var rewardClick = parseAmt(form.querySelector('[name="reward_click"]').value) || 0;
+  var maxViewerReward = parseAmt(form.querySelector('[name="max_viewer_reward"]').value) || 0;
+  var publisherRewardView = parseAmt(form.querySelector('[name="publisher_reward_view"]').value) || 0;
   var totalCostWithFee = budget * (1 + PLATFORM_FEE_RATE);
 
   var BUDGET_PER_PUBLISHER = 10;
@@ -1308,46 +1188,20 @@ function recalculateAllMetrics(form) {
   if (isFinite(numPublishers) && numPublishers > 0) {
     pubBudgetPool = numPublishers * BUDGET_PER_PUBLISHER;
   } else {
-    pubBudgetPool = budget * AUTO_BALANCE_CONFIG.PUBLISHER_BUDGET_RATIO;
+    pubBudgetPool = parseAmt(form.querySelector('[name="max_publisher_budget"]').value) || 0;
   }
 
-  var viewerChannels = maxViewerReward > 0 ? Math.floor(budget / maxViewerReward) : 0;
-  var publisherChannels = publisherRewardView > 0 ? Math.floor(pubBudgetPool / publisherRewardView) : 0;
-  var maxViewers = viewerChannels - publisherChannels;
-  var maxDailyViews = parseInt(form.querySelector('[name="max_daily_views"]').value, 10) || 100;
-  var maxDailyClicks = parseInt(form.querySelector('[name="max_daily_clicks"]').value, 10) || 100;
-  var dailyRewardPerViewer = (maxDailyViews * rewardView) + (maxDailyClicks * rewardClick);
-
-  form.querySelector('[name="reward_view"]').value = fmtAmt(rewardView, 6);
-  form.querySelector('[name="reward_click"]').value = fmtAmt(rewardClick, 6);
-  form.querySelector('[name="max_viewer_reward"]').value = fmtAmt(maxViewerReward, 6);
-  form.querySelector('[name="max_publisher_budget"]').value = fmtAmt(pubBudgetPool, 6);
-  form.querySelector('[name="publisher_reward_view"]').value = fmtAmt(publisherRewardView, 6);
+  var budgetForViewers = budget - pubBudgetPool;
+  var maxViewers = maxViewerReward > 0 ? Math.floor(budgetForViewers / maxViewerReward) : 0;
 
   var viewersEl = document.getElementById('ma-metric-viewers');
-  var viewersCalcEl = document.getElementById('ma-metric-viewers-calc');
   if (viewersEl) {
-    viewersEl.textContent = Math.abs(maxViewers).toLocaleString() + ' (est.)';
-    if (maxViewers < 0) {
-      viewersEl.style.color = 'var(--pico-color-red, #d32f2f)';
-    } else {
-      viewersEl.style.color = '';
-    }
+    viewersEl.textContent = maxViewers.toLocaleString() + ' (est.)';
+    viewersEl.style.color = maxViewers < 0 ? 'var(--pico-color-red, #d32f2f)' : '';
   }
-  if (viewersCalcEl) {
-    var calcText = '⌊' + budget.toLocaleString() + ' / ' + fmtAmt(maxViewerReward, 2) + '⌋ − ⌊' + fmtAmt(pubBudgetPool, 2) + ' / ' + fmtAmt(publisherRewardView, 2) + '⌋'
-      + '<br>' + viewerChannels.toLocaleString() + ' viewers − ' + publisherChannels.toLocaleString() + ' publishers = ' + maxViewers.toLocaleString();
-    viewersCalcEl.innerHTML = calcText;
-  }
-
-  var dailyEl = document.getElementById('ma-metric-daily');
-  if (dailyEl) { dailyEl.textContent = fmtAmt(dailyRewardPerViewer, 2) + ' MINIMA'; }
-
-  var pubBudgetEl = document.getElementById('ma-metric-pub-budget');
-  if (pubBudgetEl) { pubBudgetEl.textContent = fmtAmt(pubBudgetPool, 2) + ' MINIMA'; }
 
   var channelMaxEl = document.getElementById('ma-metric-channel-max');
-  if (channelMaxEl) { channelMaxEl.textContent = fmtAmt(perViewerChannelMax, 2) + ' MINIMA'; }
+  if (channelMaxEl) { channelMaxEl.textContent = fmtAmt(maxViewerReward, 2) + ' MINIMA'; }
 
   var costEl = document.getElementById('ma-metric-cost');
   if (costEl) { costEl.textContent = fmtAmt(totalCostWithFee, 2) + ' MINIMA'; }
@@ -1356,7 +1210,6 @@ function recalculateAllMetrics(form) {
     var budgetPerPublisher = pubBudgetPool / numPublishers;
     var viewsPerPublisher = publisherRewardView > 0 ? Math.floor(budgetPerPublisher / publisherRewardView) : 0;
     var totalPublisherViews = viewsPerPublisher * numPublishers;
-    var totalReach = maxViewers + totalPublisherViews;
 
     var pubEstDisplay = document.getElementById('ma-pub-est-display');
     if (pubEstDisplay) {
@@ -1364,11 +1217,8 @@ function recalculateAllMetrics(form) {
         '<strong style="display:block;margin-bottom:0.3rem;">' + numPublishers + ' publishers:</strong>'
         + '<span style="display:block;font-size:0.85rem;margin-bottom:0.2rem;">'
         + fmtAmt(budgetPerPublisher, 2) + ' MINIMA/pub &middot; ' + viewsPerPublisher.toLocaleString() + ' views/pub</span>'
-        + '<span style="display:block;font-size:0.85rem;margin-bottom:0.2rem;color:var(--pico-muted-color);">'
-        + totalPublisherViews.toLocaleString() + ' publisher views</span>'
-        + '<span style="display:block;font-weight:600;color:var(--pico-primary,#6366f1);margin-top:0.3rem;">'
-        + maxViewers.toLocaleString() + ' viewers + ' + totalPublisherViews.toLocaleString() + ' pub = '
-        + totalReach.toLocaleString() + ' total reach</span>';
+        + '<span style="display:block;font-size:0.85rem;color:var(--pico-muted-color);">'
+        + totalPublisherViews.toLocaleString() + ' total publisher-funded views</span>';
     }
   }
 }

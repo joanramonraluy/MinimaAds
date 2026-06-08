@@ -1479,26 +1479,7 @@ function onCreatorSubmit(e) {
 // V1 — legacy escrow script. Kept only to spend coins from campaigns created before T-PUB4.
 var ESCROW_SCRIPT_FE = 'LET creatorkey=PREVSTATE(1) ASSERT SIGNEDBY(creatorkey) LET payout=STATE(10) LET change=@AMOUNT-payout IF change GT 0 THEN ASSERT VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE) ENDIF RETURN TRUE';
 
-// V2 — current escrow script (T-PUB4). Embeds PLATFORM_KEY at PREVSTATE(5)
-// and MAX_PUBLISHER_BUDGET at PREVSTATE(6); enables conditional fee branch
-// via STATE(11). All NEW campaigns use this script. See MinimaAds.md §B.2.
-var ESCROW_SCRIPT_V2 =
-  "LET creatorkey=PREVSTATE(1) " +
-  "ASSERT SIGNEDBY(creatorkey) " +
-  "LET payout=STATE(10) " +
-  "LET feeflag=STATE(11) " +
-  "LET change=@AMOUNT-payout " +
-  "IF feeflag EQ 1 THEN " +
-  "LET platformkey=PREVSTATE(5) " +
-  "LET feeamount=STATE(12) " +
-  "ASSERT VERIFYOUT(STATE(13) platformkey feeamount @TOKENID FALSE) " +
-  "ENDIF " +
-  "IF change GT 0 THEN " +
-  "ASSERT VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE) " +
-  "ENDIF " +
-  "RETURN TRUE";
-
-// V3 — current escrow script (T-SC2). Adds on-chain campaign status at PREVSTATE(7).
+// V3 — escrow script (T-SC2). Adds on-chain campaign status at PREVSTATE(7).
 // Byte-identical to the SW constant in service.js. All NEW campaigns use this script.
 // See MinimaAds.md §B.2.1 and §4.7.
 var ESCROW_SCRIPT_V3 =
@@ -1595,25 +1576,8 @@ function resolveEscrowAddress(cb) {
     console.log('[CREATOR] ESCROW_ADDRESS_V3 not in keypair — registering via newscript');
     MDS.cmd('newscript script:"' + ESCROW_SCRIPT_V3 + '" trackall:false', function (resV3) {
       if (!resV3.status) {
-        console.warn('[CREATOR] newscript V3 failed — falling back to V2:', resV3.error);
-        MDS.keypair.get('ESCROW_ADDRESS_V2', function (addrResV2) {
-          var cachedV2 = addrResV2 && addrResV2.status ? addrResV2.value : '';
-          if (cachedV2) {
-            console.log('[CREATOR] ESCROW_ADDRESS_V2 from keypair (V3 fallback):', cachedV2);
-            cb(cachedV2);
-            return;
-          }
-          MDS.cmd('newscript script:"' + ESCROW_SCRIPT_V2 + '" trackall:false', function (resV2) {
-            if (!resV2.status) {
-              console.error('[CREATOR] newscript V2 also failed:', resV2.error);
-              cb('');
-              return;
-            }
-            var addrV2 = resV2.response.address;
-            MDS.keypair.set('ESCROW_ADDRESS_V2', addrV2, function () { });
-            cb(addrV2);
-          });
-        });
+        console.error('[CREATOR] newscript V3 failed:', resV3.error);
+        cb('');
         return;
       }
       var addrV3 = resV3.response.address;

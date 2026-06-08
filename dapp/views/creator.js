@@ -16,6 +16,22 @@ var BLOCKS_PER_DAY = 1728;
 // Platform fee rate — MinimaAds.md §6.1 (F = 0.06).
 var PLATFORM_FEE_RATE = 0.06;
 
+// Auto-balance configuration
+var AUTO_BALANCE_CONFIG = {
+  REWARD_RATIO_CLICK_TO_VIEW: 2.0,
+  PUBLISHER_REWARD_RATIO: 0.5,
+  PUBLISHER_BUDGET_RATIO: 0.10,
+  MULTIPLIER_MIN: 1.0,
+  MULTIPLIER_MAX: 10.0,
+  MULTIPLIER_DEFAULT: 2.0,
+  BUDGET_TIERS: [
+    { max: 500, reward_view: 0.10, reward_click: 0.20 },
+    { max: 2000, reward_view: 0.05, reward_click: 0.10 },
+    { max: 10000, reward_view: 0.02, reward_click: 0.04 },
+    { max: Infinity, reward_view: 0.01, reward_click: 0.02 }
+  ]
+};
+
 function formatMinima(val) {
   var s = val.toFixed(6).replace(/\.?0+$/, '');
   var parts = s.split('.');
@@ -23,6 +39,46 @@ function formatMinima(val) {
   var decSep  = window.NUMFMT === 'EU' ? ',' : '.';
   parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, thouSep);
   return parts.length > 1 ? parts[0] + decSep + parts[1] : parts[0];
+}
+
+function getAutoBalanceDefaults(budgetTotal) {
+  for (var i = 0; i < AUTO_BALANCE_CONFIG.BUDGET_TIERS.length; i++) {
+    var tier = AUTO_BALANCE_CONFIG.BUDGET_TIERS[i];
+    if (budgetTotal < tier.max) {
+      return { reward_view: tier.reward_view, reward_click: tier.reward_click };
+    }
+  }
+  return { reward_view: 0.01, reward_click: 0.02 };
+}
+
+function calculateAutoBalanceMetrics(form) {
+  var autoBalance = form.querySelector('[name="auto_balance"]').checked;
+  if (!autoBalance) { return null; }
+
+  var budget = parseAmt(form.querySelector('[name="budget"]').value);
+  var multiplier = parseFloat(form.querySelector('[name="multiplier"]').value) || AUTO_BALANCE_CONFIG.MULTIPLIER_DEFAULT;
+  var defaults = getAutoBalanceDefaults(budget);
+
+  var rewardView = defaults.reward_view;
+  var rewardClick = defaults.reward_click;
+  var maxPublisherBudget = budget * AUTO_BALANCE_CONFIG.PUBLISHER_BUDGET_RATIO;
+  var budgetForViewers = budget - maxPublisherBudget;
+  var maxViewerReward = (rewardView + rewardClick) * multiplier;
+  var maxViewers = Math.floor(budgetForViewers / maxViewerReward);
+  var dailyRewardPerViewer = (100 * rewardView) + (100 * rewardClick);
+  var publisherRewardView = (rewardView + rewardClick) * AUTO_BALANCE_CONFIG.PUBLISHER_REWARD_RATIO;
+  var totalCostWithFee = budget * (1 + PLATFORM_FEE_RATE);
+
+  return {
+    reward_view: rewardView,
+    reward_click: rewardClick,
+    max_viewer_reward: maxViewerReward,
+    max_viewers: maxViewers,
+    daily_reward_per_viewer: dailyRewardPerViewer,
+    max_publisher_budget: maxPublisherBudget,
+    publisher_reward_view: publisherRewardView,
+    total_cost: totalCostWithFee
+  };
 }
 
 function computeTextColor(hex) {
@@ -174,17 +230,36 @@ function renderCreator(root) {
     + '      </label>'
     + '    </div>'
     + '  </div>'
-    + '</div>'
-    + '<div class="ma-tab-panel" id="ma-panel-viewer" role="tabpanel" aria-labelledby="ma-tab-viewer" hidden>'
     + '  <div class="ma-autobalance-control">'
-    + '    <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;margin:0;padding:0.5rem;border-radius:0.375rem;transition:background-color 0.15s ease;">'
+    + '    <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;margin:0;padding:0.75rem;border-radius:0.375rem;transition:background-color 0.15s ease;background-color:var(--pico-form-element-focus-border-color,rgba(99,102,241,0.08));">'
     + '      <input type="checkbox" name="auto_balance" style="margin:0;">'
-    + '      <span style="font-weight:500;color:var(--pico-color);">Auto-balance cap</span>'
+    + '      <span style="font-weight:600;color:var(--pico-primary,#6366f1);">Auto-calculate rewards & cap</span>'
     + '    </label>'
     + '    <small style="display:block;margin-top:0.35rem;margin-left:1.75rem;color:var(--pico-muted-color,#6c757d);font-size:0.8rem;line-height:1.4;">'
-    + '      Automatically calculate max reward per viewer based on your reward rates and a multiplier. When enabled, you can adjust the multiplier to increase or decrease viewer incentive.'
+    + '      Automatically fill reward rates and viewer cap based on your budget. Adjust the multiplier to balance reach vs. incentive. Shows estimated viewers, daily rewards, and total cost.'
     + '    </small>'
     + '  </div>'
+    + '  <div id="ma-autobalance-metrics" style="display:none;margin-top:1.5rem;padding:1rem;background-color:var(--pico-form-element-focus-border-color,rgba(99,102,241,0.08));border-radius:0.5rem;border-left:4px solid var(--pico-primary,#6366f1);">'
+    + '    <strong style="display:block;margin-bottom:0.5rem;">Estimated metrics</strong>'
+    + '    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;font-size:0.9rem;">'
+    + '      <div><small style="color:var(--pico-muted-color);">Max viewers</small><br><strong id="ma-metric-viewers">—</strong></div>'
+    + '      <div><small style="color:var(--pico-muted-color);">Daily reward/viewer</small><br><strong id="ma-metric-daily">—</strong></div>'
+    + '      <div><small style="color:var(--pico-muted-color);">Max reach (×1)</small><br><strong id="ma-metric-maxreach">—</strong></div>'
+    + '      <div><small style="color:var(--pico-muted-color);">Total cost (+fee)</small><br><strong id="ma-metric-cost">—</strong></div>'
+    + '    </div>'
+    + '    <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--pico-muted-border-color,#e0e0e0);">'
+    + '      <small style="color:var(--pico-muted-color);display:block;margin-bottom:0.3rem;">Publishers (estimate):</small>'
+    + '      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">'
+    + '        <button type="button" class="ma-pub-est" data-publishers="5" style="font-size:0.85rem;padding:0.3rem 0.6rem;margin:0;">5</button>'
+    + '        <button type="button" class="ma-pub-est" data-publishers="10" style="font-size:0.85rem;padding:0.3rem 0.6rem;margin:0;">10</button>'
+    + '        <button type="button" class="ma-pub-est" data-publishers="25" style="font-size:0.85rem;padding:0.3rem 0.6rem;margin:0;">25</button>'
+    + '        <button type="button" class="ma-pub-est" data-publishers="50" style="font-size:0.85rem;padding:0.3rem 0.6rem;margin:0;">50</button>'
+    + '      </div>'
+    + '      <small id="ma-pub-est-display" style="display:block;margin-top:0.5rem;color:var(--pico-muted-color);"></small>'
+    + '    </div>'
+    + '  </div>'
+    + '</div>'
+    + '<div class="ma-tab-panel" id="ma-panel-viewer" role="tabpanel" aria-labelledby="ma-tab-viewer" hidden>'
     + '  <div class="ma-grid-2col">'
     + '    <div class="ma-section-group viewer-section">'
     + '      <strong class="ma-section-title">Rewards</strong>'
@@ -199,7 +274,7 @@ function renderCreator(root) {
     + '      <label>Max reward per viewer (MINIMA)'
     + '        <input name="max_viewer_reward" type="text" inputmode="decimal" value="10" required>'
     + '        <small id="ma-cap-min-hint" style="display:block;margin-top:0.2rem;"></small>'
-    + '        <span id="ma-multiplier-row" style="display:flex;align-items:center;gap:0.5rem;margin-top:0.35rem;">'
+    + '        <span id="ma-multiplier-row" style="display:none;align-items:center;gap:0.5rem;margin-top:0.35rem;">'
     + '          <small style="color:var(--pico-muted-color)">(view + click) &times;</small>'
     + '          <input name="multiplier" type="number" step="0.1" min="1" value="2"'
     + '            style="width:5rem;margin:0;padding:0.2rem 0.4rem;">'
@@ -282,6 +357,42 @@ function renderCreator(root) {
   var imageInput = form.querySelector('[name="image_file"]');
   if (imageInput) {
     imageInput.addEventListener('change', function () { onImageFileSelect(this); });
+  }
+
+  var pubEstButtons = form.querySelectorAll('.ma-pub-est');
+  if (pubEstButtons.length > 0) {
+    pubEstButtons.forEach(function(btn) {
+      btn.addEventListener('click', function(e) {
+        e.preventDefault();
+        var numPublishers = parseInt(this.dataset.publishers, 10);
+        var budget = parseAmt(form.querySelector('[name="budget"]').value);
+        var maxPubBudget = parseAmt(form.querySelector('[name="max_publisher_budget"]').value);
+        var pubRewardView = parseAmt(form.querySelector('[name="publisher_reward_view"]').value);
+
+        if (!isFinite(budget) || budget <= 0 || !isFinite(pubRewardView) || pubRewardView <= 0) {
+          var displayEl = document.getElementById('ma-pub-est-display');
+          if (displayEl) { displayEl.textContent = 'Enter budget and enable auto-balance first.'; }
+          return;
+        }
+
+        var budgetPerPublisher = maxPubBudget / numPublishers;
+        var viewsPerPublisher = Math.floor(budgetPerPublisher / pubRewardView);
+        var totalPublisherViews = viewsPerPublisher * numPublishers;
+        var budgetUsed = totalPublisherViews * pubRewardView;
+        var budgetRemaining = maxPubBudget - budgetUsed;
+
+        var displayEl = document.getElementById('ma-pub-est-display');
+        if (displayEl) {
+          displayEl.innerHTML = '<strong>' + numPublishers + ' publishers:</strong> '
+            + fmtAmt(budgetPerPublisher, 2) + ' MINIMA/publisher &middot; '
+            + viewsPerPublisher.toLocaleString() + ' views/publisher &middot; '
+            + totalPublisherViews.toLocaleString() + ' total publisher views';
+        }
+
+        pubEstButtons.forEach(function(b) { b.style.fontWeight = '400'; });
+        this.style.fontWeight = '600';
+      });
+    });
   }
 
   form.addEventListener('reset', function () {
@@ -1080,58 +1191,75 @@ function enforceViewerRewardLimits(form) {
   }
 }
 
-// When auto-balance is ON: cap = (view + click) × multiplier.
-// Multiplier defaults to 2 (balanced). Min 1 = maximum reach. Higher = more incentive per viewer.
 function applyAutoBalance(form) {
   var autoBalance = form.querySelector('[name="auto_balance"]').checked;
+  var rewardViewInput = form.querySelector('[name="reward_view"]');
+  var rewardClickInput = form.querySelector('[name="reward_click"]');
   var capInput = form.querySelector('[name="max_viewer_reward"]');
   var multiplierInput = form.querySelector('[name="multiplier"]');
-  var hintEl = document.getElementById('ma-max-viewer-hint');
-
-  var rewardView = parseAmt(form.querySelector('[name="reward_view"]').value);
-  var rewardClick = parseAmt(form.querySelector('[name="reward_click"]').value);
+  var metricsPanel = document.getElementById('ma-autobalance-metrics');
   var budget = parseAmt(form.querySelector('[name="budget"]').value);
-  var multiplierRow = document.getElementById('ma-multiplier-row');
-  var multiplier = multiplierInput ? (parseFloat(multiplierInput.value) || 1) : 1;
-  if (multiplier < 1) { multiplier = 1; }
 
-  if (multiplierRow) { multiplierRow.style.display = autoBalance ? 'flex' : 'none'; }
-  capInput.readOnly = autoBalance;
+  if (autoBalance && isFinite(budget) && budget > 0) {
+    var defaults = getAutoBalanceDefaults(budget);
+    rewardViewInput.value = fmtAmt(defaults.reward_view, 6);
+    rewardClickInput.value = fmtAmt(defaults.reward_click, 6);
 
-  if (hintEl) {
-    if (!isFinite(rewardView) || !isFinite(rewardClick) || !isFinite(budget)) {
-      hintEl.innerHTML = '';
-    } else {
-      var minCap = rewardView + rewardClick;
-      var maxReach = minCap > 0 ? Math.floor(budget / minCap) : 0;
-      var curCap = minCap * multiplier;
-      var curReach = curCap > 0 ? Math.floor(budget / curCap) : 0;
-      if (autoBalance) {
-        var minLine = '<span style="display:block">'
-          + '<strong>&times;1</strong> &nbsp;Max reach: <strong>' + maxReach.toLocaleString() + '</strong> viewers'
-          + ' &middot; ' + formatMinima(minCap) + '&thinsp;MINIMA/viewer'
-          + '</span>';
-        var curLine = multiplier !== 1
-          ? '<span style="display:block">'
-          + '<strong>&times;' + multiplier.toFixed(1) + '</strong> Current: <strong>' + curReach.toLocaleString() + '</strong> viewers'
-          + ' &middot; ' + formatMinima(curCap) + '&thinsp;MINIMA/viewer'
-          + '</span>'
-          : '';
-        var note = '<span style="display:block;margin-top:0.2rem;opacity:0.75">'
-          + 'Higher &times; &rarr; fewer viewers, stronger incentive per viewer'
-          + '</span>';
-        hintEl.innerHTML = minLine + curLine + note;
-      } else {
-        hintEl.innerHTML = '';
-      }
-    }
+    var multiplier = parseFloat(multiplierInput.value) || AUTO_BALANCE_CONFIG.MULTIPLIER_DEFAULT;
+    if (multiplier < AUTO_BALANCE_CONFIG.MULTIPLIER_MIN) { multiplier = AUTO_BALANCE_CONFIG.MULTIPLIER_MIN; }
+    if (multiplier > AUTO_BALANCE_CONFIG.MULTIPLIER_MAX) { multiplier = AUTO_BALANCE_CONFIG.MULTIPLIER_MAX; }
+
+    var maxViewerReward = (defaults.reward_view + defaults.reward_click) * multiplier;
+    capInput.value = fmtAmt(maxViewerReward, 6);
+
+    var maxPubBudget = budget * AUTO_BALANCE_CONFIG.PUBLISHER_BUDGET_RATIO;
+    var pubRewardView = (defaults.reward_view + defaults.reward_click) * AUTO_BALANCE_CONFIG.PUBLISHER_REWARD_RATIO;
+    form.querySelector('[name="max_publisher_budget"]').value = fmtAmt(maxPubBudget, 6);
+    form.querySelector('[name="publisher_reward_view"]').value = fmtAmt(pubRewardView, 6);
+
+    rewardViewInput.style.opacity = '0.6';
+    rewardClickInput.style.opacity = '0.6';
+    capInput.style.opacity = '0.6';
+    rewardViewInput.readOnly = true;
+    rewardClickInput.readOnly = true;
+    capInput.readOnly = true;
+
+    multiplierInput.style.display = 'block';
+    if (metricsPanel) { metricsPanel.style.display = 'block'; }
+
+    updateAutoBalanceMetricsDisplay(form);
+  } else {
+    rewardViewInput.style.opacity = '1';
+    rewardClickInput.style.opacity = '1';
+    capInput.style.opacity = '1';
+    rewardViewInput.readOnly = false;
+    rewardClickInput.readOnly = false;
+    capInput.readOnly = false;
+
+    multiplierInput.style.display = 'none';
+    if (metricsPanel) { metricsPanel.style.display = 'none'; }
   }
+}
 
-  if (!autoBalance) return;
-  if (!isFinite(rewardView) || !isFinite(rewardClick)) return;
+function updateAutoBalanceMetricsDisplay(form) {
+  var metrics = calculateAutoBalanceMetrics(form);
+  if (!metrics) { return; }
 
-  var suggested = (rewardView + rewardClick) * multiplier;
-  if (suggested > 0) { capInput.value = fmtAmt(suggested, 6); }
+  var viewersEl = document.getElementById('ma-metric-viewers');
+  var dailyEl = document.getElementById('ma-metric-daily');
+  var maxReachEl = document.getElementById('ma-metric-maxreach');
+  var costEl = document.getElementById('ma-metric-cost');
+
+  if (viewersEl) { viewersEl.textContent = metrics.max_viewers.toLocaleString() + ' viewers'; }
+  if (dailyEl) { dailyEl.textContent = fmtAmt(metrics.daily_reward_per_viewer, 2) + ' MINIMA'; }
+  if (maxReachEl) {
+    var budget = parseAmt(form.querySelector('[name="budget"]').value);
+    var maxPubBudget = budget * AUTO_BALANCE_CONFIG.PUBLISHER_BUDGET_RATIO;
+    var minCap = metrics.reward_view + metrics.reward_click;
+    var maxReach = Math.floor((budget - maxPubBudget) / minCap);
+    maxReachEl.textContent = maxReach.toLocaleString() + ' viewers';
+  }
+  if (costEl) { costEl.textContent = fmtAmt(metrics.total_cost, 2) + ' MINIMA'; }
 }
 
 function updateCampaignSummary(form) {

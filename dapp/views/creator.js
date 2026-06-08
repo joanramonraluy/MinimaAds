@@ -1291,9 +1291,9 @@ function recalculateAllMetrics(form) {
   var rewardView = defaults.reward_view;
   var rewardClick = defaults.reward_click;
 
-  var maxViewerReward = (rewardView + rewardClick) * multiplier;
-  var perViewerChannelMax = (rewardView + rewardClick) * campaignDays;
-  var publisherRewardView = (rewardView + rewardClick) * AUTO_BALANCE_CONFIG.PUBLISHER_REWARD_RATIO;
+  var rewardSum = rewardView + rewardClick;
+  var maxViewerReward = rewardSum * multiplier;
+  var publisherRewardView = rewardSum * AUTO_BALANCE_CONFIG.PUBLISHER_REWARD_RATIO;
   var totalCostWithFee = budget * (1 + PLATFORM_FEE_RATE);
 
   var BUDGET_PER_PUBLISHER = 10;
@@ -1301,17 +1301,15 @@ function recalculateAllMetrics(form) {
   var numPublishers = selectedPubBtn ? parseInt(selectedPubBtn.dataset.publishers, 10) : 0;
 
   var pubBudgetPool;
-  var budgetForViewers;
-
   if (isFinite(numPublishers) && numPublishers > 0) {
     pubBudgetPool = numPublishers * BUDGET_PER_PUBLISHER;
-    budgetForViewers = Math.max(0, budget - pubBudgetPool);
   } else {
     pubBudgetPool = budget * AUTO_BALANCE_CONFIG.PUBLISHER_BUDGET_RATIO;
-    budgetForViewers = budget - pubBudgetPool;
   }
 
-  var maxViewers = budgetForViewers > 0 ? Math.floor(budgetForViewers / perViewerChannelMax) : 0;
+  var viewerChannels = maxViewerReward > 0 ? Math.floor(budget / maxViewerReward) : 0;
+  var publisherChannels = publisherRewardView > 0 ? Math.floor(pubBudgetPool / publisherRewardView) : 0;
+  var maxViewers = viewerChannels - publisherChannels;
   var maxDailyViews = parseInt(form.querySelector('[name="max_daily_views"]').value, 10) || 100;
   var maxDailyClicks = parseInt(form.querySelector('[name="max_daily_clicks"]').value, 10) || 100;
   var dailyRewardPerViewer = (maxDailyViews * rewardView) + (maxDailyClicks * rewardClick);
@@ -1323,7 +1321,14 @@ function recalculateAllMetrics(form) {
   form.querySelector('[name="publisher_reward_view"]').value = fmtAmt(publisherRewardView, 6);
 
   var viewersEl = document.getElementById('ma-metric-viewers');
-  if (viewersEl) { viewersEl.textContent = maxViewers.toLocaleString() + ' (est.)'; }
+  if (viewersEl) {
+    viewersEl.textContent = Math.abs(maxViewers).toLocaleString() + ' (est.)';
+    if (maxViewers < 0) {
+      viewersEl.style.color = 'var(--pico-color-red, #d32f2f)';
+    } else {
+      viewersEl.style.color = '';
+    }
+  }
 
   var dailyEl = document.getElementById('ma-metric-daily');
   if (dailyEl) { dailyEl.textContent = fmtAmt(dailyRewardPerViewer, 2) + ' MINIMA'; }

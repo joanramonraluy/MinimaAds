@@ -1335,7 +1335,9 @@ function recalculateAllMetrics(form) {
     }
   }
   if (viewersCalcEl) {
-    viewersCalcEl.textContent = viewerChannels.toLocaleString() + ' − ' + publisherChannels.toLocaleString() + ' = ' + maxViewers.toLocaleString();
+    var calcText = '⌊' + budget.toLocaleString() + ' / ' + fmtAmt(maxViewerReward, 2) + '⌋ − ⌊' + fmtAmt(pubBudgetPool, 2) + ' / ' + fmtAmt(publisherRewardView, 2) + '⌋'
+      + '<br>' + viewerChannels.toLocaleString() + ' viewers − ' + publisherChannels.toLocaleString() + ' publishers = ' + maxViewers.toLocaleString();
+    viewersCalcEl.innerHTML = calcText;
   }
 
   var dailyEl = document.getElementById('ma-metric-daily');

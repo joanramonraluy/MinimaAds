@@ -250,7 +250,7 @@ function renderCreator(root) {
     + '    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;font-size:0.9rem;">'
     + '      <div><small style="color:var(--pico-muted-color);">Max viewers</small><br><strong id="ma-metric-viewers">—</strong></div>'
     + '      <div><small style="color:var(--pico-muted-color);">Daily reward/viewer</small><br><strong id="ma-metric-daily">—</strong></div>'
-    + '      <div><small style="color:var(--pico-muted-color);">Max reach (×1)</small><br><strong id="ma-metric-maxreach">—</strong></div>'
+    + '      <div><small style="color:var(--pico-muted-color);">Max reach (×1)</small><br><input type="number" id="ma-metric-maxreach" min="1" step="1" value="666" style="width:100%;margin:0;padding:0.3rem;font-weight:600;font-size:0.9rem;"></div>'
     + '      <div><small style="color:var(--pico-muted-color);">Total cost (+fee)</small><br><strong id="ma-metric-cost">—</strong></div>'
     + '    </div>'
     + '    <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--pico-muted-border-color,#e0e0e0);">'
@@ -370,33 +370,17 @@ function renderCreator(root) {
     pubEstButtons.forEach(function(btn) {
       btn.addEventListener('click', function(e) {
         e.preventDefault();
-        var numPublishers = parseInt(this.dataset.publishers, 10);
-        var maxPubBudget = parseAmt(form.querySelector('[name="max_publisher_budget"]').value);
-        var pubRewardView = parseAmt(form.querySelector('[name="publisher_reward_view"]').value);
-        var metrics = calculateAutoBalanceMetrics(form);
-
-        if (!metrics || !isFinite(maxPubBudget) || maxPubBudget <= 0 || !isFinite(pubRewardView) || pubRewardView <= 0) {
-          var displayEl = document.getElementById('ma-pub-est-display');
-          if (displayEl) { displayEl.textContent = 'Enable auto-balance first.'; }
-          return;
-        }
-
-        var budgetPerPublisher = maxPubBudget / numPublishers;
-        var viewsPerPublisher = Math.floor(budgetPerPublisher / pubRewardView);
-        var totalPublisherViews = viewsPerPublisher * numPublishers;
-        var totalReach = metrics.max_viewers + totalPublisherViews;
-
-        var displayEl = document.getElementById('ma-pub-est-display');
-        if (displayEl) {
-          displayEl.innerHTML = '<strong style="display:block;margin-bottom:0.3rem;">' + numPublishers + ' publishers:</strong>'
-            + '<span style="display:block;font-size:0.85rem;margin-bottom:0.2rem;">' + fmtAmt(budgetPerPublisher, 2) + ' MINIMA/pub &middot; ' + viewsPerPublisher.toLocaleString() + ' views/pub</span>'
-            + '<span style="display:block;font-size:0.85rem;margin-bottom:0.2rem;color:var(--pico-muted-color);">' + totalPublisherViews.toLocaleString() + ' publisher views</span>'
-            + '<span style="display:block;font-weight:600;color:var(--pico-primary,#6366f1);margin-top:0.3rem;">' + metrics.max_viewers.toLocaleString() + ' viewers + ' + totalPublisherViews.toLocaleString() + ' pub = ' + totalReach.toLocaleString() + ' total reach</span>';
-        }
-
         pubEstButtons.forEach(function(b) { b.style.fontWeight = '400'; });
         this.style.fontWeight = '600';
+        updateMetricsFromMaxReach(form);
       });
+    });
+  }
+
+  var maxReachInput = document.getElementById('ma-metric-maxreach');
+  if (maxReachInput) {
+    maxReachInput.addEventListener('input', function() {
+      updateMetricsFromMaxReach(form);
     });
   }
 
@@ -1255,17 +1239,48 @@ function updateAutoBalanceMetricsDisplay(form) {
   var maxReachEl = document.getElementById('ma-metric-maxreach');
   var costEl = document.getElementById('ma-metric-cost');
 
+  var minCap = metrics.reward_view + metrics.reward_click;
+  var maxReachAt1x = Math.floor(metrics.max_publisher_budget / minCap);
+
   if (viewersEl) { viewersEl.textContent = metrics.max_viewers.toLocaleString() + ' viewers'; }
   if (dailyEl) { dailyEl.textContent = fmtAmt(metrics.daily_reward_per_viewer, 2) + ' MINIMA/day'; }
-  if (maxReachEl) {
-    var minCap = metrics.reward_view + metrics.reward_click;
-    var maxReach = Math.floor(metrics.max_publisher_budget / minCap);
-    maxReachEl.textContent = maxReach.toLocaleString() + ' viewers';
-  }
+  if (maxReachEl && !maxReachEl.value) { maxReachEl.value = maxReachAt1x; }
   if (costEl) { costEl.textContent = fmtAmt(metrics.total_cost, 2) + ' MINIMA'; }
 
   var pubEstDisplay = document.getElementById('ma-pub-est-display');
   if (pubEstDisplay) { pubEstDisplay.innerHTML = ''; }
+}
+
+function updateMetricsFromMaxReach(form) {
+  var maxReachInput = document.getElementById('ma-metric-maxreach');
+  var maxReachValue = parseInt(maxReachInput.value, 10);
+  if (!isFinite(maxReachValue) || maxReachValue <= 0) { return; }
+
+  var metrics = calculateAutoBalanceMetrics(form);
+  if (!metrics) { return; }
+
+  var viewersEl = document.getElementById('ma-metric-viewers');
+  var pubEstDisplay = document.getElementById('ma-pub-est-display');
+  var minCap = metrics.reward_view + metrics.reward_click;
+
+  var impliedMultiplier = maxReachValue / (metrics.max_publisher_budget / minCap);
+  var newMaxViewers = Math.floor(metrics.max_viewers * impliedMultiplier);
+
+  if (viewersEl) { viewersEl.textContent = newMaxViewers.toLocaleString() + ' viewers'; }
+
+  var selectedPubBtn = document.querySelector('.ma-pub-est[style*="font-weight: 600"]');
+  if (selectedPubBtn && pubEstDisplay) {
+    var numPublishers = parseInt(selectedPubBtn.dataset.publishers, 10);
+    var budgetPerPublisher = metrics.max_publisher_budget / numPublishers;
+    var viewsPerPublisher = Math.floor(budgetPerPublisher / metrics.publisher_reward_view);
+    var totalPublisherViews = viewsPerPublisher * numPublishers;
+    var totalReach = newMaxViewers + totalPublisherViews;
+
+    pubEstDisplay.innerHTML = '<strong style="display:block;margin-bottom:0.3rem;">' + numPublishers + ' publishers:</strong>'
+      + '<span style="display:block;font-size:0.85rem;margin-bottom:0.2rem;">' + fmtAmt(budgetPerPublisher, 2) + ' MINIMA/pub &middot; ' + viewsPerPublisher.toLocaleString() + ' views/pub</span>'
+      + '<span style="display:block;font-size:0.85rem;margin-bottom:0.2rem;color:var(--pico-muted-color);">' + totalPublisherViews.toLocaleString() + ' publisher views</span>'
+      + '<span style="display:block;font-weight:600;color:var(--pico-primary,#6366f1);margin-top:0.3rem;">' + newMaxViewers.toLocaleString() + ' viewers + ' + totalPublisherViews.toLocaleString() + ' pub = ' + totalReach.toLocaleString() + ' total reach</span>';
+  }
 }
 
 function updateCampaignSummary(form) {

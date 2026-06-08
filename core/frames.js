@@ -4,7 +4,10 @@
 // All DB access via sqlQuery() from core/minima.js.
 
 function listFrames(cb) {
-  sqlQuery("SELECT * FROM FRAMES ORDER BY CREATED_AT", function(err, rows) {
+  var sql = "SELECT FRAME_ID, PUBLISHER_KEY, PUBLISHER_WALLET, PUBLISHER_MX, LABEL, IS_BUILTIN, CREATED_AT, TOTAL_EARNED "
+    + "FROM FRAMES "
+    + "ORDER BY CREATED_AT";
+  sqlQuery(sql, function(err, rows) {
     if (err) { cb(err); return; }
     cb(null, rows);
   });
@@ -100,19 +103,14 @@ function initBuiltinFrame(maximaPk, walletAddr) {
 
 function getFrameEarnings(frameId, cb) {
   var fid = escapeSql(frameId);
-  sqlQuery(
-    "SELECT TOTAL_EARNED FROM FRAMES WHERE UPPER(FRAME_ID) = UPPER('" + fid + "')",
-    function(err, rows) {
-      if (err) { cb(err); return; }
-      var totalEarned = rows.length > 0 ? (parseFloat(rows[0].TOTAL_EARNED) || 0) : 0;
-      sqlQuery(
-        "SELECT COUNT(*) AS CNT FROM REWARD_EVENTS WHERE UPPER(PUBLISHER_ID) = UPPER('" + fid + "') AND TYPE = 'publisher_view'",
-        function(err2, rows2) {
-          if (err2) { cb(err2); return; }
-          var cnt = rows2.length > 0 ? (parseInt(rows2[0].CNT, 10) || 0) : 0;
-          cb(null, { total_earned: totalEarned, event_count: cnt });
-        }
-      );
-    }
-  );
+  var sql = "SELECT f.TOTAL_EARNED, "
+    + "(SELECT COUNT(*) FROM REWARD_EVENTS WHERE UPPER(PUBLISHER_ID) = UPPER('" + fid + "') AND TYPE = 'publisher_view') AS CNT "
+    + "FROM FRAMES f "
+    + "WHERE UPPER(f.FRAME_ID) = UPPER('" + fid + "')";
+  sqlQuery(sql, function(err, rows) {
+    if (err) { cb(err); return; }
+    var totalEarned = (rows && rows.length > 0) ? (parseFloat(rows[0].TOTAL_EARNED) || 0) : 0;
+    var cnt = (rows && rows.length > 0) ? (parseInt(rows[0].CNT, 10) || 0) : 0;
+    cb(null, { total_earned: totalEarned, event_count: cnt });
+  });
 }

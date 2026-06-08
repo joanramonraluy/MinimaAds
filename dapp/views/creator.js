@@ -56,6 +56,7 @@ function calculateAutoBalanceMetrics(form) {
   if (!autoBalance) { return null; }
 
   var budget = parseAmt(form.querySelector('[name="budget"]').value);
+  var campaignDays = parseInt(form.querySelector('[name="campaign_days"]').value, 10) || 7;
   var multiplier = parseFloat(form.querySelector('[name="multiplier"]').value) || AUTO_BALANCE_CONFIG.MULTIPLIER_DEFAULT;
   var defaults = getAutoBalanceDefaults(budget);
 
@@ -64,7 +65,10 @@ function calculateAutoBalanceMetrics(form) {
   var maxPublisherBudget = budget * AUTO_BALANCE_CONFIG.PUBLISHER_BUDGET_RATIO;
   var budgetForViewers = budget - maxPublisherBudget;
   var maxViewerReward = (rewardView + rewardClick) * multiplier;
-  var maxViewers = Math.floor(budgetForViewers / maxViewerReward);
+
+  var perViewerChannelMax = (rewardView + rewardClick) * campaignDays;
+  var maxViewers = Math.floor(budgetForViewers / perViewerChannelMax);
+
   var dailyRewardPerViewer = (100 * rewardView) + (100 * rewardClick);
   var publisherRewardView = (rewardView + rewardClick) * AUTO_BALANCE_CONFIG.PUBLISHER_REWARD_RATIO;
   var totalCostWithFee = budget * (1 + PLATFORM_FEE_RATE);
@@ -73,11 +77,13 @@ function calculateAutoBalanceMetrics(form) {
     reward_view: rewardView,
     reward_click: rewardClick,
     max_viewer_reward: maxViewerReward,
+    per_viewer_channel_max: perViewerChannelMax,
     max_viewers: maxViewers,
     daily_reward_per_viewer: dailyRewardPerViewer,
     max_publisher_budget: maxPublisherBudget,
     publisher_reward_view: publisherRewardView,
-    total_cost: totalCostWithFee
+    total_cost: totalCostWithFee,
+    campaign_days: campaignDays
   };
 }
 
@@ -365,28 +371,27 @@ function renderCreator(root) {
       btn.addEventListener('click', function(e) {
         e.preventDefault();
         var numPublishers = parseInt(this.dataset.publishers, 10);
-        var budget = parseAmt(form.querySelector('[name="budget"]').value);
         var maxPubBudget = parseAmt(form.querySelector('[name="max_publisher_budget"]').value);
         var pubRewardView = parseAmt(form.querySelector('[name="publisher_reward_view"]').value);
+        var metrics = calculateAutoBalanceMetrics(form);
 
-        if (!isFinite(budget) || budget <= 0 || !isFinite(pubRewardView) || pubRewardView <= 0) {
+        if (!metrics || !isFinite(maxPubBudget) || maxPubBudget <= 0 || !isFinite(pubRewardView) || pubRewardView <= 0) {
           var displayEl = document.getElementById('ma-pub-est-display');
-          if (displayEl) { displayEl.textContent = 'Enter budget and enable auto-balance first.'; }
+          if (displayEl) { displayEl.textContent = 'Enable auto-balance first.'; }
           return;
         }
 
         var budgetPerPublisher = maxPubBudget / numPublishers;
         var viewsPerPublisher = Math.floor(budgetPerPublisher / pubRewardView);
         var totalPublisherViews = viewsPerPublisher * numPublishers;
-        var budgetUsed = totalPublisherViews * pubRewardView;
-        var budgetRemaining = maxPubBudget - budgetUsed;
+        var totalReach = metrics.max_viewers + totalPublisherViews;
 
         var displayEl = document.getElementById('ma-pub-est-display');
         if (displayEl) {
-          displayEl.innerHTML = '<strong>' + numPublishers + ' publishers:</strong> '
-            + fmtAmt(budgetPerPublisher, 2) + ' MINIMA/publisher &middot; '
-            + viewsPerPublisher.toLocaleString() + ' views/publisher &middot; '
-            + totalPublisherViews.toLocaleString() + ' total publisher views';
+          displayEl.innerHTML = '<strong style="display:block;margin-bottom:0.3rem;">' + numPublishers + ' publishers:</strong>'
+            + '<span style="display:block;font-size:0.85rem;margin-bottom:0.2rem;">' + fmtAmt(budgetPerPublisher, 2) + ' MINIMA/pub &middot; ' + viewsPerPublisher.toLocaleString() + ' views/pub</span>'
+            + '<span style="display:block;font-size:0.85rem;margin-bottom:0.2rem;color:var(--pico-muted-color);">' + totalPublisherViews.toLocaleString() + ' publisher views</span>'
+            + '<span style="display:block;font-weight:600;color:var(--pico-primary,#6366f1);margin-top:0.3rem;">' + metrics.max_viewers.toLocaleString() + ' viewers + ' + totalPublisherViews.toLocaleString() + ' pub = ' + totalReach.toLocaleString() + ' total reach</span>';
         }
 
         pubEstButtons.forEach(function(b) { b.style.fontWeight = '400'; });
@@ -1251,15 +1256,16 @@ function updateAutoBalanceMetricsDisplay(form) {
   var costEl = document.getElementById('ma-metric-cost');
 
   if (viewersEl) { viewersEl.textContent = metrics.max_viewers.toLocaleString() + ' viewers'; }
-  if (dailyEl) { dailyEl.textContent = fmtAmt(metrics.daily_reward_per_viewer, 2) + ' MINIMA'; }
+  if (dailyEl) { dailyEl.textContent = fmtAmt(metrics.daily_reward_per_viewer, 2) + ' MINIMA/day'; }
   if (maxReachEl) {
-    var budget = parseAmt(form.querySelector('[name="budget"]').value);
-    var maxPubBudget = budget * AUTO_BALANCE_CONFIG.PUBLISHER_BUDGET_RATIO;
     var minCap = metrics.reward_view + metrics.reward_click;
-    var maxReach = Math.floor((budget - maxPubBudget) / minCap);
+    var maxReach = Math.floor(metrics.max_publisher_budget / minCap);
     maxReachEl.textContent = maxReach.toLocaleString() + ' viewers';
   }
   if (costEl) { costEl.textContent = fmtAmt(metrics.total_cost, 2) + ' MINIMA'; }
+
+  var pubEstDisplay = document.getElementById('ma-pub-est-display');
+  if (pubEstDisplay) { pubEstDisplay.innerHTML = ''; }
 }
 
 function updateCampaignSummary(form) {

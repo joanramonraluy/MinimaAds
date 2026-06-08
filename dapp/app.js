@@ -453,23 +453,22 @@ function handleDoChannelOpen(data) {
           // buildAndPostChannelTx from the input coin's address, so this is
           // only a safety fallback for the error-log path.
           var escrowAddr = escrowAddrV3 || (esRes && esRes.status ? esRes.value : '');
-            if (!channelAddr || !escrowAddr) {
-              console.error('[CHANNEL] DO_CHANNEL_OPEN: missing script addresses',
-                'channel:', channelAddr, 'escrow:', escrowAddr);
-              return;
-            }
-            buildAndPostChannelTx({
-              campaignId:    campaignId,
-              viewerKey:     viewerKey,
-              viewerMx:      viewerMx,
-              viewerWalletPK: viewerWalletPK,
-              maxAmount:     maxAmount,
-              budgetLeft:    budgetLeft,
-              escrowCoinId:  escrowCoinId,
-              walletPK:      walletPK,
-              channelAddr:   channelAddr,
-              escrowAddr:    escrowAddr
-            });
+          if (!channelAddr || !escrowAddr) {
+            console.error('[CHANNEL] DO_CHANNEL_OPEN: missing script addresses',
+              'channel:', channelAddr, 'escrow:', escrowAddr);
+            return;
+          }
+          buildAndPostChannelTx({
+            campaignId:    campaignId,
+            viewerKey:     viewerKey,
+            viewerMx:      viewerMx,
+            viewerWalletPK: viewerWalletPK,
+            maxAmount:     maxAmount,
+            budgetLeft:    budgetLeft,
+            escrowCoinId:  escrowCoinId,
+            walletPK:      walletPK,
+            channelAddr:   channelAddr,
+            escrowAddr:    escrowAddr
           });
         });
       });

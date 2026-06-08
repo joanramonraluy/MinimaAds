@@ -25,7 +25,10 @@ function handleCampaignAnnounce(payload) {
   }
   var campaignId = payload.campaign.id;
 
-  if (typeof PLATFORM_KEY === 'undefined' || PLATFORM_KEY === null) {
+  var localPlatformSet = !(typeof PLATFORM_KEY === 'undefined' || PLATFORM_KEY === null || PLATFORM_KEY === '');
+  var localFoundationSet = !(typeof FOUNDATION_KEY === 'undefined' || FOUNDATION_KEY === null || FOUNDATION_KEY === '');
+
+  if (!localPlatformSet && !localFoundationSet) {
     persistCampaign(payload, campaignId);
     return;
   }
@@ -56,10 +59,23 @@ function handleCampaignAnnounce(payload) {
     var onChainPk = getStateVar(prevstates, 5);
     // If escrow was created without PLATFORM_KEY (0x00), accept regardless of local setting.
     // Creator and viewer may have different PLATFORM_KEY overrides; 0x00 means creator had fee disabled.
-    if (onChainPk && onChainPk !== '0x00' && onChainPk.toUpperCase() !== PLATFORM_KEY.toUpperCase()) {
+    if (localPlatformSet && onChainPk && onChainPk !== '0x00' && onChainPk.toUpperCase() !== PLATFORM_KEY.toUpperCase()) {
       MDS.log("[CAMPAIGN] PREVSTATE(5) mismatch, dropping campaign: " + campaignId);
       return;
     }
+
+    // Foundation fee verification (V4 escrow): PREVSTATE(6) holds the foundation key.
+    // Under V3, PREVSTATE(6) holds max_publisher_budget (a number) — not a key — so a
+    // local FOUNDATION_KEY override would never match. Only drop when the on-chain value
+    // looks like a key (0x... DER, longer than a short number) and mismatches. A short/0x00
+    // value means the creator funded a V3 escrow with the foundation fee disabled → accept.
+    var onChainFk = getStateVar(prevstates, 6);
+    if (localFoundationSet && onChainFk && onChainFk !== '0x00' && onChainFk.length > 10
+        && onChainFk.toUpperCase() !== FOUNDATION_KEY.toUpperCase()) {
+      MDS.log("[CAMPAIGN] PREVSTATE(6) foundation key mismatch, dropping campaign: " + campaignId);
+      return;
+    }
+
     persistCampaign(payload, campaignId);
   });
 }

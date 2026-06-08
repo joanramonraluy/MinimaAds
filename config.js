@@ -1,5 +1,7 @@
 // MVP: fee enforcement disabled. Set PLATFORM_KEY to '0x...' wallet address before mainnet.
 var PLATFORM_KEY = null;
+// MVP: Minima Foundation fee disabled. Set FOUNDATION_KEY to '0x...' wallet address before mainnet.
+var FOUNDATION_KEY = null;
 var APP_NAME = 'minima-ads';
 
 // Maxima public key (DER format, 0x...) of the platform creator that owns the

@@ -250,7 +250,7 @@ function renderCreator(root) {
     + '    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1rem;margin-bottom:1.5rem;">'
     + '      <div><small style="color:var(--pico-muted-color);display:block;margin-bottom:0.3rem;">Max viewers</small><strong id="ma-metric-viewers" style="font-size:1.1rem;">—</strong></div>'
     + '      <div><small style="color:var(--pico-muted-color);display:block;margin-bottom:0.3rem;">Daily reward/viewer</small><strong id="ma-metric-daily" style="font-size:1.1rem;">—</strong></div>'
-    + '      <div><small style="color:var(--pico-muted-color);display:block;margin-bottom:0.3rem;">Pub budget pool</small><strong id="ma-metric-pub-budget" style="font-size:1.1rem;">—</strong></div>'
+    + '      <div><small style="color:var(--pico-muted-color);display:block;margin-bottom:0.3rem;">Total for publishers</small><strong id="ma-metric-pub-budget" style="font-size:1.1rem;">—</strong></div>'
     + '    </div>'
     + '    <div style="padding:0.75rem;background:rgba(0,0,0,0.02);border-radius:0.375rem;margin-bottom:1rem;">'
     + '      <small style="color:var(--pico-muted-color);display:block;margin-bottom:0.3rem;">Per-viewer channel max</small>'
@@ -1293,12 +1293,28 @@ function recalculateAllMetrics(form) {
 
   var maxViewerReward = (rewardView + rewardClick) * multiplier;
   var perViewerChannelMax = (rewardView + rewardClick) * campaignDays;
-  var pubBudgetPool = budget * AUTO_BALANCE_CONFIG.PUBLISHER_BUDGET_RATIO;
-  var budgetForViewers = budget - pubBudgetPool;
-  var maxViewers = Math.floor(budgetForViewers / perViewerChannelMax);
-  var dailyRewardPerViewer = (rewardView * 100) + (rewardClick * 100);
   var publisherRewardView = (rewardView + rewardClick) * AUTO_BALANCE_CONFIG.PUBLISHER_REWARD_RATIO;
   var totalCostWithFee = budget * (1 + PLATFORM_FEE_RATE);
+
+  var BUDGET_PER_PUBLISHER = 10;
+  var selectedPubBtn = form.querySelector('.ma-pub-est.ma-pub-est-active');
+  var numPublishers = selectedPubBtn ? parseInt(selectedPubBtn.dataset.publishers, 10) : 0;
+
+  var pubBudgetPool;
+  var budgetForViewers;
+
+  if (isFinite(numPublishers) && numPublishers > 0) {
+    pubBudgetPool = numPublishers * BUDGET_PER_PUBLISHER;
+    budgetForViewers = Math.max(0, budget - pubBudgetPool);
+  } else {
+    pubBudgetPool = budget * AUTO_BALANCE_CONFIG.PUBLISHER_BUDGET_RATIO;
+    budgetForViewers = budget - pubBudgetPool;
+  }
+
+  var maxViewers = budgetForViewers > 0 ? Math.floor(budgetForViewers / perViewerChannelMax) : 0;
+  var maxDailyViews = parseInt(form.querySelector('[name="max_daily_views"]').value, 10) || 100;
+  var maxDailyClicks = parseInt(form.querySelector('[name="max_daily_clicks"]').value, 10) || 100;
+  var dailyRewardPerViewer = (maxDailyViews * rewardView) + (maxDailyClicks * rewardClick);
 
   form.querySelector('[name="reward_view"]').value = fmtAmt(rewardView, 6);
   form.querySelector('[name="reward_click"]').value = fmtAmt(rewardClick, 6);
@@ -1321,27 +1337,23 @@ function recalculateAllMetrics(form) {
   var costEl = document.getElementById('ma-metric-cost');
   if (costEl) { costEl.textContent = fmtAmt(totalCostWithFee, 2) + ' MINIMA'; }
 
-  var selectedPubBtn = form.querySelector('.ma-pub-est.ma-pub-est-active');
-  if (selectedPubBtn) {
-    var numPublishers = parseInt(selectedPubBtn.dataset.publishers, 10);
-    if (isFinite(numPublishers) && numPublishers > 0) {
-      var budgetPerPublisher = pubBudgetPool / numPublishers;
-      var viewsPerPublisher = publisherRewardView > 0 ? Math.floor(budgetPerPublisher / publisherRewardView) : 0;
-      var totalPublisherViews = viewsPerPublisher * numPublishers;
-      var totalReach = maxViewers + totalPublisherViews;
+  if (selectedPubBtn && isFinite(numPublishers) && numPublishers > 0) {
+    var budgetPerPublisher = pubBudgetPool / numPublishers;
+    var viewsPerPublisher = publisherRewardView > 0 ? Math.floor(budgetPerPublisher / publisherRewardView) : 0;
+    var totalPublisherViews = viewsPerPublisher * numPublishers;
+    var totalReach = maxViewers + totalPublisherViews;
 
-      var pubEstDisplay = document.getElementById('ma-pub-est-display');
-      if (pubEstDisplay) {
-        pubEstDisplay.innerHTML =
-          '<strong style="display:block;margin-bottom:0.3rem;">' + numPublishers + ' publishers:</strong>'
-          + '<span style="display:block;font-size:0.85rem;margin-bottom:0.2rem;">'
-          + fmtAmt(budgetPerPublisher, 2) + ' MINIMA/pub &middot; ' + viewsPerPublisher.toLocaleString() + ' views/pub</span>'
-          + '<span style="display:block;font-size:0.85rem;margin-bottom:0.2rem;color:var(--pico-muted-color);">'
-          + totalPublisherViews.toLocaleString() + ' publisher views</span>'
-          + '<span style="display:block;font-weight:600;color:var(--pico-primary,#6366f1);margin-top:0.3rem;">'
-          + maxViewers.toLocaleString() + ' viewers + ' + totalPublisherViews.toLocaleString() + ' pub = '
-          + totalReach.toLocaleString() + ' total reach</span>';
-      }
+    var pubEstDisplay = document.getElementById('ma-pub-est-display');
+    if (pubEstDisplay) {
+      pubEstDisplay.innerHTML =
+        '<strong style="display:block;margin-bottom:0.3rem;">' + numPublishers + ' publishers:</strong>'
+        + '<span style="display:block;font-size:0.85rem;margin-bottom:0.2rem;">'
+        + fmtAmt(budgetPerPublisher, 2) + ' MINIMA/pub &middot; ' + viewsPerPublisher.toLocaleString() + ' views/pub</span>'
+        + '<span style="display:block;font-size:0.85rem;margin-bottom:0.2rem;color:var(--pico-muted-color);">'
+        + totalPublisherViews.toLocaleString() + ' publisher views</span>'
+        + '<span style="display:block;font-weight:600;color:var(--pico-primary,#6366f1);margin-top:0.3rem;">'
+        + maxViewers.toLocaleString() + ' viewers + ' + totalPublisherViews.toLocaleString() + ' pub = '
+        + totalReach.toLocaleString() + ' total reach</span>';
     }
   }
 }

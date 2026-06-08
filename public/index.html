@@ -6,10 +6,13 @@
   <title>MinimaAds</title>
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     /* ── MinimaAds identity ──────────────────────────────────────────── */
     :root {
-      --pico-font-family-sans-serif: ui-sans-serif, system-ui, -apple-system,
+      --pico-font-family-sans-serif: 'Inter', ui-sans-serif, system-ui, -apple-system,
         BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       --pico-border-radius: 0.5rem;
       --pico-line-height: 1.6;
@@ -44,6 +47,181 @@
     main { max-width: 960px; margin: 0 auto; padding: 0 1rem; }
     body > header { padding: 0; }
     body > header > nav { max-width: 960px; margin: 0 auto; padding: 0 1rem; }
+
+    /* ── Enhanced Buttons ──────────────────────────────────────────── */
+    button, [role="button"] {
+      padding: 0.6rem 1.2rem;
+      border-radius: 0.5rem;
+      font-weight: 500;
+      letter-spacing: 0.01em;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+    }
+    button:not([disabled]):active {
+      transform: scale(0.98);
+    }
+    /* Primary buttons (submit) */
+    button[type="submit"]:not([disabled]), button.primary:not([disabled]) {
+      background: var(--pico-primary-background, #6366f1);
+      border-color: var(--pico-primary-border, #6366f1);
+      color: #fff;
+      box-shadow: 0 2px 16px var(--pico-primary-focus, rgba(99,102,241,.25));
+      font-weight: 600;
+    }
+    button[type="submit"]:not([disabled]):hover, button.primary:not([disabled]):hover {
+      background: var(--pico-primary-hover-background, #4f46e5);
+      border-color: var(--pico-primary-hover-background, #4f46e5);
+      box-shadow: 0 4px 24px var(--pico-primary-focus, rgba(99,102,241,.35));
+      transform: translateY(-1px);
+    }
+    button[type="submit"]:not([disabled]):focus, button.primary:not([disabled]):focus {
+      outline: 2px solid var(--pico-primary, #6366f1);
+      outline-offset: 2px;
+    }
+    /* Secondary buttons (outline) */
+    button.secondary:not([disabled]), button[type="button"].outline:not([disabled]) {
+      background: transparent;
+      border: 2px solid var(--pico-muted-border-color, #ddd);
+      color: var(--pico-color, #1f2937);
+    }
+    [data-theme="dark"] button.secondary:not([disabled]),
+    [data-theme="dark"] button[type="button"].outline:not([disabled]) {
+      color: var(--pico-color, #f3f4f6);
+      border-color: rgba(255,255,255,.2);
+    }
+    button.secondary:not([disabled]):hover, button[type="button"].outline:not([disabled]):hover {
+      background: var(--pico-card-sectionning-background-color, #f0f4f8);
+      border-color: var(--pico-primary, #6366f1);
+      color: var(--pico-primary, #6366f1);
+    }
+    [data-theme="dark"] button.secondary:not([disabled]):hover,
+    [data-theme="dark"] button[type="button"].outline:not([disabled]):hover {
+      background: rgba(255,255,255,.08);
+      border-color: var(--pico-primary, #818cf8);
+      color: var(--pico-primary, #818cf8);
+    }
+    button.secondary:not([disabled]):focus, button[type="button"].outline:not([disabled]):focus {
+      outline: 2px solid var(--pico-primary, #6366f1);
+      outline-offset: 2px;
+      border-color: var(--pico-primary, #6366f1);
+    }
+    /* Disabled buttons */
+    button[disabled], [role="button"][disabled] {
+      opacity: 0.5;
+      cursor: not-allowed;
+      box-shadow: none !important;
+    }
+    button[disabled]:hover, [role="button"][disabled]:hover {
+      transform: none !important;
+    }
+
+    /* ── Enhanced Input Fields ─────────────────────────────────────── */
+    input:not([type="checkbox"]):not([type="radio"]),
+    select,
+    textarea {
+      border: 2px solid var(--pico-muted-border-color, #ddd);
+      border-radius: 0.5rem;
+      padding: 0.65rem 0.9rem;
+      font-size: 1rem;
+      font-family: inherit;
+    }
+    input[type="file"] {
+      padding: 0;
+      border: none;
+      background: transparent;
+      box-shadow: none !important;
+    }
+    [data-theme="dark"] input:not([type="checkbox"]):not([type="radio"]),
+    [data-theme="dark"] select,
+    [data-theme="dark"] textarea {
+      border-color: rgba(255,255,255,.12);
+    }
+    /* Focus state */
+    input:not([type="checkbox"]):not([type="radio"]):focus,
+    select:focus,
+    textarea:focus {
+      border-color: var(--pico-primary, #6366f1) !important;
+      box-shadow: 0 0 0 3px var(--pico-primary-focus, rgba(99,102,241,.2)) !important;
+      outline: none;
+    }
+    /* Hover state */
+    input:not([type="checkbox"]):not([type="radio"]):hover:not(:focus),
+    select:hover:not(:focus),
+    textarea:hover:not(:focus) {
+      border-color: var(--pico-primary, #6366f1);
+      background: var(--pico-card-sectionning-background-color, #f8f9fa);
+    }
+    [data-theme="dark"] input:not([type="checkbox"]):not([type="radio"]):hover:not(:focus),
+    [data-theme="dark"] select:hover:not(:focus),
+    [data-theme="dark"] textarea:hover:not(:focus) {
+      border-color: var(--pico-primary, #818cf8);
+      background: rgba(255,255,255,.04);
+    }
+    /* Disabled input */
+    input:not([type="checkbox"]):not([type="radio"])[disabled],
+    select[disabled],
+    textarea[disabled] {
+      opacity: 0.6;
+      cursor: not-allowed;
+      background: var(--pico-card-sectionning-background-color, #f0f4f8);
+    }
+    [data-theme="dark"] input:not([type="checkbox"]):not([type="radio"])[disabled],
+    [data-theme="dark"] select[disabled],
+    [data-theme="dark"] textarea[disabled] {
+      background: rgba(255,255,255,.04);
+    }
+    /* Placeholder styling */
+    input::placeholder,
+    textarea::placeholder {
+      color: var(--pico-muted-color, #9ca3af);
+      opacity: 0.8;
+    }
+
+    /* ── Enhanced Checkboxes & Radio Buttons ─────────────────────── */
+    input[type="checkbox"],
+    input[type="radio"] {
+      width: 1.25rem;
+      height: 1.25rem;
+      cursor: pointer;
+      accent-color: var(--pico-primary, #6366f1);
+      margin-right: 0.5rem;
+    }
+    /* Larger click target area */
+    label input[type="checkbox"],
+    label input[type="radio"] {
+      margin: 0 0.5rem 0 0;
+    }
+    /* Focus state for checkboxes and radio buttons */
+    input[type="checkbox"]:focus,
+    input[type="radio"]:focus {
+      outline: 2px solid var(--pico-primary, #6366f1);
+      outline-offset: 2px;
+    }
+    /* Custom checkbox styling (progressive enhancement) */
+    input[type="checkbox"]:not(:checked):not(:focus) {
+      border: 2px solid var(--pico-muted-border-color, #cbd5e1);
+    }
+    input[type="checkbox"]:checked {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='white' d='M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 11-1.06-1.06l7.25-7.25a.75.75 0 011.06 0z'/%3E%3C/svg%3E");
+      background-size: 100%;
+      background-position: center;
+      background-repeat: no-repeat;
+    }
+    /* Hover state for checkboxes */
+    input[type="checkbox"]:hover:not(:disabled) {
+      border-color: var(--pico-primary, #6366f1);
+      box-shadow: 0 0 0 2px var(--pico-primary-focus, rgba(99,102,241,.15));
+    }
+    input[type="radio"]:hover:not(:disabled) {
+      box-shadow: 0 0 0 2px var(--pico-primary-focus, rgba(99,102,241,.15));
+    }
+    /* Disabled checkbox/radio */
+    input[type="checkbox"][disabled],
+    input[type="radio"][disabled] {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
     nav ul { list-style: none; display: flex; gap: 1.5rem; padding: 0; }
     nav a { text-decoration: none; }
     nav a[aria-current] { font-weight: bold; border-bottom: 2px solid currentColor; }
@@ -92,6 +270,35 @@
     .ma-tabs button[aria-selected="true"] { background: var(--pico-primary-background, #0172ad); color: #fff; border-color: var(--pico-primary-border, #0172ad); font-weight: 600; }
     .ma-tabs button[aria-selected="false"] { background: var(--pico-secondary-background, #5d6b89); color: #fff; border-color: var(--pico-secondary-border, #5d6b89); }
     .ma-tab-panel[hidden] { display: none; }
+    /* Creator Grid and Column layouts */
+    .ma-creator-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1.25rem;
+    }
+    .ma-grid-2col {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1.25rem;
+    }
+    @media (min-width: 768px) {
+      .ma-grid-2col {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+    @media (min-width: 992px) {
+      .ma-creator-grid {
+        grid-template-columns: 1.3fr 1fr;
+        align-items: start;
+      }
+      .ma-creator-sidebar {
+        position: sticky;
+        top: 1.5rem;
+      }
+    }
+    .ma-tab-panel {
+      margin-top: 1rem;
+    }
     #app { min-height: 12rem; }
     /* Hamburger menu button */
     .ma-menu-btn { width: auto; margin: 0; padding: .25rem .65rem; font-size: .9rem; border-radius: .25rem; display: flex; align-items: center; gap: .4rem; white-space: nowrap; }

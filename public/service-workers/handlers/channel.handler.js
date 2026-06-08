@@ -128,7 +128,7 @@ function handleChannelOpenRequest(payload, senderPk) {
                 maxAmount:     maxAmount,
                 splitCoinId:   existing.SPLIT_COINID,
                 walletPK:      camp.ESCROW_WALLET_PK,
-                escrowAddr:    ESCROW_ADDRESS_V2 || ESCROW_ADDRESS,
+                escrowAddr:    ESCROW_ADDRESS_V3 || ESCROW_ADDRESS,
                 role:          'publisher',
                 frameId:       frameId
               });
@@ -280,7 +280,7 @@ function handleChannelOpenRequest(payload, senderPk) {
                 maxAmount:     maxAmount,
                 splitCoinId:   existing.SPLIT_COINID,
                 walletPK:      camp.ESCROW_WALLET_PK,
-                escrowAddr:    ESCROW_ADDRESS_V2 || ESCROW_ADDRESS,
+                escrowAddr:    ESCROW_ADDRESS_V3 || ESCROW_ADDRESS,
                 role:          'viewer',
                 frameId:       ''
               });
@@ -1753,7 +1753,7 @@ function swBuildAndPostChannelTx(ctx) {
 
 function _swBuildAndPostChannelTxInner(ctx, txId, campaignHex, contactForState4) {
   var creatorMxHex = "0x" + utf8ToHex(contactForState4).toUpperCase();
-  var escrowAddrFallback = ESCROW_ADDRESS_V3 || ESCROW_ADDRESS_V2 || ESCROW_ADDRESS;
+  var escrowAddrFallback = ESCROW_ADDRESS_V3 || ESCROW_ADDRESS;
 
   function fail(stage) {
     MDS.log("[CHANNEL] swBuildAndPostChannelTx failed at " + stage + " campaign: " + ctx.campaignId);

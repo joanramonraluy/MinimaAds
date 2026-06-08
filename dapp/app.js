@@ -448,13 +448,11 @@ function handleDoChannelOpen(data) {
       var channelAddr = chRes && chRes.status ? chRes.value : '';
       MDS.keypair.get('ESCROW_ADDRESS_V3', function(esResV3) {
         var escrowAddrV3 = esResV3 && esResV3.status ? esResV3.value : '';
-        MDS.keypair.get('ESCROW_ADDRESS_V2', function(esResV2) {
-          var escrowAddrV2 = esResV2 && esResV2.status ? esResV2.value : '';
-          MDS.keypair.get('ESCROW_ADDRESS', function(esRes) {
-            // Prefer V3 > V2 > V1. The actual output address is overridden in
-            // buildAndPostChannelTx from the input coin's address, so this is
-            // only a safety fallback for the error-log path.
-            var escrowAddr = escrowAddrV3 || escrowAddrV2 || (esRes && esRes.status ? esRes.value : '');
+        MDS.keypair.get('ESCROW_ADDRESS', function(esRes) {
+          // Prefer V3 > V1. The actual output address is overridden in
+          // buildAndPostChannelTx from the input coin's address, so this is
+          // only a safety fallback for the error-log path.
+          var escrowAddr = escrowAddrV3 || (esRes && esRes.status ? esRes.value : '');
             if (!channelAddr || !escrowAddr) {
               console.error('[CHANNEL] DO_CHANNEL_OPEN: missing script addresses',
                 'channel:', channelAddr, 'escrow:', escrowAddr);
@@ -851,8 +849,8 @@ function handleDoPublisherChannelOpen(data) {
 
     MDS.keypair.get('CHANNEL_SCRIPT_ADDRESS', function(chRes) {
       var channelAddr = chRes && chRes.status ? chRes.value : '';
-      MDS.keypair.get('ESCROW_ADDRESS_V2', function(esRes) {
-        var escrowAddr = esRes && esRes.status ? esRes.value : '';
+      MDS.keypair.get('ESCROW_ADDRESS_V3', function(esResV3) {
+        var escrowAddr = esResV3 && esResV3.status ? esResV3.value : '';
         if (!escrowAddr) {
           // Fallback for legacy V1 escrows.
           MDS.keypair.get('ESCROW_ADDRESS', function(esResV1) {

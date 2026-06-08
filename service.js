@@ -28,7 +28,6 @@ var _livenessCheckBlock = 0;
 
 // Escrow script address — deterministic, same for all nodes with this DApp
 var ESCROW_ADDRESS    = '';
-var ESCROW_ADDRESS_V2 = '';
 var ESCROW_ADDRESS_V3 = '';
 var ESCROW_ADDRESS_V4 = '';
 
@@ -40,22 +39,6 @@ var CHANNEL_SCRIPT_ADDRESS = '';
 var _knownEscrowCoins = {};
 
 var ESCROW_SCRIPT = 'LET creatorkey=PREVSTATE(1) ASSERT SIGNEDBY(creatorkey) LET payout=STATE(10) LET change=@AMOUNT-payout IF change GT 0 THEN ASSERT VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE) ENDIF RETURN TRUE';
-
-var ESCROW_SCRIPT_V2 =
-  "LET creatorkey=PREVSTATE(1) " +
-  "ASSERT SIGNEDBY(creatorkey) " +
-  "LET payout=STATE(10) " +
-  "LET feeflag=STATE(11) " +
-  "LET change=@AMOUNT-payout " +
-  "IF feeflag EQ 1 THEN " +
-  "LET platformkey=PREVSTATE(5) " +
-  "LET feeamount=STATE(12) " +
-  "ASSERT VERIFYOUT(STATE(13) platformkey feeamount @TOKENID FALSE) " +
-  "ENDIF " +
-  "IF change GT 0 THEN " +
-  "ASSERT VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE) " +
-  "ENDIF " +
-  "RETURN TRUE";
 
 var ESCROW_SCRIPT_V3 =
   "LET creatorkey=PREVSTATE(1) " +
@@ -221,15 +204,7 @@ function registerEscrowScript() {
     ESCROW_ADDRESS = res.response.address;
     MDS.log("[ADS] ESCROW_ADDRESS: " + ESCROW_ADDRESS);
     MDS.keypair.set("ESCROW_ADDRESS", ESCROW_ADDRESS, function() {
-      MDS.cmd("newscript script:\"" + ESCROW_SCRIPT_V2 + "\" trackall:false", function(res2) {
-        if (!res2.status) {
-          MDS.log("[ADS] newscript V2 failed: " + res2.error);
-          scanEscrowCoins();
-          return;
-        }
-        ESCROW_ADDRESS_V2 = res2.response.address;
-        MDS.log("[ADS] ESCROW_ADDRESS_V2: " + ESCROW_ADDRESS_V2);
-        MDS.cmd("newscript script:\"" + ESCROW_SCRIPT_V3 + "\" trackall:false", function(resV3) {
+      MDS.cmd("newscript script:\"" + ESCROW_SCRIPT_V3 + "\" trackall:false", function(resV3) {
           if (!resV3.status) {
             MDS.log("[ADS] newscript V3 failed: " + resV3.error);
           } else {
@@ -261,7 +236,6 @@ function registerEscrowScript() {
             }
             scanEscrowCoins();
           });
-          });
         });
       });
     });
@@ -270,7 +244,6 @@ function registerEscrowScript() {
 
 function scanEscrowCoins() {
   _scanAddress(ESCROW_ADDRESS);
-  _scanAddress(ESCROW_ADDRESS_V2);
   _scanAddress(ESCROW_ADDRESS_V3);
   _scanAddress(ESCROW_ADDRESS_V4);
 }

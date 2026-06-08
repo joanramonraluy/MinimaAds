@@ -250,7 +250,6 @@ function renderCreator(root) {
     + '    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1rem;margin-bottom:1.5rem;">'
     + '      <div><small style="color:var(--pico-muted-color);display:block;margin-bottom:0.3rem;">Max viewers</small><strong id="ma-metric-viewers" style="font-size:1.1rem;">—</strong></div>'
     + '      <div><small style="color:var(--pico-muted-color);display:block;margin-bottom:0.3rem;">Daily reward/viewer</small><strong id="ma-metric-daily" style="font-size:1.1rem;">—</strong></div>'
-    + '      <div><small style="color:var(--pico-muted-color);display:block;margin-bottom:0.3rem;">Multiplier</small><input type="range" id="ma-multiplier-slider" min="1" max="10" step="0.1" value="2" style="width:100%;margin:0;padding:0;"> <strong id="ma-multiplier-display" style="display:block;margin-top:0.3rem;font-size:0.95rem;">×2.0</strong></div>'
     + '      <div><small style="color:var(--pico-muted-color);display:block;margin-bottom:0.3rem;">Pub budget pool</small><strong id="ma-metric-pub-budget" style="font-size:1.1rem;">—</strong></div>'
     + '    </div>'
     + '    <div style="padding:0.75rem;background:rgba(0,0,0,0.02);border-radius:0.375rem;margin-bottom:1rem;">'
@@ -402,27 +401,6 @@ function renderCreator(root) {
     });
   }
 
-  var multiplierSlider = document.getElementById('ma-multiplier-slider');
-  if (multiplierSlider) {
-    multiplierSlider.addEventListener('input', function() {
-      var multiplyInput = form.querySelector('input[name="multiplier"]');
-      if (multiplyInput) {
-        multiplyInput.value = this.value;
-      }
-      recalculateAllMetrics(form);
-    });
-  }
-
-  var multiplyInput = form.querySelector('input[name="multiplier"]');
-  if (multiplyInput) {
-    multiplyInput.addEventListener('input', function() {
-      var slider = document.getElementById('ma-multiplier-slider');
-      if (slider) {
-        slider.value = this.value;
-      }
-      recalculateAllMetrics(form);
-    });
-  }
 
   form.addEventListener('reset', function () {
     _pendingImageData = null;
@@ -1333,9 +1311,6 @@ function recalculateAllMetrics(form) {
 
   var dailyEl = document.getElementById('ma-metric-daily');
   if (dailyEl) { dailyEl.textContent = fmtAmt(dailyRewardPerViewer, 2) + ' MINIMA'; }
-
-  var multiplierDisplay = document.getElementById('ma-multiplier-display');
-  if (multiplierDisplay) { multiplierDisplay.textContent = '×' + multiplier.toFixed(1); }
 
   var pubBudgetEl = document.getElementById('ma-metric-pub-budget');
   if (pubBudgetEl) { pubBudgetEl.textContent = fmtAmt(pubBudgetPool, 2) + ' MINIMA'; }

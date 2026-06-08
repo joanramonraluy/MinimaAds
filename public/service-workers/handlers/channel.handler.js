@@ -1599,6 +1599,7 @@ function swRunSequential(cmds, idx, cb) {
 
 function swWaitForCoin(coinId, maxRetries, delay, cb) {
   var attempts = 0;
+  var actualDelay = delay || 200;
   function check() {
     attempts++;
     MDS.cmd("coins coinid:" + coinId + " relevant:true", function(res) {
@@ -1606,7 +1607,7 @@ function swWaitForCoin(coinId, maxRetries, delay, cb) {
         cb(true);
       } else if (attempts < maxRetries) {
         MDS.log("[CHANNEL] swWaitForCoin: coin not yet visible attempt " + attempts + "/" + maxRetries + " coinId: " + coinId);
-        cb(false);
+        setTimeout(function() { check(); }, actualDelay);
       } else {
         MDS.log("[CHANNEL] swWaitForCoin: coin not found after " + maxRetries + " attempts: " + coinId);
         cb(false);
@@ -1911,7 +1912,7 @@ function swBuildAndPostChannelOpenTx(ctx) {
     return;
   }
 
-  swWaitForCoin(ctx.splitCoinId, 3, 0, function(found) {
+  swWaitForCoin(ctx.splitCoinId, 20, 200, function(found) {
     if (!found) {
       MDS.log("[CHANNEL] swBuildAndPostChannelOpenTx: split coin not indexed. Queuing for NEWBLOCK. campaign: " + ctx.campaignId);
       MDS.keypair.get("PENDING_CHOPEN_QUEUE", function(qRes) {

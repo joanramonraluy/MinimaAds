@@ -1961,6 +1961,20 @@ function onInited() {
     if (!msg || !msg.event) { return; }
     if (msg.event === 'inited') {
       onInited();
+      // Fetch initial block height for the footer
+      MDS.cmd('status', function(res) {
+        if (res && res.status && res.response && res.response.chain) {
+          var blockEl = document.getElementById('ma-footer-block-height');
+          if (blockEl) { blockEl.textContent = '#' + res.response.chain.block; }
+        }
+      });
+      return;
+    }
+    if (msg.event === 'NEWBLOCK') {
+      if (msg.data && msg.data.txpow && msg.data.txpow.header) {
+        var blockEl = document.getElementById('ma-footer-block-height');
+        if (blockEl) { blockEl.textContent = '#' + msg.data.txpow.header.block; }
+      }
       return;
     }
     if (msg.event === 'MDSCOMMS') {

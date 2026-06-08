@@ -46,6 +46,35 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-07 — Collapsible Campaign Cards & Combined Totals
+
+**Task**: Re-architect the campaign cards view in the creator dashboard to make campaign cards and their budget allocation sections collapsible to keep the UI tidy, introduce a "Combined Totals" budget overview, and preserve details open states across page updates.
+
+**Root Cause**: When a creator had multiple campaigns, the dashboard cards took up too much vertical space, showing long configuration tables and dual budget grids. In addition, there was no quick "combined totals" summary grouping general budget metrics, and page refreshes/updates would reset any toggle states.
+
+**Fix**:
+- dapp/views/mycampaigns.js:
+  - Switched the main card element from `<article>` to `<details class="ma-campaign-card-details">`.
+  - Put title, badge, quick stats summary, and action buttons inside the `<summary>` element.
+  - Used `e.stopPropagation()` on the action button click handlers to prevent details toggle when clicking actions.
+  - Put the budget allocation rows and indicators inside a collapsible nested `<details data-details-id="budget-allocation">`.
+  - Added a **"Combined Totals"** row at the top of the budget allocation details body showing aggregated campaign funds (Total Budget, Escrow Left, Locked, Paid).
+  - Modified state saving logic in `loadMyCampaigns` to query all elements matching `[data-campaign-id]` and preserve expanded states of both the campaign details cards and nested details panels using `data-details-id` attribute values.
+  - Replaced the static/non-dynamic "Reward/View" and "Reward/Click" stat cards on the Performance row with dynamic **"Viewers"** and **"Publishers"** counts retrieved via H2 `COUNT(DISTINCT USER_ADDRESS)` and `COUNT(DISTINCT PUBLISHER_ID)` queries from `REWARD_EVENTS`.
+  - Added a collapsible **"Ad Preview"** (`<details data-details-id="ad-preview">`) section which lazily renders the responsive ad banner using the project's standard `renderAd` function once toggled.
+- dapp/views/ui-helpers.js:
+  - Updated `mkStatCard` to use a flex column layout (`display:flex; flex-direction:column;`) and added `margin-top:auto` to the main value element (`val`) to guarantee all numbers align horizontally even if labels wrap on small screens.
+- public/index.html:
+  - Added custom styles for `details.ma-campaign-card-details` to animate open states and render a custom right-aligned chevron arrow indicator.
+
+**AGENTS.md updated**: yes — §6 updated.
+
+**Verification**:
+- `mycampaigns.js` and `ui-helpers.js` compile cleanly with `node -c`.
+- Rebuilt `MinimaAds.mds.zip` and verified files packaged successfully.
+
+---
+
 ### Session: 2026-06-06 — Fix Stale-Pending Publisher Channel Deadlock
 
 **Task**: Publisher rewards from snippets (and built-in frame) not reaching publishers. Diagnosed via `logs/user1.txt`, `logs/user2.txt`, `logs/user4.txt`.
@@ -762,4 +791,76 @@ The remaining DEFERRED state is expected (no open publisher channel yet), not a 
 - Opened DevTools modal (Ctrl+Shift+D) and verified "Register Self Key on Local MLS" button is removed.
 - Verified local and remote execution paths in `service.js` work correctly.
 
+---
 
+### Session: 2026-06-07 — Log Publisher Reward Events & Rename Active Rewards Label
+
+**Task**: 
+- Campaign creator's "Rewarded nodes" screen not showing publisher earnings when they originate from the built-in snippet/viewer frame.
+- Clarify active reward section name in the campaign dashboard to avoid confusion with settled channels.
+
+**Root Cause**: 
+- On the creator's node, the Service Worker only created a `REWARD_EVENTS` row (type `'view'`) when a viewer voucher was signed and posted. It completely skipped generating `publisher_view` reward events when issuing publisher vouchers. Additionally, in `_swDispatchVoucher`, the `rewardAmount` was hardcoded to `0` when the role was `'publisher'`.
+- "Rewarded nodes" label was ambiguous and did not clearly distinguish active, pending-settlement earnings from archived on-chain settled channels.
+
+**Fix**: 
+- In `channel.handler.js`:
+  - Updated `_swDispatchVoucher` to set `rewardAmount` to the campaign's `PUBLISHER_REWARD_VIEW` when the role is `'publisher'`.
+  - In `swSignAndPostChannelTx`'s `sendMaxima` callback, added the path for `role === 'publisher'` to query the active campaign's ad and write a `'publisher_view'` reward event (passing `publisher_id = fid`). This correctly populates `REWARD_EVENTS` and decrements the campaign budget via the local `updateBudget` call in `createRewardEvent`.
+- In `dapp/views/mycampaigns.js`:
+  - Renamed the section heading and comments from "Rewarded nodes" to "Pending settlement".
+  - Renamed empty state and loading texts accordingly to "No pending settlements yet." and "Loading pending settlements…".
+
+**AGENTS.md updated**: yes — §6 updated.
+
+**Verification**:
+- `channel.handler.js` and `mycampaigns.js` compile cleanly with `node -c`.
+
+---
+
+### Session: 2026-06-07 — Detailed Campaign Budget Allocation UI
+
+**Task**: Improve the creator's campaign metrics UI to break down the campaign budget into distinct actionable sections (available in escrow, locked in channels, and settled payouts) and introduce CTR performance tracking.
+
+**Root Cause**: Previously, the campaign cards only showed "Budget left" (which represents the escrow balance), without explaining what was locked in open payment channels or already settled/paid to viewers and publishers. This was confusing because users could not audit the flow of funds or see pending unliquidated channel balances.
+
+**Fix**:
+- dapp/views/mycampaigns.js:
+  - Updated `loadMyCampaigns()`'s SQL query to fetch separate viewer and publisher channel aggregates (`VIEWER_LOCKED`, `VIEWER_UNSETTLED`, `VIEWER_SETTLED`, `PUB_LOCKED`, `PUB_UNSETTLED`, `PUB_SETTLED`, and dynamic `PUB_SPENT_ACTUAL`).
+  - Split the "Budget Allocation" section into two distinct rows: "Budget Allocation (Viewer)" (Available Escrow, Locked in Channels, Settled Paid, Unspent Campaign) and "Budget Allocation (Publisher)" (Max Pub Budget, Budget Reserved, Budget Spent, Budget Left) to organize dynamic runtime fons.
+  - Mobile responsiveness: Switched both rows to responsive CSS Grids (`repeat(auto-fit, minmax(120px, 1fr))`).
+  - Exhausted Publisher Budget Warning: Added a dynamic check so if the remaining publisher budget is lower than a single view's reward rate, the "Budget Left" card values turn red, and the subtext changes to "Exhausted (cannot open)".
+  - Collapsible Campaign Configuration: Added an expandable details block showing static parameters divided into themed sub-sections: General Campaign Data, Reward Viewer, Reward Viewer Limits, and Publisher Rewards & Limits (removing dynamic/runtime publisher stats from this static block).
+  - Periodic Auto-Refresh Removed: Completely eliminated the 30-second interval timer which caused disruptive full-page UI refreshes.
+  - Silent Stateful Update: Added `loadMyCampaigns(isAutoRefresh)` parameter to preserve the open/expanded states of all details blocks before reloading.
+  - Polish: updated progress bar labels and footnotes.
+- dapp/views/creator.js:
+  - Added a descriptive note beneath the "Max publisher budget" input field to explain dynamic runtime budget reservation, payment channels, and tracking.
+- dapp/views/help.js:
+  - Expanded the Creator Help panel with dedicated sections detailing the Viewer and Publisher budget allocation categories.
+- dapp/app.js:
+  - Configured handlers for `NEW_CAMPAIGN`, `CAMPAIGN_UPDATED`, and `REWARD_CONFIRMED` to trigger silent/seamless reloads.
+
+**AGENTS.md updated**: yes — §6 updated.
+
+**Verification**:
+- `mycampaigns.js`, `creator.js`, and `help.js` compile cleanly with `node -c`.
+
+---
+
+### Session: 2026-06-07 — Restore Publisher Frame Historical Earnings
+
+**Task**: Fix publisher frame "Total earned" mismatch in the frames view by reading the values directly from the `TOTAL_EARNED` column of the `FRAMES` table rather than dynamically calculating it from `REWARD_EVENTS`.
+
+**Root Cause**: The previous session modified `listFrames` and `getFrameEarnings` to sum `REWARD_EVENTS` dynamically, which discarded historical earnings that didn't have corresponding `REWARD_EVENTS` entries due to past service worker bugs.
+
+**Fix**:
+- core/frames.js:
+  - Reverted `listFrames` to select `TOTAL_EARNED` directly from the `FRAMES` table without the `REWARD_EVENTS` JOIN.
+  - Reverted `getFrameEarnings` to read `TOTAL_EARNED` from the `FRAMES` table, while keeping a subquery to count events in `REWARD_EVENTS`.
+
+**AGENTS.md updated**: yes — §6 updated.
+
+**Verification**:
+- Checked JS syntax on all modified files with `node -c` (all clean).
+- Rebuilt `MinimaAds.mds.zip` and verified package integrity.

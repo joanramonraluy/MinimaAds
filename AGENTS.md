@@ -176,87 +176,84 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
-### Session: 2026-06-07 — Collapsible Campaign Cards & Combined Totals
+### Session: 2026-06-07 — Normalize Publisher Frame IDs
 
-**Task**: Re-architect the campaign cards view in the creator dashboard to make campaign cards and their budget allocation sections collapsible to keep the UI tidy, introduce a "Combined Totals" budget overview, and preserve details open states across page updates.
+**Task**: Fix publisher frame "Total earned" mismatch and statistics mismatch on creator/publisher nodes by normalizing frame IDs.
 
-**Root Cause**: When a creator had multiple campaigns, the dashboard cards took up too much vertical space, showing long configuration tables and dual budget grids. In addition, there was no quick "combined totals" summary grouping general budget metrics, and page refreshes/updates would reset any toggle states.
+**Root Cause**: In several execution paths, raw public keys (e.g. `0X...`) were not normalized to the prefixed form (`builtin:0X...`), causing database lookups and updates on the `FRAMES` table (which uses prefixed keys) to fail or mapping incorrectly.
 
 **Fix**:
-- dapp/views/mycampaigns.js:
-  - Switched the main card element from `<article>` to `<details class="ma-campaign-card-details">`.
-  - Put title, badge, quick stats summary, and action buttons inside the `<summary>` element.
-  - Used `e.stopPropagation()` on the action button click handlers to prevent details toggle when clicking actions.
-  - Put the budget allocation rows and indicators inside a collapsible nested `<details data-details-id="budget-allocation">`.
-  - Added a **"Combined Totals"** row at the top of the budget allocation details body showing aggregated campaign funds (Total Budget, Escrow Left, Locked, Paid).
-  - Modified state saving logic in `loadMyCampaigns` to query all elements matching `[data-campaign-id]` and preserve expanded states of both the campaign details cards and nested details panels using `data-details-id` attribute values.
-  - Replaced the static/non-dynamic "Reward/View" and "Reward/Click" stat cards on the Performance row with dynamic **"Viewers"** and **"Publishers"** counts retrieved via H2 `COUNT(DISTINCT USER_ADDRESS)` and `COUNT(DISTINCT PUBLISHER_ID)` queries from `REWARD_EVENTS`.
-  - Added a collapsible **"Ad Preview"** (`<details data-details-id="ad-preview">`) section which lazily renders the responsive ad banner using the project's standard `renderAd` function once toggled.
-- dapp/views/ui-helpers.js:
-  - Updated `mkStatCard` to use a flex column layout (`display:flex; flex-direction:column;`) and added `margin-top:auto` to the main value element (`val`) to guarantee all numbers align horizontally even if labels wrap on small screens.
-- public/index.html:
-  - Added custom styles for `details.ma-campaign-card-details` to animate open states and render a custom right-aligned chevron arrow indicator.
+- public/service-workers/handlers/channel.handler.js:
+  - In `handleChannelOpen`: extract and normalize `frame_id` (prefixed with `builtin:` and capitalized) and pass it to `_doChannelOpenUpsert`.
+  - In `_doChannelOpenUpsert`: update the SQL script to save `frameId` to `CHANNEL_STATE.FRAME_ID` instead of an empty string `''`.
+  - In `_continueRewardVoucher`: normalize `frameId` before looking up the frame in `FRAMES` and calling `createRewardEvent`.
+  - In `handlePublisherRewardNotify`: normalize `frame_id` before saving to deferred notifies or looking up channel states.
+  - In `_maybeGeneratePublisherVoucher`: normalize `frameId` and handle `publisherKey` normalization.
+  - In `_doGeneratePublisherVoucher`: normalize `frameId` before using it in any outbound open request, keypair store, or transaction dispatch.
 
 **AGENTS.md updated**: yes — §6 updated.
 
 **Verification**:
-- `mycampaigns.js` and `ui-helpers.js` compile cleanly with `node -c`.
-- Rebuilt `MinimaAds.mds.zip` and verified files packaged successfully.
+- Verified JS syntax using `node -c` (clean).
+- Rebuilt `MinimaAds.mds.zip` and verified package integrity.
 
 ---
 
-### Session: 2026-06-07 — Detailed Campaign Budget Allocation UI
+### Session: 2026-06-07 — Modernize Campaign Creator Layout & Fix Publisher Count
 
-**Task**: Improve the creator's campaign metrics UI to break down the campaign budget into distinct actionable sections (available in escrow, locked in channels, and settled payouts) and introduce CTR performance tracking.
+**Task**: Modernize the campaign creation wizard layout by removing outer panel borders, grouping related settings inside sub-cards, and placing forms and ad preview side-by-side using responsive grids. Also, resolve creator dashboard performance stats mismatch by deduplicating local reward events and normalizing case/empty strings for unique publisher counts.
 
-**Root Cause**: Previously, the campaign cards only showed "Budget left" (which represents the escrow balance), without explaining what was locked in open payment channels or already settled/paid to viewers and publishers. This was confusing because users could not audit the flow of funds or see pending unliquidated channel balances.
+**Root Cause**:
+- Form fields in the wizard were crowded inside single panel cards. Sub-sections had no distinction, and the ad preview took up too much vertical space without desktop-optimized placement.
+- When running creator and viewer/publisher on a single node, duplicate reward events were written. Case differences in publisher Maxima public keys and empty frames also caused `COUNT(DISTINCT)` to return incorrect metrics.
 
 **Fix**:
-- dapp/views/mycampaigns.js:
-  - Updated `loadMyCampaigns()`'s SQL query to fetch separate viewer and publisher channel aggregates (`VIEWER_LOCKED`, `VIEWER_UNSETTLED`, `VIEWER_SETTLED`, `PUB_LOCKED`, `PUB_UNSETTLED`, `PUB_SETTLED`, and dynamic `PUB_SPENT_ACTUAL`).
-  - Split the "Budget Allocation" section into two distinct rows: "Budget Allocation (Viewer)" (Available Escrow, Locked in Channels, Settled Paid, Unspent Campaign) and "Budget Allocation (Publisher)" (Max Pub Budget, Budget Reserved, Budget Spent, Budget Left) to organize dynamic runtime fons.
-  - Mobile responsiveness: Switched both rows to responsive CSS Grids (`repeat(auto-fit, minmax(120px, 1fr))`).
-  - Exhausted Publisher Budget Warning: Added a dynamic check so if the remaining publisher budget is lower than a single view's reward rate, the "Budget Left" card values turn red, and the subtext changes to "Exhausted (cannot open)".
-  - Collapsible Campaign Configuration: Added an expandable details block showing static parameters divided into themed sub-sections: General Campaign Data, Reward Viewer, Reward Viewer Limits, and Publisher Rewards & Limits (removing dynamic/runtime publisher stats from this static block).
-  - Periodic Auto-Refresh Removed: Completely eliminated the 30-second interval timer which caused disruptive full-page UI refreshes.
-  - Silent Stateful Update: Added `loadMyCampaigns(isAutoRefresh)` parameter to preserve the open/expanded states of all details blocks before reloading.
-  - Polish: updated progress bar labels and footnotes.
 - dapp/views/creator.js:
-  - Added a descriptive note beneath the "Max publisher budget" input field to explain dynamic runtime budget reservation, payment channels, and tracking.
-- dapp/views/help.js:
-  - Expanded the Creator Help panel with dedicated sections detailing the Viewer and Publisher budget allocation categories.
-- dapp/app.js:
-  - Configured handlers for `NEW_CAMPAIGN`, `CAMPAIGN_UPDATED`, and `REWARD_CONFIRMED` to trigger silent/seamless reloads.
+  - Removed `.ma-section` card wrapper from outer panels.
+  - Rendered "Add Content" and "Review" sections stacked vertically in a single column.
+  - Wrapped "Budget", "Viewer", and "Publisher" settings inside `.ma-grid-2col` wrappers to arrange forms/notes side-by-side on desktop.
+- public/index.html:
+  - Added CSS grid rules for `.ma-creator-grid`, `.ma-grid-2col`, and sticky sidebars.
+  - Overrode padding for `input[type="file"]` to center-align native browser text/buttons.
+- core/rewards.js:
+  - Added `id` and `timestamp` params support to `createRewardEvent` to enable deterministic event IDs.
+- public/service-workers/handlers/channel.handler.js:
+  - Used `eventId` and `'pub-' + eventId` to set deterministic event IDs, allowing H2 MERGE INTO to deduplicate local database writes.
+  - Added `event_id` payload to `VOUCHER_RECEIVED` signal.
+- sdk/index.js:
+  - Extracted and forwarded `event_id` to `createRewardEvent` on viewer nodes.
+- core/frames.js:
+  - Updated `listFrames` and `getFrameEarnings` to calculate frame earnings dynamically from `REWARD_EVENTS` instead of reading the cached `TOTAL_EARNED` column from the `FRAMES` table.
+- dapp/views/mycampaigns.js:
+  - Updated distinct count to `COUNT(DISTINCT UPPER(re.PUBLISHER_ID))` and added check to skip empty IDs (`AND re.PUBLISHER_ID <> ''`).
 
 **AGENTS.md updated**: yes — §6 updated.
 
 **Verification**:
-- `mycampaigns.js`, `creator.js`, and `help.js` compile cleanly with `node -c`.
+- Checked JS syntax on all modified files with `node -c` (all clean).
+- Rebuilt `MinimaAds.mds.zip` and verified package integrity.
 
 ---
 
-### Session: 2026-06-07 — Log Publisher Reward Events & Rename Active Rewards Label
+### Session: 2026-06-07 — Modernize Side Drawer Menu Footer
 
-**Task**: 
-- Campaign creator's "Rewarded nodes" screen not showing publisher earnings when they originate from the built-in snippet/viewer frame.
-- Clarify active reward section name in the campaign dashboard to avoid confusion with settled channels.
+**Task**: Modernize the side drawer menu footer by adding the DApp name, version, a pulsing connection status badge ("Connected to Minima"), and a dynamic block height tracker.
 
-**Root Cause**: 
-- On the creator's node, the Service Worker only created a `REWARD_EVENTS` row (type `'view'`) when a viewer voucher was signed and posted. It completely skipped generating `publisher_view` reward events when issuing publisher vouchers. Additionally, in `_swDispatchVoucher`, the `rewardAmount` was hardcoded to `0` when the role was `'publisher'`.
-- "Rewarded nodes" label was ambiguous and did not clearly distinguish active, pending-settlement earnings from archived on-chain settled channels.
+**Root Cause**: The side drawer menu had no footer, version indicator, or connection status, which missed an opportunity to display relevant node info and offer a more responsive, premium design.
 
-**Fix**: 
-- In `channel.handler.js`:
-  - Updated `_swDispatchVoucher` to set `rewardAmount` to the campaign's `PUBLISHER_REWARD_VIEW` when the role is `'publisher'`.
-  - In `swSignAndPostChannelTx`'s `sendMaxima` callback, added the path for `role === 'publisher'` to query the active campaign's ad and write a `'publisher_view'` reward event (passing `publisher_id = fid`). This correctly populates `REWARD_EVENTS` and decrements the campaign budget via the local `updateBudget` call in `createRewardEvent`.
-- In `dapp/views/mycampaigns.js`:
-  - Renamed the section heading and comments from "Rewarded nodes" to "Pending settlement".
-  - Renamed empty state and loading texts accordingly to "No pending settlements yet." and "Loading pending settlements…".
+**Fix**:
+- public/index.html:
+  - Modified `#ma-drawer` panel styles to disable global drawer scrolling (`overflow: hidden;`) and enable internal scroll on the menu options section (`overflow-y: auto;`).
+  - Added CSS classes for `.ma-drawer-footer`, `.ma-drawer-footer-title`, `.ma-drawer-version`, `.ma-drawer-status`, `.ma-status-pulse` (with pulsing keyframe animation), and `.ma-drawer-block`.
+  - Added HTML structure for Section 3 (Footer) at the bottom of the drawer.
+- dapp/app.js:
+  - Inside `MDS.init` `inited` handler, added a call to `MDS.cmd('status')` to fetch and display the initial block height (`#ma-footer-block-height`).
+  - Added a `NEWBLOCK` event listener in `MDS.init` callback to dynamically update the block height inside the footer as new blocks are mined.
 
 **AGENTS.md updated**: yes — §6 updated.
 
 **Verification**:
-- `channel.handler.js` and `mycampaigns.js` compile cleanly with `node -c`.
+- `dapp/app.js` compiles cleanly with `node -c`.
 
 ---
 

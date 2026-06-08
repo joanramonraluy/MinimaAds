@@ -340,6 +340,10 @@ function handleChannelOpen(payload) {
   var channelCoinId = payload.channel_coinid;
   var maxAmount     = parseFloat(payload.max_amount) || 0;
   var role          = payload.role || 'viewer';
+  var frameId       = payload.frame_id || '';
+  if (frameId && (frameId.toUpperCase().indexOf('0X') === 0 || frameId.indexOf(':') === -1)) {
+    frameId = 'builtin:' + frameId.toUpperCase();
+  }
   var now           = Date.now();
 
   MDS.keypair.get("CREATOR_MX_" + campaignId, function(kpRes) {
@@ -355,17 +359,17 @@ function handleChannelOpen(payload) {
           MDS.log("[CHANNEL] CHANNEL_OPEN: archiving existing " + existing.STATUS + " channel before new open. campaign: " + campaignId + " old coin: " + existing.CHANNEL_COINID);
           settleChannel(campaignId, viewerKey, role, function(archErr) {
             if (archErr) { MDS.log("[CHANNEL] CHANNEL_OPEN: archive old channel failed (non-fatal): " + archErr); }
-            _doChannelOpenUpsert(campaignId, viewerKey, role, channelCoinId, maxAmount, now, creatorMx, viewerWalletAddr);
+            _doChannelOpenUpsert(campaignId, viewerKey, role, channelCoinId, maxAmount, now, creatorMx, viewerWalletAddr, frameId);
           });
         } else {
-          _doChannelOpenUpsert(campaignId, viewerKey, role, channelCoinId, maxAmount, now, creatorMx, viewerWalletAddr);
+          _doChannelOpenUpsert(campaignId, viewerKey, role, channelCoinId, maxAmount, now, creatorMx, viewerWalletAddr, frameId);
         }
       });
     });
   });
 }
 
-function _doChannelOpenUpsert(campaignId, viewerKey, role, channelCoinId, maxAmount, now, creatorMx, viewerWalletAddr) {
+function _doChannelOpenUpsert(campaignId, viewerKey, role, channelCoinId, maxAmount, now, creatorMx, viewerWalletAddr, frameId) {
       var sql = "MERGE INTO CHANNEL_STATE " +
         "(CAMPAIGN_ID, VIEWER_KEY, ROLE, FRAME_ID, CREATOR_MX, CHANNEL_COINID, MAX_AMOUNT, " +
         "CUMULATIVE_EARNED, LATEST_TX_HEX, STATUS, CREATED_AT, VIEWER_WALLET_ADDR) " +
@@ -373,7 +377,7 @@ function _doChannelOpenUpsert(campaignId, viewerKey, role, channelCoinId, maxAmo
         "'" + escapeSql(campaignId) + "'," +
         "'" + escapeSql(viewerKey) + "'," +
         "'" + escapeSql(role) + "'," +
-        "''," +
+        "'" + escapeSql(frameId || '') + "'," +
         "'" + escapeSql(creatorMx) + "'," +
         "'" + escapeSql(channelCoinId) + "'," +
         maxAmount + "," +
@@ -611,6 +615,9 @@ function _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHe
           MDS.log("[CHANNEL] REWARD_VOUCHER (publisher): no frame_id — cannot create reward event. campaign: " + campaignId);
           return;
         }
+        if (frameId && (frameId.toUpperCase().indexOf('0X') === 0 || frameId.indexOf(':') === -1)) {
+          frameId = 'builtin:' + frameId.toUpperCase();
+        }
         getCampaign(campaignId, function(campErr, campaign) {
           if (campErr || !campaign) {
             MDS.log("[CHANNEL] REWARD_VOUCHER (publisher): campaign not found: " + campaignId);
@@ -628,6 +635,7 @@ function _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHe
               getFrame(frameId, function(frErr, frame) {
                 var userAddr = (frame && frame.PUBLISHER_KEY) ? frame.PUBLISHER_KEY : frameId;
                 var reParams = {
+                  id:           'pub-' + eventId,
                   campaign_id:  campaignId,
                   ad_id:        adId,
                   user_address: userAddr,
@@ -658,12 +666,13 @@ function _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHe
         if (!(delta > 0)) {
           signalFE("VOUCHER_RECEIVED", {
             campaign_id: campaignId,
-            cumulative:  cumulative
+            cumulative:  cumulative,
+            event_id:    eventId
           });
           return;
         }
         var reTimestamp = Date.now();
-        var reId = reTimestamp.toString(16) + '-' + Math.floor(Math.random() * 0xFFFFFFFF).toString(16);
+        var reId = eventId;
         sqlQuery(
           "SELECT ID FROM ADS WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')",
           function(adErr, adRows) {
@@ -704,7 +713,8 @@ function _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHe
                     if (profErr) { MDS.log("[CHANNEL] REWARD_VOUCHER: USER_PROFILE update failed: " + profErr); }
                     signalFE("VOUCHER_RECEIVED", {
                       campaign_id: campaignId,
-                      cumulative:  cumulative
+                      cumulative:  cumulative,
+                      event_id:    eventId
                     });
                   });
                 }
@@ -1086,6 +1096,9 @@ function handlePublisherRewardNotify(payload, senderPk) {
   }
   var campaignId = payload.campaign_id;
   var frameId    = payload.frame_id;
+  if (frameId && (frameId.toUpperCase().indexOf('0X') === 0 || frameId.indexOf(':') === -1)) {
+    frameId = 'builtin:' + frameId.toUpperCase();
+  }
   var creatorKey = senderPk || '';
 
   getCampaign(campaignId, function(err, campaign) {
@@ -1177,6 +1190,15 @@ function _doSendPublisherChannelOpenRequest(campaignId, campaign, frameId, creat
 // ---------------------------------------------------------------------------
 function _maybeGeneratePublisherVoucher(campaignId, frameId, eventId, publisherKey, publisherMx) {
   if (!frameId && !publisherKey) { return; }
+
+  // Normalize frameId
+  var resolvedFrameId = frameId || '';
+  if (!resolvedFrameId && publisherKey) {
+    resolvedFrameId = 'builtin:' + publisherKey.toUpperCase();
+  } else if (resolvedFrameId && (resolvedFrameId.toUpperCase().indexOf('0X') === 0 || resolvedFrameId.indexOf(':') === -1)) {
+    resolvedFrameId = 'builtin:' + resolvedFrameId.toUpperCase();
+  }
+
   if (publisherKey) {
     // Fast path: publisherKey provided directly by viewer snippet — no keypair lookup needed.
     sqlQuery(
@@ -1187,18 +1209,22 @@ function _maybeGeneratePublisherVoucher(campaignId, frameId, eventId, publisherK
       function(err, rows) {
         if (err || !rows || rows.length === 0) {
           MDS.log("[CHANNEL] _maybeGeneratePublisherVoucher: publisher channel not open — DEFERRING. campaign: " + campaignId + " pubKey: " + publisherKey.substring(0, 16) + "...");
-          _deferPublisherReward(campaignId, frameId || publisherKey, eventId, publisherMx || '');
+          _deferPublisherReward(campaignId, resolvedFrameId, eventId, publisherMx || '');
 
-          _notifyPublisherByKey(campaignId, frameId || publisherKey, publisherKey, publisherMx);
+          _notifyPublisherByKey(campaignId, resolvedFrameId, publisherKey, publisherMx);
           return;
         }
-        _doGeneratePublisherVoucher(campaignId, frameId || rows[0].FRAME_ID, eventId, rows[0]);
+        var targetFrameId = resolvedFrameId || rows[0].FRAME_ID;
+        if (targetFrameId && (targetFrameId.toUpperCase().indexOf('0X') === 0 || targetFrameId.indexOf(':') === -1)) {
+          targetFrameId = 'builtin:' + targetFrameId.toUpperCase();
+        }
+        _doGeneratePublisherVoucher(campaignId, targetFrameId, eventId, rows[0]);
       }
     );
     return;
   }
   // Legacy path: no publisherKey — resolve via FRAME_PUBLISHER keypair or FRAME_ID.
-  MDS.keypair.get("FRAME_PUBLISHER_" + frameId, function(kpRes) {
+  MDS.keypair.get("FRAME_PUBLISHER_" + resolvedFrameId, function(kpRes) {
     var kpKey = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : '';
     var sql;
     if (kpKey) {
@@ -1209,7 +1235,7 @@ function _maybeGeneratePublisherVoucher(campaignId, frameId, eventId, publisherK
     } else {
       sql = "SELECT * FROM CHANNEL_STATE WHERE " +
         "UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') AND " +
-        "UPPER(FRAME_ID) = UPPER('" + escapeSql(frameId) + "') AND " +
+        "UPPER(FRAME_ID) = UPPER('" + escapeSql(resolvedFrameId) + "') AND " +
         "ROLE = 'publisher' AND STATUS = 'open'";
     }
     sqlQuery(sql, function(err, rows) {
@@ -1221,18 +1247,22 @@ function _maybeGeneratePublisherVoucher(campaignId, frameId, eventId, publisherK
           "ROLE = 'publisher' AND STATUS = 'open' LIMIT 1",
           function(err2, rows2) {
             if (err2 || !rows2 || rows2.length === 0) {
-              MDS.log("[CHANNEL] _maybeGeneratePublisherVoucher: no open publisher channel — DEFERRING. campaign: " + campaignId + " frame: " + frameId);
-              _deferPublisherReward(campaignId, frameId, eventId, publisherMx || '');
-              _maybeNotifyPublisher(campaignId, frameId);
+              MDS.log("[CHANNEL] _maybeGeneratePublisherVoucher: no open publisher channel — DEFERRING. campaign: " + campaignId + " frame: " + resolvedFrameId);
+              _deferPublisherReward(campaignId, resolvedFrameId, eventId, publisherMx || '');
+              _maybeNotifyPublisher(campaignId, resolvedFrameId);
               return;
             }
-            MDS.log("[CHANNEL] _maybeGeneratePublisherVoucher: fallback to open publisher channel. campaign: " + campaignId + " frame: " + frameId);
-            _doGeneratePublisherVoucher(campaignId, rows2[0].FRAME_ID || frameId, eventId, rows2[0]);
+            MDS.log("[CHANNEL] _maybeGeneratePublisherVoucher: fallback to open publisher channel. campaign: " + campaignId + " frame: " + resolvedFrameId);
+            var targetFrameId = rows2[0].FRAME_ID || resolvedFrameId;
+            if (targetFrameId && (targetFrameId.toUpperCase().indexOf('0X') === 0 || targetFrameId.indexOf(':') === -1)) {
+              targetFrameId = 'builtin:' + targetFrameId.toUpperCase();
+            }
+            _doGeneratePublisherVoucher(campaignId, targetFrameId, eventId, rows2[0]);
           }
         );
         return;
       }
-      _doGeneratePublisherVoucher(campaignId, frameId, eventId, rows[0]);
+      _doGeneratePublisherVoucher(campaignId, resolvedFrameId, eventId, rows[0]);
     });
   });
 }
@@ -1337,6 +1367,9 @@ function _replayDeferredPublisherRewardsNow(campaignId, frameId, rows, pubChanne
 }
 
 function _doGeneratePublisherVoucher(campaignId, frameId, eventId, pubChannel) {
+  if (frameId && (frameId.toUpperCase().indexOf('0X') === 0 || frameId.indexOf(':') === -1)) {
+    frameId = 'builtin:' + frameId.toUpperCase();
+  }
   getCampaign(campaignId, function(err2, campaign) {
     if (err2 || !campaign) { return; }
     var pubReward = parseFloat(campaign.PUBLISHER_REWARD_VIEW) || 0;
@@ -1650,6 +1683,7 @@ function swBuildAndExportVoucherTx(ctx, afterSend) {
                     function(adErr, adRows) {
                       var adId = (adRows && adRows.length > 0) ? adRows[0].ID : '';
                       createRewardEvent({
+                        id:           ctx.eventId,
                         campaign_id:  ctx.campaignId,
                         ad_id:        adId,
                         user_address: ctx.viewerKey,
@@ -1670,6 +1704,7 @@ function swBuildAndExportVoucherTx(ctx, afterSend) {
                     function(adErr, adRows) {
                       var adId = (adRows && adRows.length > 0) ? adRows[0].ID : '';
                       createRewardEvent({
+                        id:           'pub-' + ctx.eventId,
                         campaign_id:  ctx.campaignId,
                         ad_id:        adId,
                         user_address: ctx.viewerKey,

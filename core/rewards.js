@@ -8,8 +8,8 @@ function _generateRewardId() {
 }
 
 function createRewardEvent(params, cb) {
-  var id = _generateRewardId();
-  var timestamp = Date.now();
+  var id = params.id || _generateRewardId();
+  var timestamp = params.timestamp || Date.now();
   var campaignId = params.campaign_id;
   var adId = params.ad_id;
   var userAddress = params.user_address;

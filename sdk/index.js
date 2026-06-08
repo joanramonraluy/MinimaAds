@@ -866,6 +866,7 @@
         }
         _lookupAdId(parsed.campaign_id, function(errAd, adId) {
           var params = {
+            id: parsed.event_id,
             campaign_id: parsed.campaign_id,
             ad_id: adId || '',
             user_address: parsed.viewer_key,

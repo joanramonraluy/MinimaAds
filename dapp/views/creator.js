@@ -246,22 +246,32 @@ function renderCreator(root) {
     + '    </small>'
     + '  </div>'
     + '  <div id="ma-autobalance-metrics" style="display:none;margin-top:1.5rem;padding:1rem;background-color:var(--pico-form-element-focus-border-color,rgba(99,102,241,0.08));border-radius:0.5rem;border-left:4px solid var(--pico-primary,#6366f1);">'
-    + '    <strong style="display:block;margin-bottom:0.5rem;">Estimated metrics</strong>'
-    + '    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;font-size:0.9rem;">'
-    + '      <div><small style="color:var(--pico-muted-color);">Max viewers</small><br><strong id="ma-metric-viewers">—</strong></div>'
-    + '      <div><small style="color:var(--pico-muted-color);">Daily reward/viewer</small><br><strong id="ma-metric-daily">—</strong></div>'
-    + '      <div><small style="color:var(--pico-muted-color);">Max reach (×1)</small><br><input type="number" id="ma-metric-maxreach" min="1" step="1" value="666" style="width:100%;margin:0;padding:0.3rem;font-weight:600;font-size:0.9rem;"></div>'
-    + '      <div><small style="color:var(--pico-muted-color);">Total cost (+fee)</small><br><strong id="ma-metric-cost">—</strong></div>'
+    + '    <strong style="display:block;margin-bottom:1rem;">Estimated metrics</strong>'
+    + '    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1rem;margin-bottom:1.5rem;">'
+    + '      <div><small style="color:var(--pico-muted-color);display:block;margin-bottom:0.3rem;">Max viewers</small><strong id="ma-metric-viewers" style="font-size:1.1rem;">—</strong></div>'
+    + '      <div><small style="color:var(--pico-muted-color);display:block;margin-bottom:0.3rem;">Daily reward/viewer</small><strong id="ma-metric-daily" style="font-size:1.1rem;">—</strong></div>'
+    + '      <div><small style="color:var(--pico-muted-color);display:block;margin-bottom:0.3rem;">Multiplier</small><input type="range" name="multiplier" id="ma-multiplier-slider" min="1" max="10" step="0.1" value="2" style="width:100%;margin:0;padding:0;"> <strong id="ma-multiplier-display" style="display:block;margin-top:0.3rem;font-size:0.95rem;">×2.0</strong></div>'
+    + '      <div><small style="color:var(--pico-muted-color);display:block;margin-bottom:0.3rem;">Pub budget pool</small><strong id="ma-metric-pub-budget" style="font-size:1.1rem;">—</strong></div>'
     + '    </div>'
-    + '    <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--pico-muted-border-color,#e0e0e0);">'
-    + '      <small style="color:var(--pico-muted-color);display:block;margin-bottom:0.3rem;">Publishers (estimate):</small>'
-    + '      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">'
-    + '        <button type="button" class="ma-pub-est" data-publishers="5" style="font-size:0.85rem;padding:0.3rem 0.6rem;margin:0;">5</button>'
-    + '        <button type="button" class="ma-pub-est" data-publishers="10" style="font-size:0.85rem;padding:0.3rem 0.6rem;margin:0;">10</button>'
-    + '        <button type="button" class="ma-pub-est" data-publishers="25" style="font-size:0.85rem;padding:0.3rem 0.6rem;margin:0;">25</button>'
-    + '        <button type="button" class="ma-pub-est" data-publishers="50" style="font-size:0.85rem;padding:0.3rem 0.6rem;margin:0;">50</button>'
+    + '    <div style="padding:0.75rem;background:rgba(0,0,0,0.02);border-radius:0.375rem;margin-bottom:1rem;">'
+    + '      <small style="color:var(--pico-muted-color);display:block;margin-bottom:0.3rem;">Per-viewer channel max</small>'
+    + '      <strong id="ma-metric-channel-max" style="font-size:1rem;">—</strong>'
+    + '    </div>'
+    + '    <div style="border-top:1px solid var(--pico-muted-border-color,#e0e0e0);padding-top:1rem;">'
+    + '      <small style="color:var(--pico-muted-color);display:block;margin-bottom:0.5rem;"><strong>Publishers (estimate):</strong></small>'
+    + '      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.75rem;">'
+    + '        <button type="button" class="ma-pub-est" data-publishers="5" style="font-size:0.85rem;padding:0.4rem 0.7rem;margin:0;border-radius:0.375rem;">5</button>'
+    + '        <button type="button" class="ma-pub-est" data-publishers="10" style="font-size:0.85rem;padding:0.4rem 0.7rem;margin:0;border-radius:0.375rem;">10</button>'
+    + '        <button type="button" class="ma-pub-est" data-publishers="25" style="font-size:0.85rem;padding:0.4rem 0.7rem;margin:0;border-radius:0.375rem;">25</button>'
+    + '        <button type="button" class="ma-pub-est" data-publishers="50" style="font-size:0.85rem;padding:0.4rem 0.7rem;margin:0;border-radius:0.375rem;">50</button>'
     + '      </div>'
-    + '      <small id="ma-pub-est-display" style="display:block;margin-top:0.5rem;color:var(--pico-muted-color);"></small>'
+    + '      <div id="ma-pub-est-display" style="display:block;font-size:0.9rem;color:var(--pico-color);"></div>'
+    + '    </div>'
+    + '    <div style="border-top:1px solid var(--pico-muted-border-color,#e0e0e0);padding-top:1rem;margin-top:1rem;">'
+    + '      <div style="display:flex;justify-content:space-between;align-items:baseline;">'
+    + '        <small style="color:var(--pico-muted-color);">Total cost (w/ 6% fee)</small>'
+    + '        <strong id="ma-metric-cost" style="font-size:1.1rem;color:var(--pico-primary,#6366f1);">—</strong>'
+    + '      </div>'
     + '    </div>'
     + '  </div>'
     + '</div>'
@@ -343,8 +353,18 @@ function renderCreator(root) {
 
   setupCreatorTabs(form);
   form.addEventListener('submit', onCreatorSubmit);
-  form.addEventListener('input', onCreatorFormInput);
-  form.addEventListener('change', onCreatorFormChange);
+  form.addEventListener('input', function(e) {
+    onCreatorFormInput(e);
+    if (['budget', 'campaign_days', 'multiplier'].includes(e.target.name)) {
+      recalculateAllMetrics(form);
+    }
+  });
+  form.addEventListener('change', function(e) {
+    onCreatorFormChange(e);
+    if (e.target.name === 'auto_balance') {
+      recalculateAllMetrics(form);
+    }
+  });
   var budgetInput = form.querySelector('[name="budget"]');
   budgetInput.addEventListener('focus', function () {
     var thouSep = window.NUMFMT === 'EU' ? '.' : ',';
@@ -372,15 +392,16 @@ function renderCreator(root) {
         e.preventDefault();
         pubEstButtons.forEach(function(b) { b.style.fontWeight = '400'; });
         this.style.fontWeight = '600';
-        updateMetricsFromMaxReach(form);
+        recalculateAllMetrics(form);
       });
     });
   }
 
-  var maxReachInput = document.getElementById('ma-metric-maxreach');
-  if (maxReachInput) {
-    maxReachInput.addEventListener('input', function() {
-      updateMetricsFromMaxReach(form);
+  var multiplierSlider = document.getElementById('ma-multiplier-slider');
+  if (multiplierSlider) {
+    multiplierSlider.addEventListener('input', function() {
+      form.querySelector('[name="multiplier"]').value = this.value;
+      recalculateAllMetrics(form);
     });
   }
 
@@ -1251,35 +1272,81 @@ function updateAutoBalanceMetricsDisplay(form) {
   if (pubEstDisplay) { pubEstDisplay.innerHTML = ''; }
 }
 
-function updateMetricsFromMaxReach(form) {
-  var maxReachInput = document.getElementById('ma-metric-maxreach');
-  var maxReachValue = parseInt(maxReachInput.value, 10);
-  if (!isFinite(maxReachValue) || maxReachValue <= 0) { return; }
+function recalculateAllMetrics(form) {
+  var autoBalanceCheckbox = form.querySelector('[name="auto_balance"]');
+  var metricsPanel = document.getElementById('ma-autobalance-metrics');
 
-  var metrics = calculateAutoBalanceMetrics(form);
-  if (!metrics) { return; }
+  if (!autoBalanceCheckbox.checked) {
+    if (metricsPanel) { metricsPanel.style.display = 'none'; }
+    return;
+  }
+
+  if (metricsPanel) { metricsPanel.style.display = 'block'; }
+
+  var budget = parseAmt(form.querySelector('[name="budget"]').value) || 0;
+  var campaignDays = parseInt(form.querySelector('[name="campaign_days"]').value, 10) || 7;
+  var multiplier = parseFloat(form.querySelector('[name="multiplier"]').value) || AUTO_BALANCE_CONFIG.MULTIPLIER_DEFAULT;
+
+  if (multiplier < AUTO_BALANCE_CONFIG.MULTIPLIER_MIN) { multiplier = AUTO_BALANCE_CONFIG.MULTIPLIER_MIN; }
+  if (multiplier > AUTO_BALANCE_CONFIG.MULTIPLIER_MAX) { multiplier = AUTO_BALANCE_CONFIG.MULTIPLIER_MAX; }
+
+  var defaults = getAutoBalanceDefaults(budget);
+  var rewardView = defaults.reward_view;
+  var rewardClick = defaults.reward_click;
+
+  var maxViewerReward = (rewardView + rewardClick) * multiplier;
+  var perViewerChannelMax = (rewardView + rewardClick) * campaignDays;
+  var pubBudgetPool = budget * AUTO_BALANCE_CONFIG.PUBLISHER_BUDGET_RATIO;
+  var budgetForViewers = budget - pubBudgetPool;
+  var maxViewers = Math.floor(budgetForViewers / perViewerChannelMax);
+  var dailyRewardPerViewer = (rewardView * 100) + (rewardClick * 100);
+  var publisherRewardView = (rewardView + rewardClick) * AUTO_BALANCE_CONFIG.PUBLISHER_REWARD_RATIO;
+  var totalCostWithFee = budget * (1 + PLATFORM_FEE_RATE);
+
+  form.querySelector('[name="reward_view"]').value = fmtAmt(rewardView, 6);
+  form.querySelector('[name="reward_click"]').value = fmtAmt(rewardClick, 6);
+  form.querySelector('[name="max_viewer_reward"]').value = fmtAmt(maxViewerReward, 6);
+  form.querySelector('[name="max_publisher_budget"]').value = fmtAmt(pubBudgetPool, 6);
+  form.querySelector('[name="publisher_reward_view"]').value = fmtAmt(publisherRewardView, 6);
 
   var viewersEl = document.getElementById('ma-metric-viewers');
-  var pubEstDisplay = document.getElementById('ma-pub-est-display');
-  var minCap = metrics.reward_view + metrics.reward_click;
+  if (viewersEl) { viewersEl.textContent = maxViewers.toLocaleString() + ' (est.)'; }
 
-  var impliedMultiplier = maxReachValue / (metrics.max_publisher_budget / minCap);
-  var newMaxViewers = Math.floor(metrics.max_viewers * impliedMultiplier);
+  var dailyEl = document.getElementById('ma-metric-daily');
+  if (dailyEl) { dailyEl.textContent = fmtAmt(dailyRewardPerViewer, 2) + ' MINIMA'; }
 
-  if (viewersEl) { viewersEl.textContent = newMaxViewers.toLocaleString() + ' viewers'; }
+  var multiplierDisplay = document.getElementById('ma-multiplier-display');
+  if (multiplierDisplay) { multiplierDisplay.textContent = '×' + multiplier.toFixed(1); }
 
-  var selectedPubBtn = document.querySelector('.ma-pub-est[style*="font-weight: 600"]');
-  if (selectedPubBtn && pubEstDisplay) {
+  var pubBudgetEl = document.getElementById('ma-metric-pub-budget');
+  if (pubBudgetEl) { pubBudgetEl.textContent = fmtAmt(pubBudgetPool, 2) + ' MINIMA'; }
+
+  var channelMaxEl = document.getElementById('ma-metric-channel-max');
+  if (channelMaxEl) { channelMaxEl.textContent = fmtAmt(perViewerChannelMax, 2) + ' MINIMA'; }
+
+  var costEl = document.getElementById('ma-metric-cost');
+  if (costEl) { costEl.textContent = fmtAmt(totalCostWithFee, 2) + ' MINIMA'; }
+
+  var selectedPubBtn = document.querySelector('.ma-pub-est[style*="font-weight"]');
+  if (selectedPubBtn) {
     var numPublishers = parseInt(selectedPubBtn.dataset.publishers, 10);
-    var budgetPerPublisher = metrics.max_publisher_budget / numPublishers;
-    var viewsPerPublisher = Math.floor(budgetPerPublisher / metrics.publisher_reward_view);
+    var budgetPerPublisher = pubBudgetPool / numPublishers;
+    var viewsPerPublisher = Math.floor(budgetPerPublisher / publisherRewardView);
     var totalPublisherViews = viewsPerPublisher * numPublishers;
-    var totalReach = newMaxViewers + totalPublisherViews;
+    var totalReach = maxViewers + totalPublisherViews;
 
-    pubEstDisplay.innerHTML = '<strong style="display:block;margin-bottom:0.3rem;">' + numPublishers + ' publishers:</strong>'
-      + '<span style="display:block;font-size:0.85rem;margin-bottom:0.2rem;">' + fmtAmt(budgetPerPublisher, 2) + ' MINIMA/pub &middot; ' + viewsPerPublisher.toLocaleString() + ' views/pub</span>'
-      + '<span style="display:block;font-size:0.85rem;margin-bottom:0.2rem;color:var(--pico-muted-color);">' + totalPublisherViews.toLocaleString() + ' publisher views</span>'
-      + '<span style="display:block;font-weight:600;color:var(--pico-primary,#6366f1);margin-top:0.3rem;">' + newMaxViewers.toLocaleString() + ' viewers + ' + totalPublisherViews.toLocaleString() + ' pub = ' + totalReach.toLocaleString() + ' total reach</span>';
+    var pubEstDisplay = document.getElementById('ma-pub-est-display');
+    if (pubEstDisplay) {
+      pubEstDisplay.innerHTML =
+        '<strong style="display:block;margin-bottom:0.3rem;">' + numPublishers + ' publishers:</strong>'
+        + '<span style="display:block;font-size:0.85rem;margin-bottom:0.2rem;">'
+        + fmtAmt(budgetPerPublisher, 2) + ' MINIMA/pub &middot; ' + viewsPerPublisher.toLocaleString() + ' views/pub</span>'
+        + '<span style="display:block;font-size:0.85rem;margin-bottom:0.2rem;color:var(--pico-muted-color);">'
+        + totalPublisherViews.toLocaleString() + ' publisher views</span>'
+        + '<span style="display:block;font-weight:600;color:var(--pico-primary,#6366f1);margin-top:0.3rem;">'
+        + maxViewers.toLocaleString() + ' viewers + ' + totalPublisherViews.toLocaleString() + ' pub = '
+        + totalReach.toLocaleString() + ' total reach</span>';
+    }
   }
 }
 

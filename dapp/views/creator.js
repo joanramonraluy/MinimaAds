@@ -248,7 +248,11 @@ function renderCreator(root) {
     + '  <div id="ma-autobalance-metrics" style="display:none;margin-top:1.5rem;padding:1rem;background-color:var(--pico-form-element-focus-border-color,rgba(99,102,241,0.08));border-radius:0.5rem;border-left:4px solid var(--pico-primary,#6366f1);">'
     + '    <strong style="display:block;margin-bottom:1rem;">Estimated metrics</strong>'
     + '    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1rem;margin-bottom:1.5rem;">'
-    + '      <div><small style="color:var(--pico-muted-color);display:block;margin-bottom:0.3rem;">Max viewers</small><strong id="ma-metric-viewers" style="font-size:1.1rem;">—</strong></div>'
+    + '      <div>'
+    + '        <small style="color:var(--pico-muted-color);display:block;margin-bottom:0.3rem;">Max viewers</small>'
+    + '        <strong id="ma-metric-viewers" style="font-size:1.1rem;">—</strong>'
+    + '        <small id="ma-metric-viewers-calc" style="display:block;margin-top:0.25rem;font-size:0.7rem;color:var(--pico-muted-color);font-family:monospace;">—</small>'
+    + '      </div>'
     + '      <div><small style="color:var(--pico-muted-color);display:block;margin-bottom:0.3rem;">Daily reward/viewer</small><strong id="ma-metric-daily" style="font-size:1.1rem;">—</strong></div>'
     + '      <div><small style="color:var(--pico-muted-color);display:block;margin-bottom:0.3rem;">Total for publishers</small><strong id="ma-metric-pub-budget" style="font-size:1.1rem;">—</strong></div>'
     + '    </div>'
@@ -1321,6 +1325,7 @@ function recalculateAllMetrics(form) {
   form.querySelector('[name="publisher_reward_view"]').value = fmtAmt(publisherRewardView, 6);
 
   var viewersEl = document.getElementById('ma-metric-viewers');
+  var viewersCalcEl = document.getElementById('ma-metric-viewers-calc');
   if (viewersEl) {
     viewersEl.textContent = Math.abs(maxViewers).toLocaleString() + ' (est.)';
     if (maxViewers < 0) {
@@ -1328,6 +1333,9 @@ function recalculateAllMetrics(form) {
     } else {
       viewersEl.style.color = '';
     }
+  }
+  if (viewersCalcEl) {
+    viewersCalcEl.textContent = viewerChannels.toLocaleString() + ' − ' + publisherChannels.toLocaleString() + ' = ' + maxViewers.toLocaleString();
   }
 
   var dailyEl = document.getElementById('ma-metric-daily');

@@ -916,8 +916,26 @@ function _retryPendingChOpen(queue, i, remaining, deferred) {
       deferred.push({ __kind: 'open', ctx: ctx });
       _retryPendingChOpen(queue, i + 1, remaining, deferred);
     } else {
-      remaining.push(ctx);
-      _retryPendingChOpen(queue, i + 1, remaining, deferred);
+      // Split coin not found — increment retry count. If it's been missing
+      // for 20+ blocks the split tx was likely rejected by peers; clear
+      // SPLIT_COINID from CHANNEL_STATE and retry Tx1 on next CHANNEL_OPEN_REQUEST.
+      var retries = (ctx.splitRetries || 0) + 1;
+      if (retries >= 20) {
+        MDS.log("[CHANNEL] checkPendingChannelOpens: split coin absent after 20 blocks — clearing stale SPLIT_COINID. campaign: " + ctx.campaignId);
+        sqlQuery(
+          "UPDATE CHANNEL_STATE SET SPLIT_COINID = '', STATUS = 'pending'" +
+          " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(ctx.campaignId) + "')" +
+          " AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(ctx.viewerKey || '') + "')" +
+          " AND UPPER(ROLE) = UPPER('" + escapeSql(ctx.role || 'viewer') + "')",
+          function() {}
+        );
+        // Drop from queue — next CHANNEL_OPEN_REQUEST will trigger fresh Tx1.
+        _retryPendingChOpen(queue, i + 1, remaining, deferred);
+      } else {
+        ctx.splitRetries = retries;
+        remaining.push(ctx);
+        _retryPendingChOpen(queue, i + 1, remaining, deferred);
+      }
     }
   });
 }

@@ -390,8 +390,13 @@ function renderCreator(root) {
     pubEstButtons.forEach(function(btn) {
       btn.addEventListener('click', function(e) {
         e.preventDefault();
-        pubEstButtons.forEach(function(b) { b.style.fontWeight = '400'; });
+        pubEstButtons.forEach(function(b) {
+          b.classList.remove('ma-pub-est-active');
+          b.style.fontWeight = '400';
+        });
+        this.classList.add('ma-pub-est-active');
         this.style.fontWeight = '600';
+        console.log('Publisher button clicked:', this.dataset.publishers);
         recalculateAllMetrics(form);
       });
     });
@@ -1341,25 +1346,27 @@ function recalculateAllMetrics(form) {
   var costEl = document.getElementById('ma-metric-cost');
   if (costEl) { costEl.textContent = fmtAmt(totalCostWithFee, 2) + ' MINIMA'; }
 
-  var selectedPubBtn = document.querySelector('.ma-pub-est[style*="font-weight"]');
+  var selectedPubBtn = form.querySelector('.ma-pub-est.ma-pub-est-active');
   if (selectedPubBtn) {
     var numPublishers = parseInt(selectedPubBtn.dataset.publishers, 10);
-    var budgetPerPublisher = pubBudgetPool / numPublishers;
-    var viewsPerPublisher = Math.floor(budgetPerPublisher / publisherRewardView);
-    var totalPublisherViews = viewsPerPublisher * numPublishers;
-    var totalReach = maxViewers + totalPublisherViews;
+    if (isFinite(numPublishers) && numPublishers > 0) {
+      var budgetPerPublisher = pubBudgetPool / numPublishers;
+      var viewsPerPublisher = publisherRewardView > 0 ? Math.floor(budgetPerPublisher / publisherRewardView) : 0;
+      var totalPublisherViews = viewsPerPublisher * numPublishers;
+      var totalReach = maxViewers + totalPublisherViews;
 
-    var pubEstDisplay = document.getElementById('ma-pub-est-display');
-    if (pubEstDisplay) {
-      pubEstDisplay.innerHTML =
-        '<strong style="display:block;margin-bottom:0.3rem;">' + numPublishers + ' publishers:</strong>'
-        + '<span style="display:block;font-size:0.85rem;margin-bottom:0.2rem;">'
-        + fmtAmt(budgetPerPublisher, 2) + ' MINIMA/pub &middot; ' + viewsPerPublisher.toLocaleString() + ' views/pub</span>'
-        + '<span style="display:block;font-size:0.85rem;margin-bottom:0.2rem;color:var(--pico-muted-color);">'
-        + totalPublisherViews.toLocaleString() + ' publisher views</span>'
-        + '<span style="display:block;font-weight:600;color:var(--pico-primary,#6366f1);margin-top:0.3rem;">'
-        + maxViewers.toLocaleString() + ' viewers + ' + totalPublisherViews.toLocaleString() + ' pub = '
-        + totalReach.toLocaleString() + ' total reach</span>';
+      var pubEstDisplay = document.getElementById('ma-pub-est-display');
+      if (pubEstDisplay) {
+        pubEstDisplay.innerHTML =
+          '<strong style="display:block;margin-bottom:0.3rem;">' + numPublishers + ' publishers:</strong>'
+          + '<span style="display:block;font-size:0.85rem;margin-bottom:0.2rem;">'
+          + fmtAmt(budgetPerPublisher, 2) + ' MINIMA/pub &middot; ' + viewsPerPublisher.toLocaleString() + ' views/pub</span>'
+          + '<span style="display:block;font-size:0.85rem;margin-bottom:0.2rem;color:var(--pico-muted-color);">'
+          + totalPublisherViews.toLocaleString() + ' publisher views</span>'
+          + '<span style="display:block;font-weight:600;color:var(--pico-primary,#6366f1);margin-top:0.3rem;">'
+          + maxViewers.toLocaleString() + ' viewers + ' + totalPublisherViews.toLocaleString() + ' pub = '
+          + totalReach.toLocaleString() + ' total reach</span>';
+      }
     }
   }
 }

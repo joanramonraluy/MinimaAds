@@ -1744,7 +1744,7 @@ function swBuildAndPostChannelTx(ctx) {
 
 function _swBuildAndPostChannelTxInner(ctx, txId, campaignHex, contactForState4) {
   var creatorMxHex = "0x" + utf8ToHex(contactForState4).toUpperCase();
-  var escrowAddrFallback = ESCROW_ADDRESS_V3 || ESCROW_ADDRESS;
+  var escrowAddrFallback = ESCROW_ADDRESS_V4 || ESCROW_ADDRESS_V3 || ESCROW_ADDRESS;
 
   function fail(stage) {
     MDS.log("[CHANNEL] swBuildAndPostChannelTx failed at " + stage + " campaign: " + ctx.campaignId);
@@ -1771,9 +1771,15 @@ function _swBuildAndPostChannelTxInner(ctx, txId, campaignHex, contactForState4)
       }
 
       // Use the coin's actual on-chain address so VERIFYOUT(@ADDRESS) passes
-      // regardless of escrow script version (V1/V2/V3).
+      // regardless of escrow script version (V3/V4).
       var coinAddr = escrowAddrFallback;
-      try { coinAddr = r2.response.transaction.inputs[0].address || escrowAddrFallback; } catch(e) {}
+      try {
+        var inputAddr = r2.response.transaction.inputs[0].address;
+        coinAddr = inputAddr || escrowAddrFallback;
+        MDS.log("[CHANNEL] split coinAddr: " + (coinAddr ? coinAddr.substring(0, 10) + "..." : "EMPTY") + " from_input=" + (inputAddr ? "yes" : "NO_FALLBACK"));
+      } catch(e) {
+        MDS.log("[CHANNEL] split coinAddr try failed: " + e + " using fallback: " + (escrowAddrFallback ? escrowAddrFallback.substring(0, 10) + "..." : "NONE"));
+      }
 
       // Carry forward ports 5 (platformKey), 6 (maxPubBudget), 7 (status) so
       // ESCROW_SCRIPT_V3's top-level PREVSTATE reads don't throw on next spend.

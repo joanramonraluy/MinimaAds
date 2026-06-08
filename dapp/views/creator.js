@@ -16,6 +16,9 @@ var BLOCKS_PER_DAY = 1728;
 // Platform fee rate — MinimaAds.md §6.1 (F = 0.06).
 var PLATFORM_FEE_RATE = 0.06;
 
+// Minima Foundation fee rate — applied in parallel to the platform fee (F = 0.03).
+var FOUNDATION_FEE_RATE = 0.03;
+
 // Auto-balance configuration
 var AUTO_BALANCE_CONFIG = {
   REWARD_RATIO_CLICK_TO_VIEW: 2.0,
@@ -255,8 +258,16 @@ function renderCreator(root) {
     + '      <div id="ma-pub-est-display" style="display:block;font-size:0.9rem;color:var(--pico-color);"></div>'
     + '    </div>'
     + '    <div style="border-top:1px solid var(--pico-muted-border-color,#e0e0e0);padding-top:1rem;margin-top:1rem;">'
+    + '      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:0.25rem;">'
+    + '        <small style="color:var(--pico-muted-color);">Platform fee (6%)</small>'
+    + '        <small id="ma-metric-platform-fee" style="color:var(--pico-muted-color);">—</small>'
+    + '      </div>'
+    + '      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:0.5rem;">'
+    + '        <small style="color:var(--pico-muted-color);">Minima Foundation fee (3%)</small>'
+    + '        <small id="ma-metric-foundation-fee" style="color:var(--pico-muted-color);">—</small>'
+    + '      </div>'
     + '      <div style="display:flex;justify-content:space-between;align-items:baseline;">'
-    + '        <small style="color:var(--pico-muted-color);">Total cost (w/ 6% fee)</small>'
+    + '        <small style="color:var(--pico-muted-color);">Total cost</small>'
     + '        <strong id="ma-metric-cost" style="font-size:1.1rem;color:var(--pico-primary,#6366f1);">—</strong>'
     + '      </div>'
     + '    </div>'
@@ -1178,7 +1189,7 @@ function recalculateAllMetrics(form) {
   var rewardClick = parseAmt(form.querySelector('[name="reward_click"]').value) || 0;
   var maxViewerReward = parseAmt(form.querySelector('[name="max_viewer_reward"]').value) || 0;
   var publisherRewardView = parseAmt(form.querySelector('[name="publisher_reward_view"]').value) || 0;
-  var totalCostWithFee = budget * (1 + PLATFORM_FEE_RATE);
+  var totalCostWithFee = budget * (1 + PLATFORM_FEE_RATE + FOUNDATION_FEE_RATE);
 
   var BUDGET_PER_PUBLISHER = 10;
   var selectedPubBtn = form.querySelector('.ma-pub-est.ma-pub-est-active');
@@ -1203,6 +1214,10 @@ function recalculateAllMetrics(form) {
   var channelMaxEl = document.getElementById('ma-metric-channel-max');
   if (channelMaxEl) { channelMaxEl.textContent = fmtAmt(maxViewerReward, 2) + ' MINIMA'; }
 
+  var platformFeeEl = document.getElementById('ma-metric-platform-fee');
+  if (platformFeeEl) { platformFeeEl.textContent = fmtAmt(budget * PLATFORM_FEE_RATE, 2) + ' MINIMA'; }
+  var foundationFeeEl = document.getElementById('ma-metric-foundation-fee');
+  if (foundationFeeEl) { foundationFeeEl.textContent = fmtAmt(budget * FOUNDATION_FEE_RATE, 2) + ' MINIMA'; }
   var costEl = document.getElementById('ma-metric-cost');
   if (costEl) { costEl.textContent = fmtAmt(totalCostWithFee, 2) + ' MINIMA'; }
 
@@ -1246,30 +1261,33 @@ function updateCampaignSummary(form) {
   var publisherRv = pubRvInput ? (parseAmt(pubRvInput.value) || 0) : 0;
   var maxPubBudget = pubBudgInput ? (parseAmt(pubBudgInput.value) || 0) : 0;
 
-  var maxViewers = Math.floor(budget / cap);
+  var budgetForViewers = budget - maxPubBudget;
+  var maxViewers = cap > 0 ? Math.floor(budgetForViewers / cap) : 0;
   var platformFee = budget * PLATFORM_FEE_RATE;
-  var totalCost = budget + platformFee;
+  var foundationFee = budget * FOUNDATION_FEE_RATE;
+  var totalCost = budget + platformFee + foundationFee;
 
   // ── Reach estimate → Review panel only ───────────────────────────────
   if (reachReviewEl) {
-    var warningHtml = maxViewers === 0
+    var warningHtml = maxViewers <= 0
       ? '<p class="ma-summary-warning">No viewer can be rewarded with these settings.'
-      + ' Increase the budget or reduce the cap per viewer.</p>'
-      : '';
-    var singleInteraction = rewardView + rewardClick;
-    var interactionNote = (isFinite(singleInteraction) && singleInteraction > 0 && cap < singleInteraction)
-      ? '<li><small>Cap is below a single view + click (' + formatMinima(singleInteraction)
-      + ' MINIMA) — viewers earn partial rewards per interaction.</small></li>'
+      + ' Increase the budget or reduce the channel max per viewer.</p>'
       : '';
     var reachHtml = '<div class="ma-summary-box">'
       + warningHtml
       + '<strong>Campaign reach estimate</strong>'
       + '<ul>'
-      + '<li>Max reward per viewer: ' + formatMinima(cap) + ' MINIMA</li>'
-      + '<li>Max viewers that can be rewarded: <strong>' + maxViewers.toLocaleString() + '</strong></li>'
-      + interactionNote
+      + '<li>Max viewers: <strong>' + maxViewers.toLocaleString() + '</strong></li>'
+      + '<li>Channel max / viewer: ' + formatMinima(cap) + ' MINIMA</li>'
+      + '<li>Reward / view (viewer): ' + formatMinima(rewardView) + ' MINIMA</li>'
+      + '<li>Reward / click (viewer): ' + formatMinima(rewardClick) + ' MINIMA</li>'
+      + (maxPubBudget > 0
+        ? '<li>Channel max / publisher: ' + formatMinima(maxPubBudget) + ' MINIMA</li>'
+        : '')
+      + (publisherRv > 0
+        ? '<li>Reward / view (publisher): ' + formatMinima(publisherRv) + ' MINIMA</li>'
+        : '')
       + '</ul>'
-      + '<small class="ma-cap-auto">This estimate depends on the parameters configured in Viewer Rewards and Publisher Rewards.</small>'
       + '</div>';
     if (reachReviewEl) { reachReviewEl.innerHTML = reachHtml; }
   }
@@ -1281,10 +1299,7 @@ function updateCampaignSummary(form) {
       + '<ul>'
       + '<li>Budget: ' + formatMinima(budget) + ' MINIMA</li>'
       + '<li>Platform fee (6%): ' + formatMinima(platformFee) + ' MINIMA</li>'
-      + (publisherRv > 0
-        ? '<li>Publisher reward/view: ' + formatMinima(publisherRv) + ' MINIMA'
-        + ' &middot; max budget: ' + formatMinima(maxPubBudget) + ' MINIMA</li>'
-        : '')
+      + '<li>Minima Foundation fee (3%): ' + formatMinima(foundationFee) + ' MINIMA</li>'
       + '<li>Total cost: <strong>' + formatMinima(totalCost) + ' MINIMA</strong></li>'
       + '</ul>'
       + '</div>';
@@ -1504,12 +1519,72 @@ var ESCROW_SCRIPT_V3 =
   "ENDIF " +
   "RETURN TRUE";
 
+// V4 — adds the Minima Foundation fee branch. FOUNDATION_KEY at PREVSTATE(6),
+// foundation fee amount at STATE(14), foundation fee output index at STATE(15),
+// foundation fee flag at STATE(16). Byte-identical to the SW constant in service.js.
+// Used when FOUNDATION_KEY is set; V3 remains for existing campaigns.
+// See MinimaAds.md §B.2.2.
+var ESCROW_SCRIPT_V4 =
+  "LET creatorkey=PREVSTATE(1) " +
+  "LET platformkey=PREVSTATE(5) " +
+  "LET foundationkey=PREVSTATE(6) " +
+  "LET status=PREVSTATE(7) " +
+  "ASSERT SIGNEDBY(creatorkey) " +
+  "LET payout=STATE(10) " +
+  "LET feeflag=STATE(11) " +
+  "LET foundationfeeflag=STATE(16) " +
+  "LET change=@AMOUNT-payout " +
+  "IF feeflag EQ 1 THEN " +
+  "LET feeamount=STATE(12) " +
+  "ASSERT VERIFYOUT(STATE(13) platformkey feeamount @TOKENID FALSE) " +
+  "ENDIF " +
+  "IF foundationfeeflag EQ 1 THEN " +
+  "LET foundationfeeamount=STATE(14) " +
+  "ASSERT VERIFYOUT(STATE(15) foundationkey foundationfeeamount @TOKENID FALSE) " +
+  "ENDIF " +
+  "IF change GT 0 THEN " +
+  "ASSERT VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE) " +
+  "ENDIF " +
+  "RETURN TRUE";
+
 var CHANNEL_SCRIPT_FE = 'IF @COINAGE GT (40*1728) AND SIGNEDBY(PREVSTATE(1)) THEN RETURN TRUE ENDIF RETURN MULTISIG(2 PREVSTATE(1) PREVSTATE(2))';
 
 // Resolves the escrow address for new campaigns (T-SC3).
 // Tries V3 first (ESCROW_ADDRESS_V3); registers via newscript if missing.
 // Falls back to V2 only if V3 newscript fails (logs a warning).
+// When FOUNDATION_KEY is set, new campaigns must fund the V4 escrow script so the
+// foundation fee branch (PREVSTATE(6)/STATE(14-16)) is enforced on spend. Otherwise
+// use V3. V3 reuses PREVSTATE(6) as maxpubbudget; V4 reuses it as foundationkey —
+// the two scripts therefore produce distinct addresses and must not be mixed.
+function resolveEscrowAddressV4(cb) {
+  MDS.keypair.get('ESCROW_ADDRESS_V4', function (addrResV4) {
+    var cachedV4 = addrResV4 && addrResV4.status ? addrResV4.value : '';
+    if (cachedV4) {
+      console.log('[CREATOR] ESCROW_ADDRESS_V4 from keypair:', cachedV4);
+      cb(cachedV4);
+      return;
+    }
+    console.log('[CREATOR] ESCROW_ADDRESS_V4 not in keypair — registering via newscript');
+    MDS.cmd('newscript script:"' + ESCROW_SCRIPT_V4 + '" trackall:false', function (resV4) {
+      if (!resV4.status) {
+        console.error('[CREATOR] newscript V4 failed:', resV4.error);
+        cb('');
+        return;
+      }
+      var addrV4 = resV4.response.address;
+      console.log('[CREATOR] ESCROW_ADDRESS_V4 derived:', addrV4);
+      MDS.keypair.set('ESCROW_ADDRESS_V4', addrV4, function () { });
+      cb(addrV4);
+    });
+  });
+}
+
 function resolveEscrowAddress(cb) {
+  var hasFoundationKey = (typeof FOUNDATION_KEY !== 'undefined') && FOUNDATION_KEY !== null && FOUNDATION_KEY !== '';
+  if (hasFoundationKey) {
+    resolveEscrowAddressV4(cb);
+    return;
+  }
   MDS.keypair.get('ESCROW_ADDRESS_V3', function (addrResV3) {
     var cachedV3 = addrResV3 && addrResV3.status ? addrResV3.value : '';
     if (cachedV3) {
@@ -1625,14 +1700,35 @@ function _fundEscrowWithRoute(campaign, ad, form, submitBtn, msgEl, campaignDura
           var creatorContactHex = '0x' + utf8ToHex(permanentRoute).toUpperCase();
 
           // T-PUB4 — embed PLATFORM_KEY at port 5 and max_publisher_budget at port 6.
-          // PLATFORM_KEY is global (declared in config.js). null → fee branch disabled.
+          // PLATFORM_KEY / FOUNDATION_KEY are globals (declared in config.js). null → fee branch disabled.
+          // When FOUNDATION_KEY is set, the escrow uses V4: port 6 holds the foundation key
+          // (V4 reads PREVSTATE(6) as foundationkey) instead of max_publisher_budget.
           var hasPlatformKey = (typeof PLATFORM_KEY !== 'undefined') && PLATFORM_KEY !== null && PLATFORM_KEY !== '';
+          var hasFoundationKey = (typeof FOUNDATION_KEY !== 'undefined') && FOUNDATION_KEY !== null && FOUNDATION_KEY !== '';
           var platformKeyHex = hasPlatformKey ? PLATFORM_KEY : '0x00';
           var maxPubBudget = (campaign.max_publisher_budget && campaign.max_publisher_budget > 0)
             ? campaign.max_publisher_budget : 0;
+          // Port 6: foundation key under V4, max_publisher_budget under V3.
+          var port6 = hasFoundationKey ? FOUNDATION_KEY : maxPubBudget;
           var feeflag = hasPlatformKey ? 1 : 0;
           var feeAmount = hasPlatformKey ? (campaign.budget_total * PLATFORM_FEE_RATE) : 0;
-          var feeOutputIndex = 0;
+          var foundationFeeflag = hasFoundationKey ? 1 : 0;
+          var foundationFeeAmount = hasFoundationKey ? (campaign.budget_total * FOUNDATION_FEE_RATE) : 0;
+
+          // Multi-output funding tx order (when fees apply):
+          //   [foundationFee?, platformFee?, escrow]
+          // Output indices for the fee branches must match this order so the
+          // V4 script's VERIFYOUT(STATE(15)/STATE(13) ...) checks the right output.
+          var feeOutputIndex = 0;            // platform fee output index
+          var foundationFeeOutputIndex = 0;  // foundation fee output index
+          if (hasFoundationKey && hasPlatformKey) {
+            foundationFeeOutputIndex = 0;
+            feeOutputIndex = 1;
+          } else if (hasPlatformKey) {
+            feeOutputIndex = 0;
+          } else if (hasFoundationKey) {
+            foundationFeeOutputIndex = 0;
+          }
 
           // Funding-tx state. Ports 1–6 become PREVSTATE(N) on the escrow coin
           // when later spent. Port 11 is included as an explicit marker; the
@@ -1645,7 +1741,7 @@ function _fundEscrowWithRoute(campaign, ad, form, submitBtn, msgEl, campaignDura
             + '","3":"' + campaignIdHex
             + '","4":"' + creatorContactHex
             + '","5":"' + platformKeyHex
-            + '","6":"' + maxPubBudget
+            + '","6":"' + port6
             + '","11":"' + feeflag + '"}';
 
           if (hasPlatformKey) {
@@ -1654,7 +1750,15 @@ function _fundEscrowWithRoute(campaign, ad, form, submitBtn, msgEl, campaignDura
               + '","13":"' + feeOutputIndex + '"}';
           }
 
-          // V3: initial campaign status at port 7 — always 'active' at launch.
+          // V4: foundation fee branch — flag at port 16, amount at 14, output index at 15.
+          if (hasFoundationKey) {
+            stateJson = stateJson.slice(0, -1) // drop trailing }
+              + ',"14":"' + foundationFeeAmount
+              + '","15":"' + foundationFeeOutputIndex
+              + '","16":"' + foundationFeeflag + '"}';
+          }
+
+          // V3/V4: initial campaign status at port 7 — always 'active' at launch.
           stateJson = stateJson.slice(0, -1) + ',"7":"0x' + utf8ToHex('active').toUpperCase() + '"}';
 
           campaign.escrow_wallet_pk = walletPK;
@@ -1713,9 +1817,9 @@ function _fundEscrowWithRoute(campaign, ad, form, submitBtn, msgEl, campaignDura
             }
           }
 
-          if (!hasPlatformKey) {
-            // MVP path — feeflag=0, no fee output. Same shape as before T-PUB4.
-            console.log('[CREATOR] sending to escrow (feeflag=0):', escrowAddress, 'state:', stateJson);
+          if (!hasPlatformKey && !hasFoundationKey) {
+            // MVP path — no fee outputs. Same shape as before T-PUB4.
+            console.log('[CREATOR] sending to escrow (no fees):', escrowAddress, 'state:', stateJson);
             MDS.cmd(
               'send amount:' + campaign.budget_total
               + ' address:' + escrowAddress
@@ -1725,19 +1829,22 @@ function _fundEscrowWithRoute(campaign, ad, form, submitBtn, msgEl, campaignDura
             return;
           }
 
-          // PLATFORM_KEY set — feeflag=1. Build a multi-output tx:
-          //   output[0] → PLATFORM_KEY (fee, 6% of budget_total, no state)
-          //   output[1] → escrow (budget_total, with state)
-          //   change → back to creator wallet (auto-added by txnpost)
-          console.log('[CREATOR] sending to escrow (feeflag=1):', escrowAddress,
-            'fee:', feeAmount, '→', platformKeyHex, 'state:', stateJson);
+          // One or both fees apply — build an atomic multi-output tx. Output order:
+          //   [foundationFee?, platformFee?, escrow(budget_total, with state)]
+          //   change → back to creator wallet (auto-added by send)
+          console.log('[CREATOR] sending to escrow (fees):', escrowAddress,
+            'platformFee:', (hasPlatformKey ? feeAmount : 0), '→', platformKeyHex,
+            'foundationFee:', (hasFoundationKey ? foundationFeeAmount : 0),
+            '→', (hasFoundationKey ? FOUNDATION_KEY : '0x00'), 'state:', stateJson);
           buildEscrowFundingTx({
-            walletPK: walletPK,
             budgetTotal: campaign.budget_total,
-            feeAmount: feeAmount,
-            feeOutputIndex: feeOutputIndex,
-            escrowAddress: escrowAddress,
+            hasPlatformKey: hasPlatformKey,
             platformKey: platformKeyHex,
+            feeAmount: feeAmount,
+            hasFoundationKey: hasFoundationKey,
+            foundationKey: hasFoundationKey ? FOUNDATION_KEY : '0x00',
+            foundationFeeAmount: foundationFeeAmount,
+            escrowAddress: escrowAddress,
             stateJson: stateJson
           }, onSendResult);
         });
@@ -1746,14 +1853,21 @@ function _fundEscrowWithRoute(campaign, ad, form, submitBtn, msgEl, campaignDura
   });
 }
 
-// T-PUB4 — Fund escrow when a platform fee applies (feeflag=1).
-// Uses send multi: for one atomic tx with two outputs — same coin-selection
-// engine as the feeflag=0 send path (proven to work). fee output gets
-// storestate:true too (harmless — state not used when spending wallet coins).
+// T-PUB4 / Foundation fee — Fund escrow when a platform and/or foundation fee applies.
+// Uses send multi: for one atomic tx — same coin-selection engine as the no-fee send
+// path (proven to work). Output order MUST match the foundation/platform fee output
+// indices written into stateJson (STATE(15)/STATE(13)): [foundationFee?, platformFee?, escrow].
 function buildEscrowFundingTx(opts, onResult) {
+  var parts = [];
+  if (opts.hasFoundationKey) {
+    parts.push(opts.foundationKey + ':' + opts.foundationFeeAmount);
+  }
+  if (opts.hasPlatformKey) {
+    parts.push(opts.platformKey + ':' + opts.feeAmount);
+  }
+  parts.push(opts.escrowAddress + ':' + opts.budgetTotal);
   MDS.cmd(
-    'send multi:["' + opts.platformKey + ':' + opts.feeAmount
-    + '","' + opts.escrowAddress + ':' + opts.budgetTotal + '"]'
+    'send multi:["' + parts.join('","') + '"]'
     + ' state:' + opts.stateJson,
     function (r) { onResult(r); }
   );

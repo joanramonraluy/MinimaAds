@@ -30,6 +30,7 @@ var _livenessCheckBlock = 0;
 var ESCROW_ADDRESS    = '';
 var ESCROW_ADDRESS_V2 = '';
 var ESCROW_ADDRESS_V3 = '';
+var ESCROW_ADDRESS_V4 = '';
 
 // Channel script: time-locked creator-only exit OR 2-of-2 MULTISIG(creator, viewer/publisher)
 var CHANNEL_SCRIPT         = 'IF @COINAGE GT (40*1728) AND SIGNEDBY(PREVSTATE(1)) THEN RETURN TRUE ENDIF RETURN MULTISIG(2 PREVSTATE(1) PREVSTATE(2))';
@@ -74,6 +75,32 @@ var ESCROW_SCRIPT_V3 =
   "ENDIF " +
   "RETURN TRUE";
 
+// V4 — adds the Minima Foundation fee branch. FOUNDATION_KEY at PREVSTATE(6),
+// foundation fee amount at STATE(14), foundation fee output index at STATE(15),
+// foundation fee flag at STATE(16). Byte-identical to the FE constant in creator.js.
+var ESCROW_SCRIPT_V4 =
+  "LET creatorkey=PREVSTATE(1) " +
+  "LET platformkey=PREVSTATE(5) " +
+  "LET foundationkey=PREVSTATE(6) " +
+  "LET status=PREVSTATE(7) " +
+  "ASSERT SIGNEDBY(creatorkey) " +
+  "LET payout=STATE(10) " +
+  "LET feeflag=STATE(11) " +
+  "LET foundationfeeflag=STATE(16) " +
+  "LET change=@AMOUNT-payout " +
+  "IF feeflag EQ 1 THEN " +
+  "LET feeamount=STATE(12) " +
+  "ASSERT VERIFYOUT(STATE(13) platformkey feeamount @TOKENID FALSE) " +
+  "ENDIF " +
+  "IF foundationfeeflag EQ 1 THEN " +
+  "LET foundationfeeamount=STATE(14) " +
+  "ASSERT VERIFYOUT(STATE(15) foundationkey foundationfeeamount @TOKENID FALSE) " +
+  "ENDIF " +
+  "IF change GT 0 THEN " +
+  "ASSERT VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE) " +
+  "ENDIF " +
+  "RETURN TRUE";
+
 function onInited() {
   MDS.log("[ADS] SW inited — loading modules");
   MDS.load("config.js");
@@ -110,6 +137,11 @@ function onInited() {
           PLATFORM_KEY = kpRes.value;
           MDS.log("[ADS] PLATFORM_KEY overridden: " + PLATFORM_KEY);
         }
+        MDS.keypair.get("FOUNDATION_KEY_OVERRIDE", function(fkRes) {
+        if (fkRes && fkRes.status && fkRes.value) {
+          FOUNDATION_KEY = fkRes.value;
+          MDS.log("[ADS] FOUNDATION_KEY overridden: " + FOUNDATION_KEY);
+        }
         MDS.keypair.get("MINIMAADS_CREATOR_ROUTE", function(routeRes) {
           var creatorRoute = (routeRes && routeRes.status && routeRes.value) ? routeRes.value : "";
           if (creatorRoute) {
@@ -124,6 +156,7 @@ function onInited() {
               var mlsAddr = (mlsRes && mlsRes.status && mlsRes.value) ? mlsRes.value : "";
               MDS.log("[CONFIG] =========== NODE CONFIGURATION ===========");
               MDS.log("[CONFIG] PLATFORM_KEY:             " + (PLATFORM_KEY || "(not set — config.js default null)"));
+              MDS.log("[CONFIG] FOUNDATION_KEY:           " + (FOUNDATION_KEY || "(not set — config.js default null)"));
               MDS.log("[CONFIG] MINIMAADS_CREATOR_ROUTE:  " + (creatorRoute || "(not set)"));
               MDS.log("[CONFIG] MINIMAADS_CREATOR_PK:     " + (MINIMAADS_CREATOR_PK ? MINIMAADS_CREATOR_PK.substring(0, 30) + "..." : "(from config.js: " + (MINIMAADS_CREATOR_PK ? MINIMAADS_CREATOR_PK.substring(0, 20) : "null") + ")"));
               MDS.log("[CONFIG] USER_PERMANENT_ROUTE:     " + (permRoute || "(not set)"));
@@ -137,6 +170,7 @@ function onInited() {
               _initAfterDb();
             });
           });
+        });
         });
       });
     }
@@ -203,6 +237,14 @@ function registerEscrowScript() {
             MDS.log("[ADS] ESCROW_ADDRESS_V3: " + ESCROW_ADDRESS_V3);
             MDS.keypair.set("ESCROW_ADDRESS_V3", ESCROW_ADDRESS_V3, function() {});
           }
+          MDS.cmd("newscript script:\"" + ESCROW_SCRIPT_V4 + "\" trackall:false", function(resV4) {
+            if (!resV4.status) {
+              MDS.log("[ADS] newscript V4 failed: " + resV4.error);
+            } else {
+              ESCROW_ADDRESS_V4 = resV4.response.address;
+              MDS.log("[ADS] ESCROW_ADDRESS_V4: " + ESCROW_ADDRESS_V4);
+              MDS.keypair.set("ESCROW_ADDRESS_V4", ESCROW_ADDRESS_V4, function() {});
+            }
           MDS.cmd("newscript script:\"" + CHANNEL_SCRIPT + "\" trackall:false", function(res3) {
             if (res3 && res3.status && res3.response && res3.response.address) {
               CHANNEL_SCRIPT_ADDRESS = res3.response.address;
@@ -219,6 +261,7 @@ function registerEscrowScript() {
             }
             scanEscrowCoins();
           });
+          });
         });
       });
     });
@@ -229,6 +272,7 @@ function scanEscrowCoins() {
   _scanAddress(ESCROW_ADDRESS);
   _scanAddress(ESCROW_ADDRESS_V2);
   _scanAddress(ESCROW_ADDRESS_V3);
+  _scanAddress(ESCROW_ADDRESS_V4);
 }
 
 function _scanAddress(addr) {

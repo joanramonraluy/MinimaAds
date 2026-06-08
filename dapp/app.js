@@ -1871,6 +1871,11 @@ function onInited() {
       if (kpRes && kpRes.status && kpRes.value) {
         PLATFORM_KEY = kpRes.value;
       }
+      MDS.keypair.get('FOUNDATION_KEY_OVERRIDE', function(fkRes) {
+        if (fkRes && fkRes.status && fkRes.value) {
+          FOUNDATION_KEY = fkRes.value;
+        }
+      });
       MDS.keypair.get('MINIMAADS_CREATOR_ROUTE', function(crRes) {
         if (crRes && crRes.status && crRes.value) {
           var crParts = crRes.value.split('#');

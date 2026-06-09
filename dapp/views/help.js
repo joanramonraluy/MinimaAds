@@ -100,7 +100,8 @@ function renderHelp(root) {
   vStepsList.style.cssText = 'margin:.35rem 0 0;padding-left:1.5rem;';
   vStepsList.innerHTML =
     '<li style="margin-bottom:.5rem;">Go to the <strong>View Ads</strong> section (set your role to Viewer in the side menu).</li>' +
-    '<li style="margin-bottom:.5rem;">Browse the available ad campaigns. Your interests profile will automatically prioritize matching ads.</li>' +
+    '<li style="margin-bottom:.5rem;">Set your interests in the <strong>Profile</strong> section to help match campaigns to your preferences.</li>' +
+    '<li style="margin-bottom:.5rem;">Browse the available ad campaigns. Matching ads will be prioritized based on your interests.</li>' +
     '<li style="margin-bottom:.5rem;"><strong>View rewards:</strong> Keep the ad in view for at least <strong>3 seconds</strong> to receive the view reward.</li>' +
     '<li style="margin-bottom:.5rem;"><strong>Click rewards:</strong> Click the "CTA button" or the ad image to navigate and earn the additional click reward.</li>';
   vStepsCard.appendChild(vStepsList);
@@ -145,7 +146,7 @@ function renderHelp(root) {
     '<li style="margin-bottom:.5rem;">Set your role to <strong>Creator</strong> in the side menu.</li>' +
     '<li style="margin-bottom:.5rem;">Click <strong>Create Campaign</strong>. Fill in the content (title, description, CTA, interests, and optional banner image).</li>' +
     '<li style="margin-bottom:.5rem;">Define your total campaign budget and the reward rates (amount paid per view and per click).</li>' +
-    '<li style="margin-bottom:.5rem;">A platform fee of <strong>6%</strong> is automatically calculated and added to the escrow funding amount.</li>' +
+    '<li style="margin-bottom:.5rem;">Platform fees of <strong>6%</strong> (protocol) and <strong>3%</strong> (Minima Foundation) are automatically calculated and added to the escrow funding amount.</li>' +
     '<li style="margin-bottom:.5rem;">Confirm and approve the transaction. Your funds are locked securely in a smart contract on the Minima blockchain.</li>';
   cStepsCard.appendChild(cStepsList);
   creatorPanel.appendChild(cStepsCard);
@@ -163,7 +164,7 @@ function renderHelp(root) {
   var cBudgetCard = createContentCard('#f39c12', 'Budget Allocation & Performance');
   var cBudgetDesc = document.createElement('p');
   cBudgetDesc.style.cssText = 'font-size:0.9rem;margin:0 0 .75rem;';
-  cBudgetDesc.innerHTML = 'To give you complete transparency over campaign funding, budgets are split into two dedicated sections in the dashboard: <strong>Viewer</strong> and <strong>Publisher</strong>.';
+  cBudgetDesc.innerHTML = 'To give you complete transparency over campaign funding, your budget is split into two mandatory allocations: <strong>Viewer Rewards</strong> (for viewers who interact with your ads) and <strong>Publisher Rewards</strong> (for publishers who distribute your campaign).';
   cBudgetCard.appendChild(cBudgetDesc);
 
   // Viewer Budget sub-card
@@ -244,7 +245,7 @@ function renderHelp(root) {
   var pRewardsCard = createContentCard('#3498db', 'Publisher Rewards');
   var pRewardsDesc = document.createElement('p');
   pRewardsDesc.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;';
-  pRewardsDesc.innerHTML = 'When creators specify a <strong>Publisher reward per view</strong> (optional), your frame accumulates rewards automatically. ' +
+  pRewardsDesc.innerHTML = 'When a creator runs an ad campaign, your frame automatically accumulates <strong>Publisher rewards per view</strong>. ' +
     'Like viewers, publisher rewards are accrued in L2 payment channels. You can monitor and settle these pending amounts in the <strong>Earnings</strong> tab under your Publisher dashboard.';
   pRewardsCard.appendChild(pRewardsDesc);
   publisherPanel.appendChild(pRewardsCard);
@@ -277,7 +278,7 @@ function renderHelp(root) {
   var aArchList = document.createElement('ul');
   aArchList.style.cssText = 'margin:.35rem 0 0;padding-left:1.5rem;';
   aArchList.innerHTML =
-    '<li style="margin-bottom:.5rem;"><strong>Service Worker:</strong> Handles background tasks, persistent data storage, and Maxima event processing without relying on your node being online.</li>' +
+    '<li style="margin-bottom:.5rem;"><strong>Service Worker:</strong> Runs background tasks, persistent data storage, and Maxima event processing. Creators and publishers must stay online to send campaigns and receive rewards; viewers earn passively and can settle rewards anytime.</li>' +
     '<li style="margin-bottom:.5rem;"><strong>Layer 2 Channels:</strong> Unidirectional payment channels prevent blockchain congestion while ensuring instant settlement capability.</li>' +
     '<li style="margin-bottom:.5rem;"><strong>KissVM Contracts:</strong> All campaign budgets are locked in verifiable smart contracts on the Minima blockchain.</li>';
   aArchCard.appendChild(aArchList);
@@ -285,7 +286,7 @@ function renderHelp(root) {
 
   var aFooter = document.createElement('p');
   aFooter.style.cssText = 'text-align:center;margin-top:2rem;font-size:0.8rem;color:var(--pico-muted-color);';
-  aFooter.textContent = 'MinimaAds v1.2.0 • Decentralized Ad Infrastructure';
+  aFooter.textContent = 'MinimaAds v0.26.6.1 • Decentralized Ad Infrastructure';
   aboutPanel.appendChild(aFooter);
 
   root.appendChild(aboutPanel);

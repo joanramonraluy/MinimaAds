@@ -1092,6 +1092,7 @@ function enforceDailyLimits(form) {
 }
 
 // Keeps max_publisher_budget >= publisher_reward_view and <= budget.
+// Publisher rewards are always required (minimum LIMITS.MIN_PUBLISHER_REWARD_VIEW).
 // Displays explanatory messages beneath inputs.
 function enforcePublisherLimits(form) {
   var budget = parseAmt(form.querySelector('[name="budget"]').value) || 0;
@@ -1101,57 +1102,43 @@ function enforcePublisherLimits(form) {
   var pubRewardHint = document.getElementById('ma-publisher-reward-hint');
   var maxViewerReward = parseAmt(form.querySelector('[name="max_viewer_reward"]').value) || 0;
 
+  // Publisher rewards are always required
+  if (publisherRewardView < LIMITS.MIN_PUBLISHER_REWARD_VIEW) {
+    publisherRewardView = LIMITS.MIN_PUBLISHER_REWARD_VIEW;
+    var prInput = form.querySelector('[name="publisher_reward_view"]');
+    if (prInput) { prInput.value = fmtAmt(LIMITS.MIN_PUBLISHER_REWARD_VIEW, 6); }
+  }
+
   var allowedPubBudget = Math.max(publisherRewardView, budget - maxViewerReward);
+  var allowedPubReward = Math.max(LIMITS.MIN_PUBLISHER_REWARD_VIEW, budget - maxViewerReward);
 
-  if (publisherRewardView > 0) {
-    if (publisherRewardView < LIMITS.MIN_PUBLISHER_REWARD_VIEW) {
-      publisherRewardView = LIMITS.MIN_PUBLISHER_REWARD_VIEW;
-      var prInput = form.querySelector('[name="publisher_reward_view"]');
-      if (prInput) { prInput.value = fmtAmt(LIMITS.MIN_PUBLISHER_REWARD_VIEW, 6); }
+  if (pubRewardHint) {
+    pubRewardHint.textContent = 'Min: ' + formatMinima(LIMITS.MIN_PUBLISHER_REWARD_VIEW) + ' MINIMA, Max: ' + formatMinima(allowedPubReward) + ' MINIMA (remaining budget after viewer allocation).';
+  }
+
+  var rewardInput = form.querySelector('[name="publisher_reward_view"]');
+  if (rewardInput) {
+    rewardInput.min = LIMITS.MIN_PUBLISHER_REWARD_VIEW.toFixed(6);
+    rewardInput.max = allowedPubReward.toFixed(6);
+    var curReward = parseAmt(rewardInput.value);
+    if (isFinite(curReward) && curReward > allowedPubReward) {
+      rewardInput.value = fmtAmt(allowedPubReward, 6);
+      publisherRewardView = allowedPubReward;
     }
-    var allowedPubReward = Math.max(LIMITS.MIN_PUBLISHER_REWARD_VIEW, budget - maxViewerReward);
-    if (pubRewardHint) {
-      pubRewardHint.textContent = 'Min: ' + formatMinima(LIMITS.MIN_PUBLISHER_REWARD_VIEW) + ' MINIMA, Max: ' + formatMinima(allowedPubReward) + ' MINIMA (remaining budget after viewer allocation).';
-    }
-    var rewardInput = form.querySelector('[name="publisher_reward_view"]');
-    if (rewardInput) {
-      rewardInput.max = allowedPubReward.toFixed(6);
-      var curReward = parseAmt(rewardInput.value);
-      if (isFinite(curReward) && curReward > allowedPubReward) {
-        rewardInput.value = fmtAmt(allowedPubReward, 6);
-        publisherRewardView = allowedPubReward;
-      }
+  }
+
+  if (maxPubBudgetInput) {
+    maxPubBudgetInput.min = publisherRewardView.toFixed(6);
+    maxPubBudgetInput.max = allowedPubBudget.toFixed(6);
+    var curPubBudget = parseAmt(maxPubBudgetInput.value);
+    if (isFinite(curPubBudget) && curPubBudget < publisherRewardView) {
+      maxPubBudgetInput.value = fmtAmt(publisherRewardView, 6);
+    } else if (isFinite(curPubBudget) && curPubBudget > allowedPubBudget) {
+      maxPubBudgetInput.value = fmtAmt(allowedPubBudget, 6);
     }
 
-    if (maxPubBudgetInput) {
-      maxPubBudgetInput.min = publisherRewardView.toFixed(6);
-      maxPubBudgetInput.max = allowedPubBudget.toFixed(6);
-      var curPubBudget = parseAmt(maxPubBudgetInput.value);
-      if (isFinite(curPubBudget) && curPubBudget < publisherRewardView) {
-        maxPubBudgetInput.value = fmtAmt(publisherRewardView, 6);
-      } else if (isFinite(curPubBudget) && curPubBudget > allowedPubBudget) {
-        maxPubBudgetInput.value = fmtAmt(allowedPubBudget, 6);
-      }
-
-      if (pubBudgetHint) {
-        pubBudgetHint.textContent = 'Min: ' + formatMinima(publisherRewardView) + ' MINIMA, Max: ' + formatMinima(allowedPubBudget) + ' MINIMA (remaining budget after viewer allocation).';
-      }
-    }
-  } else {
-    if (pubRewardHint) {
-      pubRewardHint.textContent = 'Leave at 0 to disable Frame rewards. Min: ' + formatMinima(LIMITS.MIN_PUBLISHER_REWARD_VIEW) + ' MINIMA when active.';
-    }
-    var allowedPubBudgetNoReward = Math.max(0, budget - maxViewerReward);
-    if (maxPubBudgetInput) {
-      maxPubBudgetInput.min = '0';
-      maxPubBudgetInput.max = allowedPubBudgetNoReward.toFixed(6);
-      var curPubBudget2 = parseAmt(maxPubBudgetInput.value);
-      if (isFinite(curPubBudget2) && curPubBudget2 > allowedPubBudgetNoReward) {
-        maxPubBudgetInput.value = fmtAmt(allowedPubBudgetNoReward, 6);
-      }
-    }
     if (pubBudgetHint) {
-      pubBudgetHint.textContent = 'Max: ' + formatMinima(allowedPubBudgetNoReward) + ' MINIMA (remaining budget after viewer allocation).';
+      pubBudgetHint.textContent = 'Min: ' + formatMinima(publisherRewardView) + ' MINIMA, Max: ' + formatMinima(allowedPubBudget) + ' MINIMA (remaining budget after viewer allocation).';
     }
   }
 }
@@ -1476,23 +1463,21 @@ function onCreatorSubmit(e) {
     msgEl.textContent = 'Campaign cannot reach any viewer with these settings. Increase budget or reduce cap per viewer.';
     return;
   }
-  if (publisherRewardView > 0) {
-    if (!(publisherRewardView >= LIMITS.MIN_PUBLISHER_REWARD_VIEW)) {
-      msgEl.textContent = 'Publisher reward per view must be at least ' + LIMITS.MIN_PUBLISHER_REWARD_VIEW + ' MINIMA.';
-      return;
-    }
-    if (!(maxPublisherBudget > 0)) {
-      msgEl.textContent = 'Max publisher budget is required when publisher reward is enabled.';
-      return;
-    }
-    if (maxPublisherBudget > budget) {
-      msgEl.textContent = 'Max publisher budget cannot exceed total budget.';
-      return;
-    }
-    if (maxPublisherBudget < publisherRewardView) {
-      msgEl.textContent = 'Max publisher budget (' + fmtAmt(maxPublisherBudget, 6) + ' MINIMA) cannot be less than publisher reward per view (' + fmtAmt(publisherRewardView, 6) + ' MINIMA).';
-      return;
-    }
+  if (!(publisherRewardView >= LIMITS.MIN_PUBLISHER_REWARD_VIEW)) {
+    msgEl.textContent = 'Publisher reward per view must be at least ' + LIMITS.MIN_PUBLISHER_REWARD_VIEW + ' MINIMA.';
+    return;
+  }
+  if (!(maxPublisherBudget > 0)) {
+    msgEl.textContent = 'Max publisher budget is required.';
+    return;
+  }
+  if (maxPublisherBudget > budget) {
+    msgEl.textContent = 'Max publisher budget cannot exceed total budget.';
+    return;
+  }
+  if (maxPublisherBudget < publisherRewardView) {
+    msgEl.textContent = 'Max publisher budget (' + fmtAmt(maxPublisherBudget, 6) + ' MINIMA) cannot be less than publisher reward per view (' + fmtAmt(publisherRewardView, 6) + ' MINIMA).';
+    return;
   }
 
   var now = Date.now();

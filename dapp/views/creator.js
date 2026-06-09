@@ -22,16 +22,27 @@ var FOUNDATION_FEE_RATE = 0.03;
 // Auto-balance configuration
 var AUTO_BALANCE_CONFIG = {
   REWARD_RATIO_CLICK_TO_VIEW: 2.0,
-  PUBLISHER_REWARD_RATIO: 0.5,
-  PUBLISHER_BUDGET_RATIO: 0.10,
+  PUBLISHER_REWARD_RATIO: 0.33,
+  PUBLISHER_BUDGET_RATIO: 0.06,
   CAP_FACTOR_DEFAULT: 2.0,
   BUDGET_TIERS: [
     { max: 500, reward_view: 0.10, reward_click: 0.20 },
-    { max: 2000, reward_view: 0.05, reward_click: 0.10 },
-    { max: 10000, reward_view: 0.02, reward_click: 0.04 },
-    { max: Infinity, reward_view: 0.01, reward_click: 0.02 }
+    { max: 2000, reward_view: 0.15, reward_click: 0.30 },
+    { max: 10000, reward_view: 0.20, reward_click: 0.40 },
+    { max: Infinity, reward_view: 0.25, reward_click: 0.50 }
   ]
 };
+
+function roundToNiceNumber(value) {
+  if (value === 0) return 0;
+  var absVal = Math.abs(value);
+  var exponent = Math.floor(Math.log10(absVal));
+  var base = Math.pow(10, exponent);
+  var normalized = absVal / base;
+  var niceValues = [0.1, 0.2, 0.5, 1, 2, 5, 10];
+  var nice = niceValues.find(function(n) { return n >= normalized; }) || 10;
+  return (value < 0 ? -1 : 1) * nice * base;
+}
 
 function formatMinima(val) {
   var s = val.toFixed(6).replace(/\.?0+$/, '');
@@ -321,12 +332,33 @@ function renderCreator(root) {
   });
   var budgetInput = form.querySelector('[name="budget"]');
   budgetInput.addEventListener('focus', function () {
-    var thouSep = window.NUMFMT === 'EU' ? '.' : ',';
-    this.value = this.value.replace(new RegExp('\\' + thouSep, 'g'), '');
+    if (this.value === '0') {
+      this.value = '';
+    } else {
+      var thouSep = window.NUMFMT === 'EU' ? '.' : ',';
+      this.value = this.value.replace(new RegExp('\\' + thouSep, 'g'), '');
+    }
+  });
+  budgetInput.addEventListener('input', function () {
+    var val = parseAmt(this.value);
+    if (isFinite(val) && val > 0) {
+      var cursorPos = this.selectionStart;
+      var oldVal = this.value;
+      this.value = formatMinima(val);
+      var newVal = this.value;
+      if (oldVal !== newVal) {
+        var diff = newVal.length - oldVal.length;
+        this.setSelectionRange(cursorPos + diff, cursorPos + diff);
+      }
+    }
   });
   budgetInput.addEventListener('blur', function () {
     var val = parseAmt(this.value);
-    if (isFinite(val) && val > 0) { this.value = formatMinima(val); }
+    if (isFinite(val) && val > 0) {
+      this.value = formatMinima(val);
+    } else {
+      this.value = '0';
+    }
   });
   var daysInput = form.querySelector('[name="campaign_days"]');
   if (daysInput) {
@@ -1157,17 +1189,20 @@ function applyAutoBalance(form) {
       var autoDays = Math.min(LIMITS.MAX_CAMPAIGN_DAYS, Math.max(1, Math.round(budget / 50)));
       form.querySelector('[name="campaign_days"]').value = autoDays;
 
-      var defaults = getAutoBalanceDefaults(budget);
-      var rewardSum = defaults.reward_view + defaults.reward_click;
-      form.querySelector('[name="reward_view"]').value = fmtAmt(defaults.reward_view, 6);
-      form.querySelector('[name="reward_click"]').value = fmtAmt(defaults.reward_click, 6);
-      form.querySelector('[name="max_viewer_reward"]').value = fmtAmt(rewardSum * AUTO_BALANCE_CONFIG.CAP_FACTOR_DEFAULT, 6);
-      form.querySelector('[name="max_publisher_budget"]').value = fmtAmt(budget * AUTO_BALANCE_CONFIG.PUBLISHER_BUDGET_RATIO, 6);
-      form.querySelector('[name="publisher_reward_view"]').value = fmtAmt(rewardSum * AUTO_BALANCE_CONFIG.PUBLISHER_REWARD_RATIO, 6);
+      var rewardViewViewer = roundToNiceNumber(0.0005 * Math.pow(budget, 0.7));
+      var rewardClickViewer = roundToNiceNumber(rewardViewViewer * 2.0);
+      var maxViewerReward = roundToNiceNumber(0.005 * Math.pow(budget, 0.7));
+      var maxPubBudget = roundToNiceNumber(0.015 * Math.pow(budget, 0.7));
+      var rewardViewPublisher = roundToNiceNumber(0.00005 * Math.pow(budget, 0.7));
 
-      var capForLimits = rewardSum * AUTO_BALANCE_CONFIG.CAP_FACTOR_DEFAULT;
-      var autoMaxViews = defaults.reward_view > 0 ? Math.max(1, Math.floor(capForLimits / defaults.reward_view)) : 100;
-      var autoMaxClicks = defaults.reward_click > 0 ? Math.max(1, Math.floor(capForLimits / defaults.reward_click)) : 100;
+      form.querySelector('[name="reward_view"]').value = fmtAmt(rewardViewViewer, 6);
+      form.querySelector('[name="reward_click"]').value = fmtAmt(rewardClickViewer, 6);
+      form.querySelector('[name="max_viewer_reward"]').value = fmtAmt(maxViewerReward, 6);
+      form.querySelector('[name="max_publisher_budget"]').value = fmtAmt(maxPubBudget, 6);
+      form.querySelector('[name="publisher_reward_view"]').value = fmtAmt(rewardViewPublisher, 6);
+
+      var autoMaxViews = rewardViewViewer > 0 ? Math.max(1, Math.floor(maxViewerReward / rewardViewViewer)) : 100;
+      var autoMaxClicks = rewardClickViewer > 0 ? Math.max(1, Math.floor(maxViewerReward / rewardClickViewer)) : 100;
       var autoCooldown = 300;
       form.querySelector('[name="max_daily_views"]').value = autoMaxViews;
       form.querySelector('[name="max_daily_clicks"]').value = autoMaxClicks;

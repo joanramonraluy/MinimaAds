@@ -44,6 +44,20 @@ function roundToNiceNumber(value) {
   return (value < 0 ? -1 : 1) * nice * base;
 }
 
+function setupNumericInput(input, allowDecimals) {
+  input.addEventListener('input', function () {
+    var thouSep = window.NUMFMT === 'EU' ? '.' : ',';
+    var decSep = window.NUMFMT === 'EU' ? ',' : '.';
+    var pattern = allowDecimals
+      ? new RegExp('[^0-9' + '\\' + thouSep + '\\' + decSep + ']', 'g')
+      : /[^0-9]/g;
+    var filtered = this.value.replace(pattern, '');
+    if (filtered !== this.value) {
+      this.value = filtered;
+    }
+  });
+}
+
 function formatMinima(val) {
   var s = val.toFixed(6).replace(/\.?0+$/, '');
   var parts = s.split('.');
@@ -340,6 +354,16 @@ function renderCreator(root) {
     }
   });
   budgetInput.addEventListener('input', function () {
+    var thouSep = window.NUMFMT === 'EU' ? '.' : ',';
+    var decSep = window.NUMFMT === 'EU' ? ',' : '.';
+    var pattern = new RegExp('[^0-9' + '\\' + thouSep + '\\' + decSep + ']', 'g');
+    var filtered = this.value.replace(pattern, '');
+
+    if (filtered !== this.value) {
+      this.value = filtered;
+      return;
+    }
+
     var val = parseAmt(this.value);
     if (isFinite(val) && val > 0) {
       var cursorPos = this.selectionStart;
@@ -360,12 +384,22 @@ function renderCreator(root) {
       this.value = '0';
     }
   });
-  var daysInput = form.querySelector('[name="campaign_days"]');
-  if (daysInput) {
-    daysInput.addEventListener('keydown', function (e) {
-      if (e.key === '.' || e.key === ',') { e.preventDefault(); }
-    });
+  var numericInputs = [
+    { name: 'campaign_days', decimals: false },
+    { name: 'reward_view', decimals: true },
+    { name: 'reward_click', decimals: true },
+    { name: 'max_viewer_reward', decimals: true },
+    { name: 'publisher_reward_view', decimals: true },
+    { name: 'max_publisher_budget', decimals: true },
+    { name: 'max_daily_views', decimals: false },
+    { name: 'max_daily_clicks', decimals: false },
+    { name: 'cooldown_s', decimals: false }
+  ];
+  for (var i = 0; i < numericInputs.length; i++) {
+    var input = form.querySelector('[name="' + numericInputs[i].name + '"]');
+    if (input) { setupNumericInput(input, numericInputs[i].decimals); }
   }
+
   var imageInput = form.querySelector('[name="image_file"]');
   if (imageInput) {
     imageInput.addEventListener('change', function () { onImageFileSelect(this); });

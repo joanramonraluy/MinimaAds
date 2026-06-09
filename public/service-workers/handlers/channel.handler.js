@@ -341,7 +341,7 @@ function handleChannelOpen(payload) {
   var maxAmount     = parseFloat(payload.max_amount) || 0;
   var role          = payload.role || 'viewer';
   var frameId       = payload.frame_id || '';
-  if (frameId && (frameId.toUpperCase().indexOf('0X') === 0 || frameId.indexOf(':') === -1)) {
+  if (frameId && frameId.indexOf('builtin:') !== 0 && frameId.toUpperCase().indexOf('0X') === 0) {
     frameId = 'builtin:' + frameId.toUpperCase();
   }
   var now           = Date.now();
@@ -615,7 +615,7 @@ function _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHe
           MDS.log("[CHANNEL] REWARD_VOUCHER (publisher): no frame_id — cannot create reward event. campaign: " + campaignId);
           return;
         }
-        if (frameId && (frameId.toUpperCase().indexOf('0X') === 0 || frameId.indexOf(':') === -1)) {
+        if (frameId && frameId.indexOf('builtin:') !== 0 && frameId.toUpperCase().indexOf('0X') === 0) {
           frameId = 'builtin:' + frameId.toUpperCase();
         }
         getCampaign(campaignId, function(campErr, campaign) {
@@ -1114,7 +1114,7 @@ function handlePublisherRewardNotify(payload, senderPk) {
   }
   var campaignId = payload.campaign_id;
   var frameId    = payload.frame_id;
-  if (frameId && (frameId.toUpperCase().indexOf('0X') === 0 || frameId.indexOf(':') === -1)) {
+  if (frameId && frameId.indexOf('builtin:') !== 0 && frameId.toUpperCase().indexOf('0X') === 0) {
     frameId = 'builtin:' + frameId.toUpperCase();
   }
   var creatorKey = senderPk || '';
@@ -1213,7 +1213,7 @@ function _maybeGeneratePublisherVoucher(campaignId, frameId, eventId, publisherK
   var resolvedFrameId = frameId || '';
   if (!resolvedFrameId && publisherKey) {
     resolvedFrameId = 'builtin:' + publisherKey.toUpperCase();
-  } else if (resolvedFrameId && (resolvedFrameId.toUpperCase().indexOf('0X') === 0 || resolvedFrameId.indexOf(':') === -1)) {
+  } else if (resolvedFrameId && resolvedFrameId.indexOf('builtin:') !== 0 && resolvedFrameId.toUpperCase().indexOf('0X') === 0) {
     resolvedFrameId = 'builtin:' + resolvedFrameId.toUpperCase();
   }
 
@@ -1233,7 +1233,7 @@ function _maybeGeneratePublisherVoucher(campaignId, frameId, eventId, publisherK
           return;
         }
         var targetFrameId = resolvedFrameId || rows[0].FRAME_ID;
-        if (targetFrameId && (targetFrameId.toUpperCase().indexOf('0X') === 0 || targetFrameId.indexOf(':') === -1)) {
+        if (targetFrameId && targetFrameId.indexOf('builtin:') !== 0 && targetFrameId.toUpperCase().indexOf('0X') === 0) {
           targetFrameId = 'builtin:' + targetFrameId.toUpperCase();
         }
         _doGeneratePublisherVoucher(campaignId, targetFrameId, eventId, rows[0]);
@@ -1272,7 +1272,7 @@ function _maybeGeneratePublisherVoucher(campaignId, frameId, eventId, publisherK
             }
             MDS.log("[CHANNEL] _maybeGeneratePublisherVoucher: fallback to open publisher channel. campaign: " + campaignId + " frame: " + resolvedFrameId);
             var targetFrameId = rows2[0].FRAME_ID || resolvedFrameId;
-            if (targetFrameId && (targetFrameId.toUpperCase().indexOf('0X') === 0 || targetFrameId.indexOf(':') === -1)) {
+            if (targetFrameId && targetFrameId.indexOf('builtin:') !== 0 && targetFrameId.toUpperCase().indexOf('0X') === 0) {
               targetFrameId = 'builtin:' + targetFrameId.toUpperCase();
             }
             _doGeneratePublisherVoucher(campaignId, targetFrameId, eventId, rows2[0]);
@@ -1385,7 +1385,7 @@ function _replayDeferredPublisherRewardsNow(campaignId, frameId, rows, pubChanne
 }
 
 function _doGeneratePublisherVoucher(campaignId, frameId, eventId, pubChannel) {
-  if (frameId && (frameId.toUpperCase().indexOf('0X') === 0 || frameId.indexOf(':') === -1)) {
+  if (frameId && frameId.indexOf('builtin:') !== 0 && frameId.toUpperCase().indexOf('0X') === 0) {
     frameId = 'builtin:' + frameId.toUpperCase();
   }
   getCampaign(campaignId, function(err2, campaign) {

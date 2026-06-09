@@ -73,7 +73,8 @@ function loadMyCampaigns(isAutoRefresh) {
     + " (SELECT COALESCE(SUM(CUMULATIVE_EARNED), 0) FROM CHANNEL_HISTORY ch WHERE UPPER(ch.CAMPAIGN_ID) = UPPER(c.ID) AND ch.STATUS = 'settled' AND ch.ROLE = 'publisher') AS PUB_SETTLED,"
     + " (SELECT COUNT(*) FROM CHANNEL_STATE cs WHERE UPPER(cs.CAMPAIGN_ID) = UPPER(c.ID) AND cs.STATUS IN ('open', 'pending') AND cs.ROLE = 'publisher') AS PUB_ACTIVE_COUNT,"
     + " (SELECT COUNT(*) FROM CHANNEL_HISTORY ch WHERE UPPER(ch.CAMPAIGN_ID) = UPPER(c.ID) AND ch.STATUS = 'settled' AND ch.ROLE = 'publisher') AS PUB_SETTLED_COUNT,"
-    // ── Publisher actual spent ──
+    // ── Actual spent ──
+    + " (SELECT COALESCE(SUM(re.AMOUNT), 0) FROM REWARD_EVENTS re WHERE UPPER(re.CAMPAIGN_ID) = UPPER(c.ID) AND re.TYPE IN ('view', 'click')) AS VIEWER_SPENT_ACTUAL,"
     + " (SELECT COALESCE(SUM(re.AMOUNT), 0) FROM REWARD_EVENTS re WHERE UPPER(re.CAMPAIGN_ID) = UPPER(c.ID) AND re.TYPE = 'publisher_view') AS PUB_SPENT_ACTUAL"
     + " FROM CAMPAIGNS c"
     + " LEFT JOIN ADS a ON UPPER(c.ID) = UPPER(a.CAMPAIGN_ID)"
@@ -126,19 +127,22 @@ function _buildCampaignCard(c, openDetails) {
   var viewerActiveCount    = parseInt(c.VIEWER_ACTIVE_COUNT || 0, 10);
   var viewerSettledCount   = parseInt(c.VIEWER_SETTLED_COUNT || 0, 10);
   
-  var pubLocked            = parseFloat(c.PUB_LOCKED || 0);
   var pubUnsettled         = parseFloat(c.PUB_UNSETTLED || 0);
   var pubSettled           = parseFloat(c.PUB_SETTLED || 0);
   var pubActiveCount       = parseInt(c.PUB_ACTIVE_COUNT || 0, 10);
   var pubSettledCount      = parseInt(c.PUB_SETTLED_COUNT || 0, 10);
   var pubSpentActual       = parseFloat(c.PUB_SPENT_ACTUAL || 0);
+  var viewerSpentActual    = parseFloat(c.VIEWER_SPENT_ACTUAL || 0);
 
   var unspentBudget        = budgetTotal - (viewerSettled + viewerUnsettled + pubSettled + pubUnsettled);
   if (unspentBudget < 0) { unspentBudget = 0; }
-  
+
   var maxPubBudget         = parseFloat(c.MAX_PUBLISHER_BUDGET || 0);
   var pubRemaining         = maxPubBudget - (pubSettled + pubUnsettled);
   if (pubRemaining < 0) { pubRemaining = 0; }
+  // Total Locked for publishers = full MAX_PUBLISHER_BUDGET when any channel is active,
+  // because that allocation is committed to the publisher program.
+  var pubLocked            = pubActiveCount > 0 ? maxPubBudget : 0;
 
   var budgetSpent          = budgetTotal - budgetRemaining;
   var budgetPct            = budgetTotal > 0 ? (budgetSpent / budgetTotal) * 100 : 0;
@@ -247,10 +251,10 @@ function _buildCampaignCard(c, openDetails) {
   var viewerBudgetRow = document.createElement('div');
   viewerBudgetRow.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:.6rem;margin:.35rem 0 .75rem;';
   
-  var escrowCard = mkStatCard('Available (Escrow)', fmtAmt(budgetRemaining, 4) + ' M', 'Total campaign escrow');
+  var escrowCard = mkStatCard('Max Viewer Budget', fmtAmt(budgetTotal - maxPubBudget, 4) + ' M', 'Configured limit');
   var lockedCard = mkStatCard('Locked in Channels', fmtAmt(viewerLocked, 4) + ' M', viewerActiveCount + ' active channel' + (viewerActiveCount === 1 ? '' : 's') + ' (' + fmtAmt(viewerUnsettled, 4) + ' M earned)');
   var settledCard = mkStatCard('Settled (Paid)', fmtAmt(viewerSettled, 4) + ' M', viewerSettledCount + ' settled channel' + (viewerSettledCount === 1 ? '' : 's') + ' (' + fmtAmt(viewerSettled, 4) + ' M paid)');
-  var unspentCard = mkStatCard('Unspent Campaign', fmtAmt(unspentBudget, 4) + ' M', 'Initial: ' + fmtAmt(budgetTotal, 4) + ' M');
+  var unspentCard = mkStatCard('Budget Spent', fmtAmt(viewerSpentActual, 4) + ' M', viewerSettledCount + ' settled channel' + (viewerSettledCount === 1 ? '' : 's'));
   
   viewerBudgetRow.appendChild(escrowCard);
   viewerBudgetRow.appendChild(lockedCard);
@@ -268,9 +272,9 @@ function _buildCampaignCard(c, openDetails) {
     pubBudgetRow.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:.6rem;margin:.35rem 0 .75rem;';
 
     var pubLimitCard = mkStatCard('Max Pub Budget', fmtAmt(maxPubBudget, 4) + ' M', 'Configured limit');
-    var pubReservedCard = mkStatCard('Budget Reserved', fmtAmt(parseFloat(c.PUBLISHER_BUDGET_SPENT || 0), 4) + ' M', pubActiveCount + ' active channel' + (pubActiveCount === 1 ? '' : 's') + ' (' + fmtAmt(pubUnsettled, 4) + ' M earned)');
+    var pubReservedCard = mkStatCard('Locked in Channels', fmtAmt(pubActiveCount > 0 ? maxPubBudget : 0, 4) + ' M', pubActiveCount + ' active channel' + (pubActiveCount === 1 ? '' : 's') + ' (' + fmtAmt(pubUnsettled, 4) + ' M earned)');
     var pubSpentCard = mkStatCard('Budget Spent', fmtAmt(pubSpentActual, 4) + ' M', pubSettledCount + ' settled channel' + (pubSettledCount === 1 ? '' : 's') + ' (' + fmtAmt(pubSettled, 4) + ' M paid)');
-    var pubLeftCard = mkStatCard('Budget Left', fmtAmt(pubRemaining, 4) + ' M', 'Unallocated: ' + fmtAmt(pubRemaining, 4) + ' M');
+    var pubLeftCard = mkStatCard('Settled (Paid)', fmtAmt(pubSettled, 4) + ' M', pubSettledCount + ' settled channel' + (pubSettledCount === 1 ? '' : 's') + ' (' + fmtAmt(pubSettled, 4) + ' M paid)');
 
     var pubViewReward = parseFloat(c.PUBLISHER_REWARD_VIEW || 0);
     if (pubRemaining < pubViewReward) {
@@ -286,8 +290,8 @@ function _buildCampaignCard(c, openDetails) {
 
     pubBudgetRow.appendChild(pubLimitCard);
     pubBudgetRow.appendChild(pubReservedCard);
-    pubBudgetRow.appendChild(pubSpentCard);
     pubBudgetRow.appendChild(pubLeftCard);
+    pubBudgetRow.appendChild(pubSpentCard);
     budgetBody.appendChild(pubBudgetRow);
   }
 

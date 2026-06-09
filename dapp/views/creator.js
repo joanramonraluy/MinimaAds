@@ -5,6 +5,8 @@ var _pendingImageData = null;
 var _detachPositioner = null;
 // Cleanup function for the split divider drag listeners.
 var _detachDivider = null;
+// Active publisher count fetched from L1 for use in metrics panel.
+var _l1ActivePublishers = 0;
 // Renders the campaign creation form, funds the KissVM escrow, and persists
 // the campaign locally via saveCampaign(). Campaign propagates to other nodes
 // automatically via on-chain discovery (MinimaAds.md §8.1).
@@ -273,14 +275,9 @@ function renderCreator(root) {
     + '      <strong id="ma-metric-viewers" style="font-size:1.1rem;">—</strong>'
     + '    </div>'
     + '    <div style="border-top:1px solid var(--pico-muted-border-color,#e0e0e0);padding-top:1rem;">'
-    + '      <small style="color:var(--pico-muted-color);display:block;margin-bottom:0.5rem;"><strong>Publishers (estimate):</strong></small>'
-    + '      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.75rem;">'
-    + '        <button type="button" class="ma-pub-est" data-publishers="5" style="font-size:0.85rem;padding:0.4rem 0.7rem;margin:0;border-radius:0.375rem;">5</button>'
-    + '        <button type="button" class="ma-pub-est" data-publishers="10" style="font-size:0.85rem;padding:0.4rem 0.7rem;margin:0;border-radius:0.375rem;">10</button>'
-    + '        <button type="button" class="ma-pub-est" data-publishers="25" style="font-size:0.85rem;padding:0.4rem 0.7rem;margin:0;border-radius:0.375rem;">25</button>'
-    + '        <button type="button" class="ma-pub-est" data-publishers="50" style="font-size:0.85rem;padding:0.4rem 0.7rem;margin:0;border-radius:0.375rem;">50</button>'
-    + '      </div>'
-    + '      <div id="ma-pub-est-display" style="display:block;font-size:0.9rem;color:var(--pico-color);"></div>'
+    + '      <small style="color:var(--pico-muted-color);display:block;margin-bottom:0.3rem;">Active publishers (L1)</small>'
+    + '      <strong id="ma-metric-publishers" style="font-size:1.1rem;">…</strong>'
+    + '      <div id="ma-pub-est-display" style="display:block;font-size:0.9rem;color:var(--pico-color);margin-top:0.5rem;"></div>'
     + '    </div>'
     + '    <div style="border-top:1px solid var(--pico-muted-border-color,#e0e0e0);padding-top:1rem;margin-top:1rem;">'
     + '      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:0.25rem;">'
@@ -405,21 +402,7 @@ function renderCreator(root) {
     imageInput.addEventListener('change', function () { onImageFileSelect(this); });
   }
 
-  var pubEstButtons = form.querySelectorAll('.ma-pub-est');
-  if (pubEstButtons.length > 0) {
-    pubEstButtons.forEach(function(btn) {
-      btn.addEventListener('click', function(e) {
-        e.preventDefault();
-        pubEstButtons.forEach(function(b) {
-          b.classList.remove('ma-pub-est-active');
-          b.style.fontWeight = '400';
-        });
-        this.classList.add('ma-pub-est-active');
-        this.style.fontWeight = '600';
-        recalculateAllMetrics(form);
-      });
-    });
-  }
+  _loadL1PublisherCountForCreator(form);
 
 
   form.addEventListener('reset', function () {
@@ -1249,6 +1232,29 @@ function applyAutoBalance(form) {
 }
 
 
+function _loadL1PublisherCountForCreator(form) {
+  resolveChannelScriptAddress(function(channelAddr) {
+    if (!channelAddr) { return; }
+    MDS.cmd('coins address:' + channelAddr, function(res) {
+      var coins = (res && res.status && res.response) ? res.response : [];
+      var pubKeys = {};
+      for (var i = 0; i < coins.length; i++) {
+        var states = coins[i].state || [];
+        for (var si = 0; si < states.length; si++) {
+          if (states[si].port == 2 && states[si].data) {
+            pubKeys[states[si].data.toUpperCase()] = true;
+            break;
+          }
+        }
+      }
+      _l1ActivePublishers = Object.keys(pubKeys).length;
+      var el = document.getElementById('ma-metric-publishers');
+      if (el) { el.textContent = String(_l1ActivePublishers); }
+      recalculateAllMetrics(form);
+    });
+  });
+}
+
 function recalculateAllMetrics(form) {
   var metricsPanel = document.getElementById('ma-autobalance-metrics');
   if (metricsPanel) { metricsPanel.style.display = 'block'; }
@@ -1261,11 +1267,10 @@ function recalculateAllMetrics(form) {
   var totalCostWithFee = budget * (1 + PLATFORM_FEE_RATE + FOUNDATION_FEE_RATE);
 
   var BUDGET_PER_PUBLISHER = 10;
-  var selectedPubBtn = form.querySelector('.ma-pub-est.ma-pub-est-active');
-  var numPublishers = selectedPubBtn ? parseInt(selectedPubBtn.dataset.publishers, 10) : 0;
+  var numPublishers = _l1ActivePublishers;
 
   var pubBudgetPool;
-  if (isFinite(numPublishers) && numPublishers > 0) {
+  if (numPublishers > 0) {
     pubBudgetPool = numPublishers * BUDGET_PER_PUBLISHER;
   } else {
     pubBudgetPool = parseAmt(form.querySelector('[name="max_publisher_budget"]').value) || 0;
@@ -1290,19 +1295,19 @@ function recalculateAllMetrics(form) {
   var costEl = document.getElementById('ma-metric-cost');
   if (costEl) { costEl.textContent = fmtAmt(totalCostWithFee, 2) + ' MINIMA'; }
 
-  if (selectedPubBtn && isFinite(numPublishers) && numPublishers > 0) {
-    var budgetPerPublisher = pubBudgetPool / numPublishers;
-    var viewsPerPublisher = publisherRewardView > 0 ? Math.floor(budgetPerPublisher / publisherRewardView) : 0;
-    var totalPublisherViews = viewsPerPublisher * numPublishers;
-
-    var pubEstDisplay = document.getElementById('ma-pub-est-display');
-    if (pubEstDisplay) {
+  var pubEstDisplay = document.getElementById('ma-pub-est-display');
+  if (pubEstDisplay) {
+    if (numPublishers > 0 && publisherRewardView > 0) {
+      var budgetPerPublisher = pubBudgetPool / numPublishers;
+      var viewsPerPublisher = Math.floor(budgetPerPublisher / publisherRewardView);
+      var totalPublisherViews = viewsPerPublisher * numPublishers;
       pubEstDisplay.innerHTML =
-        '<strong style="display:block;margin-bottom:0.3rem;">' + numPublishers + ' publishers:</strong>'
-        + '<span style="display:block;font-size:0.85rem;margin-bottom:0.2rem;">'
+        '<span style="display:block;font-size:0.85rem;margin-bottom:0.2rem;">'
         + fmtAmt(budgetPerPublisher, 2) + ' MINIMA/pub &middot; ' + viewsPerPublisher.toLocaleString() + ' views/pub</span>'
         + '<span style="display:block;font-size:0.85rem;color:var(--pico-muted-color);">'
         + totalPublisherViews.toLocaleString() + ' total publisher-funded views</span>';
+    } else {
+      pubEstDisplay.innerHTML = '';
     }
   }
 }

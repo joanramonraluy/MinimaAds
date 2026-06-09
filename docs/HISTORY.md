@@ -46,6 +46,16 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-07 — Modernize Side Drawer Menu Footer
+
+**Task**: Modernize the side drawer menu footer by adding the DApp name, version, a pulsing connection status badge ("Connected to Minima"), and a dynamic block height tracker.
+
+**Fix**:
+- `public/index.html`: Added CSS classes and HTML for drawer footer with version, status pulse, and block height.
+- `dapp/app.js`: Added `MDS.cmd('status')` on init and `NEWBLOCK` listener to update block height in footer.
+
+---
+
 ### Session: 2026-06-07 — Normalize Publisher Frame IDs
 
 **Task**: Fix publisher frame "Total earned" mismatch and statistics mismatch on creator/publisher nodes by normalizing frame IDs.

@@ -336,6 +336,9 @@ function _trackDetailView(campaign) {
   _viewerState.viewTracked = true;
   _stopProgressBar();
 
+  var statusEl = document.getElementById('ma-viewer-status');
+  if (statusEl) { statusEl.textContent = 'Processing reward…'; }
+
   var payload = {
     type: 'MA_TRACK_VIEW',
     campaignId: campaign.ID,
@@ -355,6 +358,8 @@ function _wireDetailInteractions(campaign) {
     links[i].addEventListener('click', function(e) {
       e.preventDefault();
       var href = e.currentTarget.getAttribute('href');
+      var statusEl = document.getElementById('ma-viewer-status');
+      if (statusEl) { statusEl.textContent = 'Processing reward…'; }
       var payload = {
         type: 'MA_TRACK_CLICK',
         campaignId: campaign.ID,
@@ -538,4 +543,31 @@ function onProfileReceived(parsed) {
 
 function onCampaignsChanged() {
   if (_viewerState.mode === 'list') { _loadAndRenderList(); }
+}
+
+function onRewardValidation(result) {
+  if (_viewerState.mode !== 'detail' || !result) { return; }
+  var statusEl = document.getElementById('ma-viewer-status');
+  if (!statusEl) { return; }
+  if (result.confirmed) {
+    statusEl.textContent = 'Reward confirmed! Opening secure channel…';
+  } else {
+    var reasonMsg = 'Reward not available';
+    if (result.reason === 'cooldown active') {
+      reasonMsg = 'You must wait before earning again from this campaign.';
+    } else if (result.reason === 'daily view limit reached') {
+      reasonMsg = 'You\'ve reached the daily view limit for this campaign.';
+    } else if (result.reason === 'daily click limit reached') {
+      reasonMsg = 'You\'ve reached the daily click limit for this campaign.';
+    } else if (result.reason === 'insufficient budget') {
+      reasonMsg = 'Campaign has insufficient budget for this reward.';
+    } else if (result.reason === 'campaign not active') {
+      reasonMsg = 'This campaign is no longer active.';
+    } else if (result.reason === 'creator cannot earn from own campaign') {
+      reasonMsg = 'You cannot earn rewards from your own campaigns.';
+    } else if (result.reason === 'db error') {
+      reasonMsg = 'System error processing reward.';
+    }
+    statusEl.textContent = reasonMsg;
+  }
 }

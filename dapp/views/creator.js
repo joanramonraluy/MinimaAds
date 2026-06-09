@@ -1309,6 +1309,9 @@ function updateCampaignSummary(form) {
   var rewardClick = parseAmt(form.querySelector('[name="reward_click"]').value);
   var campaignDays = parseInt(form.querySelector('[name="campaign_days"]').value, 10);
   var cap = parseAmt(form.querySelector('[name="max_viewer_reward"]').value);
+  var cooldownS = parseInt(form.querySelector('[name="cooldown_s"]').value, 10) || 300;
+  var maxDailyViews = parseInt(form.querySelector('[name="max_daily_views"]').value, 10) || 100;
+  var maxDailyClicks = parseInt(form.querySelector('[name="max_daily_clicks"]').value, 10) || 100;
 
   if (!isFinite(budget) || budget <= 0 || !isFinite(rewardView) || !isFinite(rewardClick)
     || !isFinite(campaignDays) || campaignDays <= 0 || !isFinite(cap) || cap <= 0) {
@@ -1327,42 +1330,71 @@ function updateCampaignSummary(form) {
   var platformFee = budget * PLATFORM_FEE_RATE;
   var foundationFee = budget * FOUNDATION_FEE_RATE;
   var totalCost = budget + platformFee + foundationFee;
+  var cooldownMin = Math.round(cooldownS / 60);
 
   // ── Reach estimate → Review panel only ───────────────────────────────
   if (reachReviewEl) {
     var warningHtml = maxViewers <= 0
-      ? '<p class="ma-summary-warning">No viewer can be rewarded with these settings.'
-      + ' Increase the budget or reduce the channel max per viewer.</p>'
+      ? '<p class="ma-summary-warning">No viewer can be rewarded with these settings. Increase budget or reduce channel max.</p>'
       : '';
-    var reachHtml = '<div class="ma-summary-box">'
+    var reachHtml = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">'
+      + '<div class="ma-summary-box" style="border-left-color:#10b981;grid-column:1/-1;">'
       + warningHtml
-      + '<strong>Campaign reach estimate</strong>'
-      + '<ul>'
-      + '<li>Max viewers: <strong>' + maxViewers.toLocaleString() + '</strong></li>'
-      + '<li>Channel max / viewer: ' + formatMinima(cap) + ' MINIMA</li>'
-      + '<li>Reward / view (viewer): ' + formatMinima(rewardView) + ' MINIMA</li>'
-      + '<li>Reward / click (viewer): ' + formatMinima(rewardClick) + ' MINIMA</li>'
-      + (maxPubBudget > 0
-        ? '<li>Channel max / publisher: ' + formatMinima(maxPubBudget) + ' MINIMA</li>'
-        : '')
-      + (publisherRv > 0
-        ? '<li>Reward / view (publisher): ' + formatMinima(publisherRv) + ' MINIMA</li>'
-        : '')
-      + '</ul>'
+      + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:.75rem;">'
+      + '<span style="font-size:0.9rem;color:var(--pico-muted-color);text-transform:uppercase;font-weight:600;">Max Viewers Reachable</span>'
+      + '<strong style="font-size:1.8rem;color:#10b981;">' + maxViewers.toLocaleString() + '</strong>'
+      + '</div>'
+      + '</div>'
+      + '<div class="ma-summary-box">'
+      + '<strong style="display:block;margin-bottom:.5rem;font-size:0.85rem;text-transform:uppercase;color:var(--pico-muted-color);">Viewer Rewards</strong>'
+      + '<div style="font-size:0.9rem;line-height:1.5;">'
+      + '<div style="display:flex;justify-content:space-between;margin-bottom:.35rem;"><span>Per view:</span><strong>' + formatMinima(rewardView) + '</strong></div>'
+      + '<div style="display:flex;justify-content:space-between;margin-bottom:.35rem;"><span>Per click:</span><strong>' + formatMinima(rewardClick) + '</strong></div>'
+      + '<div style="display:flex;justify-content:space-between;"><span>Channel max:</span><strong>' + formatMinima(cap) + '</strong></div>'
+      + '</div>'
+      + '</div>'
+      + '<div class="ma-summary-box">'
+      + '<strong style="display:block;margin-bottom:.5rem;font-size:0.85rem;text-transform:uppercase;color:var(--pico-muted-color);">Publisher Rewards</strong>'
+      + '<div style="font-size:0.9rem;line-height:1.5;">'
+      + '<div style="display:flex;justify-content:space-between;margin-bottom:.35rem;"><span>Per view:</span><strong>' + formatMinima(publisherRv) + '</strong></div>'
+      + '<div style="display:flex;justify-content:space-between;"><span>Max budget:</span><strong>' + formatMinima(maxPubBudget) + '</strong></div>'
+      + '</div>'
+      + '</div>'
+      + '<div class="ma-summary-box">'
+      + '<strong style="display:block;margin-bottom:.5rem;font-size:0.85rem;text-transform:uppercase;color:var(--pico-muted-color);">Limits & Timing</strong>'
+      + '<div style="font-size:0.9rem;line-height:1.5;">'
+      + '<div style="display:flex;justify-content:space-between;margin-bottom:.35rem;"><span>Cooldown:</span><strong>' + cooldownMin + ' min</strong></div>'
+      + '<div style="display:flex;justify-content:space-between;margin-bottom:.35rem;"><span>Max views/day:</span><strong>' + maxDailyViews + '</strong></div>'
+      + '<div style="display:flex;justify-content:space-between;"><span>Max clicks/day:</span><strong>' + maxDailyClicks + '</strong></div>'
+      + '</div>'
+      + '</div>'
       + '</div>';
     if (reachReviewEl) { reachReviewEl.innerHTML = reachHtml; }
   }
 
   // ── Cost breakdown → Review panel ─────────────────────────────────────
   if (costEl) {
-    costEl.innerHTML = '<div class="ma-summary-box">'
-      + '<strong>Cost breakdown</strong>'
-      + '<ul>'
-      + '<li>Budget: ' + formatMinima(budget) + ' MINIMA</li>'
-      + '<li>Platform fee (6%): ' + formatMinima(platformFee) + ' MINIMA</li>'
-      + '<li>Minima Foundation fee (3%): ' + formatMinima(foundationFee) + ' MINIMA</li>'
-      + '<li>Total cost: <strong>' + formatMinima(totalCost) + ' MINIMA</strong></li>'
-      + '</ul>'
+    costEl.innerHTML = '<div class="ma-summary-box" style="border-left-color:#f39c12;">'
+      + '<strong style="display:block;margin-bottom:.75rem;font-size:0.9rem;text-transform:uppercase;color:var(--pico-muted-color);">Cost Breakdown</strong>'
+      + '<div style="display:flex;justify-content:space-between;margin-bottom:.5rem;padding-bottom:.5rem;border-bottom:1px solid var(--pico-muted-border-color);font-size:0.9rem;">'
+      + '<span>Campaign budget:</span>'
+      + '<strong>' + formatMinima(budget) + ' MINIMA</strong>'
+      + '</div>'
+      + '<div style="display:flex;justify-content:space-between;margin-bottom:.35rem;font-size:0.85rem;color:var(--pico-muted-color);">'
+      + '<span>Platform fee (6%):</span>'
+      + '<span>' + formatMinima(platformFee) + ' MINIMA</span>'
+      + '</div>'
+      + '<div style="display:flex;justify-content:space-between;margin-bottom:1rem;font-size:0.85rem;color:var(--pico-muted-color);padding-bottom:1rem;border-bottom:1px solid var(--pico-muted-border-color);">'
+      + '<span>Foundation fee (3%):</span>'
+      + '<span>' + formatMinima(foundationFee) + ' MINIMA</span>'
+      + '</div>'
+      + '<div style="display:flex;justify-content:space-between;align-items:baseline;">'
+      + '<span style="font-weight:600;font-size:0.95rem;">Total cost to send:</span>'
+      + '<strong style="font-size:1.5rem;color:#f39c12;">' + formatMinima(totalCost) + ' MINIMA</strong>'
+      + '</div>'
+      + '<div style="margin-top:.75rem;padding:.5rem;background-color:rgba(243,156,18,0.05);border-radius:0.3rem;font-size:0.8rem;color:var(--pico-muted-color);">'
+      + 'Duration: ' + campaignDays + ' day' + (campaignDays !== 1 ? 's' : '') + ' • Viewer budget: ' + formatMinima(budgetForViewers) + ' • Publisher budget: ' + formatMinima(maxPubBudget)
+      + '</div>'
       + '</div>';
   }
 }

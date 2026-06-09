@@ -1828,7 +1828,8 @@ function _swBuildAndPostChannelTxInner(ctx, txId, campaignHex, contactForState4)
             "txnstate id:" + txId + " port:4 value:" + creatorMxHex,
             "txnstate id:" + txId + " port:7 value:" + ps7,
             "txnstate id:" + txId + " port:10 value:" + ctx.maxAmount,
-            "txnstate id:" + txId + " port:11 value:0"
+            "txnstate id:" + txId + " port:11 value:0",
+            "txnstate id:" + txId + " port:16 value:0"
           ];
           if (ps5) { stateCmds.push("txnstate id:" + txId + " port:5 value:" + ps5); }
           if (ps6) { stateCmds.push("txnstate id:" + txId + " port:6 value:" + ps6); }
@@ -1962,7 +1963,8 @@ function swBuildAndPostChannelOpenTx(ctx) {
             "txnstate id:" + txId + " port:3 value:" + campHex,
             "txnstate id:" + txId + " port:4 value:" + viewerMxHex,
             "txnstate id:" + txId + " port:10 value:" + ctx.maxAmount,
-            "txnstate id:" + txId + " port:11 value:0"
+            "txnstate id:" + txId + " port:11 value:0",
+            "txnstate id:" + txId + " port:16 value:0"
           ];
           swRunSequential(stateCmds, 0, function(stateOk) {
             if (!stateOk) { fail("txnstate"); return; }

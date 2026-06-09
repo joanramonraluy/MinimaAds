@@ -176,6 +176,30 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-06-09 — Campaigns view (L1 data) + Remove Stats
+
+**Task**: Replace the Stats view with a new Campaigns view accessible from all roles (viewer, creator, publisher). Show real L1 data instead of estimates: escrow coin count/budget + active publishers from channel coins. Replace the publisher estimate selector in the creator form with a live L1 count.
+
+**Fix**:
+- `dapp/views/campaigns.js` (new): Campaign list from local DB enriched with L1 data. Summary cards (Campaigns, Total budget, Open channels, Active publishers) all from L1 via `coins address:ESCROW_ADDRESS*` and `coins address:CHANNEL_SCRIPT_ADDRESS`. Per-campaign publisher count from `PREVSTATE(2)` of open channel coins. Filter Active / All.
+- `dapp/views/creator.js`: Removed publisher estimate buttons (5/10/25/50). Added `_loadL1PublisherCountForCreator()` — queries L1 on metrics panel open, stores count in `_l1ActivePublishers`, auto-recalculates metrics.
+- `dapp/views/stats.js`: Deleted (superseded by Campaigns view).
+- `dapp/app.js`: Added `campaigns` route to all three `MODE_VIEWS`. Removed `stats` from creator mode and all routing/render references.
+- `public/index.html`: Removed `stats.js` script tag, added `campaigns.js`.
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry moved to `docs/HISTORY.md §17`.
+
+**Verification**:
+- Open any mode → "Campaigns" tab visible in nav
+- Campaigns view: 4 summary cards show `…` then update with L1 values
+- Filter Active / All switches campaign list
+- Creator form → metrics panel → "Active publishers (L1)" shows real count, metrics recalculate automatically
+- No console errors
+
+**Open issues**: None.
+
+---
+
 ### Session: 2026-06-09 — Minima Foundation Fee (3%) + V4 Escrow Script Fixes
 
 **Task**: Add a configurable 3% Minima Foundation fee alongside the existing 6% platform creator fee, and fix all resulting escrow script and channel transaction bugs.
@@ -238,28 +262,6 @@ For verification procedures, see `docs/VERIFICATION.md`.
 **Verification**:
 - Checked JS syntax on all modified files with `node -c` (all clean).
 - Rebuilt `MinimaAds.mds.zip` and verified package integrity.
-
----
-
-### Session: 2026-06-07 — Modernize Side Drawer Menu Footer
-
-**Task**: Modernize the side drawer menu footer by adding the DApp name, version, a pulsing connection status badge ("Connected to Minima"), and a dynamic block height tracker.
-
-**Root Cause**: The side drawer menu had no footer, version indicator, or connection status, which missed an opportunity to display relevant node info and offer a more responsive, premium design.
-
-**Fix**:
-- public/index.html:
-  - Modified `#ma-drawer` panel styles to disable global drawer scrolling (`overflow: hidden;`) and enable internal scroll on the menu options section (`overflow-y: auto;`).
-  - Added CSS classes for `.ma-drawer-footer`, `.ma-drawer-footer-title`, `.ma-drawer-version`, `.ma-drawer-status`, `.ma-status-pulse` (with pulsing keyframe animation), and `.ma-drawer-block`.
-  - Added HTML structure for Section 3 (Footer) at the bottom of the drawer.
-- dapp/app.js:
-  - Inside `MDS.init` `inited` handler, added a call to `MDS.cmd('status')` to fetch and display the initial block height (`#ma-footer-block-height`).
-  - Added a `NEWBLOCK` event listener in `MDS.init` callback to dynamically update the block height inside the footer as new blocks are mined.
-
-**AGENTS.md updated**: yes — §6 updated.
-
-**Verification**:
-- `dapp/app.js` compiles cleanly with `node -c`.
 
 ---
 

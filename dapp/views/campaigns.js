@@ -1,0 +1,312 @@
+// Campaigns view — all campaigns from local DB enriched with L1 publisher count.
+// Shows open channel coins (coins address:CHANNEL_SCRIPT_ADDRESS) to count active
+// publishers per campaign. Accessible from all modes (viewer, creator, publisher).
+
+var _campaignsFilter = 'active'; // 'active' | 'all'
+
+function renderCampaigns(root) {
+  root.innerHTML = '';
+
+  var h2 = document.createElement('h2');
+  h2.textContent = 'Campaigns';
+  h2.style.cssText = 'margin:0 0 1.5rem 0;padding:1rem;background:rgba(0,0,0,0.02);border-left:4px solid #8b5cf6;border-radius:0.375rem;';
+  root.appendChild(h2);
+
+  var summaryRow = document.createElement('div');
+  summaryRow.id = 'ma-campaigns-summary';
+  summaryRow.style.cssText = 'display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1.5rem;padding:.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(0,0,0,0.015);border-left:3px solid #8b5cf6;';
+  root.appendChild(summaryRow);
+
+  var filterRow = document.createElement('div');
+  filterRow.style.cssText = 'display:flex;gap:.5rem;margin-bottom:1rem;';
+  filterRow.id = 'ma-campaigns-filter';
+  root.appendChild(filterRow);
+
+  var listSection = document.createElement('div');
+  listSection.id = 'ma-campaigns-list';
+  root.appendChild(listSection);
+
+  _renderCampaignsFilter();
+  _loadCampaigns();
+}
+
+function _renderCampaignsFilter() {
+  var filterRow = document.getElementById('ma-campaigns-filter');
+  if (!filterRow) { return; }
+  filterRow.innerHTML = '';
+
+  var filters = [
+    { key: 'active', label: 'Active' },
+    { key: 'all',    label: 'All' }
+  ];
+  for (var i = 0; i < filters.length; i++) {
+    (function(f) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = f.label;
+      btn.style.cssText = 'padding:.3rem .85rem;font-size:.8rem;width:auto;';
+      if (_campaignsFilter === f.key) {
+        btn.className = '';
+      } else {
+        btn.className = 'outline secondary';
+      }
+      btn.addEventListener('click', function() {
+        _campaignsFilter = f.key;
+        _renderCampaignsFilter();
+        _loadCampaigns();
+      });
+      filterRow.appendChild(btn);
+    })(filters[i]);
+  }
+}
+
+function _loadCampaigns() {
+  var listEl = document.getElementById('ma-campaigns-list');
+  if (!listEl) { return; }
+  listEl.innerHTML = '';
+
+  var loading = document.createElement('p');
+  loading.setAttribute('aria-busy', 'true');
+  loading.style.cssText = 'color:var(--pico-muted-color,#6c757d);padding:1rem;margin:0;';
+  loading.textContent = 'Loading campaigns…';
+  listEl.appendChild(loading);
+
+  var sql = 'SELECT c.ID, c.TITLE, c.CREATOR_ADDRESS, c.BUDGET_REMAINING, c.REWARD_VIEW, '
+    + 'c.REWARD_CLICK, c.STATUS, c.PUBLISHER_REWARD_VIEW, '
+    + 'a.TITLE AS AD_TITLE, a.BODY AS AD_BODY '
+    + 'FROM CAMPAIGNS c LEFT JOIN ADS a ON UPPER(a.CAMPAIGN_ID) = UPPER(c.ID)';
+  if (_campaignsFilter === 'active') {
+    sql += " WHERE UPPER(c.STATUS) = 'ACTIVE'";
+  }
+  sql += ' ORDER BY c.STATUS ASC, c.TITLE ASC';
+
+  sqlQuery(sql, function(err, rows) {
+    if (err) {
+      listEl.innerHTML = '';
+      var errP = document.createElement('p');
+      errP.style.cssText = 'color:var(--pico-del-color,#c0392b);padding:1rem;margin:0;';
+      errP.textContent = 'Error loading campaigns.';
+      listEl.appendChild(errP);
+      return;
+    }
+
+    var campaigns = rows || [];
+    _updateCampaignsSummary();
+
+    if (campaigns.length === 0) {
+      listEl.innerHTML = '';
+      var empty = mkEmptyState('No campaigns found.', null, null);
+      listEl.appendChild(empty);
+      _loadL1Data([], function() {});
+      return;
+    }
+
+    _loadL1Data(campaigns, function(pubCountMap) {
+      listEl.innerHTML = '';
+
+      var wrapper = document.createElement('div');
+      wrapper.style.cssText = 'border:1px solid var(--pico-muted-border-color,#ddd);border-radius:var(--pico-border-radius);overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06);';
+
+      for (var i = 0; i < campaigns.length; i++) {
+        wrapper.appendChild(_buildCampaignsRow(campaigns[i], pubCountMap));
+      }
+      listEl.appendChild(wrapper);
+    });
+  });
+}
+
+function _updateCampaignsSummary() {
+  var summaryEl = document.getElementById('ma-campaigns-summary');
+  if (!summaryEl) { return; }
+  summaryEl.innerHTML = '';
+
+  var defs = [
+    { id: 'ma-cstat-campaigns',  label: 'Campaigns (L1)' },
+    { id: 'ma-cstat-budget',     label: 'Total budget (L1)' },
+    { id: 'ma-cstat-channels',   label: 'Open channels (L1)' },
+    { id: 'ma-cstat-publishers', label: 'Active publishers (L1)' }
+  ];
+  for (var i = 0; i < defs.length; i++) {
+    var card = mkStatCard(defs[i].label, '…');
+    card.id = defs[i].id;
+    summaryEl.appendChild(card);
+  }
+}
+
+function _setStatCard(id, value) {
+  var card = document.getElementById(id);
+  if (!card) { return; }
+  var strong = card.querySelector('strong');
+  if (strong) { strong.textContent = value; }
+}
+
+function _loadL1Data(campaigns, cb) {
+  // Build hex → campaignId lookup for per-campaign publisher count
+  var campHexMap = {};
+  for (var i = 0; i < campaigns.length; i++) {
+    var hexId = ('0x' + utf8ToHex(campaigns[i].ID)).toUpperCase();
+    campHexMap[hexId] = campaigns[i].ID;
+  }
+
+  MDS.keypair.get('ESCROW_ADDRESS', function(r1) {
+  MDS.keypair.get('ESCROW_ADDRESS_V3', function(r2) {
+  MDS.keypair.get('ESCROW_ADDRESS_V4', function(r3) {
+  MDS.keypair.get('CHANNEL_SCRIPT_ADDRESS', function(r4) {
+    var escrowAddrs = [];
+    if (r1 && r1.status && r1.value) { escrowAddrs.push(r1.value); }
+    if (r2 && r2.status && r2.value && escrowAddrs.indexOf(r2.value) === -1) { escrowAddrs.push(r2.value); }
+    if (r3 && r3.status && r3.value && escrowAddrs.indexOf(r3.value) === -1) { escrowAddrs.push(r3.value); }
+    var channelAddr = (r4 && r4.status) ? r4.value : '';
+
+    var escrowCoins = [];
+    var pending = escrowAddrs.length;
+
+    function onEscrowDone() {
+      pending--;
+      if (pending > 0) { return; }
+
+      var escrowCount = escrowCoins.length;
+      var escrowTotal = 0;
+      for (var ei = 0; ei < escrowCoins.length; ei++) {
+        escrowTotal += parseFloat(escrowCoins[ei].amount || 0);
+      }
+      _setStatCard('ma-cstat-campaigns', String(escrowCount));
+      _setStatCard('ma-cstat-budget', fmtAmt(escrowTotal, 2) + ' MINIMA');
+
+      if (!channelAddr) {
+        _setStatCard('ma-cstat-channels', '0');
+        _setStatCard('ma-cstat-publishers', '0');
+        cb({});
+        return;
+      }
+
+      MDS.cmd('coins address:' + channelAddr, function(res) {
+        var chCoins = (res && res.status && res.response) ? res.response : [];
+        var allPubKeys = {};
+        var pubCountMap = {};
+
+        for (var ci = 0; ci < chCoins.length; ci++) {
+          var states = chCoins[ci].state || [];
+          var campHex = '';
+          var pubKey  = '';
+          for (var si = 0; si < states.length; si++) {
+            if (states[si].port == 3) { campHex = (states[si].data || '').toUpperCase(); }
+            if (states[si].port == 2) { pubKey  = (states[si].data || '').toUpperCase(); }
+          }
+          if (!pubKey) { continue; }
+          allPubKeys[pubKey] = true;
+          if (campHex && campHexMap[campHex]) {
+            var cid = campHexMap[campHex];
+            if (!pubCountMap[cid]) { pubCountMap[cid] = {}; }
+            pubCountMap[cid][pubKey] = true;
+          }
+        }
+
+        _setStatCard('ma-cstat-channels', String(chCoins.length));
+        _setStatCard('ma-cstat-publishers', String(Object.keys(allPubKeys).length));
+        cb(pubCountMap);
+      });
+    }
+
+    if (escrowAddrs.length === 0) {
+      _setStatCard('ma-cstat-campaigns', '0');
+      _setStatCard('ma-cstat-budget', '0 MINIMA');
+      onEscrowDone();
+      return;
+    }
+
+    for (var ai = 0; ai < escrowAddrs.length; ai++) {
+      (function(addr) {
+        MDS.cmd('coins address:' + addr, function(res) {
+          var coins = (res && res.status && res.response) ? res.response : [];
+          for (var k = 0; k < coins.length; k++) { escrowCoins.push(coins[k]); }
+          onEscrowDone();
+        });
+      })(escrowAddrs[ai]);
+    }
+  });
+  });
+  });
+  });
+}
+
+function _buildCampaignsRow(campaign, pubCountMap) {
+  var row = document.createElement('div');
+  row.style.cssText = 'display:flex;align-items:center;gap:.85rem;'
+    + 'padding:.85rem;background:transparent;'
+    + 'border-bottom:1px solid var(--pico-muted-border-color,#ddd);';
+
+  var hue = 0;
+  var cid = campaign.ID || '';
+  for (var ci = 0; ci < cid.length; ci++) { hue = (hue + cid.charCodeAt(ci)) % 360; }
+
+  var letter = (campaign.AD_TITLE || campaign.TITLE || '?').charAt(0).toUpperCase();
+
+  var avatar = document.createElement('div');
+  avatar.style.cssText = 'width:2.75rem;height:2.75rem;min-width:2.75rem;border-radius:50%;'
+    + 'display:flex;align-items:center;justify-content:center;'
+    + 'font-weight:700;font-size:1.1rem;color:#fff;'
+    + 'background:hsl(' + hue + ',52%,46%);';
+  avatar.textContent = letter;
+
+  var textDiv = document.createElement('div');
+  textDiv.style.cssText = 'flex:1;min-width:0;';
+
+  var titleRow = document.createElement('div');
+  titleRow.style.cssText = 'display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;';
+
+  var titleEl = document.createElement('div');
+  titleEl.style.cssText = 'font-weight:600;font-size:.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+  titleEl.textContent = DOMPurify.sanitize(campaign.AD_TITLE || campaign.TITLE || 'Untitled');
+  titleRow.appendChild(titleEl);
+
+  var statusBadge = mkStatusBadge(campaign.STATUS);
+  titleRow.appendChild(statusBadge);
+  textDiv.appendChild(titleRow);
+
+  var bodyRaw = ((campaign.AD_BODY || '') + '').replace(/\s+/g, ' ').trim();
+  if (bodyRaw) {
+    var bodyEl = document.createElement('div');
+    bodyEl.style.cssText = 'color:var(--pico-muted-color,#6c757d);font-size:.82rem;'
+      + 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:.1rem;';
+    bodyEl.textContent = DOMPurify.sanitize(bodyRaw.length > 60 ? bodyRaw.substring(0, 60) + '…' : bodyRaw);
+    textDiv.appendChild(bodyEl);
+  }
+
+  var metaRow = document.createElement('div');
+  metaRow.style.cssText = 'display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;margin-top:.2rem;';
+
+  var rv = parseFloat(campaign.REWARD_VIEW) || 0;
+  var rc = parseFloat(campaign.REWARD_CLICK) || 0;
+  var rewardText = fmtAmt(rv, 3) + ' MINIMA/view';
+  if (rc > 0) { rewardText += '  ·  ' + fmtAmt(rc, 3) + '/click'; }
+  var rewardEl = document.createElement('span');
+  rewardEl.style.cssText = 'font-size:.75rem;color:var(--pico-primary,#6366f1);';
+  rewardEl.textContent = rewardText;
+  metaRow.appendChild(rewardEl);
+
+  var budgetEl = document.createElement('span');
+  budgetEl.style.cssText = 'font-size:.75rem;color:var(--pico-muted-color,#6c757d);';
+  budgetEl.textContent = fmtAmt(parseFloat(campaign.BUDGET_REMAINING || 0), 4) + ' left';
+  metaRow.appendChild(budgetEl);
+
+  textDiv.appendChild(metaRow);
+
+  var pubCount = pubCountMap[campaign.ID] ? Object.keys(pubCountMap[campaign.ID]).length : 0;
+  var pubBadge = document.createElement('div');
+  pubBadge.style.cssText = 'display:flex;flex-direction:column;align-items:center;min-width:3rem;flex-shrink:0;';
+  var pubNum = document.createElement('span');
+  pubNum.style.cssText = 'font-weight:700;font-size:1rem;color:#8b5cf6;';
+  pubNum.textContent = String(pubCount);
+  var pubLabel = document.createElement('span');
+  pubLabel.style.cssText = 'font-size:.65rem;color:var(--pico-muted-color,#6c757d);text-align:center;line-height:1.2;margin-top:.1rem;';
+  pubLabel.textContent = pubCount === 1 ? 'publisher' : 'publishers';
+  pubBadge.appendChild(pubNum);
+  pubBadge.appendChild(pubLabel);
+
+  row.appendChild(avatar);
+  row.appendChild(textDiv);
+  row.appendChild(pubBadge);
+
+  return row;
+}

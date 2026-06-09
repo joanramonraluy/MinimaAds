@@ -61,9 +61,9 @@ function setNumberFormat(fmt) {
 }
 
 var MODE_VIEWS = {
-  viewer:    ['viewer', 'earnings'],
-  creator:   ['creator', 'mycampaigns', 'stats'],
-  publisher: ['frames', 'earnings']
+  viewer:    ['viewer', 'earnings', 'campaigns'],
+  creator:   ['creator', 'mycampaigns', 'campaigns'],
+  publisher: ['frames', 'earnings', 'campaigns']
 };
 // Tracks in-flight channel-related pending txns. Keyed by pendinguid.
 // Mirrored to keypair (PENDING_CHANNEL_<uid>) so FE reloads don't lose context.
@@ -75,7 +75,7 @@ function generateUID() {
 
 function currentRoute() {
   var h = (window.location.hash || '').replace(/^#/, '');
-  if (h === 'creator' || h === 'mycampaigns' || h === 'stats' || h === 'viewer' || h === 'earnings' || h === 'frames' || h === 'settings' || h === 'settings/maxima-routes' || h === 'profile' || h === 'help') { return h; }
+  if (h === 'creator' || h === 'mycampaigns' || h === 'viewer' || h === 'earnings' || h === 'frames' || h === 'campaigns' || h === 'settings' || h === 'settings/maxima-routes' || h === 'profile' || h === 'help') { return h; }
   return 'viewer';
 }
 
@@ -100,8 +100,8 @@ function renderNav() {
     earnings: { href: '#earnings', label: 'Earnings' },
     creator:     { href: '#creator',      label: 'Create' },
     mycampaigns: { href: '#mycampaigns',  label: 'My Campaigns' },
-    stats:       { href: '#stats',        label: 'Stats' },
-    frames:   { href: '#frames',   label: 'Frames' }
+    frames:     { href: '#frames',     label: 'Frames' },
+    campaigns:  { href: '#campaigns',  label: 'Campaigns' }
   };
   linksEl.innerHTML = '';
   for (var j = 0; j < views.length; j++) {
@@ -197,12 +197,12 @@ function doRender() {
     renderCreator(root);
   } else if (route === 'earnings' && typeof renderEarnings === 'function') {
     renderEarnings(root);
-  } else if (route === 'stats' && typeof renderStats === 'function') {
-    renderStats(root);
   } else if (route === 'frames' && typeof renderFrames === 'function') {
     renderFrames(root);
   } else if (route === 'mycampaigns' && typeof renderMyCampaigns === 'function') {
     renderMyCampaigns(root);
+  } else if (route === 'campaigns' && typeof renderCampaigns === 'function') {
+    renderCampaigns(root);
   } else if (typeof renderViewer === 'function') {
     renderViewer(root);
   } else {
@@ -225,9 +225,6 @@ function handleMdsComms(parsed) {
   if (parsed.type === 'NEW_CAMPAIGN' || parsed.type === 'CAMPAIGN_UPDATED') {
     if (parsed.type === 'CAMPAIGN_UPDATED' && typeof window.onCampaignUpdated === 'function') {
       window.onCampaignUpdated(parsed);
-    }
-    if (currentRoute() === 'stats' && typeof renderStats === 'function') {
-      renderStats(document.getElementById('app'));
     }
     if (currentRoute() === 'viewer' && typeof onCampaignsChanged === 'function') {
       onCampaignsChanged();
@@ -313,6 +310,10 @@ function handleMdsComms(parsed) {
   }
   if (parsed.type === 'PROFILE_RECEIVED') {
     if (typeof onProfileReceived === 'function') { onProfileReceived(parsed); }
+    return;
+  }
+  if (parsed.type === 'MA_TRACK_RESULT') {
+    if (typeof onRewardValidation === 'function') { onRewardValidation(parsed); }
     return;
   }
 }

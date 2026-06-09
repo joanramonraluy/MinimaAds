@@ -192,3 +192,12 @@ During development, **never add `ALTER TABLE` migration statements** to `db-init
 
 50. **`checkOpenChannelsSettled` must use a grace period for newly activated channels.** Minima's local UTXO index lags ~5–20 s behind block confirmation (fragility #28). When `activateChannel` is called and NEWBLOCK fires immediately after, `coins address:<CHANNEL_SCRIPT_ADDRESS>` may return 0 results even though the coin exists on-chain. Without a grace period, `checkOpenChannelsSettled` interprets 0 results as "coin spent → settle". The fix (REW-1) uses a 60-second grace window based on `CREATED_AT`. **Rule**: any function that queries coin presence by address to infer spending must account for this lag — do not treat "coin not found via address scan" as conclusive within the first 60 s of channel activation.
 
+
+
+---
+
+## 16) V4 Escrow Script — STATE Ports Must Be Explicit
+
+51. **`STATE(n)` throws when port `n` is not set in the spending transaction** — same behaviour as `PREVSTATE(n)` (KNOWN_ISSUES #38). V4 escrow script reads `LET foundationfeeflag=STATE(16)` unconditionally at top-level. In split (Tx1) and channel-open (Tx2) transactions, port 16 was never set, causing `Script FAIL` on every V4 spend. **Rule**: every STATE port read unconditionally at top-level in any escrow script must be explicitly set to a value (e.g. 0) in ALL spending transactions, even when the corresponding feature branch is disabled. V3 was unaffected because it only reads STATE(10) and STATE(11), both always set explicitly. **Fixed (2026-06-09)**: added `txnstate port:16 value:0` to all 4 tx builders (SW `swBuildAndPostChannelTx`, SW `swBuildAndPostChannelOpenTx`, FE `buildAndPostChannelTx`, FE `buildAndPostChannelOpenTx`).
+
+52. **`escrowAddrFallback` must include all active escrow script versions** — `swBuildAndPostChannelTx` derives the output address from `r2.response.transaction.inputs[0].address` (the coin's actual on-chain address). If this read fails silently, the fallback is used for the output address. If the fallback doesn't include the current escrow version (e.g. V4), `@ADDRESS` in the script (= V4) won't match the output address (= V3), and `VERIFYOUT(@ADDRESS)` fails. **Rule**: keep `escrowAddrFallback` updated to prefer the newest script version: `ESCROW_ADDRESS_V4 || ESCROW_ADDRESS_V3 || ESCROW_ADDRESS`. **Fixed (2026-06-09)**.

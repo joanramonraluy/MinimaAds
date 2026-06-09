@@ -46,6 +46,27 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-07 — Normalize Publisher Frame IDs
+
+**Task**: Fix publisher frame "Total earned" mismatch and statistics mismatch on creator/publisher nodes by normalizing frame IDs.
+
+**Root Cause**: In several execution paths, raw public keys (e.g. `0X...`) were not normalized to the prefixed form (`builtin:0X...`), causing database lookups and updates on the `FRAMES` table (which uses prefixed keys) to fail or mapping incorrectly.
+
+**Fix**:
+- public/service-workers/handlers/channel.handler.js:
+  - In `handleChannelOpen`: extract and normalize `frame_id` (prefixed with `builtin:` and capitalized) and pass it to `_doChannelOpenUpsert`.
+  - In `_doChannelOpenUpsert`: update the SQL script to save `frameId` to `CHANNEL_STATE.FRAME_ID` instead of an empty string `''`.
+  - In `_continueRewardVoucher`: normalize `frameId` before looking up the frame in `FRAMES` and calling `createRewardEvent`.
+  - In `handlePublisherRewardNotify`: normalize `frame_id` before saving to deferred notifies or looking up channel states.
+  - In `_maybeGeneratePublisherVoucher`: normalize `frameId` and handle `publisherKey` normalization.
+  - In `_doGeneratePublisherVoucher`: normalize `frameId` before using it in any outbound open request, keypair store, or transaction dispatch.
+
+**AGENTS.md updated**: yes — §6 updated.
+
+**Verification**: Verified JS syntax using `node -c` (clean). Rebuilt `MinimaAds.mds.zip` and verified package integrity.
+
+---
+
 ### Session: 2026-06-07 — Collapsible Campaign Cards & Combined Totals
 
 **Task**: Re-architect the campaign cards view in the creator dashboard to make campaign cards and their budget allocation sections collapsible to keep the UI tidy, introduce a "Combined Totals" budget overview, and preserve details open states across page updates.

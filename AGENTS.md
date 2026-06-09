@@ -176,26 +176,32 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
-### Session: 2026-06-07 — Normalize Publisher Frame IDs
+### Session: 2026-06-09 — Minima Foundation Fee (3%) + V4 Escrow Script Fixes
 
-**Task**: Fix publisher frame "Total earned" mismatch and statistics mismatch on creator/publisher nodes by normalizing frame IDs.
+**Task**: Add a configurable 3% Minima Foundation fee alongside the existing 6% platform creator fee, and fix all resulting escrow script and channel transaction bugs.
 
-**Root Cause**: In several execution paths, raw public keys (e.g. `0X...`) were not normalized to the prefixed form (`builtin:0X...`), causing database lookups and updates on the `FRAMES` table (which uses prefixed keys) to fail or mapping incorrectly.
+**Root Cause (chain of bugs fixed)**:
+1. **STATE(16) not set in split/open txns** — V4 script reads `LET foundationfeeflag=STATE(16)` unconditionally at top-level. KissVM throws when a STATE port is absent (same as PREVSTATE, per KNOWN_ISSUES #38). Split tx and channel-open tx never set port 16, causing `Script FAIL` on every V4 spend. **Fix**: add `txnstate port:16 value:0` to all 4 tx builders (SW Tx1/Tx2, FE Tx1/Tx2).
+2. **`escrowAddrFallback` did not include V4** — fallback was `V3 || V1`. If `r2.response.transaction.inputs[0].address` read failed, `coinAddr` fell back to V3, but `@ADDRESS` in V4 script = V4. `VERIFYOUT` would fail. **Fix**: fallback now `V4 || V3 || V1`.
+3. **`setTimeout` in SW** — `swWaitForCoin` retry used `setTimeout`, not available in Rhino. **Fix**: single-attempt; rely on `checkPendingChannelOpens` NEWBLOCK retry.
+4. **Stale SPLIT_COINID loops forever** — rejected split coin stays in `PENDING_CHOPEN_QUEUE` indefinitely. **Fix**: after 20 blocks without finding the coin, clear `SPLIT_COINID` and reset channel state to `pending`.
 
-**Fix**:
-- public/service-workers/handlers/channel.handler.js:
-  - In `handleChannelOpen`: extract and normalize `frame_id` (prefixed with `builtin:` and capitalized) and pass it to `_doChannelOpenUpsert`.
-  - In `_doChannelOpenUpsert`: update the SQL script to save `frameId` to `CHANNEL_STATE.FRAME_ID` instead of an empty string `''`.
-  - In `_continueRewardVoucher`: normalize `frameId` before looking up the frame in `FRAMES` and calling `createRewardEvent`.
-  - In `handlePublisherRewardNotify`: normalize `frame_id` before saving to deferred notifies or looking up channel states.
-  - In `_maybeGeneratePublisherVoucher`: normalize `frameId` and handle `publisherKey` normalization.
-  - In `_doGeneratePublisherVoucher`: normalize `frameId` before using it in any outbound open request, keypair store, or transaction dispatch.
+**Foundation fee implementation**:
+- `config.js`: `FOUNDATION_KEY = null` (MVP, disabled by default)
+- `creator.js`: `FOUNDATION_FEE_RATE = 0.03`, ESCROW_SCRIPT_V4, 3-output atomic funding tx, cost breakdown UI
+- `service.js`: ESCROW_SCRIPT_V4 (byte-identical), loads `FOUNDATION_KEY_OVERRIDE`
+- `dapp/app.js`: loads `FOUNDATION_KEY_OVERRIDE` at boot
+- `devtools.js`: new subsection 2.3 "Minima Foundation Fee Address (3%)" — Set/Clear/Copy/manual input
+- `campaign.handler.js`: verifies `FOUNDATION_KEY` at `PREVSTATE(6)` on-chain (V4)
+- `ESCROW_ADDRESS_V2` / `ESCROW_SCRIPT_V2` removed (development only, no real campaigns)
 
-**AGENTS.md updated**: yes — §6 updated.
+**Files modified**: `config.js`, `dapp/app.js`, `dapp/views/creator.js`, `dapp/views/devtools.js`, `public/service-workers/handlers/campaign.handler.js`, `public/service-workers/handlers/channel.handler.js`, `service.js`
 
-**Verification**:
-- Verified JS syntax using `node -c` (clean).
-- Rebuilt `MinimaAds.mds.zip` and verified package integrity.
+**AGENTS.md updated**: yes — §6 updated, oldest entry moved to `docs/HISTORY.md §17`.
+
+**Verification**: Full end-to-end test (user1=creator, user3=viewer, user4=MinimaAds platform). Logs confirm: `SW CHANNEL_OPEN sent (viewer) ok=true`, `SW REWARD_VOUCHER sent cumulative: 0.05 role: viewer ok=true`, `SW CHANNEL_OPEN sent (publisher) ok=true`, `SW REWARD_VOUCHER sent cumulative: 0.075 role: publisher ok=true`. No Script FAIL.
+
+**Open issues**: None new.
 
 ---
 

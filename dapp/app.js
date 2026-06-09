@@ -528,7 +528,8 @@ function buildAndPostChannelTx(ctx) {
             'txnstate id:' + txId + ' port:4 value:' + creatorMxHex,
             'txnstate id:' + txId + ' port:7 value:' + statusHex,
             'txnstate id:' + txId + ' port:10 value:' + ctx.maxAmount,
-            'txnstate id:' + txId + ' port:11 value:0'
+            'txnstate id:' + txId + ' port:11 value:0',
+            'txnstate id:' + txId + ' port:16 value:0'
           ];
           runSequential(stateCmds, 0, function(stateOk) {
             if (!stateOk) { fail('txnstate', null); return; }
@@ -685,7 +686,8 @@ function buildAndPostChannelOpenTx(ctx) {
             'txnstate id:' + txId + ' port:3 value:' + campaignIdHex,
             'txnstate id:' + txId + ' port:4 value:' + viewerMxHex,
             'txnstate id:' + txId + ' port:10 value:' + ctx.maxAmount,
-            'txnstate id:' + txId + ' port:11 value:0'
+            'txnstate id:' + txId + ' port:11 value:0',
+            'txnstate id:' + txId + ' port:16 value:0'
           ];
           runSequential(stateCmds, 0, function(stateOk) {
             if (!stateOk) { fail('txnstate', null); return; }

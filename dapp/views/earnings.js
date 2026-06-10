@@ -552,29 +552,19 @@ function _postSettleTx(settleId, campaignId, viewerKey, role) {
     }
     MDS.cmd('txndelete id:' + settleId, function() {});
     if (!r3 || !r3.status) {
-      console.error('[EARNINGS] txnpost failed — NOT calling settleChannel. error:', r3 && r3.error, 'campaign:', campaignId, 'role:', role);
+      console.error('[EARNINGS] txnpost failed — error:', r3 && r3.error, 'campaign:', campaignId, 'role:', role);
       var statusEl = document.getElementById('ma-channel-settle-status');
       if (statusEl) { statusEl.textContent = 'Settlement failed: ' + ((r3 && r3.error) || 'txnpost failed'); }
       _refreshChannelRewards();
       return;
     }
-    console.log('[EARNINGS] calling settleChannel campaign:', campaignId, 'role:', role,
-      'viewerKey:', viewerKey ? viewerKey.substring(0, 12) + '...' : '(none)');
-    settleChannel(campaignId, viewerKey, role, function(err) {
-      if (err) {
-        console.error('[EARNINGS] settleChannel DB error:', err);
-        var el = document.getElementById('ma-channel-settle-status');
-        if (el) { el.textContent = 'Settlement posted but DB update failed.'; }
-        _refreshChannelRewards();
-        return;
-      }
-      getChannelState(campaignId, viewerKey, role, function(err2, ch) {
-        var cum = (ch && ch.CUMULATIVE_EARNED) ? parseFloat(ch.CUMULATIVE_EARNED) : 0;
-        console.log('[EARNINGS] settlement complete campaign:', campaignId, 'cumulative:', cum);
-        signalFE('SETTLE_CONFIRMED', { campaign_id: campaignId, amount: cum });
-        _refreshChannelRewards();
-      });
-    });
+    // Settlement tx posted to L1. Do NOT call settleChannel() here — the SW's
+    // checkOpenChannelsSettled() will confirm it on the next NEWBLOCK once the
+    // coin is verifiably spent on-chain, preventing false settlement from
+    // transient node re-sync issues.
+    console.log('[EARNINGS] settlement tx posted. Awaiting L1 confirmation. campaign:', campaignId);
+    var okEl = document.getElementById('ma-channel-settle-status');
+    if (okEl) { okEl.textContent = 'Settlement posted. Awaiting L1 confirmation…'; }
   });
 }
 

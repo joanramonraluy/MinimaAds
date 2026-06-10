@@ -256,8 +256,11 @@ function _loadEscrowInfoForActiveCampaigns(campaigns) {
       var campaignId = campaign.ID || '';
       var creatorAddr = (campaign.CREATOR_ADDRESS || '').toUpperCase();
 
-      // Own campaign — data is already fresh in local DB, no Maxima needed
-      if (myAddr && creatorAddr === myAddr) { return; }
+      if (myAddr && creatorAddr === myAddr) {
+        // Own campaign — calculate viewer_budget_spent directly from local DB
+        _updateOwnCampaignViewerSpent(campaignId);
+        return;
+      }
 
       var creatorMx = campaign.CREATOR_MX || '';
       if (!campaignId || !creatorMx) { return; }
@@ -265,6 +268,30 @@ function _loadEscrowInfoForActiveCampaigns(campaigns) {
       _sendEscrowInfoRequest(campaignId, creatorMx);
     })(activeCampaigns[i]);
   }
+}
+
+function _updateOwnCampaignViewerSpent(campaignId) {
+  var sqlActive = "SELECT COALESCE(SUM(CUMULATIVE_EARNED), 0) AS SPENT FROM CHANNEL_STATE"
+    + " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') AND ROLE = 'viewer'";
+
+  sqlQuery(sqlActive, function(err1, rows1) {
+    var spentActive = (!err1 && rows1 && rows1[0]) ? (parseFloat(rows1[0].SPENT) || 0) : 0;
+
+    var sqlHistory = "SELECT COALESCE(SUM(CUMULATIVE_EARNED), 0) AS SPENT FROM CHANNEL_HISTORY"
+      + " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') AND ROLE = 'viewer'";
+
+    sqlQuery(sqlHistory, function(err2, rows2) {
+      var spentHistory = (!err2 && rows2 && rows2[0]) ? (parseFloat(rows2[0].SPENT) || 0) : 0;
+      var total = spentActive + spentHistory;
+
+      sqlQuery("UPDATE CAMPAIGNS SET VIEWER_BUDGET_SPENT = " + total
+        + " WHERE UPPER(ID) = UPPER('" + escapeSql(campaignId) + "')", function() {
+        if (currentRoute() === 'campaigns' && typeof _loadCampaigns === 'function') {
+          _loadCampaigns();
+        }
+      });
+    });
+  });
 }
 
 function _sendEscrowInfoRequest(campaignId, creatorMxAddress) {

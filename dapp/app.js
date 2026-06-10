@@ -271,7 +271,7 @@ function handleMdsComms(parsed) {
     if (currentRoute() === 'earnings' && typeof loadEarnings === 'function') {
       loadEarnings();
     }
-    if (currentRoute() === 'viewer' && typeof onViewerVoucherReceived === 'function') {
+    if (typeof onViewerVoucherReceived === 'function') {
       onViewerVoucherReceived(parsed);
     }
     return;

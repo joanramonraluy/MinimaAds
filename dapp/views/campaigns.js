@@ -1,10 +1,10 @@
-// Campaigns view — L1 summary + local channel data.
-// Summary cards from L1:
-//   Campaigns (L1) = escrow coin count (V1 + V3 + V4)
-//   Total budget (L1) = sum of escrow coin amounts
-//   My open channels = channel coin count (indexed by this node)
-//   My active publishers = unique publisher keys from channel coins (this node)
-// Campaign list from local DB (Maxima CAMPAIGN_ANNOUNCE) with filter Active/All.
+// Campaigns view — DB campaigns + node-local L1 channel data.
+// Summary cards:
+//   Campaigns = count from DB (Maxima CAMPAIGN_ANNOUNCE)
+//   Total budget = sum of BUDGET_TOTAL from DB
+//   My open channels = channel coin count (this node, L1)
+//   My active publishers = unique publisher keys from channel coins (this node, L1)
+// Campaign list from local DB with filter Active/All.
 // Per-campaign publisher count from PREVSTATE(2) of channel coins.
 // Accessible from all modes (viewer, creator, publisher).
 
@@ -77,7 +77,7 @@ function _loadCampaigns() {
   loading.textContent = 'Loading campaigns…';
   listEl.appendChild(loading);
 
-  var sql = 'SELECT c.ID, c.TITLE, c.CREATOR_ADDRESS, c.BUDGET_REMAINING, c.REWARD_VIEW, '
+  var sql = 'SELECT c.ID, c.TITLE, c.CREATOR_ADDRESS, c.BUDGET_TOTAL, c.BUDGET_REMAINING, c.REWARD_VIEW, '
     + 'c.REWARD_CLICK, c.STATUS, c.PUBLISHER_REWARD_VIEW, '
     + 'a.TITLE AS AD_TITLE, a.BODY AS AD_BODY '
     + 'FROM CAMPAIGNS c LEFT JOIN ADS a ON UPPER(a.CAMPAIGN_ID) = UPPER(c.ID)';
@@ -97,17 +97,17 @@ function _loadCampaigns() {
     }
 
     var campaigns = rows || [];
-    _updateCampaignsSummary();
+    _updateCampaignsSummary(campaigns);
 
     if (campaigns.length === 0) {
       listEl.innerHTML = '';
       var empty = mkEmptyState('No campaigns found.', null, null);
       listEl.appendChild(empty);
-      _loadL1Data(campaigns, function() {});
+      _loadL1ChannelData(campaigns, function() {});
       return;
     }
 
-    _loadL1Data(campaigns, function(pubCountMap) {
+    _loadL1ChannelData(campaigns, function(pubCountMap) {
       listEl.innerHTML = '';
 
       var wrapper = document.createElement('div');
@@ -121,14 +121,21 @@ function _loadCampaigns() {
   });
 }
 
-function _updateCampaignsSummary() {
+function _updateCampaignsSummary(campaigns) {
   var summaryEl = document.getElementById('ma-campaigns-summary');
   if (!summaryEl) { return; }
   summaryEl.innerHTML = '';
 
+  var filtered = _campaignsFilter === 'active'
+    ? campaigns.filter(function(c) { return (c.STATUS || '').toUpperCase() === 'ACTIVE'; })
+    : campaigns;
+
+  var count = filtered.length;
+  var totalBudget = filtered.reduce(function(sum, c) { return sum + (parseFloat(c.BUDGET_TOTAL) || 0); }, 0);
+
   var defs = [
-    { id: 'ma-cstat-campaigns',  label: 'Campaigns (L1)', value: '…' },
-    { id: 'ma-cstat-budget',     label: 'Total budget (L1)', value: '…' },
+    { id: 'ma-cstat-campaigns',  label: 'Campaigns', value: String(count) },
+    { id: 'ma-cstat-budget',     label: 'Total budget', value: fmtAmt(totalBudget, 2) + ' MINIMA' },
     { id: 'ma-cstat-channels',   label: 'My open channels', value: '…' },
     { id: 'ma-cstat-publishers', label: 'My active publishers', value: '…' }
   ];
@@ -146,7 +153,7 @@ function _setStatCard(id, value) {
   if (strong) { strong.textContent = value; }
 }
 
-function _loadL1Data(campaigns, cb) {
+function _loadL1ChannelData(campaigns, cb) {
   // Build hex → campaignId lookup for per-campaign publisher count
   var campHexMap = {};
   for (var i = 0; i < campaigns.length; i++) {
@@ -154,85 +161,41 @@ function _loadL1Data(campaigns, cb) {
     campHexMap[hexId] = campaigns[i].ID;
   }
 
-  MDS.keypair.get('ESCROW_ADDRESS', function(r1) {
-  MDS.keypair.get('ESCROW_ADDRESS_V3', function(r2) {
-  MDS.keypair.get('ESCROW_ADDRESS_V4', function(r3) {
   MDS.keypair.get('CHANNEL_SCRIPT_ADDRESS', function(r4) {
-    var escrowAddrs = [];
-    if (r1 && r1.status && r1.value) { escrowAddrs.push(r1.value); }
-    if (r2 && r2.status && r2.value && escrowAddrs.indexOf(r2.value) === -1) { escrowAddrs.push(r2.value); }
-    if (r3 && r3.status && r3.value && escrowAddrs.indexOf(r3.value) === -1) { escrowAddrs.push(r3.value); }
     var channelAddr = (r4 && r4.status) ? r4.value : '';
-
-    var escrowCoins = [];
-    var pending = escrowAddrs.length;
-
-    function onEscrowDone() {
-      pending--;
-      if (pending > 0) { return; }
-
-      var escrowCount = escrowCoins.length;
-      var escrowTotal = 0;
-      for (var ei = 0; ei < escrowCoins.length; ei++) {
-        escrowTotal += parseFloat(escrowCoins[ei].amount || 0);
-      }
-      _setStatCard('ma-cstat-campaigns', String(escrowCount));
-      _setStatCard('ma-cstat-budget', fmtAmt(escrowTotal, 2) + ' MINIMA');
-
-      if (!channelAddr) {
-        _setStatCard('ma-cstat-channels', '0');
-        _setStatCard('ma-cstat-publishers', '0');
-        cb({});
-        return;
-      }
-
-      MDS.cmd('coins address:' + channelAddr, function(res) {
-        var chCoins = (res && res.status && res.response) ? res.response : [];
-        var allPubKeys = {};
-        var pubCountMap = {};
-
-        for (var ci = 0; ci < chCoins.length; ci++) {
-          var states = chCoins[ci].state || [];
-          var campHex = '';
-          var pubKey  = '';
-          for (var si = 0; si < states.length; si++) {
-            if (states[si].port == 3) { campHex = (states[si].data || '').toUpperCase(); }
-            if (states[si].port == 2) { pubKey  = (states[si].data || '').toUpperCase(); }
-          }
-          if (!pubKey) { continue; }
-          allPubKeys[pubKey] = true;
-          if (campHex && campHexMap[campHex]) {
-            var cid = campHexMap[campHex];
-            if (!pubCountMap[cid]) { pubCountMap[cid] = {}; }
-            pubCountMap[cid][pubKey] = true;
-          }
-        }
-
-        _setStatCard('ma-cstat-channels', String(chCoins.length));
-        _setStatCard('ma-cstat-publishers', String(Object.keys(allPubKeys).length));
-        cb(pubCountMap);
-      });
-    }
-
-    if (escrowAddrs.length === 0) {
-      _setStatCard('ma-cstat-campaigns', '0');
-      _setStatCard('ma-cstat-budget', '0,00 MINIMA');
-      onEscrowDone();
+    if (!channelAddr) {
+      _setStatCard('ma-cstat-channels', '0');
+      _setStatCard('ma-cstat-publishers', '0');
+      cb({});
       return;
     }
 
-    for (var ai = 0; ai < escrowAddrs.length; ai++) {
-      (function(addr) {
-        MDS.cmd('coins address:' + addr, function(res) {
-          var coins = (res && res.status && res.response) ? res.response : [];
-          for (var k = 0; k < coins.length; k++) { escrowCoins.push(coins[k]); }
-          onEscrowDone();
-        });
-      })(escrowAddrs[ai]);
-    }
-  });
-  });
-  });
+    MDS.cmd('coins address:' + channelAddr, function(res) {
+      var chCoins = (res && res.status && res.response) ? res.response : [];
+      var allPubKeys = {};
+      var pubCountMap = {};
+
+      for (var ci = 0; ci < chCoins.length; ci++) {
+        var states = chCoins[ci].state || [];
+        var campHex = '';
+        var pubKey  = '';
+        for (var si = 0; si < states.length; si++) {
+          if (states[si].port == 3) { campHex = (states[si].data || '').toUpperCase(); }
+          if (states[si].port == 2) { pubKey  = (states[si].data || '').toUpperCase(); }
+        }
+        if (!pubKey) { continue; }
+        allPubKeys[pubKey] = true;
+        if (campHex && campHexMap[campHex]) {
+          var cid = campHexMap[campHex];
+          if (!pubCountMap[cid]) { pubCountMap[cid] = {}; }
+          pubCountMap[cid][pubKey] = true;
+        }
+      }
+
+      _setStatCard('ma-cstat-channels', String(chCoins.length));
+      _setStatCard('ma-cstat-publishers', String(Object.keys(allPubKeys).length));
+      cb(pubCountMap);
+    });
   });
 }
 

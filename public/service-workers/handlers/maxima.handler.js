@@ -117,45 +117,62 @@ function handleEscrowInfoRequest(payload, fromRoute) {
     return;
   }
 
-  var sql = "SELECT ID, BUDGET_TOTAL, BUDGET_REMAINING, MAX_PUBLISHER_BUDGET, "
+  var campaignSql = "SELECT ID, BUDGET_TOTAL, BUDGET_REMAINING, MAX_PUBLISHER_BUDGET, "
     + "PUBLISHER_BUDGET_SPENT, STATUS FROM CAMPAIGNS WHERE UPPER(ID) = UPPER('"
     + escapeSql(campaignId) + "')";
 
-  sqlQuery(sql, function(err, rows) {
-    var response = {
-      type: 'ESCROW_INFO_RESPONSE',
-      campaign_id: campaignId,
-      status: 'error',
-      data: {}
-    };
-
+  sqlQuery(campaignSql, function(err, rows) {
     if (err || !rows || rows.length === 0) {
       MDS.log("[MAXIMA] ESCROW_INFO_REQUEST: campaign not found — " + campaignId);
-      response.status = 'not_found';
-    } else {
-      var row = rows[0];
-      var budgetTotal = parseFloat(row.BUDGET_TOTAL) || 0;
-      var budgetRemaining = parseFloat(row.BUDGET_REMAINING) || 0;
-      var maxPubBudget = parseFloat(row.MAX_PUBLISHER_BUDGET) || 0;
-      var pubBudgetSpent = parseFloat(row.PUBLISHER_BUDGET_SPENT) || 0;
-      var pubBudgetRemaining = maxPubBudget - pubBudgetSpent;
-      var escrowLeft = budgetRemaining + pubBudgetRemaining;
-
-      response.status = 'ok';
-      response.data = {
-        budget_total: budgetTotal,
-        budget_remaining: budgetRemaining,
-        max_publisher_budget: maxPubBudget,
-        publisher_budget_spent: pubBudgetSpent,
-        escrow_left: escrowLeft,
-        campaign_status: row.STATUS || 'unknown'
-      };
+      if (fromRoute) {
+        sendMaxima(null, fromRoute, {type: 'ESCROW_INFO_RESPONSE', campaign_id: campaignId, status: 'not_found', data: {}}, function() {});
+      }
+      return;
     }
 
-    if (fromRoute) {
-      sendMaxima(null, fromRoute, response, function(ok) {
-        MDS.log("[MAXIMA] ESCROW_INFO_RESPONSE sent ok=" + ok + " campaign=" + campaignId);
+    var row = rows[0];
+    var budgetTotal = parseFloat(row.BUDGET_TOTAL) || 0;
+    var budgetRemaining = parseFloat(row.BUDGET_REMAINING) || 0;
+    var maxPubBudget = parseFloat(row.MAX_PUBLISHER_BUDGET) || 0;
+    var pubBudgetSpent = parseFloat(row.PUBLISHER_BUDGET_SPENT) || 0;
+
+    // Query viewer spent from open channels
+    var viewerActiveSql = "SELECT COALESCE(SUM(CUMULATIVE_EARNED), 0) AS SPENT FROM CHANNEL_STATE"
+      + " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') AND ROLE = 'viewer'";
+
+    sqlQuery(viewerActiveSql, function(vaErr, vaRows) {
+      var viewerSpentActive = (!vaErr && vaRows && vaRows[0]) ? (parseFloat(vaRows[0].SPENT) || 0) : 0;
+
+      // Query viewer spent from closed/settled channels
+      var viewerHistorySql = "SELECT COALESCE(SUM(CUMULATIVE_EARNED), 0) AS SPENT FROM CHANNEL_HISTORY"
+        + " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') AND ROLE = 'viewer'";
+
+      sqlQuery(viewerHistorySql, function(vhErr, vhRows) {
+        var viewerSpentHistory = (!vhErr && vhRows && vhRows[0]) ? (parseFloat(vhRows[0].SPENT) || 0) : 0;
+        var viewerBudgetSpent = viewerSpentActive + viewerSpentHistory;
+        var escrowLeft = budgetRemaining + (maxPubBudget - pubBudgetSpent);
+
+        var response = {
+          type: 'ESCROW_INFO_RESPONSE',
+          campaign_id: campaignId,
+          status: 'ok',
+          data: {
+            budget_total: budgetTotal,
+            budget_remaining: budgetRemaining,
+            max_publisher_budget: maxPubBudget,
+            publisher_budget_spent: pubBudgetSpent,
+            viewer_budget_spent: viewerBudgetSpent,
+            escrow_left: escrowLeft,
+            campaign_status: row.STATUS || 'unknown'
+          }
+        };
+
+        if (fromRoute) {
+          sendMaxima(null, fromRoute, response, function(ok) {
+            MDS.log("[MAXIMA] ESCROW_INFO_RESPONSE sent ok=" + ok + " campaign=" + campaignId);
+          });
+        }
       });
-    }
+    });
   });
 }

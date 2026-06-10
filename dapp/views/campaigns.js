@@ -103,11 +103,34 @@ function _loadCampaigns() {
       listEl.innerHTML = '';
       var empty = mkEmptyState('No campaigns found.', null, null);
       listEl.appendChild(empty);
-      _loadL1ChannelData(campaigns, function() {});
+      if (_activeMode === 'creator') { _loadL1ChannelData(campaigns, function() {}); }
       return;
     }
 
-    _loadL1ChannelData(campaigns, function(pubCountMap) {
+    if (_activeMode === 'creator') {
+      _loadL1ChannelData(campaigns, function(pubCountMap) {
+        _renderCampaignsList(listEl, campaigns, pubCountMap);
+      });
+    } else {
+      _renderCampaignsList(listEl, campaigns, {});
+    }
+  });
+}
+
+function _renderCampaignsList(listEl, campaigns, pubCountMap) {
+  if (!listEl) { return; }
+  if (listEl.id !== 'ma-campaigns-list') { return; } // Safety check
+  listEl.innerHTML = '';
+
+  var wrapper = document.createElement('div');
+  wrapper.style.cssText = 'border:1px solid var(--pico-muted-border-color,#ddd);border-radius:var(--pico-border-radius);overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06);';
+
+  var campaigns_arr = campaigns || [];
+  for (var i = 0; i < campaigns_arr.length; i++) {
+    wrapper.appendChild(_buildCampaignsRow(campaigns_arr[i], pubCountMap));
+  }
+  listEl.appendChild(wrapper);
+}
       listEl.innerHTML = '';
 
       var wrapper = document.createElement('div');
@@ -135,10 +158,15 @@ function _updateCampaignsSummary(campaigns) {
 
   var defs = [
     { id: 'ma-cstat-campaigns',  label: 'Campaigns', value: String(count) },
-    { id: 'ma-cstat-budget',     label: 'Market budget', value: fmtAmt(totalBudget, 2) + ' MINIMA' },
-    { id: 'ma-cstat-channels',   label: 'My open channels', value: '…' },
-    { id: 'ma-cstat-publishers', label: 'My active publishers', value: '…' }
+    { id: 'ma-cstat-budget',     label: 'Market budget', value: fmtAmt(totalBudget, 2) + ' MINIMA' }
   ];
+
+  // Creator sees additional channel metrics
+  if (_activeMode === 'creator') {
+    defs.push({ id: 'ma-cstat-channels',   label: 'My open channels', value: '…' });
+    defs.push({ id: 'ma-cstat-publishers', label: 'My active publishers', value: '…' });
+  }
+
   for (var i = 0; i < defs.length; i++) {
     var card = mkStatCard(defs[i].label, defs[i].value);
     card.id = defs[i].id;

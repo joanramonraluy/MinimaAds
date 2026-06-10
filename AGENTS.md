@@ -176,6 +176,30 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-06-10 — Campaigns view refinement + Escrow sync via Maxima
+
+**Task**: Improve Campaigns view to show accurate, role-specific metrics. Query creators for live campaign escrow data (budget remaining) instead of static DB values.
+
+**Implementation**:
+- **Campaigns view (hybrid model)**:
+  - `Campaigns` & `Market budget`: from local DB (Maxima CAMPAIGN_ANNOUNCE), respect Active/All filter
+  - `My open channels` & `My active publishers`: from L1 channel coins (node-local perspective)
+  - Creator-only: sees 4 cards; Viewer/Publisher: sees 2 cards (market-wide data only)
+- **Escrow data sync** (SW + FE):
+  - SW `maxima.handler.js`: Added `handleEscrowInfoRequest()` — responds with current campaign budgets + escrow_left
+  - FE `campaigns.js`: `_loadEscrowInfoForActiveCampaigns()` queries creators for budget updates; displays `escrow_left` on each campaign row
+  - FE `app.js`: `_handleEscrowInfoResponse()` updates CAMPAIGNS table when data arrives
+- **Label clarity**: 
+  - Removed (L1) suffix from Campaigns/Market budget (datas are from DB, not L1)
+  - Added "My" prefix to channel metrics to clarify node-local perspective
+  - Renamed "Total budget" → "Market budget" for clarity
+
+**Files modified**: `dapp/views/campaigns.js`, `dapp/app.js`, `public/service-workers/handlers/maxima.handler.js`, `dapp/views/creator.js`, `public/index.html`
+
+**AGENTS.md updated**: yes — §6 updated.
+
+---
+
 ### Session: 2026-06-09 — Campaigns view (L1 data) + Remove Stats
 
 **Task**: Replace the Stats view with a new Campaigns view accessible from all roles (viewer, creator, publisher). Show real L1 data instead of estimates: escrow coin count/budget + active publishers from channel coins. Replace the publisher estimate selector in the creator form with a live L1 count.

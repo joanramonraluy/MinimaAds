@@ -103,33 +103,24 @@ function _loadCampaigns() {
       listEl.innerHTML = '';
       var empty = mkEmptyState('No campaigns found.', null, null);
       listEl.appendChild(empty);
-      if (_activeMode === 'creator') { _loadL1ChannelData(campaigns, function() {}); }
       return;
     }
 
-    if (_activeMode === 'creator') {
-      _loadL1ChannelData(campaigns, function(pubCountMap) {
-        _renderCampaignsList(listEl, campaigns, pubCountMap);
-        _loadEscrowInfoForActiveCampaigns(campaigns);
-      });
-    } else {
-      _renderCampaignsList(listEl, campaigns, {});
-      _loadEscrowInfoForActiveCampaigns(campaigns);
-    }
+    _renderCampaignsList(listEl, campaigns);
+    _loadEscrowInfoForActiveCampaigns(campaigns);
   });
 }
 
-function _renderCampaignsList(listEl, campaigns, pubCountMap) {
+function _renderCampaignsList(listEl, campaigns) {
   if (!listEl) { return; }
-  if (listEl.id !== 'ma-campaigns-list') { return; } // Safety check
   listEl.innerHTML = '';
 
   var wrapper = document.createElement('div');
   wrapper.style.cssText = 'border:1px solid var(--pico-muted-border-color,#ddd);border-radius:var(--pico-border-radius);overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06);';
 
-  var campaigns_arr = campaigns || [];
-  for (var i = 0; i < campaigns_arr.length; i++) {
-    wrapper.appendChild(_buildCampaignsRow(campaigns_arr[i], pubCountMap));
+  var arr = campaigns || [];
+  for (var i = 0; i < arr.length; i++) {
+    wrapper.appendChild(_buildCampaignsRow(arr[i]));
   }
   listEl.appendChild(wrapper);
 }
@@ -147,15 +138,9 @@ function _updateCampaignsSummary(campaigns) {
   var totalBudget = filtered.reduce(function(sum, c) { return sum + (parseFloat(c.BUDGET_TOTAL) || 0); }, 0);
 
   var defs = [
-    { id: 'ma-cstat-campaigns',  label: 'Campaigns', value: String(count) },
-    { id: 'ma-cstat-budget',     label: 'Market budget', value: fmtAmt(totalBudget, 2) + ' MINIMA' }
+    { id: 'ma-cstat-campaigns', label: 'Campaigns',     value: String(count) },
+    { id: 'ma-cstat-budget',    label: 'Market budget', value: fmtAmt(totalBudget, 2) + ' MINIMA' }
   ];
-
-  // Creator sees split L1 channel metrics (viewer vs publisher)
-  if (_activeMode === 'creator') {
-    defs.push({ id: 'ma-cstat-viewer-channels',    label: 'My viewer channels', value: '…' });
-    defs.push({ id: 'ma-cstat-publisher-channels', label: 'My publisher channels', value: '…' });
-  }
 
   for (var i = 0; i < defs.length; i++) {
     var card = mkStatCard(defs[i].label, defs[i].value);
@@ -171,74 +156,8 @@ function _setStatCard(id, value) {
   if (strong) { strong.textContent = value; }
 }
 
-function _loadL1ChannelData(campaigns, cb) {
-  var campHexMap = {};
-  for (var i = 0; i < campaigns.length; i++) {
-    var hexId = ('0x' + utf8ToHex(campaigns[i].ID)).toUpperCase();
-    campHexMap[hexId] = campaigns[i].ID;
-  }
 
-  // Load role map from DB: VIEWER_KEY → 'viewer' | 'publisher'
-  sqlQuery("SELECT DISTINCT UPPER(VIEWER_KEY) AS VIEWER_KEY, ROLE FROM CHANNEL_STATE", function(dbErr, roleRows) {
-    var roleMap = {};
-    if (!dbErr && roleRows) {
-      for (var ri = 0; ri < roleRows.length; ri++) {
-        if (roleRows[ri].VIEWER_KEY) {
-          roleMap[roleRows[ri].VIEWER_KEY] = (roleRows[ri].ROLE || 'viewer').toLowerCase();
-        }
-      }
-    }
-
-    MDS.keypair.get('CHANNEL_SCRIPT_ADDRESS', function(r4) {
-      var channelAddr = (r4 && r4.status) ? r4.value : '';
-      if (!channelAddr) {
-        _setStatCard('ma-cstat-viewer-channels', '0');
-        _setStatCard('ma-cstat-publisher-channels', '0');
-        cb({});
-        return;
-      }
-
-      MDS.cmd('coins address:' + channelAddr, function(res) {
-        var chCoins = (res && res.status && res.response) ? res.response : [];
-        var pubCountMap = {};
-        var viewerChannelCount = 0;
-        var publisherChannelCount = 0;
-
-        for (var ci = 0; ci < chCoins.length; ci++) {
-          var states = chCoins[ci].state || [];
-          var campHex = '';
-          var coinKey = '';
-          for (var si = 0; si < states.length; si++) {
-            if (states[si].port == 3) { campHex = (states[si].data || '').toUpperCase(); }
-            if (states[si].port == 2) { coinKey  = (states[si].data || '').toUpperCase(); }
-          }
-          if (!coinKey) { continue; }
-
-          // Split by role for summary cards
-          var role = roleMap[coinKey] || 'viewer';
-          if (role === 'publisher') {
-            publisherChannelCount++;
-          } else {
-            viewerChannelCount++;
-          }
-
-          // pubCountMap: count all open channels per campaign (both roles)
-          if (campHex && campHexMap[campHex]) {
-            var cid = campHexMap[campHex];
-            if (!pubCountMap[cid]) { pubCountMap[cid] = {}; }
-            pubCountMap[cid][coinKey] = true;
-          }
-        }
-
-        _setStatCard('ma-cstat-viewer-channels', String(viewerChannelCount));
-        _setStatCard('ma-cstat-publisher-channels', String(publisherChannelCount));
-        cb(pubCountMap);
-      });
-    });
-  });
-}
-
-function _buildCampaignsRow(campaign, pubCountMap) {
+function _buildCampaignsRow(campaign) {
   var row = document.createElement('div');
   row.style.cssText = 'display:flex;align-items:center;gap:.85rem;'
     + 'padding:.85rem;background:transparent;'
@@ -314,21 +233,8 @@ function _buildCampaignsRow(campaign, pubCountMap) {
 
   textDiv.appendChild(metaRow);
 
-  var pubCount = pubCountMap[campaign.ID] ? Object.keys(pubCountMap[campaign.ID]).length : 0;
-  var pubBadge = document.createElement('div');
-  pubBadge.style.cssText = 'display:flex;flex-direction:column;align-items:center;min-width:3rem;flex-shrink:0;';
-  var pubNum = document.createElement('span');
-  pubNum.style.cssText = 'font-weight:700;font-size:1rem;color:#8b5cf6;';
-  pubNum.textContent = String(pubCount);
-  var pubLabel = document.createElement('span');
-  pubLabel.style.cssText = 'font-size:.65rem;color:var(--pico-muted-color,#6c757d);text-align:center;line-height:1.2;margin-top:.1rem;';
-  pubLabel.textContent = pubCount === 1 ? 'publisher' : 'publishers';
-  pubBadge.appendChild(pubNum);
-  pubBadge.appendChild(pubLabel);
-
   row.appendChild(avatar);
   row.appendChild(textDiv);
-  row.appendChild(pubBadge);
 
   return row;
 }

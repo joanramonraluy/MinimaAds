@@ -78,7 +78,7 @@ function _loadCampaigns() {
   listEl.appendChild(loading);
 
   var sql = 'SELECT c.ID, c.TITLE, c.CREATOR_ADDRESS, c.BUDGET_TOTAL, c.BUDGET_REMAINING, c.REWARD_VIEW, '
-    + 'c.REWARD_CLICK, c.STATUS, c.PUBLISHER_REWARD_VIEW, '
+    + 'c.REWARD_CLICK, c.STATUS, c.PUBLISHER_REWARD_VIEW, c.CREATOR_MX, c.MAX_PUBLISHER_BUDGET, c.PUBLISHER_BUDGET_SPENT, '
     + 'a.TITLE AS AD_TITLE, a.BODY AS AD_BODY '
     + 'FROM CAMPAIGNS c LEFT JOIN ADS a ON UPPER(a.CAMPAIGN_ID) = UPPER(c.ID)';
   if (_campaignsFilter === 'active') {
@@ -110,9 +110,11 @@ function _loadCampaigns() {
     if (_activeMode === 'creator') {
       _loadL1ChannelData(campaigns, function(pubCountMap) {
         _renderCampaignsList(listEl, campaigns, pubCountMap);
+        _loadEscrowInfoForActiveCampaigns(campaigns);
       });
     } else {
       _renderCampaignsList(listEl, campaigns, {});
+      _loadEscrowInfoForActiveCampaigns(campaigns);
     }
   });
 }
@@ -130,18 +132,6 @@ function _renderCampaignsList(listEl, campaigns, pubCountMap) {
     wrapper.appendChild(_buildCampaignsRow(campaigns_arr[i], pubCountMap));
   }
   listEl.appendChild(wrapper);
-}
-      listEl.innerHTML = '';
-
-      var wrapper = document.createElement('div');
-      wrapper.style.cssText = 'border:1px solid var(--pico-muted-border-color,#ddd);border-radius:var(--pico-border-radius);overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06);';
-
-      for (var i = 0; i < campaigns.length; i++) {
-        wrapper.appendChild(_buildCampaignsRow(campaigns[i], pubCountMap));
-      }
-      listEl.appendChild(wrapper);
-    });
-  });
 }
 
 function _updateCampaignsSummary(campaigns) {
@@ -305,6 +295,20 @@ function _buildCampaignsRow(campaign, pubCountMap) {
   budgetEl.textContent = fmtAmt(parseFloat(campaign.BUDGET_REMAINING || 0), 4) + ' left';
   metaRow.appendChild(budgetEl);
 
+  // Calculate and display escrow_left (budget_remaining + publisher_budget_remaining)
+  var maxPubBudget = parseFloat(campaign.MAX_PUBLISHER_BUDGET) || 0;
+  var pubBudgetSpent = parseFloat(campaign.PUBLISHER_BUDGET_SPENT) || 0;
+  var budgetRemaining = parseFloat(campaign.BUDGET_REMAINING) || 0;
+  var pubBudgetRemaining = maxPubBudget - pubBudgetSpent;
+  var escrowLeft = budgetRemaining + pubBudgetRemaining;
+
+  if (escrowLeft > 0) {
+    var escrowEl = document.createElement('span');
+    escrowEl.style.cssText = 'font-size:.75rem;color:var(--pico-primary,#6366f1);font-weight:500;';
+    escrowEl.textContent = 'Escrow: ' + fmtAmt(escrowLeft, 4) + ' MINIMA';
+    metaRow.appendChild(escrowEl);
+  }
+
   textDiv.appendChild(metaRow);
 
   var pubCount = pubCountMap[campaign.ID] ? Object.keys(pubCountMap[campaign.ID]).length : 0;
@@ -324,4 +328,42 @@ function _buildCampaignsRow(campaign, pubCountMap) {
   row.appendChild(pubBadge);
 
   return row;
+}
+
+// Request escrow info (budget, escrow remaining) from active campaign creators via Maxima.
+// Updates CAMPAIGNS table when responses arrive.
+function _loadEscrowInfoForActiveCampaigns(campaigns) {
+  if (!campaigns || campaigns.length === 0) { return; }
+
+  var activeCampaigns = campaigns.filter(function(c) {
+    return (c.STATUS || '').toUpperCase() === 'ACTIVE';
+  });
+
+  for (var i = 0; i < activeCampaigns.length; i++) {
+    (function(campaign) {
+      var campaignId = campaign.ID || '';
+      var creatorMx = campaign.CREATOR_MX || '';
+      if (!campaignId || !creatorMx) { return; }
+
+      _sendEscrowInfoRequest(campaignId, creatorMx);
+    })(activeCampaigns[i]);
+  }
+}
+
+function _sendEscrowInfoRequest(campaignId, creatorMxAddress) {
+  if (!campaignId || !creatorMxAddress) { return; }
+  if (typeof MDS === 'undefined') { return; }
+
+  var payload = JSON.stringify({
+    type: 'ESCROW_INFO_REQUEST',
+    campaign_id: campaignId,
+    requester_mx: MY_MX_ADDRESS
+  });
+  var hex = '0x' + utf8ToHex(payload).toUpperCase();
+  var cmd = 'maxima action:send to:' + creatorMxAddress
+    + ' application:' + APP_NAME
+    + ' data:' + hex
+    + ' poll:false';
+
+  MDS.cmd(cmd, function() {});
 }

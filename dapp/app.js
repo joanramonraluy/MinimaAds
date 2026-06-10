@@ -312,6 +312,10 @@ function handleMdsComms(parsed) {
     if (typeof onProfileReceived === 'function') { onProfileReceived(parsed); }
     return;
   }
+  if (parsed.type === 'ESCROW_INFO_RESPONSE') {
+    _handleEscrowInfoResponse(parsed);
+    return;
+  }
   if (parsed.type === 'MA_TRACK_RESULT') {
     if (typeof onRewardValidation === 'function') { onRewardValidation(parsed); }
     return;
@@ -337,6 +341,42 @@ function sendChannelMaxima(mxAddress, payload, cb) {
       console.error('[CHANNEL] sendChannelMaxima failed to=' + mxAddress.substring(0, 20) + ':', res && res.error);
     }
     if (cb) { cb(res && res.status); }
+  });
+}
+
+// Handle ESCROW_INFO_RESPONSE from creator: update CAMPAIGNS table with latest
+// budget and escrow data, then refresh campaigns view if open.
+function _handleEscrowInfoResponse(parsed) {
+  var campaignId = parsed.campaign_id || '';
+  var status = parsed.status || '';
+  var data = parsed.data || {};
+
+  if (!campaignId || status !== 'ok') { return; }
+
+  var budgetTotal = parseFloat(data.budget_total) || 0;
+  var budgetRemaining = parseFloat(data.budget_remaining) || 0;
+  var maxPubBudget = parseFloat(data.max_publisher_budget) || 0;
+  var pubBudgetSpent = parseFloat(data.publisher_budget_spent) || 0;
+  var escrowLeft = parseFloat(data.escrow_left) || 0;
+  var campaignStatus = (data.campaign_status || 'unknown').toUpperCase();
+
+  var sql = "UPDATE CAMPAIGNS SET "
+    + "BUDGET_TOTAL = " + budgetTotal + ", "
+    + "BUDGET_REMAINING = " + budgetRemaining + ", "
+    + "MAX_PUBLISHER_BUDGET = " + maxPubBudget + ", "
+    + "PUBLISHER_BUDGET_SPENT = " + pubBudgetSpent + ", "
+    + "STATUS = '" + escapeSql(campaignStatus) + "' "
+    + "WHERE UPPER(ID) = UPPER('" + escapeSql(campaignId) + "')";
+
+  sqlQuery(sql, function(err) {
+    if (err) {
+      console.error('[ESCROW] Failed to update CAMPAIGNS for ' + campaignId + ':', err);
+      return;
+    }
+    // Refresh campaigns view if currently open
+    if (currentRoute() === 'campaigns' && typeof _loadCampaigns === 'function') {
+      _loadCampaigns();
+    }
   });
 }
 

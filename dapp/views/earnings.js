@@ -131,7 +131,8 @@ function loadEarnings() {
   var roleFilter = (role === 'publisher')
     ? " AND UPPER(ROLE) = 'PUBLISHER'"
     : " AND UPPER(ROLE) = 'VIEWER'";
-  var channelSql = "SELECT COUNT(*) AS CNT FROM CHANNEL_STATE WHERE STATUS = 'open'" + roleFilter;
+  var channelSql = "SELECT COUNT(*) AS CNT FROM CHANNEL_STATE WHERE STATUS = 'open'"
+    + " AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(MY_ADDRESS) + "')" + roleFilter;
   sqlQuery(channelSql, function(err, rows) {
     var cnt = (!err && rows && rows[0]) ? (parseInt(rows[0].CNT) || 0) : 0;
     _updateStatCard('ma-stat-channels', String(cnt));
@@ -159,6 +160,7 @@ function _refreshSettlementHistory() {
           + " FROM CHANNEL_HISTORY ch"
           + " LEFT JOIN CAMPAIGNS c ON UPPER(ch.CAMPAIGN_ID) = UPPER(c.ID)"
           + roleFilter
+          + " AND UPPER(ch.VIEWER_KEY) = UPPER('" + escapeSql(MY_ADDRESS) + "')"
           + " ORDER BY ch.CREATED_AT ASC";
   sqlQuery(sql, function(err, rows) {
     target.innerHTML = '';
@@ -391,6 +393,7 @@ function _refreshChannelRewards() {
           + " FROM CHANNEL_STATE cs"
           + " LEFT JOIN CAMPAIGNS c ON UPPER(cs.CAMPAIGN_ID) = UPPER(c.ID)"
           + " WHERE cs.STATUS = 'open' AND cs.LATEST_TX_HEX != ''"
+          + " AND UPPER(cs.VIEWER_KEY) = UPPER('" + escapeSql(MY_ADDRESS) + "')"
           + roleFilter;
   sqlQuery(sql, function(err, rows) {
     if (err) { console.error('[EARNINGS] _refreshChannelRewards error:', err); return; }

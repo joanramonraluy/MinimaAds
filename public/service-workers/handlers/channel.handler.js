@@ -235,6 +235,17 @@ function handleChannelOpenRequest(payload, senderPk) {
               }
             }
             if (_coinStillOpen) {
+              if (frameId && (!existing.FRAME_ID || existing.FRAME_ID === '')) {
+                sqlQuery(
+                  "UPDATE CHANNEL_STATE SET FRAME_ID = '" + escapeSql(frameId) + "'" +
+                  " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
+                  " AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(viewerKey) + "')" +
+                  " AND UPPER(ROLE) = 'VIEWER'",
+                  function() {
+                    MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: updated viewer FRAME_ID=" + frameId + " campaign: " + campaignId);
+                  }
+                );
+              }
               MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: channel already open — resending CHANNEL_OPEN. campaign: " + campaignId + " coinId: " + existing.CHANNEL_COINID);
               sendMaxima(viewerKey, viewerMx, {
                 type:           "CHANNEL_OPEN",
@@ -250,11 +261,11 @@ function handleChannelOpenRequest(payload, senderPk) {
               MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: coin spent — settling and opening new channel. campaign: " + campaignId);
               settleChannel(campaignId, viewerKey, 'viewer', function(settleErr) {
                 if (settleErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: settleChannel failed: " + settleErr); }
-                openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', '', viewerWalletAddr, function(openErr) {
+                openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', frameId, viewerWalletAddr, function(openErr) {
                   if (openErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: openChannel failed: " + openErr); return; }
                   _signalCampaignUpdated(campaignId);
                   MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: building channel TX in SW. campaign: " + campaignId + " viewer_mx: " + viewerMx);
-                  _swDispatchChannelOpen(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', '', viewerWalletPK, viewerWalletAddr);
+                  _swDispatchChannelOpen(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', frameId, viewerWalletPK, viewerWalletAddr);
                 });
               });
             }
@@ -282,7 +293,7 @@ function handleChannelOpenRequest(payload, senderPk) {
                 walletPK:      camp.ESCROW_WALLET_PK,
                 escrowAddr:    ESCROW_ADDRESS_V3 || ESCROW_ADDRESS,
                 role:          'viewer',
-                frameId:       ''
+                frameId:       frameId
               });
             });
             return;
@@ -291,24 +302,24 @@ function handleChannelOpenRequest(payload, senderPk) {
           MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: stale pending, no split coin — archiving stale record and opening fresh. campaign: " + campaignId);
           settleChannel(campaignId, viewerKey, 'viewer', function(staleSettleErr) {
             if (staleSettleErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: archive stale pending failed: " + staleSettleErr); }
-            openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', '', viewerWalletAddr, function(openErr) {
+            openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', frameId, viewerWalletAddr, function(openErr) {
               if (openErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: openChannel (after stale archive) failed: " + openErr); return; }
               _signalCampaignUpdated(campaignId);
               MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: building channel TX after stale archive. campaign: " + campaignId);
-              _swDispatchChannelOpen(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', '', viewerWalletPK, viewerWalletAddr);
+              _swDispatchChannelOpen(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', frameId, viewerWalletPK, viewerWalletAddr);
             });
           });
           return;
         }
 
-        openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', '', viewerWalletAddr, function(openErr) {
+        openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', frameId, viewerWalletAddr, function(openErr) {
           if (openErr) {
             MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: openChannel failed: " + openErr);
             return;
           }
           _signalCampaignUpdated(campaignId);
           MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: building channel TX in SW. campaign: " + campaignId + " viewer_mx: " + viewerMx);
-          _swDispatchChannelOpen(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', '', viewerWalletPK, viewerWalletAddr);
+          _swDispatchChannelOpen(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', frameId, viewerWalletPK, viewerWalletAddr);
         });
       });
     });
@@ -571,7 +582,8 @@ function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumu
           } else {
             MDS.log("[CHANNEL] REWARD_REQUEST: coin indexed. building viewer voucher in SW. campaign: " + campaignId + " cumulative: " + cumulative);
             _swDispatchVoucher(campaignId, viewerKey, channel.CREATOR_MX, eventId, cumulative, channel, 'viewer', '');
-            if (channelFrameId || publisherKey) { _maybeGeneratePublisherVoucher(campaignId, channelFrameId, eventId, publisherKey, publisherMx); }
+            var _isBuiltinFid = channelFrameId && channelFrameId.toLowerCase().indexOf('builtin:') === 0;
+            if (!_isBuiltinFid && (channelFrameId || publisherKey)) { _maybeGeneratePublisherVoucher(campaignId, channelFrameId, eventId, publisherKey, publisherMx); }
           }
         } else {
           var pending = JSON.stringify({
@@ -1514,8 +1526,12 @@ function checkOnePendingVoucher(campaignId, viewerKey, role, channelCoinId) {
             return;
           }
           _swDispatchVoucher(pending.campaign_id, pending.viewer_key, pending.viewer_mx, pending.event_id, pending.cumulative, ch, r, pending.frame_id || '');
-          if (r === 'viewer' && (pending.frame_id || pending.publisher_key)) {
-            _maybeGeneratePublisherVoucher(pending.campaign_id, pending.frame_id || '', pending.event_id, pending.publisher_key || '', pending.publisher_mx || '');
+          if (r === 'viewer') {
+            var _pendingFid = pending.frame_id || '';
+            var _pendingIsBuiltin = _pendingFid && _pendingFid.toLowerCase().indexOf('builtin:') === 0;
+            if (!_pendingIsBuiltin && (_pendingFid || pending.publisher_key)) {
+              _maybeGeneratePublisherVoucher(pending.campaign_id, _pendingFid, pending.event_id, pending.publisher_key || '', pending.publisher_mx || '');
+            }
           }
         });
       });

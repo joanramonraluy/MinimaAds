@@ -240,7 +240,7 @@ function _buildCampaignCard(c, openDetails) {
   totalBudgetRow.appendChild(mkStatCard('Total Budget', fmtAmt(budgetTotal, 4) + ' M', 'Initial funding'));
   totalBudgetRow.appendChild(mkStatCard('Total Escrow Left', fmtAmt(budgetRemaining, 4) + ' M', 'Remaining in escrow'));
   totalBudgetRow.appendChild(mkStatCard('Total Locked', fmtAmt(viewerLocked + pubLocked, 4) + ' M', 'Reserved in L2 channels'));
-  totalBudgetRow.appendChild(mkStatCard('Total Paid', fmtAmt(viewerSettled + pubSpentActual, 4) + ' M', 'On-chain settlements'));
+  totalBudgetRow.appendChild(mkStatCard('Total Spent', fmtAmt(viewerSpentActual + pubSpentActual, 4) + ' M', 'Total allocated to viewers and publishers'));
   budgetBody.appendChild(totalBudgetRow);
 
   // ── Viewer Allocation ──
@@ -1097,8 +1097,11 @@ function _formatRewardType(type) {
 function _shortNodePk(pk) {
   if (!pk) { return '—'; }
   var s = String(pk);
-  if (s.length <= 18) { return s; }
-  return s.slice(0, 10) + '…' + s.slice(-6);
+  if (s.length <= 20) { return s; }
+  var start = 5;
+  var mid = Math.floor(s.length / 2);
+  var end = 5;
+  return s.slice(0, start) + '…' + s.slice(mid - 3, mid + 3) + '…' + s.slice(-end);
 }
 
 function _nodeTd(value) {

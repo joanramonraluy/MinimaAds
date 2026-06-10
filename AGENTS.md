@@ -176,118 +176,53 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
-### Session: 2026-06-10 — Campaigns view refinement + Escrow sync via Maxima
+### Session: 2026-06-10 — Fix Earnings open channels count for creator/multi-role nodes
 
-**Task**: Improve Campaigns view to show accurate, role-specific metrics. Query creators for live campaign escrow data (budget remaining) instead of static DB values.
+**Task**: "Open channels" count (i pending settlements i settled channels) a la vista Earnings mostrava canals d'altres usuaris quan un creador canviava a mode viewer o publisher. Això passa perquè el node del creador té files a `CHANNEL_STATE` per TOTS els viewers/publishers de les seves campanyes, i les queries no filtraven per `VIEWER_KEY = MY_ADDRESS`.
+
+**Fix**: Afegit `AND UPPER(VIEWER_KEY) = UPPER(MY_ADDRESS)` (o `UPPER(ch.VIEWER_KEY)` per CHANNEL_HISTORY) a les tres queries de rol a `dapp/views/earnings.js`: open channels count, pending settlements (`_refreshChannelRewards`), i settlement history (`_refreshSettlementHistory`).
+
+**Files modified**: `dapp/views/earnings.js`
+
+**AGENTS.md updated**: yes — §6 updated.
+
+---
+
+### Session: 2026-06-10 — Fix publisher earnings for custom publisher snippets
+
+**Task**: Publisher Earnings view shows "Open channels: 1" but "Total earned: 0 / Pending settlements: 0" for custom publisher-created snippets. Built-in (integrated) snippets work correctly.
+
+**Root cause** (two linked issues):
+1. `handleChannelOpenRequest()` in `channel.handler.js` discarded the viewer's `frame_id` when storing the viewer's `CHANNEL_STATE` on the creator's node — always passed `''` to `openChannel()` for viewer role. So `CHANNEL_STATE.FRAME_ID = ''` on the creator's node.
+2. `_handleRewardRequestInner()`: `channelFrameId = channel.FRAME_ID || payload.frame_id = '' || '' = ''` → condition `(channelFrameId || publisherKey)` false → `_maybeGeneratePublisherVoucher()` never called → creator never generates publisher vouchers from external viewer REWARD_REQUESTs.
+Built-in snippets work because the publisher IS the viewer and sends their own PUBLISHER REWARD_REQUEST via `_publisherChannelFlow()`.
+
+**Fix**:
+- `handleChannelOpenRequest()` viewer role (all 3 `openChannel()` call sites + corresponding `_swDispatchChannelOpen()` + stale-pending Tx2 retry): pass `frameId` from payload instead of `''`. Also added retroactive `UPDATE CHANNEL_STATE SET FRAME_ID` for existing open channels with empty FRAME_ID.
+- `_handleRewardRequestInner()` and `checkOnePendingVoucher()`: skip `_maybeGeneratePublisherVoucher()` when `channelFrameId` starts with `'builtin:'` — built-in publisher handles their own rewards; skipping prevents duplicate vouchers.
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`
+
+**AGENTS.md updated**: yes — §6 updated.
+
+---
+
+### Session: 2026-06-10 — Settings Redirection Flow & Viewer Reward Status Message
+
+**Task**:
+1. Fix the jarring full-page reload and database/identity re-initialization when registering/re-registering a permanent Maxima route in `#settings/maxima-routes`.
+2. Fix the ad viewer detail screen status message sticking to "Processing reward..." indefinitely after the reward actually arrives/is confirmed.
 
 **Implementation**:
-- **Campaigns view (hybrid model)**:
-  - `Campaigns` & `Market budget`: from local DB (Maxima CAMPAIGN_ANNOUNCE), respect Active/All filter
-  - `My open channels` & `My active publishers`: from L1 channel coins (node-local perspective)
-  - Creator-only: sees 4 cards; Viewer/Publisher: sees 2 cards (market-wide data only)
-- **Escrow data sync** (SW + FE):
-  - SW `maxima.handler.js`: Added `handleEscrowInfoRequest()` — responds with current campaign budgets + escrow_left
-  - FE `campaigns.js`: `_loadEscrowInfoForActiveCampaigns()` queries creators for budget updates; displays `escrow_left` on each campaign row
-  - FE `app.js`: `_handleEscrowInfoResponse()` updates CAMPAIGNS table when data arrives
-- **Label clarity**: 
-  - Removed (L1) suffix from Campaigns/Market budget (datas are from DB, not L1)
-  - Added "My" prefix to channel metrics to clarify node-local perspective
-  - Renamed "Total budget" → "Market budget" for clarity
+- **Smooth Settings Redirection**: Removed `location.reload();` from the success timeout callback in `dapp/views/settings-maxima-routes.js` to prevent resetting the database and Maxima identity states. The DApp now navigates smoothly to the default home screen matching the current user role using the local Single Page App hash router (`goHome()`).
+- **Real-time Status Confirmation**: Added an `onViewerVoucherReceived` callback in `dapp/views/viewer.js` and wired it into `dapp/app.js`'s `VOUCHER_RECEIVED` handler. When the reward payment voucher is saved and verified, the status message is now updated to "Reward received! +X.XX MINIMA" in green.
 
-**Files modified**: `dapp/views/campaigns.js`, `dapp/app.js`, `public/service-workers/handlers/maxima.handler.js`, `dapp/views/creator.js`, `public/index.html`
+**Files modified**: `dapp/views/settings-maxima-routes.js`, `dapp/views/viewer.js`, `dapp/app.js`, `MinimaAds.mds.zip`
 
 **AGENTS.md updated**: yes — §6 updated.
 
 ---
 
-### Session: 2026-06-09 — Campaigns view (L1 data) + Remove Stats
+> Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, Auto-Sync Platform Creator Route, Unify MLS DevTools, Fix Viewer and Publisher Reward Delivery, Fix Publisher Budget (Multi-Publisher Support), Fix Stale-Pending Publisher Channel Deadlock, Minima Foundation Fee (3%) + V4 Escrow Script Fixes, and all earlier) are archived in `docs/HISTORY.md §17`.
 
-**Task**: Replace the Stats view with a new Campaigns view accessible from all roles (viewer, creator, publisher). Show real L1 data instead of estimates: escrow coin count/budget + active publishers from channel coins. Replace the publisher estimate selector in the creator form with a live L1 count.
-
-**Fix**:
-- `dapp/views/campaigns.js` (new): Campaign list from local DB enriched with L1 data. Summary cards (Campaigns, Total budget, Open channels, Active publishers) all from L1 via `coins address:ESCROW_ADDRESS*` and `coins address:CHANNEL_SCRIPT_ADDRESS`. Per-campaign publisher count from `PREVSTATE(2)` of open channel coins. Filter Active / All.
-- `dapp/views/creator.js`: Removed publisher estimate buttons (5/10/25/50). Added `_loadL1PublisherCountForCreator()` — queries L1 on metrics panel open, stores count in `_l1ActivePublishers`, auto-recalculates metrics.
-- `dapp/views/stats.js`: Deleted (superseded by Campaigns view).
-- `dapp/app.js`: Added `campaigns` route to all three `MODE_VIEWS`. Removed `stats` from creator mode and all routing/render references.
-- `public/index.html`: Removed `stats.js` script tag, added `campaigns.js`.
-
-**AGENTS.md updated**: yes — §6 updated, oldest entry moved to `docs/HISTORY.md §17`.
-
-**Verification**:
-- Open any mode → "Campaigns" tab visible in nav
-- Campaigns view: 4 summary cards show `…` then update with L1 values
-- Filter Active / All switches campaign list
-- Creator form → metrics panel → "Active publishers (L1)" shows real count, metrics recalculate automatically
-- No console errors
-
-**Open issues**: None.
-
----
-
-### Session: 2026-06-09 — Minima Foundation Fee (3%) + V4 Escrow Script Fixes
-
-**Task**: Add a configurable 3% Minima Foundation fee alongside the existing 6% platform creator fee, and fix all resulting escrow script and channel transaction bugs.
-
-**Root Cause (chain of bugs fixed)**:
-1. **STATE(16) not set in split/open txns** — V4 script reads `LET foundationfeeflag=STATE(16)` unconditionally at top-level. KissVM throws when a STATE port is absent (same as PREVSTATE, per KNOWN_ISSUES #38). Split tx and channel-open tx never set port 16, causing `Script FAIL` on every V4 spend. **Fix**: add `txnstate port:16 value:0` to all 4 tx builders (SW Tx1/Tx2, FE Tx1/Tx2).
-2. **`escrowAddrFallback` did not include V4** — fallback was `V3 || V1`. If `r2.response.transaction.inputs[0].address` read failed, `coinAddr` fell back to V3, but `@ADDRESS` in V4 script = V4. `VERIFYOUT` would fail. **Fix**: fallback now `V4 || V3 || V1`.
-3. **`setTimeout` in SW** — `swWaitForCoin` retry used `setTimeout`, not available in Rhino. **Fix**: single-attempt; rely on `checkPendingChannelOpens` NEWBLOCK retry.
-4. **Stale SPLIT_COINID loops forever** — rejected split coin stays in `PENDING_CHOPEN_QUEUE` indefinitely. **Fix**: after 20 blocks without finding the coin, clear `SPLIT_COINID` and reset channel state to `pending`.
-
-**Foundation fee implementation**:
-- `config.js`: `FOUNDATION_KEY = null` (MVP, disabled by default)
-- `creator.js`: `FOUNDATION_FEE_RATE = 0.03`, ESCROW_SCRIPT_V4, 3-output atomic funding tx, cost breakdown UI
-- `service.js`: ESCROW_SCRIPT_V4 (byte-identical), loads `FOUNDATION_KEY_OVERRIDE`
-- `dapp/app.js`: loads `FOUNDATION_KEY_OVERRIDE` at boot
-- `devtools.js`: new subsection 2.3 "Minima Foundation Fee Address (3%)" — Set/Clear/Copy/manual input
-- `campaign.handler.js`: verifies `FOUNDATION_KEY` at `PREVSTATE(6)` on-chain (V4)
-- `ESCROW_ADDRESS_V2` / `ESCROW_SCRIPT_V2` removed (development only, no real campaigns)
-
-**Files modified**: `config.js`, `dapp/app.js`, `dapp/views/creator.js`, `dapp/views/devtools.js`, `public/service-workers/handlers/campaign.handler.js`, `public/service-workers/handlers/channel.handler.js`, `service.js`
-
-**AGENTS.md updated**: yes — §6 updated, oldest entry moved to `docs/HISTORY.md §17`.
-
-**Verification**: Full end-to-end test (user1=creator, user3=viewer, user4=MinimaAds platform). Logs confirm: `SW CHANNEL_OPEN sent (viewer) ok=true`, `SW REWARD_VOUCHER sent cumulative: 0.05 role: viewer ok=true`, `SW CHANNEL_OPEN sent (publisher) ok=true`, `SW REWARD_VOUCHER sent cumulative: 0.075 role: publisher ok=true`. No Script FAIL.
-
-**Open issues**: None new.
-
----
-
-### Session: 2026-06-07 — Modernize Campaign Creator Layout & Fix Publisher Count
-
-**Task**: Modernize the campaign creation wizard layout by removing outer panel borders, grouping related settings inside sub-cards, and placing forms and ad preview side-by-side using responsive grids. Also, resolve creator dashboard performance stats mismatch by deduplicating local reward events and normalizing case/empty strings for unique publisher counts.
-
-**Root Cause**:
-- Form fields in the wizard were crowded inside single panel cards. Sub-sections had no distinction, and the ad preview took up too much vertical space without desktop-optimized placement.
-- When running creator and viewer/publisher on a single node, duplicate reward events were written. Case differences in publisher Maxima public keys and empty frames also caused `COUNT(DISTINCT)` to return incorrect metrics.
-
-**Fix**:
-- dapp/views/creator.js:
-  - Removed `.ma-section` card wrapper from outer panels.
-  - Rendered "Add Content" and "Review" sections stacked vertically in a single column.
-  - Wrapped "Budget", "Viewer", and "Publisher" settings inside `.ma-grid-2col` wrappers to arrange forms/notes side-by-side on desktop.
-- public/index.html:
-  - Added CSS grid rules for `.ma-creator-grid`, `.ma-grid-2col`, and sticky sidebars.
-  - Overrode padding for `input[type="file"]` to center-align native browser text/buttons.
-- core/rewards.js:
-  - Added `id` and `timestamp` params support to `createRewardEvent` to enable deterministic event IDs.
-- public/service-workers/handlers/channel.handler.js:
-  - Used `eventId` and `'pub-' + eventId` to set deterministic event IDs, allowing H2 MERGE INTO to deduplicate local database writes.
-  - Added `event_id` payload to `VOUCHER_RECEIVED` signal.
-- sdk/index.js:
-  - Extracted and forwarded `event_id` to `createRewardEvent` on viewer nodes.
-- core/frames.js:
-  - Updated `listFrames` and `getFrameEarnings` to calculate frame earnings dynamically from `REWARD_EVENTS` instead of reading the cached `TOTAL_EARNED` column from the `FRAMES` table.
-- dapp/views/mycampaigns.js:
-  - Updated distinct count to `COUNT(DISTINCT UPPER(re.PUBLISHER_ID))` and added check to skip empty IDs (`AND re.PUBLISHER_ID <> ''`).
-
-**AGENTS.md updated**: yes — §6 updated.
-
-**Verification**:
-- Checked JS syntax on all modified files with `node -c` (all clean).
-- Rebuilt `MinimaAds.mds.zip` and verified package integrity.
-
----
-
-> Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, Auto-Sync Platform Creator Route, Unify MLS DevTools, Fix Viewer and Publisher Reward Delivery, Fix Publisher Budget (Multi-Publisher Support), Fix Stale-Pending Publisher Channel Deadlock, and all earlier) are archived in `docs/HISTORY.md §17`.
 

@@ -2055,7 +2055,7 @@ function checkOpenChannelsSettled() {
   var chAddr = CHANNEL_SCRIPT_ADDRESS || '';
   if (!chAddr) { return; }
 
-  var sql = "SELECT CAMPAIGN_ID, VIEWER_KEY, ROLE, CHANNEL_COINID, CREATED_AT FROM CHANNEL_STATE WHERE STATUS = 'open'";
+  var sql = "SELECT CAMPAIGN_ID, VIEWER_KEY, ROLE, CHANNEL_COINID, CREATED_AT, CUMULATIVE_EARNED FROM CHANNEL_STATE WHERE STATUS = 'open'";
   sqlQuery(sql, function(err, rows) {
     if (err || !rows || rows.length === 0) { return; }
 
@@ -2080,13 +2080,23 @@ function checkOpenChannelsSettled() {
           if (age < 60000) {
             MDS.log("[CHANNEL] checkOpenChannelsSettled: coin " + coinId.substring(0, 18) + "... not found but channel is new (age=" + age + "ms) — grace period, skipping settle.");
           } else {
-            MDS.log("[CHANNEL] checkOpenChannelsSettled: channel coin " + coinId + " spent/settled on-chain! Settling locally.");
+            // Verify via targeted query before settling — the address scan can return
+            // an empty list transiently during node re-sync, causing false positives.
             (function(r) {
-              settleChannel(r.CAMPAIGN_ID, r.VIEWER_KEY, r.ROLE || 'viewer', function(settleErr) {
-                if (settleErr) {
-                  MDS.log("[CHANNEL] checkOpenChannelsSettled: settleChannel failed for " + r.CAMPAIGN_ID + " error: " + settleErr);
+              MDS.cmd("coins coinid:" + r.CHANNEL_COINID + " relevant:true", function(vRes) {
+                var vCoins = (vRes && vRes.status && vRes.response) ? vRes.response : [];
+                if (vCoins.length > 0) {
+                  MDS.log("[CHANNEL] checkOpenChannelsSettled: coin " + r.CHANNEL_COINID.substring(0, 18) + "... confirmed present via direct query — address scan transient, skipping.");
                 } else {
-                  _signalCampaignUpdated(r.CAMPAIGN_ID);
+                  MDS.log("[CHANNEL] checkOpenChannelsSettled: coin " + r.CHANNEL_COINID + " confirmed spent on-chain. Settling locally.");
+                  settleChannel(r.CAMPAIGN_ID, r.VIEWER_KEY, r.ROLE || 'viewer', function(settleErr) {
+                    if (settleErr) {
+                      MDS.log("[CHANNEL] checkOpenChannelsSettled: settleChannel failed for " + r.CAMPAIGN_ID + " error: " + settleErr);
+                    } else {
+                      _signalCampaignUpdated(r.CAMPAIGN_ID);
+                      signalFE("SETTLE_CONFIRMED", { campaign_id: r.CAMPAIGN_ID, amount: parseFloat(r.CUMULATIVE_EARNED || 0) });
+                    }
+                  });
                 }
               });
             })(row);

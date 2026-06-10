@@ -176,6 +176,22 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-06-10 — Fix false settlement on node re-sync + remove optimistic settleChannel
+
+**Task**: Two linked bugs around settlement:
+1. `checkOpenChannelsSettled()` could prematurely settle channels when `coins address:CHANNEL_SCRIPT_ADDRESS` returned an empty array transiently (e.g. during MiniDapp reinit / node re-sync). Result: CHANNEL_STATE → 'settled', CHANNEL_HISTORY populated, but coin still active on L1. Viewer's wallet never receives the reward.
+2. `_postSettleTx()` called `settleChannel()` optimistically after `txnpost` returns status:true, before L1 confirmation. If the tx fails to propagate, local DB is incorrectly marked 'settled' and the voucher disappears from the UI permanently.
+
+**Fix**:
+- `checkOpenChannelsSettled()`: before calling `settleChannel()`, verify the specific coin via `coins coinid:X relevant:true`. Only settle if the targeted query also confirms the coin is absent. Also added CUMULATIVE_EARNED to SELECT and `signalFE("SETTLE_CONFIRMED")` after successful settle, so earnings view auto-refreshes.
+- `_postSettleTx()`: removed `settleChannel()` call after txnpost. Shows "Settlement posted. Awaiting L1 confirmation…" instead. The SW's `checkOpenChannelsSettled()` will call `settleChannel()` on the next NEWBLOCK once the coin is verifiably spent, then signals SETTLE_CONFIRMED to the FE.
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`, `dapp/views/earnings.js`
+
+**AGENTS.md updated**: yes — §6 updated.
+
+---
+
 ### Session: 2026-06-10 — Fix Earnings open channels count for creator/multi-role nodes
 
 **Task**: "Open channels" count (i pending settlements i settled channels) a la vista Earnings mostrava canals d'altres usuaris quan un creador canviava a mode viewer o publisher. Això passa perquè el node del creador té files a `CHANNEL_STATE` per TOTS els viewers/publishers de les seves campanyes, i les queries no filtraven per `VIEWER_KEY = MY_ADDRESS`.
@@ -202,22 +218,6 @@ Built-in snippets work because the publisher IS the viewer and sends their own P
 - `_handleRewardRequestInner()` and `checkOnePendingVoucher()`: skip `_maybeGeneratePublisherVoucher()` when `channelFrameId` starts with `'builtin:'` — built-in publisher handles their own rewards; skipping prevents duplicate vouchers.
 
 **Files modified**: `public/service-workers/handlers/channel.handler.js`
-
-**AGENTS.md updated**: yes — §6 updated.
-
----
-
-### Session: 2026-06-10 — Settings Redirection Flow & Viewer Reward Status Message
-
-**Task**:
-1. Fix the jarring full-page reload and database/identity re-initialization when registering/re-registering a permanent Maxima route in `#settings/maxima-routes`.
-2. Fix the ad viewer detail screen status message sticking to "Processing reward..." indefinitely after the reward actually arrives/is confirmed.
-
-**Implementation**:
-- **Smooth Settings Redirection**: Removed `location.reload();` from the success timeout callback in `dapp/views/settings-maxima-routes.js` to prevent resetting the database and Maxima identity states. The DApp now navigates smoothly to the default home screen matching the current user role using the local Single Page App hash router (`goHome()`).
-- **Real-time Status Confirmation**: Added an `onViewerVoucherReceived` callback in `dapp/views/viewer.js` and wired it into `dapp/app.js`'s `VOUCHER_RECEIVED` handler. When the reward payment voucher is saved and verified, the status message is now updated to "Reward received! +X.XX MINIMA" in green.
-
-**Files modified**: `dapp/views/settings-maxima-routes.js`, `dapp/views/viewer.js`, `dapp/app.js`, `MinimaAds.mds.zip`
 
 **AGENTS.md updated**: yes — §6 updated.
 

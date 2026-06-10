@@ -46,6 +46,14 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-10 — Settings Redirection Flow & Viewer Reward Status Message
+
+**Task**: Fix jarring full-page reload on Maxima route registration. Fix "Processing reward..." status sticking indefinitely.
+
+**Files modified**: `dapp/views/settings-maxima-routes.js`, `dapp/views/viewer.js`, `dapp/app.js`, `MinimaAds.mds.zip`
+
+---
+
 ### Session: 2026-06-10 — DevTools reordering, Favicon fix, & Drawer Username styling
 
 **Task**: Move Minima Foundation Fee config to top-level Section 2 in DevTools. Restore favicon. Make drawer username clickable.

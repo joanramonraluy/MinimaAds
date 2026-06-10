@@ -161,40 +161,58 @@ function _loadL1ChannelData(campaigns, cb) {
     campHexMap[hexId] = campaigns[i].ID;
   }
 
-  MDS.keypair.get('CHANNEL_SCRIPT_ADDRESS', function(r4) {
-    var channelAddr = (r4 && r4.status) ? r4.value : '';
-    if (!channelAddr) {
-      _setStatCard('ma-cstat-channels', '0');
-      _setStatCard('ma-cstat-publishers', '0');
-      cb({});
-      return;
-    }
-
-    MDS.cmd('coins address:' + channelAddr, function(res) {
-      var chCoins = (res && res.status && res.response) ? res.response : [];
-      var allPubKeys = {};
-      var pubCountMap = {};
-
-      for (var ci = 0; ci < chCoins.length; ci++) {
-        var states = chCoins[ci].state || [];
-        var campHex = '';
-        var pubKey  = '';
-        for (var si = 0; si < states.length; si++) {
-          if (states[si].port == 3) { campHex = (states[si].data || '').toUpperCase(); }
-          if (states[si].port == 2) { pubKey  = (states[si].data || '').toUpperCase(); }
-        }
-        if (!pubKey) { continue; }
-        allPubKeys[pubKey] = true;
-        if (campHex && campHexMap[campHex]) {
-          var cid = campHexMap[campHex];
-          if (!pubCountMap[cid]) { pubCountMap[cid] = {}; }
-          pubCountMap[cid][pubKey] = true;
+  // Load publisher-only viewer keys from DB to filter L1 channel coins
+  sqlQuery("SELECT DISTINCT UPPER(VIEWER_KEY) AS VIEWER_KEY FROM CHANNEL_STATE WHERE ROLE = 'publisher'", function(dbErr, pubRows) {
+    var publisherKeys = {};
+    if (!dbErr && pubRows) {
+      for (var pi = 0; pi < pubRows.length; pi++) {
+        if (pubRows[pi].VIEWER_KEY) {
+          publisherKeys[pubRows[pi].VIEWER_KEY] = true;
         }
       }
+    }
 
-      _setStatCard('ma-cstat-channels', String(chCoins.length));
-      _setStatCard('ma-cstat-publishers', String(Object.keys(allPubKeys).length));
-      cb(pubCountMap);
+    MDS.keypair.get('CHANNEL_SCRIPT_ADDRESS', function(r4) {
+      var channelAddr = (r4 && r4.status) ? r4.value : '';
+      if (!channelAddr) {
+        _setStatCard('ma-cstat-channels', '0');
+        _setStatCard('ma-cstat-publishers', '0');
+        cb({});
+        return;
+      }
+
+      MDS.cmd('coins address:' + channelAddr, function(res) {
+        var chCoins = (res && res.status && res.response) ? res.response : [];
+        var allPubKeys = {};
+        var pubCountMap = {};
+        var publisherChannelCount = 0;
+
+        for (var ci = 0; ci < chCoins.length; ci++) {
+          var states = chCoins[ci].state || [];
+          var campHex = '';
+          var pubKey  = '';
+          for (var si = 0; si < states.length; si++) {
+            if (states[si].port == 3) { campHex = (states[si].data || '').toUpperCase(); }
+            if (states[si].port == 2) { pubKey  = (states[si].data || '').toUpperCase(); }
+          }
+          if (!pubKey) { continue; }
+
+          // Count only publisher channels (viewer_key in publisher list)
+          if (publisherKeys[pubKey]) {
+            publisherChannelCount++;
+            allPubKeys[pubKey] = true;
+            if (campHex && campHexMap[campHex]) {
+              var cid = campHexMap[campHex];
+              if (!pubCountMap[cid]) { pubCountMap[cid] = {}; }
+              pubCountMap[cid][pubKey] = true;
+            }
+          }
+        }
+
+        _setStatCard('ma-cstat-channels', String(publisherChannelCount));
+        _setStatCard('ma-cstat-publishers', String(Object.keys(allPubKeys).length));
+        cb(pubCountMap);
+      });
     });
   });
 }

@@ -61,7 +61,7 @@ function setNumberFormat(fmt) {
 }
 
 var MODE_VIEWS = {
-  viewer:    ['viewer', 'earnings', 'campaigns'],
+  viewer:    ['campaigns', 'earnings'],
   creator:   ['creator', 'mycampaigns', 'campaigns'],
   publisher: ['frames', 'earnings', 'campaigns']
 };
@@ -270,6 +270,9 @@ function handleMdsComms(parsed) {
     if (typeof onVoucherReceived === 'function') { onVoucherReceived(parsed); }
     if (currentRoute() === 'earnings' && typeof loadEarnings === 'function') {
       loadEarnings();
+    }
+    if (currentRoute() === 'viewer' && typeof onViewerVoucherReceived === 'function') {
+      onViewerVoucherReceived(parsed);
     }
     return;
   }

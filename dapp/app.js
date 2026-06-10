@@ -358,6 +358,7 @@ function _handleEscrowInfoResponse(parsed) {
   var maxPubBudget = parseFloat(data.max_publisher_budget) || 0;
   var pubBudgetSpent = parseFloat(data.publisher_budget_spent) || 0;
   var viewerBudgetSpent = parseFloat(data.viewer_budget_spent) || 0;
+  var publisherBudgetEarned = parseFloat(data.publisher_budget_earned) || 0;
   var campaignStatus = (data.campaign_status || 'unknown').toUpperCase();
 
   var sql = "UPDATE CAMPAIGNS SET "
@@ -366,6 +367,7 @@ function _handleEscrowInfoResponse(parsed) {
     + "MAX_PUBLISHER_BUDGET = " + maxPubBudget + ", "
     + "PUBLISHER_BUDGET_SPENT = " + pubBudgetSpent + ", "
     + "VIEWER_BUDGET_SPENT = " + viewerBudgetSpent + ", "
+    + "PUBLISHER_BUDGET_EARNED = " + publisherBudgetEarned + ", "
     + "STATUS = '" + escapeSql(campaignStatus) + "' "
     + "WHERE UPPER(ID) = UPPER('" + escapeSql(campaignId) + "')";
 

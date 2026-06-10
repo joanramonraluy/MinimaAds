@@ -78,7 +78,7 @@ function _loadCampaigns() {
   listEl.appendChild(loading);
 
   var sql = 'SELECT c.ID, c.TITLE, c.CREATOR_ADDRESS, c.BUDGET_TOTAL, c.BUDGET_REMAINING, c.REWARD_VIEW, '
-    + 'c.REWARD_CLICK, c.STATUS, c.PUBLISHER_REWARD_VIEW, c.CREATOR_MX, c.MAX_PUBLISHER_BUDGET, c.PUBLISHER_BUDGET_SPENT, c.VIEWER_BUDGET_SPENT, '
+    + 'c.REWARD_CLICK, c.STATUS, c.PUBLISHER_REWARD_VIEW, c.CREATOR_MX, c.MAX_PUBLISHER_BUDGET, c.PUBLISHER_BUDGET_SPENT, c.VIEWER_BUDGET_SPENT, c.PUBLISHER_BUDGET_EARNED, '
     + 'a.TITLE AS AD_TITLE, a.BODY AS AD_BODY '
     + 'FROM CAMPAIGNS c LEFT JOIN ADS a ON UPPER(a.CAMPAIGN_ID) = UPPER(c.ID)';
   if (_campaignsFilter === 'active') {
@@ -138,14 +138,14 @@ function _updateCampaignsSummary(campaigns) {
   var totalFunded      = filtered.reduce(function(sum, c) { return sum + (parseFloat(c.BUDGET_TOTAL) || 0); }, 0);
   var totalAvail       = filtered.reduce(function(sum, c) { return sum + (parseFloat(c.BUDGET_REMAINING) || 0); }, 0);
   var totalViewerSpent = filtered.reduce(function(sum, c) { return sum + (parseFloat(c.VIEWER_BUDGET_SPENT) || 0); }, 0);
-  var totalPubSpent    = filtered.reduce(function(sum, c) { return sum + (parseFloat(c.PUBLISHER_BUDGET_SPENT) || 0); }, 0);
+  var totalPubEarned   = filtered.reduce(function(sum, c) { return sum + (parseFloat(c.PUBLISHER_BUDGET_EARNED) || 0); }, 0);
 
   var defs = [
     { id: 'ma-cstat-campaigns',    label: 'Campaigns',       value: String(count) },
     { id: 'ma-cstat-funded',       label: 'Total funded',    value: fmtAmt(totalFunded, 2) + ' MINIMA' },
     { id: 'ma-cstat-available',    label: 'Available',       value: fmtAmt(totalAvail, 2) + ' MINIMA' },
     { id: 'ma-cstat-viewer-spent', label: 'Viewer spent',    value: fmtAmt(totalViewerSpent, 2) + ' MINIMA' },
-    { id: 'ma-cstat-pub-spent',    label: 'Publisher spent', value: fmtAmt(totalPubSpent, 2) + ' MINIMA' }
+    { id: 'ma-cstat-pub-spent',    label: 'Publisher spent', value: fmtAmt(totalPubEarned, 2) + ' MINIMA' }
   ];
 
   for (var i = 0; i < defs.length; i++) {
@@ -269,22 +269,26 @@ function _loadEscrowInfoForActiveCampaigns(campaigns) {
 }
 
 function _updateOwnCampaignViewerSpent(campaignId) {
-  var sqlActive = "SELECT COALESCE(SUM(CUMULATIVE_EARNED), 0) AS SPENT FROM CHANNEL_STATE"
-    + " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') AND ROLE = 'viewer'";
+  var eid = escapeSql(campaignId);
 
-  sqlQuery(sqlActive, function(err1, rows1) {
-    var spentActive = (!err1 && rows1 && rows1[0]) ? (parseFloat(rows1[0].SPENT) || 0) : 0;
+  sqlQuery("SELECT COALESCE(SUM(CUMULATIVE_EARNED),0) AS E FROM CHANNEL_STATE WHERE UPPER(CAMPAIGN_ID)=UPPER('" + eid + "') AND ROLE='viewer'", function(e1, r1) {
+  var va = (!e1 && r1 && r1[0]) ? (parseFloat(r1[0].E) || 0) : 0;
 
-    var sqlHistory = "SELECT COALESCE(SUM(CUMULATIVE_EARNED), 0) AS SPENT FROM CHANNEL_HISTORY"
-      + " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') AND ROLE = 'viewer'";
+  sqlQuery("SELECT COALESCE(SUM(CUMULATIVE_EARNED),0) AS E FROM CHANNEL_HISTORY WHERE UPPER(CAMPAIGN_ID)=UPPER('" + eid + "') AND ROLE='viewer'", function(e2, r2) {
+  var vh = (!e2 && r2 && r2[0]) ? (parseFloat(r2[0].E) || 0) : 0;
 
-    sqlQuery(sqlHistory, function(err2, rows2) {
-      var spentHistory = (!err2 && rows2 && rows2[0]) ? (parseFloat(rows2[0].SPENT) || 0) : 0;
-      var total = spentActive + spentHistory;
+  sqlQuery("SELECT COALESCE(SUM(CUMULATIVE_EARNED),0) AS E FROM CHANNEL_STATE WHERE UPPER(CAMPAIGN_ID)=UPPER('" + eid + "') AND ROLE='publisher'", function(e3, r3) {
+  var pa = (!e3 && r3 && r3[0]) ? (parseFloat(r3[0].E) || 0) : 0;
 
-      sqlQuery("UPDATE CAMPAIGNS SET VIEWER_BUDGET_SPENT = " + total
-        + " WHERE UPPER(ID) = UPPER('" + escapeSql(campaignId) + "')", function() {});
-    });
+  sqlQuery("SELECT COALESCE(SUM(CUMULATIVE_EARNED),0) AS E FROM CHANNEL_HISTORY WHERE UPPER(CAMPAIGN_ID)=UPPER('" + eid + "') AND ROLE='publisher'", function(e4, r4) {
+  var ph = (!e4 && r4 && r4[0]) ? (parseFloat(r4[0].E) || 0) : 0;
+
+  sqlQuery("UPDATE CAMPAIGNS SET VIEWER_BUDGET_SPENT = " + (va + vh)
+    + ", PUBLISHER_BUDGET_EARNED = " + (pa + ph)
+    + " WHERE UPPER(ID) = UPPER('" + eid + "')", function() {});
+  });
+  });
+  });
   });
 }
 

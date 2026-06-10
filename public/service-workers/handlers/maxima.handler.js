@@ -136,43 +136,52 @@ function handleEscrowInfoRequest(payload, fromRoute) {
     var maxPubBudget = parseFloat(row.MAX_PUBLISHER_BUDGET) || 0;
     var pubBudgetSpent = parseFloat(row.PUBLISHER_BUDGET_SPENT) || 0;
 
-    // Query viewer spent from open channels
-    var viewerActiveSql = "SELECT COALESCE(SUM(CUMULATIVE_EARNED), 0) AS SPENT FROM CHANNEL_STATE"
-      + " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') AND ROLE = 'viewer'";
+    var escapedId = escapeSql(campaignId);
 
-    sqlQuery(viewerActiveSql, function(vaErr, vaRows) {
-      var viewerSpentActive = (!vaErr && vaRows && vaRows[0]) ? (parseFloat(vaRows[0].SPENT) || 0) : 0;
+    // Query viewer earned (open channels)
+    sqlQuery("SELECT COALESCE(SUM(CUMULATIVE_EARNED),0) AS E FROM CHANNEL_STATE WHERE UPPER(CAMPAIGN_ID)=UPPER('" + escapedId + "') AND ROLE='viewer'", function(e1, r1) {
+    var viewerEarnedActive = (!e1 && r1 && r1[0]) ? (parseFloat(r1[0].E) || 0) : 0;
 
-      // Query viewer spent from closed/settled channels
-      var viewerHistorySql = "SELECT COALESCE(SUM(CUMULATIVE_EARNED), 0) AS SPENT FROM CHANNEL_HISTORY"
-        + " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') AND ROLE = 'viewer'";
+    // Query viewer earned (settled channels)
+    sqlQuery("SELECT COALESCE(SUM(CUMULATIVE_EARNED),0) AS E FROM CHANNEL_HISTORY WHERE UPPER(CAMPAIGN_ID)=UPPER('" + escapedId + "') AND ROLE='viewer'", function(e2, r2) {
+    var viewerEarnedHistory = (!e2 && r2 && r2[0]) ? (parseFloat(r2[0].E) || 0) : 0;
 
-      sqlQuery(viewerHistorySql, function(vhErr, vhRows) {
-        var viewerSpentHistory = (!vhErr && vhRows && vhRows[0]) ? (parseFloat(vhRows[0].SPENT) || 0) : 0;
-        var viewerBudgetSpent = viewerSpentActive + viewerSpentHistory;
-        var escrowLeft = budgetRemaining + (maxPubBudget - pubBudgetSpent);
+    // Query publisher earned (open channels)
+    sqlQuery("SELECT COALESCE(SUM(CUMULATIVE_EARNED),0) AS E FROM CHANNEL_STATE WHERE UPPER(CAMPAIGN_ID)=UPPER('" + escapedId + "') AND ROLE='publisher'", function(e3, r3) {
+    var pubEarnedActive = (!e3 && r3 && r3[0]) ? (parseFloat(r3[0].E) || 0) : 0;
 
-        var response = {
-          type: 'ESCROW_INFO_RESPONSE',
-          campaign_id: campaignId,
-          status: 'ok',
-          data: {
-            budget_total: budgetTotal,
-            budget_remaining: budgetRemaining,
-            max_publisher_budget: maxPubBudget,
-            publisher_budget_spent: pubBudgetSpent,
-            viewer_budget_spent: viewerBudgetSpent,
-            escrow_left: escrowLeft,
-            campaign_status: row.STATUS || 'unknown'
-          }
-        };
+    // Query publisher earned (settled channels)
+    sqlQuery("SELECT COALESCE(SUM(CUMULATIVE_EARNED),0) AS E FROM CHANNEL_HISTORY WHERE UPPER(CAMPAIGN_ID)=UPPER('" + escapedId + "') AND ROLE='publisher'", function(e4, r4) {
+    var pubEarnedHistory = (!e4 && r4 && r4[0]) ? (parseFloat(r4[0].E) || 0) : 0;
 
-        if (fromRoute) {
-          sendMaxima(null, fromRoute, response, function(ok) {
-            MDS.log("[MAXIMA] ESCROW_INFO_RESPONSE sent ok=" + ok + " campaign=" + campaignId);
-          });
-        }
+    var viewerBudgetSpent = viewerEarnedActive + viewerEarnedHistory;
+    var publisherBudgetEarned = pubEarnedActive + pubEarnedHistory;
+    var escrowLeft = budgetRemaining + (maxPubBudget - pubBudgetSpent);
+
+    var response = {
+      type: 'ESCROW_INFO_RESPONSE',
+      campaign_id: campaignId,
+      status: 'ok',
+      data: {
+        budget_total: budgetTotal,
+        budget_remaining: budgetRemaining,
+        max_publisher_budget: maxPubBudget,
+        publisher_budget_spent: pubBudgetSpent,
+        viewer_budget_spent: viewerBudgetSpent,
+        publisher_budget_earned: publisherBudgetEarned,
+        escrow_left: escrowLeft,
+        campaign_status: row.STATUS || 'unknown'
+      }
+    };
+
+    if (fromRoute) {
+      sendMaxima(null, fromRoute, response, function(ok) {
+        MDS.log("[MAXIMA] ESCROW_INFO_RESPONSE sent ok=" + ok + " campaign=" + campaignId);
       });
+    }
+    });
+    });
+    });
     });
   });
 }

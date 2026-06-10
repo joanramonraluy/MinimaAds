@@ -135,19 +135,53 @@ function _updateCampaignsSummary(campaigns) {
     : campaigns;
 
   var count = filtered.length;
-  var totalFunded      = filtered.reduce(function(sum, c) { return sum + (parseFloat(c.BUDGET_TOTAL) || 0); }, 0);
-  var totalAvail       = filtered.reduce(function(sum, c) { return sum + (parseFloat(c.BUDGET_REMAINING) || 0); }, 0);
+  var totalFunded = filtered.reduce(function(sum, c) { return sum + (parseFloat(c.BUDGET_TOTAL) || 0); }, 0);
+  var totalAvail  = filtered.reduce(function(sum, c) { return sum + (parseFloat(c.BUDGET_REMAINING) || 0); }, 0);
+
   var defs = [
     { id: 'ma-cstat-campaigns', label: 'Campaigns',    value: String(count) },
     { id: 'ma-cstat-funded',    label: 'Total funded', value: fmtAmt(totalFunded, 2) + ' MINIMA' },
     { id: 'ma-cstat-available', label: 'Available',    value: fmtAmt(totalAvail, 2) + ' MINIMA' }
   ];
 
+  // Viewer-specific: personal earnings cards
+  if (_activeMode === 'viewer') {
+    defs.push({ id: 'ma-earned-today', label: 'Today earned', value: '—' });
+    defs.push({ id: 'ma-earned-total', label: 'Total earned',  value: '—' });
+  }
+
   for (var i = 0; i < defs.length; i++) {
     var card = mkStatCard(defs[i].label, defs[i].value);
     card.id = defs[i].id;
     summaryEl.appendChild(card);
   }
+
+  if (_activeMode === 'viewer') { _loadViewerEarned(); }
+}
+
+function _loadViewerEarned() {
+  if (!MY_ADDRESS) { return; }
+
+  var todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  var todayMs = todayStart.getTime();
+
+  var sqlToday = "SELECT COALESCE(SUM(AMOUNT), 0) AS EARNED FROM REWARD_EVENTS"
+    + " WHERE UPPER(USER_ADDRESS) = UPPER('" + escapeSql(MY_ADDRESS) + "')"
+    + " AND TIMESTAMP >= " + todayMs;
+
+  sqlQuery(sqlToday, function(err1, rows1) {
+    var today = (!err1 && rows1 && rows1[0]) ? (parseFloat(rows1[0].EARNED) || 0) : 0;
+    _setStatCard('ma-earned-today', fmtAmt(today, 6) + ' MINIMA');
+  });
+
+  var sqlTotal = "SELECT COALESCE(TOTAL_EARNED, 0) AS EARNED FROM USER_PROFILE"
+    + " WHERE UPPER(ADDRESS) = UPPER('" + escapeSql(MY_ADDRESS) + "')";
+
+  sqlQuery(sqlTotal, function(err2, rows2) {
+    var total = (!err2 && rows2 && rows2[0]) ? (parseFloat(rows2[0].EARNED) || 0) : 0;
+    _setStatCard('ma-earned-total', fmtAmt(total, 6) + ' MINIMA');
+  });
 }
 
 function _setStatCard(id, value) {
@@ -159,9 +193,27 @@ function _setStatCard(id, value) {
 
 
 function _buildCampaignsRow(campaign) {
-  var row = document.createElement('div');
-  row.style.cssText = 'display:flex;align-items:center;gap:.85rem;'
-    + 'padding:.85rem;background:transparent;'
+  var isViewer = (_activeMode === 'viewer');
+  var isClickable = isViewer
+    && (campaign.STATUS || '').toUpperCase() === 'ACTIVE'
+    && typeof _openCampaign === 'function'
+    && MY_ADDRESS
+    && (campaign.CREATOR_ADDRESS || '').toUpperCase() !== MY_ADDRESS.toUpperCase()
+    && parseFloat(campaign.BUDGET_REMAINING) >= parseFloat(campaign.REWARD_VIEW);
+
+  var row = document.createElement(isClickable ? 'button' : 'div');
+  if (isClickable) {
+    row.type = 'button';
+    row.addEventListener('click', function() { _openCampaign(campaign); });
+    row.addEventListener('mouseover', function() {
+      row.style.background = document.documentElement.getAttribute('data-theme') === 'dark'
+        ? 'rgba(255,255,255,.06)' : 'rgba(15,23,42,.05)';
+    });
+    row.addEventListener('mouseout', function() { row.style.background = 'transparent'; });
+  }
+  row.style.cssText = 'display:flex;align-items:center;gap:.85rem;width:100%;'
+    + 'padding:.85rem;background:transparent;text-align:left;color:inherit;'
+    + (isClickable ? 'cursor:pointer;border:none;border-radius:0;box-shadow:none;margin:0;' : '')
     + 'border-bottom:1px solid var(--pico-muted-border-color,#ddd);';
 
   var hue = 0;
@@ -229,6 +281,14 @@ function _buildCampaignsRow(campaign) {
 
   row.appendChild(avatar);
   row.appendChild(textDiv);
+
+  if (isClickable) {
+    var arrow = document.createElement('span');
+    arrow.setAttribute('aria-hidden', 'true');
+    arrow.style.cssText = 'color:var(--pico-muted-color,#6c757d);font-size:1.2rem;flex-shrink:0;';
+    arrow.textContent = '›';
+    row.appendChild(arrow);
+  }
 
   return row;
 }

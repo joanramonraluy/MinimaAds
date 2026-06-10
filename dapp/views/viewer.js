@@ -380,6 +380,12 @@ function _goBackToList() {
   _viewerState.campaign = null;
   _viewerState.viewTracked = false;
 
+  // Viewer mode uses Campaigns as landing page
+  if (typeof _activeMode !== 'undefined' && _activeMode === 'viewer') {
+    window.location.hash = 'campaigns';
+    return;
+  }
+
   var root = document.getElementById('app');
   if (!root) { return; }
   root.innerHTML = '';
@@ -569,5 +575,16 @@ function onRewardValidation(result) {
       reasonMsg = 'System error processing reward.';
     }
     statusEl.textContent = reasonMsg;
+  }
+}
+
+function onViewerVoucherReceived(parsed) {
+  if (_viewerState.mode !== 'detail' || !_viewerState.campaign || !parsed) { return; }
+  if (parsed.campaign_id !== _viewerState.campaign.ID) { return; }
+  var statusEl = document.getElementById('ma-viewer-status');
+  if (statusEl) {
+    var amt = parseFloat(_viewerState.campaign.REWARD_VIEW) || 0;
+    statusEl.textContent = 'Reward received! +' + fmtAmt(amt, 3) + ' MINIMA';
+    statusEl.style.color = '#10b981';
   }
 }

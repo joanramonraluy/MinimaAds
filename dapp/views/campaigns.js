@@ -151,10 +151,10 @@ function _updateCampaignsSummary(campaigns) {
     { id: 'ma-cstat-budget',     label: 'Market budget', value: fmtAmt(totalBudget, 2) + ' MINIMA' }
   ];
 
-  // Creator sees additional channel metrics
+  // Creator sees split L1 channel metrics (viewer vs publisher)
   if (_activeMode === 'creator') {
-    defs.push({ id: 'ma-cstat-channels',   label: 'My open channels', value: '…' });
-    defs.push({ id: 'ma-cstat-publishers', label: 'My active publishers', value: '…' });
+    defs.push({ id: 'ma-cstat-viewer-channels',    label: 'My viewer channels', value: '…' });
+    defs.push({ id: 'ma-cstat-publisher-channels', label: 'My publisher channels', value: '…' });
   }
 
   for (var i = 0; i < defs.length; i++) {
@@ -172,20 +172,19 @@ function _setStatCard(id, value) {
 }
 
 function _loadL1ChannelData(campaigns, cb) {
-  // Build hex → campaignId lookup for per-campaign publisher count
   var campHexMap = {};
   for (var i = 0; i < campaigns.length; i++) {
     var hexId = ('0x' + utf8ToHex(campaigns[i].ID)).toUpperCase();
     campHexMap[hexId] = campaigns[i].ID;
   }
 
-  // Load publisher-only viewer keys from DB to filter L1 channel coins
-  sqlQuery("SELECT DISTINCT UPPER(VIEWER_KEY) AS VIEWER_KEY FROM CHANNEL_STATE WHERE ROLE = 'publisher'", function(dbErr, pubRows) {
-    var publisherKeys = {};
-    if (!dbErr && pubRows) {
-      for (var pi = 0; pi < pubRows.length; pi++) {
-        if (pubRows[pi].VIEWER_KEY) {
-          publisherKeys[pubRows[pi].VIEWER_KEY] = true;
+  // Load role map from DB: VIEWER_KEY → 'viewer' | 'publisher'
+  sqlQuery("SELECT DISTINCT UPPER(VIEWER_KEY) AS VIEWER_KEY, ROLE FROM CHANNEL_STATE", function(dbErr, roleRows) {
+    var roleMap = {};
+    if (!dbErr && roleRows) {
+      for (var ri = 0; ri < roleRows.length; ri++) {
+        if (roleRows[ri].VIEWER_KEY) {
+          roleMap[roleRows[ri].VIEWER_KEY] = (roleRows[ri].ROLE || 'viewer').toLowerCase();
         }
       }
     }
@@ -193,42 +192,46 @@ function _loadL1ChannelData(campaigns, cb) {
     MDS.keypair.get('CHANNEL_SCRIPT_ADDRESS', function(r4) {
       var channelAddr = (r4 && r4.status) ? r4.value : '';
       if (!channelAddr) {
-        _setStatCard('ma-cstat-channels', '0');
-        _setStatCard('ma-cstat-publishers', '0');
+        _setStatCard('ma-cstat-viewer-channels', '0');
+        _setStatCard('ma-cstat-publisher-channels', '0');
         cb({});
         return;
       }
 
       MDS.cmd('coins address:' + channelAddr, function(res) {
         var chCoins = (res && res.status && res.response) ? res.response : [];
-        var allPubKeys = {};
         var pubCountMap = {};
+        var viewerChannelCount = 0;
         var publisherChannelCount = 0;
 
         for (var ci = 0; ci < chCoins.length; ci++) {
           var states = chCoins[ci].state || [];
           var campHex = '';
-          var pubKey  = '';
+          var coinKey = '';
           for (var si = 0; si < states.length; si++) {
             if (states[si].port == 3) { campHex = (states[si].data || '').toUpperCase(); }
-            if (states[si].port == 2) { pubKey  = (states[si].data || '').toUpperCase(); }
+            if (states[si].port == 2) { coinKey  = (states[si].data || '').toUpperCase(); }
           }
-          if (!pubKey) { continue; }
+          if (!coinKey) { continue; }
 
-          // Count only publisher channels (viewer_key in publisher list)
-          if (publisherKeys[pubKey]) {
+          // Split by role for summary cards
+          var role = roleMap[coinKey] || 'viewer';
+          if (role === 'publisher') {
             publisherChannelCount++;
-            allPubKeys[pubKey] = true;
-            if (campHex && campHexMap[campHex]) {
-              var cid = campHexMap[campHex];
-              if (!pubCountMap[cid]) { pubCountMap[cid] = {}; }
-              pubCountMap[cid][pubKey] = true;
-            }
+          } else {
+            viewerChannelCount++;
+          }
+
+          // pubCountMap: count all open channels per campaign (both roles)
+          if (campHex && campHexMap[campHex]) {
+            var cid = campHexMap[campHex];
+            if (!pubCountMap[cid]) { pubCountMap[cid] = {}; }
+            pubCountMap[cid][coinKey] = true;
           }
         }
 
-        _setStatCard('ma-cstat-channels', String(publisherChannelCount));
-        _setStatCard('ma-cstat-publishers', String(Object.keys(allPubKeys).length));
+        _setStatCard('ma-cstat-viewer-channels', String(viewerChannelCount));
+        _setStatCard('ma-cstat-publisher-channels', String(publisherChannelCount));
         cb(pubCountMap);
       });
     });
@@ -335,6 +338,8 @@ function _buildCampaignsRow(campaign, pubCountMap) {
 function _loadEscrowInfoForActiveCampaigns(campaigns) {
   if (!campaigns || campaigns.length === 0) { return; }
 
+  var myAddr = MY_ADDRESS ? MY_ADDRESS.toUpperCase() : '';
+
   var activeCampaigns = campaigns.filter(function(c) {
     return (c.STATUS || '').toUpperCase() === 'ACTIVE';
   });
@@ -342,6 +347,11 @@ function _loadEscrowInfoForActiveCampaigns(campaigns) {
   for (var i = 0; i < activeCampaigns.length; i++) {
     (function(campaign) {
       var campaignId = campaign.ID || '';
+      var creatorAddr = (campaign.CREATOR_ADDRESS || '').toUpperCase();
+
+      // Own campaign — data is already fresh in local DB, no Maxima needed
+      if (myAddr && creatorAddr === myAddr) { return; }
+
       var creatorMx = campaign.CREATOR_MX || '';
       if (!campaignId || !creatorMx) { return; }
 

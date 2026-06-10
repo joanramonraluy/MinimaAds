@@ -137,15 +137,10 @@ function _updateCampaignsSummary(campaigns) {
   var count = filtered.length;
   var totalFunded      = filtered.reduce(function(sum, c) { return sum + (parseFloat(c.BUDGET_TOTAL) || 0); }, 0);
   var totalAvail       = filtered.reduce(function(sum, c) { return sum + (parseFloat(c.BUDGET_REMAINING) || 0); }, 0);
-  var totalViewerSpent = filtered.reduce(function(sum, c) { return sum + (parseFloat(c.VIEWER_BUDGET_SPENT) || 0); }, 0);
-  var totalPubEarned   = filtered.reduce(function(sum, c) { return sum + (parseFloat(c.PUBLISHER_BUDGET_EARNED) || 0); }, 0);
-
   var defs = [
-    { id: 'ma-cstat-campaigns',    label: 'Campaigns',       value: String(count) },
-    { id: 'ma-cstat-funded',       label: 'Total funded',    value: fmtAmt(totalFunded, 2) + ' MINIMA' },
-    { id: 'ma-cstat-available',    label: 'Available',       value: fmtAmt(totalAvail, 2) + ' MINIMA' },
-    { id: 'ma-cstat-viewer-spent', label: 'Viewer spent',    value: fmtAmt(totalViewerSpent, 2) + ' MINIMA' },
-    { id: 'ma-cstat-pub-spent',    label: 'Publisher spent', value: fmtAmt(totalPubEarned, 2) + ' MINIMA' }
+    { id: 'ma-cstat-campaigns', label: 'Campaigns',    value: String(count) },
+    { id: 'ma-cstat-funded',    label: 'Total funded', value: fmtAmt(totalFunded, 2) + ' MINIMA' },
+    { id: 'ma-cstat-available', label: 'Available',    value: fmtAmt(totalAvail, 2) + ' MINIMA' }
   ];
 
   for (var i = 0; i < defs.length; i++) {

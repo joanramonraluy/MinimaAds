@@ -182,6 +182,8 @@ function initDB(cb) {
                     sqlQuery("ALTER TABLE ADS ADD COLUMN IF NOT EXISTS IMAGE_ZOOM FLOAT DEFAULT 1.0", function() {
                     sqlQuery("ALTER TABLE ADS ADD COLUMN IF NOT EXISTS IMAGE_WIDTH_PCT INT DEFAULT 40", function() {
                     sqlQuery("ALTER TABLE CAMPAIGNS ADD COLUMN IF NOT EXISTS VIEWER_BUDGET_SPENT DECIMAL(20,6) NOT NULL DEFAULT 0", function() {
+                    sqlQuery("ALTER TABLE CAMPAIGNS ADD COLUMN IF NOT EXISTS PUBLISHER_BUDGET_EARNED DECIMAL(20,6) NOT NULL DEFAULT 0", function() {
+                    }); // end PUBLISHER_BUDGET_EARNED migration
                     sqlQuery("UPDATE CAMPAIGNS SET MAX_PUBLISHER_BUDGET = PUBLISHER_REWARD_VIEW * 10 WHERE MAX_PUBLISHER_BUDGET <= 0 AND PUBLISHER_REWARD_VIEW > 0", function(patchErr) {
                       if (patchErr) { MDS.log("[DB] initDB: publisher budget patch failed — " + patchErr); }
                       else { MDS.log("[DB] initDB: stale MAX_PUBLISHER_BUDGET patched"); }

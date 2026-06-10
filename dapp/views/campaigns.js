@@ -212,26 +212,19 @@ function _buildCampaignsRow(campaign) {
   rewardEl.textContent = rewardText;
   metaRow.appendChild(rewardEl);
 
-  var budgetEl = document.createElement('span');
-  budgetEl.style.cssText = 'font-size:.75rem;color:var(--pico-muted-color,#6c757d);';
-  budgetEl.textContent = fmtAmt(parseFloat(campaign.BUDGET_REMAINING || 0), 4) + ' left';
-  metaRow.appendChild(budgetEl);
-
-  // Calculate and display escrow_left (budget_remaining + publisher_budget_remaining)
-  var maxPubBudget = parseFloat(campaign.MAX_PUBLISHER_BUDGET) || 0;
-  var pubBudgetSpent = parseFloat(campaign.PUBLISHER_BUDGET_SPENT) || 0;
-  var budgetRemaining = parseFloat(campaign.BUDGET_REMAINING) || 0;
-  var pubBudgetRemaining = maxPubBudget - pubBudgetSpent;
-  var escrowLeft = budgetRemaining + pubBudgetRemaining;
-
-  if (escrowLeft > 0) {
-    var escrowEl = document.createElement('span');
-    escrowEl.style.cssText = 'font-size:.75rem;color:var(--pico-primary,#6366f1);font-weight:500;';
-    escrowEl.textContent = 'Escrow: ' + fmtAmt(escrowLeft, 4) + ' MINIMA';
-    metaRow.appendChild(escrowEl);
-  }
-
   textDiv.appendChild(metaRow);
+
+  var budgetRow = document.createElement('div');
+  budgetRow.style.cssText = 'margin-top:.35rem;';
+  var budgetLabel = document.createElement('small');
+  budgetLabel.style.cssText = 'display:block;font-size:.7rem;color:var(--pico-muted-color,#6c757d);text-transform:uppercase;letter-spacing:.04em;margin-bottom:.1rem;';
+  budgetLabel.textContent = 'Budget remaining';
+  var budgetVal = document.createElement('strong');
+  budgetVal.style.cssText = 'font-size:.95rem;color:var(--pico-primary,#6366f1);';
+  budgetVal.textContent = fmtAmt(parseFloat(campaign.BUDGET_REMAINING || 0), 4) + ' MINIMA';
+  budgetRow.appendChild(budgetLabel);
+  budgetRow.appendChild(budgetVal);
+  textDiv.appendChild(budgetRow);
 
   row.appendChild(avatar);
   row.appendChild(textDiv);

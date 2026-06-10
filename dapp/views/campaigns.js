@@ -135,7 +135,7 @@ function _updateCampaignsSummary(campaigns) {
 
   var defs = [
     { id: 'ma-cstat-campaigns',  label: 'Campaigns', value: String(count) },
-    { id: 'ma-cstat-budget',     label: 'Total budget', value: fmtAmt(totalBudget, 2) + ' MINIMA' },
+    { id: 'ma-cstat-budget',     label: 'Market budget', value: fmtAmt(totalBudget, 2) + ' MINIMA' },
     { id: 'ma-cstat-channels',   label: 'My open channels', value: '…' },
     { id: 'ma-cstat-publishers', label: 'My active publishers', value: '…' }
   ];

@@ -136,10 +136,12 @@ function _updateCampaignsSummary(campaigns) {
 
   var count = filtered.length;
   var totalBudget = filtered.reduce(function(sum, c) { return sum + (parseFloat(c.BUDGET_TOTAL) || 0); }, 0);
+  var totalRemaining = filtered.reduce(function(sum, c) { return sum + (parseFloat(c.BUDGET_REMAINING) || 0); }, 0);
 
   var defs = [
-    { id: 'ma-cstat-campaigns', label: 'Campaigns',     value: String(count) },
-    { id: 'ma-cstat-budget',    label: 'Market budget', value: fmtAmt(totalBudget, 2) + ' MINIMA' }
+    { id: 'ma-cstat-campaigns',  label: 'Campaigns',     value: String(count) },
+    { id: 'ma-cstat-budget',     label: 'Market budget', value: fmtAmt(totalBudget, 2) + ' MINIMA' },
+    { id: 'ma-cstat-remaining',  label: 'Remaining',     value: fmtAmt(totalRemaining, 2) + ' MINIMA' }
   ];
 
   for (var i = 0; i < defs.length; i++) {

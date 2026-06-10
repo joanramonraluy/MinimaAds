@@ -372,11 +372,6 @@ function _handleEscrowInfoResponse(parsed) {
   sqlQuery(sql, function(err) {
     if (err) {
       console.error('[ESCROW] Failed to update CAMPAIGNS for ' + campaignId + ':', err);
-      return;
-    }
-    // Refresh campaigns view if currently open
-    if (currentRoute() === 'campaigns' && typeof _loadCampaigns === 'function') {
-      _loadCampaigns();
     }
   });
 }

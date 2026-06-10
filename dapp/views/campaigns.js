@@ -285,11 +285,7 @@ function _updateOwnCampaignViewerSpent(campaignId) {
       var total = spentActive + spentHistory;
 
       sqlQuery("UPDATE CAMPAIGNS SET VIEWER_BUDGET_SPENT = " + total
-        + " WHERE UPPER(ID) = UPPER('" + escapeSql(campaignId) + "')", function() {
-        if (currentRoute() === 'campaigns' && typeof _loadCampaigns === 'function') {
-          _loadCampaigns();
-        }
-      });
+        + " WHERE UPPER(ID) = UPPER('" + escapeSql(campaignId) + "')", function() {});
     });
   });
 }

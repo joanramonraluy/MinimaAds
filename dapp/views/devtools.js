@@ -257,22 +257,157 @@
     panel.appendChild(mlsSec);
 
     // ==========================================
-    // SECTION 2: MinimaAds Creator Configuration
+    // SECTION 2: Minima Foundation Fee Address (3%)
+    // ==========================================
+    var foundationSec = document.createElement('section');
+    foundationSec.style.cssText = 'background:var(--pico-card-sectionning-background-color, rgba(0,0,0,0.02));border:1px solid var(--pico-muted-border-color);border-left:4px solid #0ea5e9;border-radius:0.75rem;padding:1.25rem;display:flex;flex-direction:column;gap:1.25rem;margin:0;';
+
+    var foundationTitle = document.createElement('strong');
+    foundationTitle.textContent = '2. Minima Foundation Fee Address (3%)';
+    foundationTitle.style.cssText = 'display:block;font-size:0.95rem;font-weight:700;color:#0ea5e9;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.1rem;';
+    foundationSec.appendChild(foundationTitle);
+
+    var fkDesc = document.createElement('span');
+    fkDesc.textContent = 'Wallet address that receives the 3% Minima Foundation fee on each campaign. Leave unset to disable foundation fee (MVP mode).';
+    fkDesc.style.cssText = 'font-size:0.7rem;color:var(--pico-muted-color,#6c757d);';
+    foundationSec.appendChild(fkDesc);
+
+    var fkStatus = document.createElement('pre');
+    fkStatus.id = 'ma-dev-fk-status';
+    fkStatus.style.cssText = 'font-family:monospace;font-size:0.75rem;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);padding:0.6rem 0.75rem;border-radius:0.375rem;margin:0;word-break:break-all;color:var(--pico-color);line-height:1.4;';
+    fkStatus.textContent = 'Loading Foundation Key…';
+
+    function updateFoundationKeyStatus() {
+      MDS.keypair.get('FOUNDATION_KEY_OVERRIDE', function(res) {
+        var override = (res && res.status && res.value) ? res.value : '';
+        var activeKey = override || (typeof FOUNDATION_KEY !== 'undefined' && FOUNDATION_KEY ? FOUNDATION_KEY : '');
+
+        var displayLabel = override ? 'Current FOUNDATION_KEY (overridden): ' + activeKey : 'Current FOUNDATION_KEY: ' + (activeKey || '(not set)');
+        fkStatus.textContent = displayLabel;
+
+        if (activeKey) {
+          fkStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
+          fkStatus.style.color = 'var(--pico-ins-color, #27ae60)';
+        } else {
+          fkStatus.style.borderColor = 'var(--pico-muted-border-color)';
+          fkStatus.style.color = 'var(--pico-color)';
+        }
+      });
+    }
+    setTimeout(updateFoundationKeyStatus, 100);
+    foundationSec.appendChild(fkStatus);
+
+    var fkActions = document.createElement('div');
+    fkActions.style.cssText = 'display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;';
+
+    var fkSetSelfBtn = document.createElement('button');
+    fkSetSelfBtn.textContent = 'Set Self Wallet';
+    fkSetSelfBtn.className = 'primary';
+    fkSetSelfBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;background-color:#0ea5e9;border-color:#0ea5e9;';
+    fkSetSelfBtn.addEventListener('click', function() {
+      fkSetSelfBtn.disabled = true;
+      fkSetSelfBtn.textContent = 'Reading…';
+      MDS.cmd('getaddress', function(res) {
+        fkSetSelfBtn.disabled = false;
+        fkSetSelfBtn.textContent = 'Set Self Wallet';
+        if (!res || !res.status || !res.response || !res.response.address) {
+          fkStatus.textContent = 'ERROR: could not read wallet address';
+          fkStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
+          fkStatus.style.color = 'var(--pico-del-color, #c0392b)';
+          return;
+        }
+        var addr = res.response.address;
+        MDS.keypair.set('FOUNDATION_KEY_OVERRIDE', addr, function() {
+          FOUNDATION_KEY = addr;
+          updateFoundationKeyStatus();
+          refreshKeypairInspector();
+        });
+      });
+    });
+    fkActions.appendChild(fkSetSelfBtn);
+
+    var fkClearBtn = document.createElement('button');
+    fkClearBtn.textContent = 'Clear Override';
+    fkClearBtn.className = 'outline secondary';
+    fkClearBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;';
+    fkClearBtn.addEventListener('click', function() {
+      MDS.keypair.set('FOUNDATION_KEY_OVERRIDE', '', function() {
+        FOUNDATION_KEY = null;
+        updateFoundationKeyStatus();
+        refreshKeypairInspector();
+      });
+    });
+    fkActions.appendChild(fkClearBtn);
+
+    var fkCopyBtn = document.createElement('button');
+    fkCopyBtn.textContent = 'Copy';
+    fkCopyBtn.className = 'outline secondary';
+    fkCopyBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;';
+    fkCopyBtn.addEventListener('click', function() {
+      MDS.keypair.get('FOUNDATION_KEY_OVERRIDE', function(res) {
+        var override = (res && res.status && res.value) ? res.value : '';
+        var currentKey = override || (typeof FOUNDATION_KEY !== 'undefined' && FOUNDATION_KEY ? FOUNDATION_KEY : '');
+        if (!currentKey) {
+          fkCopyBtn.textContent = '✕ No Key';
+          setTimeout(function() { fkCopyBtn.textContent = 'Copy'; }, 1500);
+          return;
+        }
+        navigator.clipboard.writeText(currentKey);
+        fkCopyBtn.textContent = '✓ Copied!';
+        setTimeout(function() { fkCopyBtn.textContent = 'Copy'; }, 1500);
+      });
+    });
+    fkActions.appendChild(fkCopyBtn);
+    foundationSec.appendChild(fkActions);
+
+    var fkRow = document.createElement('div');
+    fkRow.style.cssText = 'display:flex;gap:0.5rem;align-items:stretch;';
+    var fkInput = document.createElement('input');
+    fkInput.type = 'text';
+    fkInput.placeholder = 'Or paste custom foundation address (0xABC…)';
+    fkInput.style.cssText = 'flex:1;margin:0;padding:0 0.5rem;font-size:0.75rem;font-family:monospace;height:2rem;box-sizing:border-box;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);color:var(--pico-color);border-radius:0.375rem;';
+    var fkSaveBtn = document.createElement('button');
+    fkSaveBtn.textContent = 'Save';
+    fkSaveBtn.className = 'primary';
+    fkSaveBtn.style.cssText = 'width:auto;margin:0;padding:0 1rem;font-size:0.75rem;height:2rem;box-sizing:border-box;display:flex;align-items:center;justify-content:center;line-height:2rem;white-space:nowrap;background-color:#0ea5e9;border-color:#0ea5e9;';
+    fkSaveBtn.addEventListener('click', function() {
+      var fk = (fkInput.value || '').trim();
+      if (!fk) {
+        fkStatus.textContent = 'ERROR: enter a wallet address first';
+        fkStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
+        fkStatus.style.color = 'var(--pico-del-color, #c0392b)';
+        return;
+      }
+      MDS.keypair.set('FOUNDATION_KEY_OVERRIDE', fk, function() {
+        FOUNDATION_KEY = fk;
+        updateFoundationKeyStatus();
+        fkInput.value = '';
+        refreshKeypairInspector();
+      });
+    });
+    fkRow.appendChild(fkInput);
+    fkRow.appendChild(fkSaveBtn);
+    foundationSec.appendChild(fkRow);
+
+    panel.appendChild(foundationSec);
+
+    // ==========================================
+    // SECTION 3: MinimaAds Creator Configuration
     // ==========================================
     var creatorSec = document.createElement('section');
     creatorSec.style.cssText = 'background:var(--pico-card-sectionning-background-color, rgba(0,0,0,0.02));border:1px solid var(--pico-muted-border-color);border-left:4px solid #a855f7;border-radius:0.75rem;padding:1.25rem;display:flex;flex-direction:column;gap:1.25rem;margin:0;';
 
     var creatorTitle = document.createElement('strong');
-    creatorTitle.textContent = '2. MinimaAds Creator';
+    creatorTitle.textContent = '3. MinimaAds Creator';
     creatorTitle.style.cssText = 'display:block;font-size:0.95rem;font-weight:700;color:#a855f7;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.1rem;';
     creatorSec.appendChild(creatorTitle);
 
-    // Sub-item 2.1: Platform Creator Route (MinimaAds Developer)
+    // Sub-item 3.1: Platform Creator Route (MinimaAds Developer)
     var pcDevSub = document.createElement('div');
     pcDevSub.style.cssText = 'display:flex;flex-direction:column;gap:0.4rem;';
 
     var pcDevSubTitle = document.createElement('span');
-    pcDevSubTitle.textContent = '2.1 Platform Creator Route (MinimaAds Developer)';
+    pcDevSubTitle.textContent = '3.1 Platform Creator Route (MinimaAds Developer)';
     pcDevSubTitle.style.cssText = 'font-size:0.75rem;font-weight:700;color:var(--pico-muted-color);text-transform:uppercase;letter-spacing:0.05em;';
     pcDevSub.appendChild(pcDevSubTitle);
 
@@ -407,12 +542,12 @@
     pcDevSub.appendChild(pcDevInputRow);
     creatorSec.appendChild(pcDevSub);
 
-    // Sub-item 2.2: Platform Key (PLATFORM_KEY)
+    // Sub-item 3.2: Platform Key (PLATFORM_KEY)
     var pkSub = document.createElement('div');
     pkSub.style.cssText = 'display:flex;flex-direction:column;gap:0.4rem;border-top:1px dashed var(--pico-muted-border-color);padding-top:0.75rem;';
     
     var pkSubTitle = document.createElement('span');
-    pkSubTitle.textContent = '2.2 Platform Key (PLATFORM_KEY)';
+    pkSubTitle.textContent = '3.2 Platform Key (PLATFORM_KEY)';
     pkSubTitle.style.cssText = 'font-size:0.75rem;font-weight:700;color:var(--pico-muted-color);text-transform:uppercase;letter-spacing:0.05em;';
     pkSub.appendChild(pkSubTitle);
 
@@ -533,148 +668,18 @@
     pkSub.appendChild(extRow);
     creatorSec.appendChild(pkSub);
 
-    // Sub-item 2.3: Minima Foundation Key
-    var fkSub = document.createElement('div');
-    fkSub.style.cssText = 'display:flex;flex-direction:column;gap:0.4rem;border-top:1px dashed var(--pico-muted-border-color);padding-top:0.75rem;';
 
-    var fkSubTitle = document.createElement('span');
-    fkSubTitle.textContent = '2.3 Minima Foundation Fee Address (3%)';
-    fkSubTitle.style.cssText = 'font-size:0.75rem;font-weight:700;color:var(--pico-muted-color);text-transform:uppercase;letter-spacing:0.05em;';
-    fkSub.appendChild(fkSubTitle);
-
-    var fkDesc = document.createElement('span');
-    fkDesc.textContent = 'Wallet address that receives the 3% Minima Foundation fee on each campaign. Leave unset to disable foundation fee (MVP mode).';
-    fkDesc.style.cssText = 'font-size:0.7rem;color:var(--pico-muted-color,#6c757d);';
-    fkSub.appendChild(fkDesc);
-
-    var fkStatus = document.createElement('pre');
-    fkStatus.id = 'ma-dev-fk-status';
-    fkStatus.style.cssText = 'font-family:monospace;font-size:0.75rem;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);padding:0.6rem 0.75rem;border-radius:0.375rem;margin:0;word-break:break-all;color:var(--pico-color);line-height:1.4;';
-    fkStatus.textContent = 'Loading Foundation Key…';
-
-    function updateFoundationKeyStatus() {
-      MDS.keypair.get('FOUNDATION_KEY_OVERRIDE', function(res) {
-        var override = (res && res.status && res.value) ? res.value : '';
-        var activeKey = override || (typeof FOUNDATION_KEY !== 'undefined' && FOUNDATION_KEY ? FOUNDATION_KEY : '');
-
-        var displayLabel = override ? 'Current FOUNDATION_KEY (overridden): ' + activeKey : 'Current FOUNDATION_KEY: ' + (activeKey || '(not set)');
-        fkStatus.textContent = displayLabel;
-
-        if (activeKey) {
-          fkStatus.style.borderColor = 'var(--pico-ins-color, #27ae60)';
-          fkStatus.style.color = 'var(--pico-ins-color, #27ae60)';
-        } else {
-          fkStatus.style.borderColor = 'var(--pico-muted-border-color)';
-          fkStatus.style.color = 'var(--pico-color)';
-        }
-      });
-    }
-    setTimeout(updateFoundationKeyStatus, 100);
-    fkSub.appendChild(fkStatus);
-
-    var fkActions = document.createElement('div');
-    fkActions.style.cssText = 'display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;';
-
-    var fkSetSelfBtn = document.createElement('button');
-    fkSetSelfBtn.textContent = 'Set Self Wallet';
-    fkSetSelfBtn.className = 'primary';
-    fkSetSelfBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;background-color:#0ea5e9;border-color:#0ea5e9;';
-    fkSetSelfBtn.addEventListener('click', function() {
-      fkSetSelfBtn.disabled = true;
-      fkSetSelfBtn.textContent = 'Reading…';
-      MDS.cmd('getaddress', function(res) {
-        fkSetSelfBtn.disabled = false;
-        fkSetSelfBtn.textContent = 'Set Self Wallet';
-        if (!res || !res.status || !res.response || !res.response.address) {
-          fkStatus.textContent = 'ERROR: could not read wallet address';
-          fkStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
-          fkStatus.style.color = 'var(--pico-del-color, #c0392b)';
-          return;
-        }
-        var addr = res.response.address;
-        MDS.keypair.set('FOUNDATION_KEY_OVERRIDE', addr, function() {
-          FOUNDATION_KEY = addr;
-          updateFoundationKeyStatus();
-          refreshKeypairInspector();
-        });
-      });
-    });
-    fkActions.appendChild(fkSetSelfBtn);
-
-    var fkClearBtn = document.createElement('button');
-    fkClearBtn.textContent = 'Clear Override';
-    fkClearBtn.className = 'outline secondary';
-    fkClearBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;';
-    fkClearBtn.addEventListener('click', function() {
-      MDS.keypair.set('FOUNDATION_KEY_OVERRIDE', '', function() {
-        FOUNDATION_KEY = null;
-        updateFoundationKeyStatus();
-        refreshKeypairInspector();
-      });
-    });
-    fkActions.appendChild(fkClearBtn);
-
-    var fkCopyBtn = document.createElement('button');
-    fkCopyBtn.textContent = 'Copy';
-    fkCopyBtn.className = 'outline secondary';
-    fkCopyBtn.style.cssText = 'width:auto;margin:0;padding:0.4rem 0.8rem;font-size:0.75rem;line-height:1.2;';
-    fkCopyBtn.addEventListener('click', function() {
-      MDS.keypair.get('FOUNDATION_KEY_OVERRIDE', function(res) {
-        var override = (res && res.status && res.value) ? res.value : '';
-        var currentKey = override || (typeof FOUNDATION_KEY !== 'undefined' && FOUNDATION_KEY ? FOUNDATION_KEY : '');
-        if (!currentKey) {
-          fkCopyBtn.textContent = '✕ No Key';
-          setTimeout(function() { fkCopyBtn.textContent = 'Copy'; }, 1500);
-          return;
-        }
-        navigator.clipboard.writeText(currentKey);
-        fkCopyBtn.textContent = '✓ Copied!';
-        setTimeout(function() { fkCopyBtn.textContent = 'Copy'; }, 1500);
-      });
-    });
-    fkActions.appendChild(fkCopyBtn);
-    fkSub.appendChild(fkActions);
-
-    var fkRow = document.createElement('div');
-    fkRow.style.cssText = 'display:flex;gap:0.5rem;align-items:stretch;';
-    var fkInput = document.createElement('input');
-    fkInput.type = 'text';
-    fkInput.placeholder = 'Or paste custom foundation address (0xABC…)';
-    fkInput.style.cssText = 'flex:1;margin:0;padding:0 0.5rem;font-size:0.75rem;font-family:monospace;height:2rem;box-sizing:border-box;background:var(--pico-background-color);border:1px solid var(--pico-muted-border-color);color:var(--pico-color);border-radius:0.375rem;';
-    var fkSaveBtn = document.createElement('button');
-    fkSaveBtn.textContent = 'Save';
-    fkSaveBtn.className = 'primary';
-    fkSaveBtn.style.cssText = 'width:auto;margin:0;padding:0 1rem;font-size:0.75rem;height:2rem;box-sizing:border-box;display:flex;align-items:center;justify-content:center;line-height:2rem;white-space:nowrap;background-color:#0ea5e9;border-color:#0ea5e9;';
-    fkSaveBtn.addEventListener('click', function() {
-      var fk = (fkInput.value || '').trim();
-      if (!fk) {
-        fkStatus.textContent = 'ERROR: enter a wallet address first';
-        fkStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
-        fkStatus.style.color = 'var(--pico-del-color, #c0392b)';
-        return;
-      }
-      MDS.keypair.set('FOUNDATION_KEY_OVERRIDE', fk, function() {
-        FOUNDATION_KEY = fk;
-        updateFoundationKeyStatus();
-        fkInput.value = '';
-        refreshKeypairInspector();
-      });
-    });
-    fkRow.appendChild(fkInput);
-    fkRow.appendChild(fkSaveBtn);
-    fkSub.appendChild(fkRow);
-    creatorSec.appendChild(fkSub);
 
     panel.appendChild(creatorSec);
 
     // ==========================================
-    // SECTION 3: Database & storage console
+    // SECTION 4: Database & storage console
     // ==========================================
     var dbSec = document.createElement('section');
     dbSec.style.cssText = 'background:var(--pico-card-sectionning-background-color, rgba(0,0,0,0.02));border:1px solid var(--pico-muted-border-color);border-left:4px solid var(--pico-muted-color, #6c757d);border-radius:0.75rem;padding:1.25rem;display:flex;flex-direction:column;gap:1.25rem;margin:0;';
 
     var dbTitle = document.createElement('strong');
-    dbTitle.textContent = '3. Database & Storage Console';
+    dbTitle.textContent = '4. Database & Storage Console';
     dbTitle.style.cssText = 'display:block;font-size:0.95rem;font-weight:700;color:var(--pico-muted-color, #6c757d);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.1rem;';
     dbSec.appendChild(dbTitle);
 

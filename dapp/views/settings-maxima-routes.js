@@ -225,7 +225,6 @@ function renderMaximaRoutesSettings(root) {
                 } else {
                   window.location.hash = 'viewer';
                 }
-                location.reload();
               }, 1500);
             } else {
               permanentStatus.style.color = 'var(--pico-del-color,#c0392b)';

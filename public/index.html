@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MinimaAds</title>
+  <link rel="icon" type="image/png" href="icon.png?v=1">
+  <link rel="shortcut icon" type="image/png" href="icon.png?v=1">
 
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -321,7 +323,8 @@
     .ma-drawer-avatar { width: 2.75rem; height: 2.75rem; border-radius: 50%; background: var(--pico-primary-background, #0172ad); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; font-weight: 700; flex-shrink: 0; margin: 0; box-shadow: 0 2px 8px rgba(0,0,0,0.12); cursor: pointer; transition: transform 0.15s ease, box-shadow 0.15s ease; }
     .ma-drawer-avatar:hover { transform: scale(1.05); box-shadow: 0 4px 12px rgba(0,0,0,0.18); }
     [data-theme="dark"] .ma-drawer-avatar:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
-    .ma-drawer-mx { font-size: .8rem; color: var(--pico-muted-color, #6c757d); font-family: monospace; word-break: break-all; min-width: 0; }
+    .ma-drawer-mx { font-size: 0.95rem; font-weight: 600; color: var(--pico-color, inherit); word-break: break-all; min-width: 0; cursor: pointer; transition: color 0.15s ease; }
+    .ma-drawer-mx:hover { color: var(--pico-primary, #6366f1); }
     .ma-drawer-menu { list-style: none; margin: 0; padding: 0; }
     .ma-drawer-menu > li { border-bottom: 0; }
     .ma-drawer-menu > li:last-child { border-bottom: 0; }
@@ -459,7 +462,7 @@
     <div class="ma-drawer-section ma-drawer-header">
       <div class="ma-drawer-identity">
         <div class="ma-drawer-avatar" id="ma-drawer-avatar-circle" onclick="closeDrawer();window.location.hash='profile';" style="cursor:pointer;" title="Go to Profile">?</div>
-        <div class="ma-drawer-mx" id="ma-drawer-mx-text">&#8212;</div>
+        <div class="ma-drawer-mx" id="ma-drawer-mx-text" onclick="closeDrawer();window.location.hash='profile';" style="cursor:pointer;" title="Go to Profile">&#8212;</div>
       </div>
     </div>
     <!-- Section 2: Menu options -->

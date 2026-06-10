@@ -46,6 +46,51 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-10 — DevTools reordering, Favicon fix, & Drawer Username styling
+
+**Task**: Move Minima Foundation Fee config to top-level Section 2 in DevTools. Restore favicon. Make drawer username clickable.
+
+**Files modified**: `dapp/views/devtools.js`, `public/index.html`, `dapp.conf`, `icon.png`, `MinimaAds.mds.zip`
+
+---
+
+### Session: 2026-06-10 — Campaigns view refinement + Escrow sync via Maxima
+
+**Task**: Improve Campaigns view to show accurate, role-specific metrics. Query creators for live campaign escrow data (budget remaining) instead of static DB values.
+
+**Implementation**:
+- **Campaigns view (hybrid model)**: `Campaigns` & `Market budget` from local DB; `My open channels` & `My active publishers` from L1 channel coins. Creator-only sees 4 cards; Viewer/Publisher sees 2.
+- **Escrow data sync** (SW + FE): SW `maxima.handler.js` added `handleEscrowInfoRequest()`; FE `campaigns.js` queries creators for budget updates; FE `app.js` handles `_handleEscrowInfoResponse()`.
+- Label clarity: "Total budget" → "Market budget", added "My" prefix to channel metrics, removed (L1) suffix.
+
+**Files modified**: `dapp/views/campaigns.js`, `dapp/app.js`, `public/service-workers/handlers/maxima.handler.js`, `dapp/views/creator.js`, `public/index.html`
+
+---
+
+### Session: 2026-06-09 — Campaigns view (L1 data) + Remove Stats
+
+**Task**: Replace the Stats view with a new Campaigns view accessible from all roles (viewer, creator, publisher). Show real L1 data instead of estimates: escrow coin count/budget + active publishers from channel coins. Replace the publisher estimate selector in the creator form with a live L1 count.
+
+**Fix**:
+- `dapp/views/campaigns.js` (new): Campaign list from local DB enriched with L1 data. Summary cards (Campaigns, Total budget, Open channels, Active publishers) all from L1 via `coins address:ESCROW_ADDRESS*` and `coins address:CHANNEL_SCRIPT_ADDRESS`. Per-campaign publisher count from `PREVSTATE(2)` of open channel coins. Filter Active / All.
+- `dapp/views/creator.js`: Removed publisher estimate buttons (5/10/25/50). Added `_loadL1PublisherCountForCreator()` — queries L1 on metrics panel open, stores count in `_l1ActivePublishers`, auto-recalculates metrics.
+- `dapp/views/stats.js`: Deleted (superseded by Campaigns view).
+- `dapp/app.js`: Added `campaigns` route to all three `MODE_VIEWS`. Removed `stats` from creator mode and all routing/render references.
+- `public/index.html`: Removed `stats.js` script tag, added `campaigns.js`.
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry moved to `docs/HISTORY.md §17`.
+
+**Verification**:
+- Open any mode → "Campaigns" tab visible in nav
+- Campaigns view: 4 summary cards show `…` then update with L1 values
+- Filter Active / All switches campaign list
+- Creator form → metrics panel → "Active publishers (L1)" shows real count, metrics recalculate automatically
+- No console errors
+
+**Open issues**: None.
+
+---
+
 ### Session: 2026-06-07 — Modernize Side Drawer Menu Footer
 
 **Task**: Modernize the side drawer menu footer by adding the DApp name, version, a pulsing connection status badge ("Connected to Minima"), and a dynamic block height tracker.
@@ -895,3 +940,31 @@ The remaining DEFERRED state is expected (no open publisher channel yet), not a 
 **Verification**:
 - Checked JS syntax on all modified files with `node -c` (all clean).
 - Rebuilt `MinimaAds.mds.zip` and verified package integrity.
+
+---
+
+### Session: 2026-06-09 — Minima Foundation Fee (3%) + V4 Escrow Script Fixes
+
+**Task**: Add a configurable 3% Minima Foundation fee alongside the existing 6% platform creator fee, and fix all resulting escrow script and channel transaction bugs.
+
+**Root Cause (chain of bugs fixed)**:
+1. **STATE(16) not set in split/open txns** — V4 script reads `LET foundationfeeflag=STATE(16)` unconditionally at top-level. KissVM throws when a STATE port is absent (same as PREVSTATE, per KNOWN_ISSUES #38). Split tx and channel-open tx never set port 16, causing `Script FAIL` on every V4 spend. **Fix**: add `txnstate port:16 value:0` to all 4 tx builders (SW Tx1/Tx2, FE Tx1/Tx2).
+2. **`escrowAddrFallback` did not include V4** — fallback was `V3 || V1`. If `r2.response.transaction.inputs[0].address` read failed, `coinAddr` fell back to V3, but `@ADDRESS` in V4 script = V4. `VERIFYOUT` would fail. **Fix**: fallback now `V4 || V3 || V1`.
+3. **`setTimeout` in SW** — `swWaitForCoin` retry used `setTimeout`, not available in Rhino. **Fix**: single-attempt; rely on `checkPendingChannelOpens` NEWBLOCK retry.
+4. **Stale SPLIT_COINID loops forever** — rejected split coin stays in `PENDING_CHOPEN_QUEUE` indefinitely. **Fix**: after 20 blocks without finding the coin, clear `SPLIT_COINID` and reset channel state to `pending`.
+
+**Foundation fee implementation**:
+- `config.js`: `FOUNDATION_KEY = null` (MVP, disabled by default)
+- `creator.js`: `FOUNDATION_FEE_RATE = 0.03`, ESCROW_SCRIPT_V4, 3-output atomic funding tx, cost breakdown UI
+- `service.js`: ESCROW_SCRIPT_V4 (byte-identical), loads `FOUNDATION_KEY_OVERRIDE`
+- `dapp/app.js`: loads `FOUNDATION_KEY_OVERRIDE` at boot
+- `devtools.js`: new subsection 2.3 "Minima Foundation Fee Address (3%)" — Set/Clear/Copy/manual input
+- `campaign.handler.js`: verifies `FOUNDATION_KEY` at `PREVSTATE(6)` on-chain (V4)
+- `ESCROW_ADDRESS_V2` / `ESCROW_SCRIPT_V2` removed (development only, no real campaigns)
+
+**Files modified**: `config.js`, `dapp/app.js`, `dapp/views/creator.js`, `dapp/views/devtools.js`, `public/service-workers/handlers/campaign.handler.js`, `public/service-workers/handlers/channel.handler.js`, `service.js`
+
+**AGENTS.md updated**: yes — §6 updated.
+
+**Verification**: Full end-to-end test (user1=creator, user3=viewer, user4=MinimaAds platform). Logs confirm: `SW CHANNEL_OPEN sent (viewer) ok=true`, `SW REWARD_VOUCHER sent cumulative: 0.05 role: viewer ok=true`, `SW CHANNEL_OPEN sent (publisher) ok=true`, `SW REWARD_VOUCHER sent cumulative: 0.075 role: publisher ok=true`. No Script FAIL.
+

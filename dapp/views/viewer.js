@@ -579,8 +579,14 @@ function onRewardValidation(result) {
 }
 
 function onViewerVoucherReceived(parsed) {
+  console.log('[VIEWER] onViewerVoucherReceived parsed:', parsed, 'current campaign:', _viewerState.campaign);
   if (_viewerState.mode !== 'detail' || !_viewerState.campaign || !parsed) { return; }
-  if (parsed.campaign_id !== _viewerState.campaign.ID) { return; }
+  var pId = String(parsed.campaign_id || '').trim().toUpperCase();
+  var cId = String(_viewerState.campaign.ID || '').trim().toUpperCase();
+  if (pId !== cId) {
+    console.log('[VIEWER] campaign ID mismatch:', pId, 'vs', cId);
+    return;
+  }
   var statusEl = document.getElementById('ma-viewer-status');
   if (statusEl) {
     var amt = parseFloat(_viewerState.campaign.REWARD_VIEW) || 0;

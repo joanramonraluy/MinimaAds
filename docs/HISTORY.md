@@ -46,6 +46,16 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-10 — Fix Earnings open channels count for creator/multi-role nodes
+
+**Task**: Open channels count showed other users' channels when creator switched to viewer/publisher mode.
+
+**Fix**: Added `AND UPPER(VIEWER_KEY) = UPPER(MY_ADDRESS)` to all three role-filtered queries in `earnings.js`.
+
+**Files modified**: `dapp/views/earnings.js`
+
+---
+
 ### Session: 2026-06-10 — Settings Redirection Flow & Viewer Reward Status Message
 
 **Task**: Fix jarring full-page reload on Maxima route registration. Fix "Processing reward..." status sticking indefinitely.
@@ -975,4 +985,24 @@ The remaining DEFERRED state is expected (no open publisher channel yet), not a 
 **AGENTS.md updated**: yes — §6 updated.
 
 **Verification**: Full end-to-end test (user1=creator, user3=viewer, user4=MinimaAds platform). Logs confirm: `SW CHANNEL_OPEN sent (viewer) ok=true`, `SW REWARD_VOUCHER sent cumulative: 0.05 role: viewer ok=true`, `SW CHANNEL_OPEN sent (publisher) ok=true`, `SW REWARD_VOUCHER sent cumulative: 0.075 role: publisher ok=true`. No Script FAIL.
+
+---
+
+### Session: 2026-06-10 — Fix publisher earnings for custom publisher snippets
+
+**Task**: Publisher Earnings view shows "Open channels: 1" but "Total earned: 0 / Pending settlements: 0" for custom publisher-created snippets. Built-in (integrated) snippets work correctly.
+
+**Root cause** (two linked issues):
+1. `handleChannelOpenRequest()` in `channel.handler.js` discarded the viewer's `frame_id` when storing the viewer's `CHANNEL_STATE` on the creator's node — always passed `''` to `openChannel()` for viewer role. So `CHANNEL_STATE.FRAME_ID = ''` on the creator's node.
+2. `_handleRewardRequestInner()`: `channelFrameId = channel.FRAME_ID || payload.frame_id = '' || '' = ''` → condition `(channelFrameId || publisherKey)` false → `_maybeGeneratePublisherVoucher()` never called → creator never generates publisher vouchers from external viewer REWARD_REQUESTs.
+Built-in snippets work because the publisher IS the viewer and sends their own PUBLISHER REWARD_REQUEST via `_publisherChannelFlow()`.
+
+**Fix**:
+- `handleChannelOpenRequest()` viewer role (all 3 `openChannel()` call sites + corresponding `_swDispatchChannelOpen()` + stale-pending Tx2 retry): pass `frameId` from payload instead of `''`. Also added retroactive `UPDATE CHANNEL_STATE SET FRAME_ID` for existing open channels with empty FRAME_ID.
+- `_handleRewardRequestInner()` and `checkOnePendingVoucher()`: skip `_maybeGeneratePublisherVoucher()` when `channelFrameId` starts with `'builtin:'` — built-in publisher handles their own rewards; skipping prevents duplicate vouchers.
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`
+
+**AGENTS.md updated**: yes — §6 updated.
+
 

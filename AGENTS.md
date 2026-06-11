@@ -176,6 +176,44 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-06-11 — Redundant Profile item, Settings Redirection Flow, Scroll Reset, Viewer Status, & Campaign Redirect
+
+**Task**:
+1. Remove redundant "Profile" option from vertical drawer menu.
+2. Fix jarring page reload/database reset when registering a permanent Maxima route in Settings.
+3. Fix window not scrolling to top on route changes (resulting in home page loading scrolled down).
+4. Update ad viewer status message to green "Reward received! +X.XX MINIMA" when payment voucher arrives.
+5. Automatically redirect user to "My Campaigns" view after successfully creating/publishing a campaign.
+
+**Fix**:
+- **UI & Drawer cleanups**: Removed redundant drawer Profile button from `public/index.html` and unused `openProfileFromDrawer` from `dapp/app.js`.
+- **Settings Redirection & Scroll Reset**: Replaced `location.reload()` callback with SPA routing (`goHome()`) in `dapp/views/settings-maxima-routes.js`. Added `window.scrollTo(0, 0)` at the beginning of `doRender()` in `dapp/app.js` to reset viewport scroll position on route/page transitions.
+- **Viewer Status Update**: Implemented `onViewerVoucherReceived` in `dapp/views/viewer.js` and wired it to `VOUCHER_RECEIVED` event in `dapp/app.js` to change the status element's text and color upon payment voucher confirmation.
+- **Campaign Redirect**: Modified `saveCampaignAndBroadcast` in `dapp/views/creator.js` to show a `"Campaign published successfully. Redirecting…"` message and perform a delayed SPA redirect (`window.location.hash = '#mycampaigns'`) after 1.5 seconds.
+
+**Files modified**: `public/index.html`, `dapp/app.js`, `dapp/views/settings-maxima-routes.js`, `dapp/views/viewer.js`, `dapp/views/creator.js`, `MinimaAds.mds.zip`
+
+**AGENTS.md updated**: yes — §6 updated.
+
+---
+
+### Session: 2026-06-11 — Fix built-in publisher reward not dispatched on channel open
+
+**Task**: Built-in publisher (user4) opened a publisher channel successfully but received no REWARD_VOUCHER. Root cause: `_publisherChannelFlow()` in the SDK opens a new channel (STATUS='pending') but discards the pending `amount`. When CHANNEL_OPEN arrives, `_doChannelOpenUpsert()` checks `PENDING_REWARD_<campaignId>` (which is never set by the publisher flow) and does nothing. The CHANNEL_OPENED signal had no `role` field so the SDK couldn't distinguish viewer from publisher channels.
+
+**Why built-in specifically**: Our earlier fix (`_isBuiltinFid` check in `_handleRewardRequestInner()`) correctly skips `_maybeGeneratePublisherVoucher()` for built-in frames to avoid duplicate vouchers. This means the creator never sends deferred rewards for built-in publishers — the publisher must self-dispatch via REWARD_REQUEST.
+
+**Fix**:
+- `channel.handler.js`: added `role` field to the CHANNEL_OPENED signal from `_doChannelOpenUpsert()`.
+- `sdk/index.js` — `_publisherChannelFlow()`: for built-in frames, stores pending `amount` in `PENDING_PUB_REWARD_<campaignId>` keypair when opening a new channel or accumulating while pending.
+- `sdk/index.js` — `_onChannelOpenedCore()`: when `role='publisher'`, retrieves `PENDING_PUB_REWARD_<campaignId>` and dispatches `_sendPublisherRewardRequest()`. Non-builtin frames still handled by creator-side deferred replay.
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`, `sdk/index.js`
+
+**AGENTS.md updated**: yes — §6 updated.
+
+---
+
 ### Session: 2026-06-10 — Fix false settlement on node re-sync + remove optimistic settleChannel
 
 **Task**: Two linked bugs around settlement:
@@ -187,37 +225,6 @@ For verification procedures, see `docs/VERIFICATION.md`.
 - `_postSettleTx()`: removed `settleChannel()` call after txnpost. Shows "Settlement posted. Awaiting L1 confirmation…" instead. The SW's `checkOpenChannelsSettled()` will call `settleChannel()` on the next NEWBLOCK once the coin is verifiably spent, then signals SETTLE_CONFIRMED to the FE.
 
 **Files modified**: `public/service-workers/handlers/channel.handler.js`, `dapp/views/earnings.js`
-
-**AGENTS.md updated**: yes — §6 updated.
-
----
-
-### Session: 2026-06-10 — Fix Earnings open channels count for creator/multi-role nodes
-
-**Task**: "Open channels" count (i pending settlements i settled channels) a la vista Earnings mostrava canals d'altres usuaris quan un creador canviava a mode viewer o publisher. Això passa perquè el node del creador té files a `CHANNEL_STATE` per TOTS els viewers/publishers de les seves campanyes, i les queries no filtraven per `VIEWER_KEY = MY_ADDRESS`.
-
-**Fix**: Afegit `AND UPPER(VIEWER_KEY) = UPPER(MY_ADDRESS)` (o `UPPER(ch.VIEWER_KEY)` per CHANNEL_HISTORY) a les tres queries de rol a `dapp/views/earnings.js`: open channels count, pending settlements (`_refreshChannelRewards`), i settlement history (`_refreshSettlementHistory`).
-
-**Files modified**: `dapp/views/earnings.js`
-
-**AGENTS.md updated**: yes — §6 updated.
-
----
-
-### Session: 2026-06-10 — Fix publisher earnings for custom publisher snippets
-
-**Task**: Publisher Earnings view shows "Open channels: 1" but "Total earned: 0 / Pending settlements: 0" for custom publisher-created snippets. Built-in (integrated) snippets work correctly.
-
-**Root cause** (two linked issues):
-1. `handleChannelOpenRequest()` in `channel.handler.js` discarded the viewer's `frame_id` when storing the viewer's `CHANNEL_STATE` on the creator's node — always passed `''` to `openChannel()` for viewer role. So `CHANNEL_STATE.FRAME_ID = ''` on the creator's node.
-2. `_handleRewardRequestInner()`: `channelFrameId = channel.FRAME_ID || payload.frame_id = '' || '' = ''` → condition `(channelFrameId || publisherKey)` false → `_maybeGeneratePublisherVoucher()` never called → creator never generates publisher vouchers from external viewer REWARD_REQUESTs.
-Built-in snippets work because the publisher IS the viewer and sends their own PUBLISHER REWARD_REQUEST via `_publisherChannelFlow()`.
-
-**Fix**:
-- `handleChannelOpenRequest()` viewer role (all 3 `openChannel()` call sites + corresponding `_swDispatchChannelOpen()` + stale-pending Tx2 retry): pass `frameId` from payload instead of `''`. Also added retroactive `UPDATE CHANNEL_STATE SET FRAME_ID` for existing open channels with empty FRAME_ID.
-- `_handleRewardRequestInner()` and `checkOnePendingVoucher()`: skip `_maybeGeneratePublisherVoucher()` when `channelFrameId` starts with `'builtin:'` — built-in publisher handles their own rewards; skipping prevents duplicate vouchers.
-
-**Files modified**: `public/service-workers/handlers/channel.handler.js`
 
 **AGENTS.md updated**: yes — §6 updated.
 

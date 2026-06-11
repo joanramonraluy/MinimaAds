@@ -486,10 +486,28 @@
             (parseFloat(campaign.PUBLISHER_REWARD_VIEW) || 0) * _campaignDays()
           );
           if (!(maxAmount > 0)) { if (cb) { cb(); } return; }
+          // For built-in frames the creator skips _maybeGeneratePublisherVoucher(),
+          // so the publisher must send its own REWARD_REQUEST once the channel opens.
+          // Store the pending amount so onChannelOpened() can dispatch it.
+          if (frameId.toLowerCase().indexOf('builtin:') === 0) {
+            MDS.keypair.get('PENDING_PUB_REWARD_' + campaign.ID, function(prRes) {
+              var existing = (prRes && prRes.status && prRes.value) ? parseFloat(prRes.value) : 0;
+              MDS.keypair.set('PENDING_PUB_REWARD_' + campaign.ID, String(existing + amount), function() {});
+            });
+          }
           _openNewPublisherChannel(campaign, frameId, frame, maxAmount, cb);
           return;
         }
-        if (channel.STATUS === 'pending') { if (cb) { cb(); } return; }
+        if (channel.STATUS === 'pending') {
+          // Accumulate additional views while channel is still opening.
+          if (frameId.toLowerCase().indexOf('builtin:') === 0) {
+            MDS.keypair.get('PENDING_PUB_REWARD_' + campaign.ID, function(prRes) {
+              var existing = (prRes && prRes.status && prRes.value) ? parseFloat(prRes.value) : 0;
+              MDS.keypair.set('PENDING_PUB_REWARD_' + campaign.ID, String(existing + amount), function() {});
+            });
+          }
+          if (cb) { cb(); } return;
+        }
         if (channel.STATUS === 'open') {
           _sendPublisherRewardRequest(campaign, channel, frameId, amount, cb);
           return;
@@ -802,8 +820,29 @@
 
   function _onChannelOpenedCore(parsed) {
     if (!parsed || !parsed.campaign_id) { return; }
-    console.log('[SDK] CHANNEL_OPENED campaign:' + parsed.campaign_id + ' coinid:' + parsed.channel_coinid + ' → flushing pending');
-    _flushPending(parsed.campaign_id);
+    var campaignId = parsed.campaign_id;
+    var role = parsed.role || 'viewer';
+    console.log('[SDK] CHANNEL_OPENED campaign:' + campaignId + ' role:' + role + ' coinid:' + parsed.channel_coinid);
+    if (role === 'publisher') {
+      // For built-in publisher channels the creator skips _maybeGeneratePublisherVoucher(),
+      // so we must dispatch the stored pending amount as a direct REWARD_REQUEST.
+      MDS.keypair.get('PENDING_PUB_REWARD_' + campaignId, function(prRes) {
+        var pendingAmt = (prRes && prRes.status && prRes.value) ? parseFloat(prRes.value) : 0;
+        if (!(pendingAmt > 0)) { return; }
+        MDS.keypair.set('PENDING_PUB_REWARD_' + campaignId, '', function() {});
+        _getPublisherChannel(campaignId, function(chErr, ch) {
+          if (chErr || !ch || ch.STATUS !== 'open') { return; }
+          getCampaign(campaignId, function(campErr, campaign) {
+            if (campErr || !campaign) { return; }
+            var fid = ch.FRAME_ID || '';
+            console.log('[SDK] CHANNEL_OPENED publisher: dispatching pending reward amt=' + pendingAmt + ' frameId=' + fid);
+            _sendPublisherRewardRequest(campaign, ch, fid, pendingAmt, function() {});
+          });
+        });
+      });
+    } else {
+      _flushPending(campaignId);
+    }
   }
 
   function _onVoucherReceivedCore(parsed) {

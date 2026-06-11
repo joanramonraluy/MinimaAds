@@ -27,6 +27,8 @@ var MY_MX_ICON = '';
 var _dbReady = false;
 var _activeMode = 'viewer';
 var _profileInterestsSaveTimer = 0;
+var _networkConnected = true;
+var _statusCheckInterval = null;
 
 // Number format preference: 'EU' = 1.234,56  |  'EN' = 1,234.56
 window.NUMFMT = 'EU';
@@ -175,6 +177,41 @@ function setStatus(text) {
   root.appendChild(p);
 }
 
+function startNetworkStatusMonitoring() {
+  if (_statusCheckInterval) { return; }
+  _statusCheckInterval = setInterval(function() {
+    MDS.cmd('status', function(res) {
+      var connected = res && res.status && res.response && res.response.network && res.response.network.connected > 0;
+      if (connected !== _networkConnected) {
+        _networkConnected = connected;
+        updateStatusBar();
+      }
+    });
+  }, 10000);
+  MDS.cmd('status', function(res) {
+    var connected = res && res.status && res.response && res.response.network && res.response.network.connected > 0;
+    _networkConnected = connected;
+    updateStatusBar();
+  });
+}
+
+function updateStatusBar() {
+  var statusEl = document.getElementById('ma-status-text');
+  var pulseEl = document.querySelector('.ma-status-pulse');
+  if (statusEl) {
+    statusEl.textContent = _networkConnected ? 'Connected to Minima' : 'Disconnected from Minima';
+  }
+  if (pulseEl) {
+    if (_networkConnected) {
+      pulseEl.style.backgroundColor = '#10b981';
+      pulseEl.style.boxShadow = '0 0 0 0 rgba(16,185,129,0.4)';
+    } else {
+      pulseEl.style.backgroundColor = '#ef4444';
+      pulseEl.style.boxShadow = '0 0 0 0 rgba(239,68,68,0.4)';
+    }
+  }
+}
+
 function doRender() {
   window.scrollTo(0, 0);
   renderNav();
@@ -232,23 +269,6 @@ function doRender() {
 
 function handleMdsComms(parsed) {
   if (!parsed || !parsed.type) { return; }
-  if (parsed.type === 'CONNECTION_STATUS') {
-    var statusEl = document.getElementById('ma-status-text');
-    var pulseEl = document.querySelector('.ma-status-pulse');
-    if (statusEl) {
-      statusEl.textContent = parsed.status === 'connected' ? 'Connected to Minima' : 'Disconnected from Minima';
-    }
-    if (pulseEl) {
-      if (parsed.status === 'connected') {
-        pulseEl.style.backgroundColor = '#10b981';
-        pulseEl.style.boxShadow = '0 0 0 0 rgba(16,185,129,0.4)';
-      } else {
-        pulseEl.style.backgroundColor = '#ef4444';
-        pulseEl.style.boxShadow = '0 0 0 0 rgba(239,68,68,0.4)';
-      }
-    }
-    return;
-  }
   if (parsed.type === 'DB_READY') {
     _dbReady = true;
     doRender();
@@ -2018,6 +2038,7 @@ function onInited() {
                   renderNav();
                   probeDb();
                   doRender();
+                  startNetworkStatusMonitoring();
                 });
               });
             });

@@ -12,15 +12,6 @@ function onMaxima(msg) {
     return;
   }
 
-  var now = Date.now();
-  var wasOffline = now - LAST_MAXIMA_EVENT_TIME > CONNECTION_TIMEOUT_MS;
-  if (wasOffline && LAST_MAXIMA_EVENT_TIME > 0) {
-    MDS.log("[STATUS] Node back online after offline period");
-    CONNECTION_STATUS = 'connected';
-    MDS.comms.solo(JSON.stringify({ type: 'CONNECTION_STATUS', status: 'connected', timestamp: now }));
-  }
-  LAST_MAXIMA_EVENT_TIME = now;
-
   var payload;
   try {
     payload = JSON.parse(hexToUtf8(msg.data.data));

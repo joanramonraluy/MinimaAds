@@ -400,16 +400,23 @@ function renderCreator(root) {
   _loadL1PublisherCountForCreator(form);
 
   getCreatorMaximaRoute(function(route) {
+    console.log('[CREATOR] getCreatorMaximaRoute callback - route:', route);
     var submitBtn = form.querySelector('[type="submit"]');
     var msgEl = document.getElementById('ma-creator-msg');
+    console.log('[CREATOR] submitBtn found:', !!submitBtn, 'msgEl found:', !!msgEl);
     if (!route) {
+      console.log('[CREATOR] No route - disabling button and showing message');
       if (submitBtn) { submitBtn.disabled = true; }
       if (msgEl) {
         msgEl.innerHTML = '🔒 No Maxima route registered<br><small>Go to <a href="#settings/maxima-routes">Settings → Maxima Routes</a> to register one before creating campaigns.</small>';
         msgEl.style.color = '#d32f2f';
         msgEl.style.fontWeight = '600';
+        console.log('[CREATOR] Message updated');
+      } else {
+        console.log('[CREATOR] msgEl is null!');
       }
     } else {
+      console.log('[CREATOR] Route exists - enabling button');
       if (submitBtn) { submitBtn.disabled = false; }
       if (msgEl) { msgEl.textContent = ''; }
     }

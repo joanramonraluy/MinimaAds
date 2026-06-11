@@ -34,7 +34,10 @@ function renderFrames(root) {
     + '<button type="submit">Create Frame</button>'
     + '<p id="ma-frames-msg" role="status"></p>'
     + '</form>'
-    + '<p id="ma-frames-info" style="margin-top:0.75rem;margin-bottom:0;font-size:0.875rem;color:var(--pico-muted-color,#6c757d);">You must be online to receive publisher rewards.</p>';
+    + '<div style="margin-top:1rem;padding:0.75rem;background-color:#fef3c7;border:1px solid #fcd34d;border-radius:0.375rem;border-left:4px solid #f59e0b;">'
+    + '<p style="margin:0;font-weight:600;color:#92400e;font-size:0.9rem;">📡 You must be online to earn rewards</p>'
+    + '<p style="margin:0.3rem 0 0 0;font-size:0.85rem;color:#b45309;">You need to be connected to Minima to receive publisher rewards. Frames created offline will not earn until you\'re back online.</p>'
+    + '</div>';
   root.appendChild(createSection);
 
 

@@ -405,8 +405,9 @@ function renderCreator(root) {
     if (!route) {
       if (submitBtn) { submitBtn.disabled = true; }
       if (msgEl) {
-        msgEl.textContent = 'You must register a Maxima route to create campaigns. Go to Settings to add one.';
-        msgEl.style.color = 'var(--pico-form-element-invalid-border-color, #d32f2f)';
+        msgEl.innerHTML = '🔒 No Maxima route registered<br><small>Go to <a href="#settings/maxima-routes">Settings → Maxima Routes</a> to register one before creating campaigns.</small>';
+        msgEl.style.color = '#d32f2f';
+        msgEl.style.fontWeight = '600';
       }
     } else {
       if (submitBtn) { submitBtn.disabled = false; }

@@ -210,6 +210,21 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 ---
 
+### Session: 2026-06-11 (patch 2) — Block publisher rewards on viewer click events
+
+**Task**: Publisher was incorrectly receiving a reward voucher every time a viewer clicked (in addition to views). Decision: publisher only earns on views, not clicks.
+
+**Fix**:
+- `channel.handler.js` line ~593: added `&& (payload.reward_type || 'view') !== 'click'` guard before calling `_maybeGeneratePublisherVoucher` in the indexed-coin path.
+- `channel.handler.js` line ~1566: same guard added to the deferred-voucher replay path, using `pending.reward_type`.
+- Note: the previous session's AGENTS.md entry claimed this fix was applied but the guard was never actually written to the file.
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`
+
+**AGENTS.md updated**: yes — §6 updated.
+
+---
+
 ### Session: 2026-06-11 — Support Proper Reward Types (View/Click) for Vouchers and Logs
 
 **Task**: Fix click rewards being logged as "view" rewards in the database, triggering incorrect publisher commission generation (publisher rewards should only occur on views, not clicks), and displaying incorrect values in the viewer status UI. Also, prevent returning to the campaigns list automatically in the DApp when clicking the campaign's CTA link/button so the user stays on the details screen.

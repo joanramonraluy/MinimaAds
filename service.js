@@ -28,7 +28,7 @@ var _livenessCheckBlock = 0;
 
 // Connection state tracking
 var LAST_MAXIMA_EVENT_TIME = 0;
-var CONNECTION_TIMEOUT_MS = 120000;
+var CONNECTION_TIMEOUT_MS = 30000;
 var CONNECTION_STATUS = 'connected';
 
 // Escrow script address — deterministic, same for all nodes with this DApp
@@ -166,6 +166,7 @@ function onInited() {
 }
 
 function _initAfterDb() {
+  LAST_MAXIMA_EVENT_TIME = Date.now();
   MDS.cmd("maxima action:info", function(resp) {
     if (!resp.status || !resp.response) {
       MDS.log("[ADS] maxima action:info failed: " + (resp.error || "no response") + " — retrying in 10s");

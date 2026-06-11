@@ -7,11 +7,12 @@ function mkStatusBadge(status) {
     paused:   { bg: '#f39c12', fg: '#fff' },
     finished: { bg: '#95a5a6', fg: '#fff' },
     pending:  { bg: '#3498db', fg: '#fff' },
-    settled:  { bg: '#9b59b6', fg: '#fff' }
+    settled:  { bg: '#9b59b6', fg: '#fff' },
+    completed: { bg: '#e74c3c', fg: '#fff' }
   };
   var labels = {
     active: 'Active', paused: 'Paused', finished: 'Finished',
-    pending: 'Pending', settled: 'Settled'
+    pending: 'Pending', settled: 'Settled', completed: 'Limit Reached'
   };
   var c = palette[status] || { bg: '#95a5a6', fg: '#fff' };
   var el = document.createElement('mark');

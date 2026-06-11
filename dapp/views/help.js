@@ -124,7 +124,8 @@ function renderHelp(root) {
   vLimitsList.innerHTML =
     '<li style="margin-bottom:.5rem;"><strong>Cooldown:</strong> There is a cooldown period (default 5 minutes) between rewards for the same campaign to prevent spamming.</li>' +
     '<li style="margin-bottom:.5rem;"><strong>Daily cap:</strong> Each campaign has a maximum daily limit of views and clicks per user (default 100).</li>' +
-    '<li style="margin-bottom:.5rem;"><strong>Self-rewards:</strong> You cannot earn rewards from campaigns you created yourself.</li>';
+    '<li style="margin-bottom:.5rem;"><strong>Self-rewards:</strong> You cannot earn rewards from campaigns you created yourself.</li>' +
+    '<li style="margin-bottom:.5rem;"><strong>Limit Feedback & Badges:</strong> If you open a campaign while under cooldown, having reached your daily limit, or if you have completed the reward limit for that campaign, an immediate red status message will inform you and block reward processing. A red <strong>Limit Reached</strong> badge will also be displayed next to the campaign name in your list once you have received all the rewards allowed for that campaign channel.</li>';
   vLimitsCard.appendChild(vLimitsList);
   viewerPanel.appendChild(vLimitsCard);
   root.appendChild(viewerPanel);

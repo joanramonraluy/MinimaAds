@@ -119,7 +119,7 @@
     }
 
     /* ── Enhanced Input Fields ─────────────────────────────────────── */
-    input:not([type="checkbox"]):not([type="radio"]),
+    input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
     select,
     textarea {
       border: 2px solid var(--pico-muted-border-color, #ddd);
@@ -129,10 +129,14 @@
       font-family: inherit;
     }
     input[type="file"] {
-      padding: 0;
-      border: none;
-      background: transparent;
+      border: 2px solid var(--pico-muted-border-color, #ddd);
+      border-radius: 0.5rem;
+      padding: 0.35rem 0.5rem;
+      font-size: 1rem;
+      font-family: inherit;
+      background-color: var(--pico-form-element-background-color, transparent);
       box-shadow: none !important;
+      line-height: 1.5;
     }
     [data-theme="dark"] input:not([type="checkbox"]):not([type="radio"]),
     [data-theme="dark"] select,
@@ -468,12 +472,7 @@
     <!-- Section 2: Menu options -->
     <div style="flex:1; overflow-y:auto;">
       <ul class="ma-drawer-menu">
-        <li>
-          <button class="ma-drawer-menu-btn" onclick="openProfileFromDrawer()">
-            Profile
-            <span style="font-size:.85rem;color:var(--pico-muted-color,#6c757d)">&#8250;</span>
-          </button>
-        </li>
+
         <li>
           <button class="ma-drawer-menu-btn" onclick="toggleRoleSubmenu()">
             <span>Role &mdash; <strong id="ma-drawer-role-current">Viewer</strong></span>

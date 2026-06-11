@@ -354,7 +354,8 @@ function _buildCampaignCard(c, openDetails) {
       text_color:      c.TEXT_COLOR || '#111111',
       image_position:  c.IMAGE_POSITION || 'center',
       image_zoom:      c.IMAGE_ZOOM !== undefined ? parseFloat(c.IMAGE_ZOOM) : 1.0,
-      image_width_pct: c.IMAGE_WIDTH_PCT !== undefined ? parseInt(c.IMAGE_WIDTH_PCT, 10) : 40
+      image_width_pct: c.IMAGE_WIDTH_PCT !== undefined ? parseInt(c.IMAGE_WIDTH_PCT, 10) : 40,
+      force_full:      true
     };
     renderAd(previewAd, adContainer.id);
   }

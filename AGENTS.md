@@ -176,64 +176,64 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
-### Session: 2026-06-11 (continued) — Fix deferred publisher reward recovery from false settlement
+### Session: 2026-06-11 — Fix discovery retry on Maxima send failure
 
-**Task**: Built-in publisher (user4) opened a publisher channel successfully but didn't receive deferred REWARD_VOUCHERs. Investigation found two issues:
-1. `_isBuiltinFid` check was too broad: skipped `_maybeGeneratePublisherVoucher()` for ALL built-in frames, even when a different viewer used the publisher's frame (should only skip when viewer IS the publisher).
-2. Deferred publisher rewards couldn't be replayed from falsely-settled channels: `checkPendingChannelOpens()` JOIN required `STATUS='open'`, but recovered channels had `STATUS='settled'` from prior false-positive settlement attempts.
+**Task**: When `REQUEST_CAMPAIGN_DATA` Maxima send returned `ok: false`, the coin was already marked in `_knownEscrowCoins` so it was never retried on subsequent blocks. Campaigns published while Maxima was transiently unavailable became permanently invisible until SW restart.
 
-**Fix**:
-- **Builtin publisher voucher identity check** (commit `e2ca08b`): Replace `_isBuiltinFid` guard with viewer-identity check. Extract PK from `builtin:0X[PK]` and compare with viewer key — skip generation only when they match (viewer is the publisher, they self-dispatch).
-- **Deferred reward recovery** (commit `3918a3e`): 
-  - `checkPendingChannelOpens()` JOIN now includes `STATUS IN ('open', 'settled')` to find falsely-settled channels with pending deferred rewards.
-  - `_replayDeferredPublisherRewards()` detects falsely-settled channels (coin still active on-chain but STATUS='settled') and re-activates them to 'open' before dispatching the voucher TX. `swWaitForCoin()` remains the gatekeeper for legitimately settled channels.
+**Fix**: In `campaign.handler.js` `processEscrowCoin`, delete the coin from `_knownEscrowCoins` when `_sendRequestCampaignData` returns `ok: false`, allowing retry on the next NEWBLOCK.
 
-**Verification**: User4 (publisher) now receives 0.006 MINIMA (3 accumulated deferred rewards × 0.002) as REWARD_VOUCHER, correctly tracked in Earnings with "1 Pending settlement".
-
-**Files modified**: `public/service-workers/handlers/channel.handler.js`
+**Files modified**: `public/service-workers/handlers/campaign.handler.js`
 
 **AGENTS.md updated**: yes — §6 updated.
 
 ---
 
-### Session: 2026-06-11 — Redundant Profile item, Settings Redirection Flow, Scroll Reset, Viewer Status, & Campaign Redirect
+### Session: 2026-06-11 — Support Dedicated Routing for Campaign Details
 
-**Task**:
-1. Remove redundant "Profile" option from vertical drawer menu.
-2. Fix jarring page reload/database reset when registering a permanent Maxima route in Settings.
-3. Fix window not scrolling to top on route changes (resulting in home page loading scrolled down).
-4. Update ad viewer status message to green "Reward received! +X.XX MINIMA" when payment voucher arrives.
-5. Automatically redirect user to "My Campaigns" view after successfully creating/publishing a campaign.
+**Task**: Fix the DApp returning to the campaigns list when clicking the CTA/banner links inside campaign detail views. Introduce dedicated hash routing `#campaign-detail?id=<campaignId>` for detail views to guarantee state preservation and enable standard navigation history.
 
 **Fix**:
-- **UI & Drawer cleanups**: Removed redundant drawer Profile button from `public/index.html` and unused `openProfileFromDrawer` from `dapp/app.js`.
-- **Settings Redirection & Scroll Reset**: Replaced `location.reload()` callback with SPA routing (`goHome()`) in `dapp/views/settings-maxima-routes.js`. Added `window.scrollTo(0, 0)` at the beginning of `doRender()` in `dapp/app.js` to reset viewport scroll position on route/page transitions.
-- **Viewer Status Update**: Implemented `onViewerVoucherReceived` in `dapp/views/viewer.js` and wired it to `VOUCHER_RECEIVED` event in `dapp/app.js` to change the status element's text and color upon payment voucher confirmation.
-- **Campaign Redirect**: Modified `saveCampaignAndBroadcast` in `dapp/views/creator.js` to show a `"Campaign published successfully. Redirecting…"` message and perform a delayed SPA redirect (`window.location.hash = '#mycampaigns'`) after 1.5 seconds.
+- **Routing Infrastructure**:
+  - Registered `campaign-detail` inside `MODE_VIEWS.viewer` in `dapp/app.js`.
+  - Updated `currentRoute()` to parse hash parameters and match route base names (e.g. splitting at `?`).
+  - Added the helper `getHashParams()` to extract query parameters from the hash dynamically in any view.
+  - Set active link status inside `renderNav()` if view matches `campaigns` and current route is `campaign-detail`.
+  - Added a routing fallback block inside `doRender()` for `campaign-detail` calling `renderCampaignDetail(root)`.
+- **View Integration**:
+  - Implemented `renderCampaignDetail(root)` in `dapp/views/viewer.js` to extract campaign ID, show loading status, query the campaign details from the H2 DB via `getCampaign(id, cb)`, and invoke the detail UI via `_openCampaign(campaign)`.
+  - Updated click listeners in `dapp/views/campaigns.js` and list renderer in `dapp/views/viewer.js` to change `window.location.hash` to `'campaign-detail?id=' + campaign.ID` instead of calling `_openCampaign` directly.
+  - Rewrote `_goBackToList()` in `dapp/views/viewer.js` to reset `window.location.hash` to `'campaigns'`.
 
-**Files modified**: `public/index.html`, `dapp/app.js`, `dapp/views/settings-maxima-routes.js`, `dapp/views/viewer.js`, `dapp/views/creator.js`, `MinimaAds.mds.zip`
+**Files modified**: `dapp/app.js`, `dapp/views/viewer.js`, `dapp/views/campaigns.js`
 
 **AGENTS.md updated**: yes — §6 updated.
 
 ---
 
-### Session: 2026-06-11 — Fix built-in publisher reward not dispatched on channel open
+### Session: 2026-06-11 — Support Proper Reward Types (View/Click) for Vouchers and Logs
 
-**Task**: Built-in publisher (user4) opened a publisher channel successfully but received no REWARD_VOUCHER. Root cause: `_publisherChannelFlow()` in the SDK opens a new channel (STATUS='pending') but discards the pending `amount`. When CHANNEL_OPEN arrives, `_doChannelOpenUpsert()` checks `PENDING_REWARD_<campaignId>` (which is never set by the publisher flow) and does nothing. The CHANNEL_OPENED signal had no `role` field so the SDK couldn't distinguish viewer from publisher channels.
-
-**Why built-in specifically**: Our earlier fix (`_isBuiltinFid` check in `_handleRewardRequestInner()`) correctly skips `_maybeGeneratePublisherVoucher()` for built-in frames to avoid duplicate vouchers. This means the creator never sends deferred rewards for built-in publishers — the publisher must self-dispatch via REWARD_REQUEST.
+**Task**: Fix click rewards being logged as "view" rewards in the database, triggering incorrect publisher commission generation (publisher rewards should only occur on views, not clicks), and displaying incorrect values in the viewer status UI. Also, prevent returning to the campaigns list automatically in the DApp when clicking the campaign's CTA link/button so the user stays on the details screen.
 
 **Fix**:
-- `channel.handler.js`: added `role` field to the CHANNEL_OPENED signal from `_doChannelOpenUpsert()`.
-- `sdk/index.js` — `_publisherChannelFlow()`: for built-in frames, stores pending `amount` in `PENDING_PUB_REWARD_<campaignId>` keypair when opening a new channel or accumulating while pending.
-- `sdk/index.js` — `_onChannelOpenedCore()`: when `role='publisher'`, retrieves `PENDING_PUB_REWARD_<campaignId>` and dispatches `_sendPublisherRewardRequest()`. Non-builtin frames still handled by creator-side deferred replay.
+- **Service Worker Propagation**:
+  - Propagated `reward_type` from `CHANNEL_OPEN` handler (`PENDING_REWARD_<campaignId>` metadata check) to `REWARD_REQUEST` payloads.
+  - Modified `_handleRewardRequestInner` to skip generating publisher rewards (`_maybeGeneratePublisherVoucher`) when `role === 'viewer'` and `reward_type === 'click'`.
+  - Added `reward_type` to `PENDING_VOUCHER_` queue data during indexing delays.
+  - Updated `_swDispatchVoucher` and `swBuildAndExportVoucherTx` to set the correct amount (`REWARD_CLICK` instead of `REWARD_VIEW` if `reward_type === 'click'`), pass the type into the transaction context, include it in `REWARD_VOUCHER` Maxima payloads, and log `REWARD_EVENTS` with correct type.
+  - Updated `handleRewardVoucher` and `_continueRewardVoucher` to parse the `reward_type` and store the matching event type in `REWARD_EVENTS` instead of hardcoding `'view'`, sending the type in the `VOUCHER_RECEIVED` FE notification signal.
+- **SDK & UI Flow Integration**:
+  - Threaded `rewardType` down `_channelFlow` -> `_openNewChannel` / `_accumulatePending` / `_sendRewardRequest` inside `sdk/index.js`, persisting it to pending reward caches and outgoing `REWARD_REQUEST` payloads.
+  - Configured `_onVoucherReceivedCore` to read `reward_type` and record the correct type inside `createRewardEvent`.
+  - Updated `onViewerVoucherReceived` in `dapp/views/viewer.js` to read the received `reward_type` and display the correct reward amount (REWARD_CLICK vs REWARD_VIEW).
+  - Modified link click handler in `_wireDetailInteractions` in `dapp/views/viewer.js` to remove calls to `_goBackToList()`.
 
-**Files modified**: `public/service-workers/handlers/channel.handler.js`, `sdk/index.js`
+**Files modified**: `public/service-workers/handlers/channel.handler.js`, `sdk/index.js`, `dapp/views/viewer.js`
 
 **AGENTS.md updated**: yes — §6 updated.
 
 ---
 
 > Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, Auto-Sync Platform Creator Route, Unify MLS DevTools, Fix Viewer and Publisher Reward Delivery, Fix Publisher Budget (Multi-Publisher Support), Fix Stale-Pending Publisher Channel Deadlock, Minima Foundation Fee (3%) + V4 Escrow Script Fixes, 2026-06-10 settlement fixes, and all earlier) are archived in `docs/HISTORY.md §17`.
+
 
 

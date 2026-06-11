@@ -427,7 +427,8 @@ function _doChannelOpenUpsert(campaignId, viewerKey, role, channelCoinId, maxAmo
             role:          role,
             publisher_key: pending.publisher_key || "",
             frame_id:      pending.frame_id || "",
-            publisher_mx:  pending.publisher_mx || ""
+            publisher_mx:  pending.publisher_mx || "",
+            reward_type:   pending.reward_type || "view"
           };
           // Fix 3a: persist publisher_mx so subsequent REWARD_REQUESTs (sent
           // after the channel is already open, via _sendRewardRequest) can look
@@ -579,10 +580,10 @@ function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumu
         if (indexed) {
           if (role === 'publisher') {
             MDS.log("[CHANNEL] REWARD_REQUEST (publisher): coin indexed. building publisher voucher in SW. campaign: " + campaignId + " cumulative: " + cumulative);
-            _swDispatchVoucher(campaignId, viewerKey, channel.CREATOR_MX, eventId, cumulative, channel, 'publisher', channelFrameId);
+            _swDispatchVoucher(campaignId, viewerKey, channel.CREATOR_MX, eventId, cumulative, channel, 'publisher', channelFrameId, null, 'view');
           } else {
             MDS.log("[CHANNEL] REWARD_REQUEST: coin indexed. building viewer voucher in SW. campaign: " + campaignId + " cumulative: " + cumulative);
-            _swDispatchVoucher(campaignId, viewerKey, channel.CREATOR_MX, eventId, cumulative, channel, 'viewer', '');
+            _swDispatchVoucher(campaignId, viewerKey, channel.CREATOR_MX, eventId, cumulative, channel, 'viewer', '', null, payload.reward_type || 'view');
             // Skip publisher voucher generation only when the viewer IS the built-in publisher
             // (same node viewing their own snippet — they self-dispatch via REWARD_REQUEST).
             // When a different viewer uses the publisher's built-in frame, generate normally.
@@ -602,7 +603,8 @@ function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumu
             role:           role,
             frame_id:       channelFrameId,
             publisher_key:  publisherKey,
-            publisher_mx:   publisherMx
+            publisher_mx:   publisherMx,
+            reward_type:    payload.reward_type || 'view'
           });
           var kpKey = "PENDING_VOUCHER_" + campaignId + "_" + viewerKey.toUpperCase() + "_" + role.toUpperCase();
           MDS.keypair.set(kpKey, pending, function() {
@@ -614,7 +616,7 @@ function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumu
   });
 }
 
-function _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHex, role, frameId, oldCumulative, viewerWalletAddr) {
+function _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHex, role, frameId, oldCumulative, viewerWalletAddr, rewardType) {
   updateChannelVoucher(campaignId, viewerKey, role, cumulative, txHex, function(err) {
     if (err) {
       MDS.log("[CHANNEL] REWARD_VOUCHER: updateChannelVoucher failed: " + err);
@@ -681,11 +683,13 @@ function _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHe
         });
       } else {
         var delta = cumulative - oldCumulative;
+        var reType = rewardType || 'view';
         if (!(delta > 0)) {
           signalFE("VOUCHER_RECEIVED", {
             campaign_id: campaignId,
             cumulative:  cumulative,
-            event_id:    eventId
+            event_id:    eventId,
+            reward_type: reType
           });
           return;
         }
@@ -702,7 +706,7 @@ function _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHe
               + "'" + escapeSql(campaignId) + "',"
               + "'" + escapeSql(adId) + "',"
               + "'" + escapeSql(viewerKey) + "',"
-              + "'view',"
+              + "'" + escapeSql(reType) + "',"
               + delta + ","
               + reTimestamp + ","
               + "NULL"
@@ -732,7 +736,8 @@ function _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHe
                     signalFE("VOUCHER_RECEIVED", {
                       campaign_id: campaignId,
                       cumulative:  cumulative,
-                      event_id:    eventId
+                      event_id:    eventId,
+                      reward_type: reType
                     });
                   });
                 }
@@ -758,16 +763,17 @@ function handleRewardVoucher(payload) {
   var txHex      = payload.tx_hex;
   var role       = payload.role || 'viewer';
   var frameId    = payload.frame_id || '';
+  var rewardType = payload.reward_type || 'view';
 
   if (role !== 'publisher') {
     getChannelState(campaignId, viewerKey, role, function(csErr, chState) {
       var oldCumulative = chState ? (parseFloat(chState.CUMULATIVE_EARNED) || 0) : 0;
       var viewerWalletAddr = chState ? (chState.VIEWER_WALLET_ADDR || '') : '';
-      _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHex, role, frameId, oldCumulative, viewerWalletAddr);
+      _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHex, role, frameId, oldCumulative, viewerWalletAddr, rewardType);
     });
     return;
   }
-  _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHex, role, frameId, 0, '');
+  _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHex, role, frameId, 0, '', rewardType);
 }
 
 function handleVoucherSyncRequest(payload) {
@@ -1416,7 +1422,8 @@ function _replayDeferredPublisherRewardsNow(campaignId, frameId, rows, pubChanne
                   );
                 }
               );
-            }
+            },
+            'view'
           );
         });
 }
@@ -1502,7 +1509,7 @@ function _doGeneratePublisherVoucher(campaignId, frameId, eventId, pubChannel) {
           "MERGE INTO DEDUP_LOG (ID, LOGGED_AT) KEY (ID) VALUES ('" + escapeSql(pubEventId) + "'," + now + ")",
           function() {
             MDS.log("[CHANNEL] publisher voucher SW: campaign: " + campaignId + " frame: " + frameId + " cumulative: " + cumulative);
-            _swDispatchVoucher(campaignId, pubChannel.VIEWER_KEY, pubChannel.CREATOR_MX, pubEventId, cumulative, pubChannel, 'publisher', frameId);
+            _swDispatchVoucher(campaignId, pubChannel.VIEWER_KEY, pubChannel.CREATOR_MX, pubEventId, cumulative, pubChannel, 'publisher', frameId, null, 'view');
           }
         );
       });
@@ -1550,7 +1557,7 @@ function checkOnePendingVoucher(campaignId, viewerKey, role, channelCoinId) {
             MDS.log("[CHANNEL] checkOnePendingVoucher: channel not found. campaign: " + pending.campaign_id);
             return;
           }
-          _swDispatchVoucher(pending.campaign_id, pending.viewer_key, pending.viewer_mx, pending.event_id, pending.cumulative, ch, r, pending.frame_id || '');
+          _swDispatchVoucher(pending.campaign_id, pending.viewer_key, pending.viewer_mx, pending.event_id, pending.cumulative, ch, r, pending.frame_id || '', null, pending.reward_type || 'view');
           if (r === 'viewer') {
             var _pendingFid = pending.frame_id || '';
             var _pendingBuiltinPk = (_pendingFid && _pendingFid.toLowerCase().indexOf('builtin:') === 0)
@@ -1601,7 +1608,8 @@ function _swDispatchChannelOpen(campaignId, viewerKey, viewerMx, maxAmount, role
 // swBuildAndExportVoucherTx. Used by handleRewardRequest, checkOnePendingVoucher,
 // and _doGeneratePublisherVoucher.
 // ---------------------------------------------------------------------------
-function _swDispatchVoucher(campaignId, viewerKey, viewerMx, eventId, cumulative, channel, role, frameId, afterSend) {
+function _swDispatchVoucher(campaignId, viewerKey, viewerMx, eventId, cumulative, channel, role, frameId, afterSend, rewardType) {
+  var rType = rewardType || 'view';
   getCampaign(campaignId, function(err, campaign) {
     if (err || !campaign || !campaign.ESCROW_WALLET_PK) {
       MDS.log("[CHANNEL] _swDispatchVoucher: campaign or ESCROW_WALLET_PK missing. campaign: " + campaignId);
@@ -1614,9 +1622,12 @@ function _swDispatchVoucher(campaignId, viewerKey, viewerMx, eventId, cumulative
     }
     // rewardAmount passed to the voucher builder so it can create a creator-side
     // REWARD_EVENT after the voucher is sent.
-    var rewardAmount = (role === 'viewer')
-      ? (parseFloat(campaign.REWARD_VIEW) || 0)
-      : (parseFloat(campaign.PUBLISHER_REWARD_VIEW) || 0);
+    var rewardAmount = 0;
+    if (role === 'viewer') {
+      rewardAmount = (rType === 'click') ? (parseFloat(campaign.REWARD_CLICK) || 0) : (parseFloat(campaign.REWARD_VIEW) || 0);
+    } else {
+      rewardAmount = (parseFloat(campaign.PUBLISHER_REWARD_VIEW) || 0);
+    }
     swBuildAndExportVoucherTx({
       campaignId:      campaignId,
       viewerKey:       viewerKey,
@@ -1629,7 +1640,8 @@ function _swDispatchVoucher(campaignId, viewerKey, viewerMx, eventId, cumulative
       viewerAddr:      viewerAddr,
       role:            role || 'viewer',
       frameId:         frameId || '',
-      rewardAmount:    rewardAmount
+      rewardAmount:    rewardAmount,
+      rewardType:      rType
     }, afterSend || null);
   });
 }
@@ -1722,7 +1734,8 @@ function swBuildAndExportVoucherTx(ctx, afterSend) {
                 viewer_key:  ctx.viewerKey,
                 event_id:    ctx.eventId,
                 cumulative:  ctx.cumulative,
-                tx_hex:      txHex
+                tx_hex:      txHex,
+                reward_type: ctx.rewardType || 'view'
               };
               if (role === "publisher") {
                 voucherMsg.role     = "publisher";
@@ -1740,7 +1753,7 @@ function swBuildAndExportVoucherTx(ctx, afterSend) {
                         campaign_id:  ctx.campaignId,
                         ad_id:        adId,
                         user_address: ctx.viewerKey,
-                        type:         'view',
+                        type:         ctx.rewardType || 'view',
                         amount:       ctx.rewardAmount
                       }, function(evtErr, evt) {
                         if (evtErr || !evt) {

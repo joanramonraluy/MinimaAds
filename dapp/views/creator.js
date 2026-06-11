@@ -926,7 +926,8 @@ function updateCreatorPreview(form) {
     text_color: textColor,
     image_position: imagePosition,
     image_zoom: imageZoom,
-    image_width_pct: imageWidthPct
+    image_width_pct: imageWidthPct,
+    force_full: true
   };
   if (_detachDivider) { _detachDivider(); _detachDivider = null; }
   renderAd(previewAd, 'ma-creator-preview');
@@ -1942,13 +1943,12 @@ function saveCampaignAndBroadcast(campaign, ad, form, submitBtn, msgEl) {
       msgEl.innerHTML = '';
       var successMsg = document.createElement('span');
       successMsg.style.cssText = 'color:#2ecc71;font-weight:600;';
-      successMsg.textContent = 'Campaign "' + campaign.title + '" published successfully. ';
-      var link = document.createElement('a');
-      link.href = '#mycampaigns';
-      link.textContent = 'View in My Campaigns';
+      successMsg.textContent = 'Campaign "' + campaign.title + '" published successfully. Redirecting…';
       msgEl.appendChild(successMsg);
-      msgEl.appendChild(link);
     }
     if (form) { form.reset(); }
+    setTimeout(function() {
+      window.location.hash = '#mycampaigns';
+    }, 1500);
   });
 }

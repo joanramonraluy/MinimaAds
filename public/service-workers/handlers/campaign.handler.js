@@ -307,6 +307,7 @@ function processEscrowCoin(coin) {
 
       _sendRequestCampaignData(campaignId, creatorPkRoute, creatorMxAddr, function(ok) {
         MDS.log("[DISCOVERY] REQUEST_CAMPAIGN_DATA sent for: " + campaignId + " ok: " + ok);
+        if (!ok) { delete _knownEscrowCoins[coinId]; }
       });
     });
   });

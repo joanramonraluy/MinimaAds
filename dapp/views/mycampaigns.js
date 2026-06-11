@@ -709,12 +709,12 @@ function _loadSettledChannels(campaignId, detailEl) {
         return;
       }
 
-      _renderSettledChannelsTable(detailEl, rows, contactsMap);
+      _renderSettledChannelsTable(detailEl, rows, contactsMap, campaignId);
     });
   });
 }
 
-function _renderSettledChannelsTable(target, rows, contactsMap) {
+function _renderSettledChannelsTable(target, rows, contactsMap, campaignId) {
   var groups = _groupSettledChannelsByPk(rows);
   var table = document.createElement('table');
   table.className = 'ma-nested-table';
@@ -780,7 +780,7 @@ function _renderSettledChannelsTable(target, rows, contactsMap) {
           summaryRow.setAttribute('aria-expanded', 'true');
           if (!loaded) {
             loaded = true;
-            _renderSettledChannelEvents(cellEl, channelRows);
+            _renderSettledChannelEvents(cellEl, channelRows, campaignId);
           }
         } else {
           rowEl.style.display = 'none';
@@ -800,6 +800,70 @@ function _renderSettledChannelsTable(target, rows, contactsMap) {
 
   table.appendChild(tbody);
   target.appendChild(table);
+}
+
+function _loadSettledChannelRewards(campaignId, currentChannel, allChannels, channelIndex, targetEl) {
+  var currentTs = parseInt(currentChannel.CREATED_AT || 0, 10);
+  var nextTs = null;
+  if (channelIndex + 1 < allChannels.length) {
+    nextTs = parseInt(allChannels[channelIndex + 1].CREATED_AT || 0, 10);
+  }
+  var stateSql = "SELECT CREATED_AT FROM CHANNEL_STATE"
+    + " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')"
+    + " AND UPPER(ROLE) = UPPER('" + escapeSql(currentChannel.ROLE) + "')"
+    + " AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(currentChannel.VIEWER_KEY) + "')"
+    + " AND STATUS IN ('open', 'pending')";
+  sqlQuery(stateSql, function(stErr, stRows) {
+    var openTs = (!stErr && stRows && stRows[0]) ? parseInt(stRows[0].CREATED_AT || 0, 10) : null;
+    var upperBound = null;
+    if (nextTs && openTs) { upperBound = Math.min(nextTs, openTs); }
+    else if (nextTs) { upperBound = nextTs; }
+    else if (openTs) { upperBound = openTs; }
+    var timeFilter = " AND TIMESTAMP >= " + currentTs;
+    if (upperBound) { timeFilter += " AND TIMESTAMP < " + upperBound; }
+    var eventsSql = "SELECT TYPE, AMOUNT, TIMESTAMP"
+      + " FROM REWARD_EVENTS"
+      + " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')"
+      + " AND UPPER(USER_ADDRESS) = UPPER('" + escapeSql(currentChannel.VIEWER_KEY) + "')"
+      + timeFilter
+      + " ORDER BY TIMESTAMP ASC";
+    sqlQuery(eventsSql, function(evErr, evRows) {
+      targetEl.innerHTML = '';
+      if (evErr || !evRows || !evRows.length) {
+        var p = document.createElement('p');
+        p.style.cssText = 'margin:.25rem 0;font-size:.85em;color:var(--pico-muted-color,#6c757d);';
+        p.textContent = 'No events recorded for this channel.';
+        targetEl.appendChild(p);
+        return;
+      }
+      var table = document.createElement('table');
+      table.style.cssText = 'width:100%;font-size:.85em;margin:0;';
+      var thead = document.createElement('thead');
+      var hRow = document.createElement('tr');
+      var headers = ['Type', 'Amount', 'Date'];
+      for (var h = 0; h < headers.length; h++) {
+        var th = document.createElement('th');
+        th.textContent = headers[h];
+        hRow.appendChild(th);
+      }
+      thead.appendChild(hRow);
+      table.appendChild(thead);
+      var tbody = document.createElement('tbody');
+      for (var i = 0; i < evRows.length; i++) {
+        var eventRow = evRows[i];
+        var tr = document.createElement('tr');
+        var date = eventRow.TIMESTAMP
+          ? new Date(parseInt(eventRow.TIMESTAMP)).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
+          : '—';
+        tr.appendChild(_nodeTd(eventRow.TYPE));
+        tr.appendChild(_nodeTd(fmtAmt(parseFloat(eventRow.AMOUNT || 0) || 0, 6)));
+        tr.appendChild(_nodeTd(date));
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      targetEl.appendChild(table);
+    });
+  });
 }
 
 function _groupSettledChannelsByPk(rows) {
@@ -823,13 +887,13 @@ function _groupSettledChannelsByPk(rows) {
   return groups;
 }
 
-function _renderSettledChannelEvents(target, rows) {
+function _renderSettledChannelEvents(target, rows, campaignId) {
   target.innerHTML = '';
   var table = document.createElement('table');
   table.className = 'ma-nested-table';
   var thead = document.createElement('thead');
   var headerRow = document.createElement('tr');
-  var headers = ['Status', 'Earned', 'Settled at'];
+  var headers = ['Status', 'Earned', 'Settled at', ''];
   for (var h = 0; h < headers.length; h++) {
     var th = document.createElement('th');
     th.textContent = headers[h];
@@ -840,16 +904,61 @@ function _renderSettledChannelEvents(target, rows) {
 
   var tbody = document.createElement('tbody');
   for (var i = 0; i < rows.length; i++) {
-    var r = rows[i];
-    var ts = parseInt(r.CREATED_AT || 0, 10);
-    var settledDate = ts
-      ? new Date(ts).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
-      : '—';
-    var tr = document.createElement('tr');
-    tr.appendChild(_nodeTd(r.STATUS || 'settled'));
-    tr.appendChild(_nodeTd(fmtAmt(parseFloat(r.CUMULATIVE_EARNED || 0) || 0, 6) + ' M'));
-    tr.appendChild(_nodeTd(settledDate));
-    tbody.appendChild(tr);
+    (function(r, idx) {
+      var ts = parseInt(r.CREATED_AT || 0, 10);
+      var settledDate = ts
+        ? new Date(ts).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
+        : '—';
+      var tr = document.createElement('tr');
+      tr.className = 'ma-expandable-row';
+      tr.setAttribute('tabindex', '0');
+      tr.setAttribute('aria-expanded', 'false');
+      tr.appendChild(_nodeTd(r.STATUS || 'settled'));
+      tr.appendChild(_nodeTd(fmtAmt(parseFloat(r.CUMULATIVE_EARNED || 0) || 0, 6) + ' M'));
+      tr.appendChild(_nodeTd(settledDate));
+
+      var toggleTd = document.createElement('td');
+      var toggleIcon = document.createElement('span');
+      toggleIcon.setAttribute('aria-hidden', 'true');
+      toggleIcon.textContent = '›';
+      toggleIcon.style.cssText = 'display:inline-block;color:var(--pico-muted-color,#6c757d);font-size:1rem;transition:transform .15s ease;';
+      toggleTd.appendChild(toggleIcon);
+      tr.appendChild(toggleTd);
+      tbody.appendChild(tr);
+
+      var detailTr = document.createElement('tr');
+      detailTr.style.display = 'none';
+      var detailTd = document.createElement('td');
+      detailTd.className = 'ma-nested-detail';
+      detailTd.setAttribute('colspan', '4');
+      detailTd.style.cssText = 'padding:.5rem 1rem;';
+      detailTr.appendChild(detailTd);
+      tbody.appendChild(detailTr);
+
+      var loaded = false;
+      function toggle() {
+        if (detailTr.style.display === 'none') {
+          detailTr.style.display = '';
+          toggleIcon.style.transform = 'rotate(90deg)';
+          tr.setAttribute('aria-expanded', 'true');
+          if (!loaded) {
+            loaded = true;
+            _loadSettledChannelRewards(campaignId, r, rows, idx, detailTd);
+          }
+        } else {
+          detailTr.style.display = 'none';
+          toggleIcon.style.transform = 'rotate(0deg)';
+          tr.setAttribute('aria-expanded', 'false');
+        }
+      }
+      tr.addEventListener('click', toggle);
+      tr.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          toggle();
+        }
+      });
+    })(rows[i], i);
   }
   table.appendChild(tbody);
   target.appendChild(table);

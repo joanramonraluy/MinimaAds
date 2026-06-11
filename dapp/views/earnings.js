@@ -409,6 +409,21 @@ function _renderChannelRewardRows(rows, container) {
     container.appendChild(mkEmptyState('No pending settlements.'));
     return;
   }
+
+  var table = document.createElement('table');
+  table.style.cssText = 'width:100%;margin:0;font-size:.9rem;';
+  var thead = document.createElement('thead');
+  var headerRow = document.createElement('tr');
+  var headers = ['Type', 'Campaign', 'Amount', 'Action'];
+  for (var h = 0; h < headers.length; h++) {
+    var th = document.createElement('th');
+    th.textContent = headers[h];
+    headerRow.appendChild(th);
+  }
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  var tbody = document.createElement('tbody');
   for (var i = 0; i < rows.length; i++) {
     (function(row) {
       var campaignId = row.CAMPAIGN_ID;
@@ -418,65 +433,52 @@ function _renderChannelRewardRows(rows, container) {
       var campName   = row.TITLE || (campaignId.substring(0, 8) + '…');
       var amount     = parseFloat(row.CUMULATIVE_EARNED || 0);
 
-      var card = document.createElement('article');
-      card.style.cssText = 'margin-bottom:1.5rem;padding:.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(0,0,0,0.015);border-left:3px solid #f39c12;';
+      var tr = document.createElement('tr');
 
-      // Card header: name + badge + settle button
-      var cardHeader = document.createElement('header');
-      cardHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin:-.75rem -1rem .75rem;padding:0 1rem;';
+      var typeTd = document.createElement('td');
+      typeTd.textContent = role.charAt(0).toUpperCase() + role.slice(1);
+      tr.appendChild(typeTd);
 
-      var titleGroup = document.createElement('div');
-      titleGroup.style.cssText = 'display:flex;align-items:center;gap:.5rem;min-width:0;';
-      var nameEl = document.createElement('strong');
-      nameEl.textContent = campName;
-      titleGroup.appendChild(nameEl);
-      titleGroup.appendChild(mkStatusBadge('pending'));
-      cardHeader.appendChild(titleGroup);
+      tr.appendChild(earningsTd(campName));
+      tr.appendChild(earningsTd(fmtAmt(amount, 6) + ' MINIMA'));
 
+      var actionTd = document.createElement('td');
       var btn = document.createElement('button');
       btn.textContent = 'Settle';
-      btn.style.cssText = 'width:auto;margin:0;padding:.3rem .85rem;flex-shrink:0;';
+      btn.style.cssText = 'width:auto;margin:0;padding:.3rem .85rem;';
       btn.addEventListener('click', function() {
         btn.disabled = true;
         btn.textContent = 'Settling…';
         _runSettlement(campaignId, viewerKey, role, txHex, btn, amount);
       });
-      cardHeader.appendChild(btn);
-      card.appendChild(cardHeader);
+      actionTd.appendChild(btn);
+      tr.appendChild(actionTd);
+      tbody.appendChild(tr);
 
-      // Amount stat card
-      var amountWrap = document.createElement('div');
-      amountWrap.style.cssText = 'margin:.75rem 0;';
-      var amountCard = mkStatCard('Pending', fmtAmt(amount, 6) + ' MINIMA');
-      amountCard.style.flex = 'none';
-      amountWrap.appendChild(amountCard);
-      card.appendChild(amountWrap);
+      var detailTr = document.createElement('tr');
+      detailTr.style.display = 'none';
+      var detailTd = document.createElement('td');
+      detailTd.className = 'ma-nested-detail';
+      detailTd.setAttribute('colspan', '4');
+      detailTd.style.cssText = 'padding:.5rem 1rem;';
+      detailTr.appendChild(detailTd);
+      tbody.appendChild(detailTr);
 
-      // Expandable event detail
-      var details = document.createElement('details');
-      details.className = 'ma-campaign-details';
-      details.style.cssText = 'margin-top:.5rem;';
-      var summary = document.createElement('summary');
-      summary.textContent = 'Show events';
-      summary.className = 'ma-campaign-details-summary';
-      summary.style.cssText = 'font-weight:600;cursor:pointer;';
-      details.appendChild(summary);
-      var detailBody = document.createElement('div');
-      detailBody.style.cssText = 'margin-top:.5rem;';
-      detailBody.appendChild(mkLoading('Loading events…'));
-      details.appendChild(detailBody);
       var loaded = false;
-      details.addEventListener('toggle', function() {
-        if (details.open && !loaded) {
-          loaded = true;
-          _loadChannelEvents(campaignId, role, false, detailBody);
+      function toggle() {
+        if (detailTr.style.display === 'none') {
+          detailTr.style.display = '';
+          if (!loaded) { loaded = true; _loadChannelEvents(campaignId, role, false, detailTd); }
+        } else {
+          detailTr.style.display = 'none';
         }
-      });
-      card.appendChild(details);
-
-      container.appendChild(card);
+      }
+      tr.style.cursor = 'pointer';
+      tr.addEventListener('click', toggle);
     })(rows[i]);
   }
+  table.appendChild(tbody);
+  container.appendChild(table);
 }
 
 function _runSettlement(campaignId, viewerKey, role, txHex, btnEl, cumulative) {

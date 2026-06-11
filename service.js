@@ -26,6 +26,11 @@ var MY_ADDRESS     = '';
 // Liveness-check throttle: run checkCampaignStatuses every 20 blocks (~5 min)
 var _livenessCheckBlock = 0;
 
+// Connection state tracking
+var LAST_MAXIMA_EVENT_TIME = 0;
+var CONNECTION_TIMEOUT_MS = 120000;
+var CONNECTION_STATUS = 'connected';
+
 // Escrow script address — deterministic, same for all nodes with this DApp
 var ESCROW_ADDRESS    = '';
 var ESCROW_ADDRESS_V3 = '';
@@ -333,7 +338,19 @@ MDS.init(function(msg) {
     scanEscrowCoins(); checkPendingChannelOpens(); checkPendingVouchers(); checkExpiredCampaigns(); checkOpenChannelsSettled();
     _livenessCheckBlock++;
     if (_livenessCheckBlock % 20 === 0) { checkCampaignStatuses(); }
+    checkConnectionStatus();
   }
   if (msg.event === "MDS_PENDING")         { onPending(msg); }
   if (msg.event === "MDSCOMMS")            { onComms(msg); }
 });
+
+function checkConnectionStatus() {
+  var now = Date.now();
+  var isOffline = LAST_MAXIMA_EVENT_TIME > 0 && now - LAST_MAXIMA_EVENT_TIME > CONNECTION_TIMEOUT_MS;
+  var newStatus = isOffline ? 'disconnected' : 'connected';
+  if (newStatus !== CONNECTION_STATUS) {
+    CONNECTION_STATUS = newStatus;
+    MDS.log("[STATUS] Connection status changed to: " + newStatus);
+    MDS.comms.solo(JSON.stringify({ type: 'CONNECTION_STATUS', status: newStatus, timestamp: now }));
+  }
+}

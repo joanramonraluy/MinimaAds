@@ -33,7 +33,8 @@ function renderFrames(root) {
     + '</label>'
     + '<button type="submit">Create Frame</button>'
     + '<p id="ma-frames-msg" role="status"></p>'
-    + '</form>';
+    + '</form>'
+    + '<p id="ma-frames-info" style="margin-top:0.75rem;margin-bottom:0;font-size:0.875rem;color:var(--pico-muted-color,#6c757d);">You must be online to receive publisher rewards.</p>';
   root.appendChild(createSection);
 
 

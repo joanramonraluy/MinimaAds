@@ -847,7 +847,7 @@ function checkPendingChannelOpens() {
     "FROM DEFERRED_PUB_REWARDS dpr " +
     "INNER JOIN CHANNEL_STATE cs ON UPPER(dpr.CAMPAIGN_ID) = UPPER(cs.CAMPAIGN_ID) " +
     "AND UPPER(dpr.FRAME_ID) = UPPER(cs.FRAME_ID) " +
-    "AND cs.ROLE = 'publisher' AND cs.STATUS = 'open'",
+    "AND cs.ROLE = 'publisher' AND cs.STATUS IN ('open', 'settled')",
     function(retryErr, retryRows) {
       if (!retryErr && retryRows && retryRows.length > 0) {
         for (var _ri = 0; _ri < retryRows.length; _ri++) {
@@ -1349,6 +1349,25 @@ function _replayDeferredPublisherRewards(campaignId, frameId, publisherKey) {
         swWaitForCoin(pubChannel.CHANNEL_COINID, 1, 0, function(coinFound) {
           if (!coinFound) {
             MDS.log("[CHANNEL] _replayDeferredPublisherRewards: channel coin not yet indexed, deferring. campaign: " + campaignId);
+            return;
+          }
+          // Coin is still active on-chain but channel may have been incorrectly
+          // settled by a transient address-scan false positive. Re-activate so
+          // the voucher TX can be built against the live coin.
+          if (pubChannel.STATUS === 'settled' || pubChannel.STATUS === 'SETTLED') {
+            MDS.log("[CHANNEL] _replayDeferredPublisherRewards: channel was falsely settled — re-activating. campaign: " + campaignId);
+            sqlQuery(
+              "UPDATE CHANNEL_STATE SET STATUS = 'open'" +
+              " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
+              " AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(publisherKey) + "')" +
+              " AND UPPER(ROLE) = 'PUBLISHER'",
+              function() {
+                getChannelState(campaignId, publisherKey, 'publisher', function(reErr, reChannel) {
+                  if (reErr || !reChannel) { return; }
+                  _replayDeferredPublisherRewardsNow(campaignId, frameId, rows, reChannel);
+                });
+              }
+            );
             return;
           }
           _replayDeferredPublisherRewardsNow(campaignId, frameId, rows, pubChannel);

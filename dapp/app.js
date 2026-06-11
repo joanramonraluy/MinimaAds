@@ -178,10 +178,14 @@ function setStatus(text) {
 }
 
 function startNetworkStatusMonitoring() {
-  if (_statusCheckInterval) { return; }
+  console.log('[STATUS] Starting network status monitoring');
+  if (_statusCheckInterval) { console.log('[STATUS] Already monitoring'); return; }
   _statusCheckInterval = setInterval(function() {
     MDS.cmd('status', function(res) {
-      var connected = res && res.status && res.response && res.response.network && res.response.network.connected > 0;
+      console.log('[STATUS] status response:', res);
+      var peers = (res && res.response && res.response.network) ? res.response.network.connected : -1;
+      var connected = peers > 0;
+      console.log('[STATUS] peers:', peers, 'connected:', connected);
       if (connected !== _networkConnected) {
         _networkConnected = connected;
         updateStatusBar();
@@ -189,7 +193,10 @@ function startNetworkStatusMonitoring() {
     });
   }, 10000);
   MDS.cmd('status', function(res) {
-    var connected = res && res.status && res.response && res.response.network && res.response.network.connected > 0;
+    console.log('[STATUS] Initial status response:', res);
+    var peers = (res && res.response && res.response.network) ? res.response.network.connected : -1;
+    var connected = peers > 0;
+    console.log('[STATUS] Initial peers:', peers, 'connected:', connected);
     _networkConnected = connected;
     updateStatusBar();
   });
@@ -198,6 +205,7 @@ function startNetworkStatusMonitoring() {
 function updateStatusBar() {
   var statusEl = document.getElementById('ma-status-text');
   var pulseEl = document.querySelector('.ma-status-pulse');
+  console.log('[STATUS] Updating bar - connected:', _networkConnected, 'statusEl:', !!statusEl, 'pulseEl:', !!pulseEl);
   if (statusEl) {
     statusEl.textContent = _networkConnected ? 'Connected to Minima' : 'Disconnected from Minima';
   }

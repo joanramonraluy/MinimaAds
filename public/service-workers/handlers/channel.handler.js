@@ -590,7 +590,7 @@ function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumu
             var _builtinPk = (channelFrameId && channelFrameId.toLowerCase().indexOf('builtin:') === 0)
               ? channelFrameId.substring(8).toUpperCase() : '';
             var _viewerIsPublisher = _builtinPk && (viewerKey.toUpperCase() === _builtinPk);
-            if (!_viewerIsPublisher && (channelFrameId || publisherKey)) { _maybeGeneratePublisherVoucher(campaignId, channelFrameId, eventId, publisherKey, publisherMx); }
+            if (!_viewerIsPublisher && (channelFrameId || publisherKey) && (payload.reward_type || 'view') !== 'click') { _maybeGeneratePublisherVoucher(campaignId, channelFrameId, eventId, publisherKey, publisherMx); }
           }
         } else {
           var pending = JSON.stringify({
@@ -1563,7 +1563,7 @@ function checkOnePendingVoucher(campaignId, viewerKey, role, channelCoinId) {
             var _pendingBuiltinPk = (_pendingFid && _pendingFid.toLowerCase().indexOf('builtin:') === 0)
               ? _pendingFid.substring(8).toUpperCase() : '';
             var _pendingViewerIsPublisher = _pendingBuiltinPk && (pending.viewer_key.toUpperCase() === _pendingBuiltinPk);
-            if (!_pendingViewerIsPublisher && (_pendingFid || pending.publisher_key)) {
+            if (!_pendingViewerIsPublisher && (_pendingFid || pending.publisher_key) && (pending.reward_type || 'view') !== 'click') {
               _maybeGeneratePublisherVoucher(pending.campaign_id, _pendingFid, pending.event_id, pending.publisher_key || '', pending.publisher_mx || '');
             }
           }

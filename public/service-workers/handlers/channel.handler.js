@@ -583,8 +583,13 @@ function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumu
           } else {
             MDS.log("[CHANNEL] REWARD_REQUEST: coin indexed. building viewer voucher in SW. campaign: " + campaignId + " cumulative: " + cumulative);
             _swDispatchVoucher(campaignId, viewerKey, channel.CREATOR_MX, eventId, cumulative, channel, 'viewer', '');
-            var _isBuiltinFid = channelFrameId && channelFrameId.toLowerCase().indexOf('builtin:') === 0;
-            if (!_isBuiltinFid && (channelFrameId || publisherKey)) { _maybeGeneratePublisherVoucher(campaignId, channelFrameId, eventId, publisherKey, publisherMx); }
+            // Skip publisher voucher generation only when the viewer IS the built-in publisher
+            // (same node viewing their own snippet — they self-dispatch via REWARD_REQUEST).
+            // When a different viewer uses the publisher's built-in frame, generate normally.
+            var _builtinPk = (channelFrameId && channelFrameId.toLowerCase().indexOf('builtin:') === 0)
+              ? channelFrameId.substring(8).toUpperCase() : '';
+            var _viewerIsPublisher = _builtinPk && (viewerKey.toUpperCase() === _builtinPk);
+            if (!_viewerIsPublisher && (channelFrameId || publisherKey)) { _maybeGeneratePublisherVoucher(campaignId, channelFrameId, eventId, publisherKey, publisherMx); }
           }
         } else {
           var pending = JSON.stringify({
@@ -1529,8 +1534,10 @@ function checkOnePendingVoucher(campaignId, viewerKey, role, channelCoinId) {
           _swDispatchVoucher(pending.campaign_id, pending.viewer_key, pending.viewer_mx, pending.event_id, pending.cumulative, ch, r, pending.frame_id || '');
           if (r === 'viewer') {
             var _pendingFid = pending.frame_id || '';
-            var _pendingIsBuiltin = _pendingFid && _pendingFid.toLowerCase().indexOf('builtin:') === 0;
-            if (!_pendingIsBuiltin && (_pendingFid || pending.publisher_key)) {
+            var _pendingBuiltinPk = (_pendingFid && _pendingFid.toLowerCase().indexOf('builtin:') === 0)
+              ? _pendingFid.substring(8).toUpperCase() : '';
+            var _pendingViewerIsPublisher = _pendingBuiltinPk && (pending.viewer_key.toUpperCase() === _pendingBuiltinPk);
+            if (!_pendingViewerIsPublisher && (_pendingFid || pending.publisher_key)) {
               _maybeGeneratePublisherVoucher(pending.campaign_id, _pendingFid, pending.event_id, pending.publisher_key || '', pending.publisher_mx || '');
             }
           }

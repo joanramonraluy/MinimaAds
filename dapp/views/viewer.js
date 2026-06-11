@@ -677,8 +677,19 @@ function renderCampaignDetail(root) {
     return;
   }
 
-  getCampaign(id, function(err, campaign) {
-    if (err || !campaign) {
+  var detailSql = "SELECT c.ID, c.TITLE, c.CREATOR_ADDRESS, c.BUDGET_REMAINING, c.REWARD_VIEW, c.REWARD_CLICK, "
+    + "c.STATUS, c.MAX_VIEWER_REWARD, c.EXPIRES_AT, c.PUBLISHER_REWARD_VIEW, "
+    + "a.ID AS AD_ID, a.TITLE AS AD_TITLE, a.BODY AS AD_BODY, "
+    + "a.CTA_LABEL AS AD_CTA_LABEL, a.CTA_URL AS AD_CTA_URL, "
+    + "a.IMAGE_DATA, a.SHOW_TITLE, a.SHOW_BODY, a.SHOW_CTA, "
+    + "a.BG_COLOR, a.TEXT_COLOR, a.IMAGE_POSITION, a.IMAGE_ZOOM, a.IMAGE_WIDTH_PCT, "
+    + "cs.CUMULATIVE_EARNED AS USER_CUMULATIVE, cs.MAX_AMOUNT AS USER_MAX_AMOUNT, cs.STATUS AS USER_CHANNEL_STATUS "
+    + "FROM CAMPAIGNS c LEFT JOIN ADS a ON UPPER(a.CAMPAIGN_ID) = UPPER(c.ID) "
+    + "LEFT JOIN CHANNEL_STATE cs ON UPPER(cs.CAMPAIGN_ID) = UPPER(c.ID) AND UPPER(cs.VIEWER_KEY) = UPPER('" + escapeSql(MY_ADDRESS || '') + "') AND cs.ROLE = 'viewer' "
+    + "WHERE UPPER(c.ID) = UPPER('" + escapeSql(id) + "')";
+
+  sqlQuery(detailSql, function(err, rows) {
+    if (err || !rows || rows.length === 0) {
       root.innerHTML = '';
       var errP = document.createElement('p');
       errP.style.cssText = 'color:var(--pico-del-color,#c0392b);padding:1rem;text-align:center;';
@@ -686,6 +697,6 @@ function renderCampaignDetail(root) {
       root.appendChild(errP);
       return;
     }
-    _openCampaign(campaign);
+    _openCampaign(rows[0]);
   });
 }

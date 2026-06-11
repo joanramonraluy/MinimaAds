@@ -232,6 +232,23 @@ function doRender() {
 
 function handleMdsComms(parsed) {
   if (!parsed || !parsed.type) { return; }
+  if (parsed.type === 'CONNECTION_STATUS') {
+    var statusEl = document.getElementById('ma-status-text');
+    var pulseEl = document.querySelector('.ma-status-pulse');
+    if (statusEl) {
+      statusEl.textContent = parsed.status === 'connected' ? 'Connected to Minima' : 'Disconnected from Minima';
+    }
+    if (pulseEl) {
+      if (parsed.status === 'connected') {
+        pulseEl.style.backgroundColor = '#10b981';
+        pulseEl.style.boxShadow = '0 0 0 0 rgba(16,185,129,0.4)';
+      } else {
+        pulseEl.style.backgroundColor = '#ef4444';
+        pulseEl.style.boxShadow = '0 0 0 0 rgba(239,68,68,0.4)';
+      }
+    }
+    return;
+  }
   if (parsed.type === 'DB_READY') {
     _dbReady = true;
     doRender();

@@ -176,6 +176,26 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-06-11 (continued) — Fix deferred publisher reward recovery from false settlement
+
+**Task**: Built-in publisher (user4) opened a publisher channel successfully but didn't receive deferred REWARD_VOUCHERs. Investigation found two issues:
+1. `_isBuiltinFid` check was too broad: skipped `_maybeGeneratePublisherVoucher()` for ALL built-in frames, even when a different viewer used the publisher's frame (should only skip when viewer IS the publisher).
+2. Deferred publisher rewards couldn't be replayed from falsely-settled channels: `checkPendingChannelOpens()` JOIN required `STATUS='open'`, but recovered channels had `STATUS='settled'` from prior false-positive settlement attempts.
+
+**Fix**:
+- **Builtin publisher voucher identity check** (commit `e2ca08b`): Replace `_isBuiltinFid` guard with viewer-identity check. Extract PK from `builtin:0X[PK]` and compare with viewer key — skip generation only when they match (viewer is the publisher, they self-dispatch).
+- **Deferred reward recovery** (commit `3918a3e`): 
+  - `checkPendingChannelOpens()` JOIN now includes `STATUS IN ('open', 'settled')` to find falsely-settled channels with pending deferred rewards.
+  - `_replayDeferredPublisherRewards()` detects falsely-settled channels (coin still active on-chain but STATUS='settled') and re-activates them to 'open' before dispatching the voucher TX. `swWaitForCoin()` remains the gatekeeper for legitimately settled channels.
+
+**Verification**: User4 (publisher) now receives 0.006 MINIMA (3 accumulated deferred rewards × 0.002) as REWARD_VOUCHER, correctly tracked in Earnings with "1 Pending settlement".
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`
+
+**AGENTS.md updated**: yes — §6 updated.
+
+---
+
 ### Session: 2026-06-11 — Redundant Profile item, Settings Redirection Flow, Scroll Reset, Viewer Status, & Campaign Redirect
 
 **Task**:
@@ -214,22 +234,6 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 ---
 
-### Session: 2026-06-10 — Fix false settlement on node re-sync + remove optimistic settleChannel
-
-**Task**: Two linked bugs around settlement:
-1. `checkOpenChannelsSettled()` could prematurely settle channels when `coins address:CHANNEL_SCRIPT_ADDRESS` returned an empty array transiently (e.g. during MiniDapp reinit / node re-sync). Result: CHANNEL_STATE → 'settled', CHANNEL_HISTORY populated, but coin still active on L1. Viewer's wallet never receives the reward.
-2. `_postSettleTx()` called `settleChannel()` optimistically after `txnpost` returns status:true, before L1 confirmation. If the tx fails to propagate, local DB is incorrectly marked 'settled' and the voucher disappears from the UI permanently.
-
-**Fix**:
-- `checkOpenChannelsSettled()`: before calling `settleChannel()`, verify the specific coin via `coins coinid:X relevant:true`. Only settle if the targeted query also confirms the coin is absent. Also added CUMULATIVE_EARNED to SELECT and `signalFE("SETTLE_CONFIRMED")` after successful settle, so earnings view auto-refreshes.
-- `_postSettleTx()`: removed `settleChannel()` call after txnpost. Shows "Settlement posted. Awaiting L1 confirmation…" instead. The SW's `checkOpenChannelsSettled()` will call `settleChannel()` on the next NEWBLOCK once the coin is verifiably spent, then signals SETTLE_CONFIRMED to the FE.
-
-**Files modified**: `public/service-workers/handlers/channel.handler.js`, `dapp/views/earnings.js`
-
-**AGENTS.md updated**: yes — §6 updated.
-
----
-
-> Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, Auto-Sync Platform Creator Route, Unify MLS DevTools, Fix Viewer and Publisher Reward Delivery, Fix Publisher Budget (Multi-Publisher Support), Fix Stale-Pending Publisher Channel Deadlock, Minima Foundation Fee (3%) + V4 Escrow Script Fixes, and all earlier) are archived in `docs/HISTORY.md §17`.
+> Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, Auto-Sync Platform Creator Route, Unify MLS DevTools, Fix Viewer and Publisher Reward Delivery, Fix Publisher Budget (Multi-Publisher Support), Fix Stale-Pending Publisher Channel Deadlock, Minima Foundation Fee (3%) + V4 Escrow Script Fixes, 2026-06-10 settlement fixes, and all earlier) are archived in `docs/HISTORY.md §17`.
 
 

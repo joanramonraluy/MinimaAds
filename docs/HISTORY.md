@@ -46,6 +46,20 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-10 — Fix false settlement on node re-sync + remove optimistic settleChannel
+
+**Task**: Two linked bugs around settlement:
+1. `checkOpenChannelsSettled()` could prematurely settle channels when `coins address:CHANNEL_SCRIPT_ADDRESS` returned an empty array transiently (e.g. during MiniDapp reinit / node re-sync). Result: CHANNEL_STATE → 'settled', CHANNEL_HISTORY populated, but coin still active on L1. Viewer's wallet never receives the reward.
+2. `_postSettleTx()` called `settleChannel()` optimistically after `txnpost` returns status:true, before L1 confirmation. If the tx fails to propagate, local DB is incorrectly marked 'settled' and the voucher disappears from the UI permanently.
+
+**Fix**:
+- `checkOpenChannelsSettled()`: before calling `settleChannel()`, verify the specific coin via `coins coinid:X relevant:true`. Only settle if the targeted query also confirms the coin is absent. Also added CUMULATIVE_EARNED to SELECT and `signalFE("SETTLE_CONFIRMED")` after successful settle, so earnings view auto-refreshes.
+- `_postSettleTx()`: removed `settleChannel()` call after txnpost. Shows "Settlement posted. Awaiting L1 confirmation…" instead. The SW's `checkOpenChannelsSettled()` will call `settleChannel()` on the next NEWBLOCK once the coin is verifiably spent, then signals SETTLE_CONFIRMED to the FE.
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`, `dapp/views/earnings.js`
+
+---
+
 ### Session: 2026-06-10 — Fix Earnings open channels count for creator/multi-role nodes
 
 **Task**: Open channels count showed other users' channels when creator switched to viewer/publisher mode.

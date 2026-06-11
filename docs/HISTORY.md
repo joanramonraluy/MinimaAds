@@ -46,6 +46,54 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-11 — Align Campaign Image Selector Button Layout
+
+**Task**: Align the file selector button and its label/text correctly inside the campaign image upload field. Previously, due to specificity override conflicts on `input:not([type="checkbox"]):not([type="radio"])` vs `input[type="file"]`, the padding wasn't applied correctly and the native button was touching the bottom boundary of the input box and misaligned.
+
+**Fix**:
+- **CSS Hierarchy Refinement**: Excluded `[type="file"]` from the general input field styling rule to prevent specificity clashes.
+- **Custom Box Styling**: Explicitly defined the layout for `input[type="file"]` using a cohesive border, border-radius, background, and custom `0.35rem 0.5rem` padding to keep the choose-file button and text perfectly centered without touching the container edges.
+
+**Files modified**: `public/index.html`
+
+---
+
+### Session: 2026-06-11 — Show CTA button when rendering ads on mobile in viewer & previews
+
+**Task**: Fix campaigns displayed in the viewer, developer/creator previews, and campaigns list details not showing the Call To Action (CTA) button on mobile (or container width < 480px) or having missing ad metadata (like images and CTA options) when opened from the system campaigns list. Parse visibility flags dynamically to prevent type coercion mismatch bugs.
+
+**Fix**:
+- **Mobile Force Full Layout**: Introduced `ad.force_full` flag in `renderer/renderAd.js`. When `force_full` is true, a responsive vertical card layout (image on top, text and button below) is rendered on narrow screens/containers instead of the image-only banner.
+- **Set force_full**: Enabled `force_full: true` on the rendering parameters inside `dapp/views/viewer.js` (viewer details view), `dapp/views/creator.js` (creator live preview and review preview), and `dapp/views/mycampaigns.js` (campaign card detail preview).
+- **Flag Parsing**: Parsed `show_title`, `show_body`, and `show_cta` via `parseInt(..., 10)` in `renderer/renderAd.js` and `sdk/index.js` mapping to ensure they are compared as numbers against strict `!== 0` constraints, avoiding H2 Hsql type-mismatch/coercion bugs.
+- **Full Ad Query in Campaigns List**: Added all missing `ADS` table columns (`CTA_LABEL`, `CTA_URL`, `IMAGE_DATA`, visibility flags, and colors/styling options) to the campaign list query in `dapp/views/campaigns.js`. This guarantees that launching `_openCampaign` from the "Campaigns" list has identical data and fully renders the ad, showing the CTA button/image.
+
+**Files modified**: `renderer/renderAd.js`, `sdk/index.js`, `dapp/views/viewer.js`, `dapp/views/creator.js`, `dapp/views/mycampaigns.js`, `dapp/views/campaigns.js`
+
+**AGENTS.md updated**: yes — §6 updated.
+
+---
+
+### Session: 2026-06-11 (continued) — Fix deferred publisher reward recovery from false settlement
+
+**Task**: Built-in publisher (user4) opened a publisher channel successfully but didn't receive deferred REWARD_VOUCHERs. Investigation found two issues:
+1. `_isBuiltinFid` check was too broad: skipped `_maybeGeneratePublisherVoucher()` for ALL built-in frames, even when a different viewer used the publisher's frame (should only skip when viewer IS the publisher).
+2. Deferred publisher rewards couldn't be replayed from falsely-settled channels: `checkPendingChannelOpens()` JOIN required `STATUS='open'`, but recovered channels had `STATUS='settled'` from prior false-positive settlement attempts.
+
+**Fix**:
+- **Builtin publisher voucher identity check** (commit `e2ca08b`): Replace `_isBuiltinFid` guard with viewer-identity check. Extract PK from `builtin:0X[PK]` and compare with viewer key — skip generation only when they match (viewer is the publisher, they self-dispatch).
+- **Deferred reward recovery** (commit `3918a3e`): 
+  - `checkPendingChannelOpens()` JOIN now includes `STATUS IN ('open', 'settled')` to find falsely-settled channels with pending deferred rewards.
+  - `_replayDeferredPublisherRewards()` detects falsely-settled channels (coin still active on-chain but STATUS='settled') and re-activates them to 'open' before dispatching the voucher TX. `swWaitForCoin()` remains the gatekeeper for legitimately settled channels.
+
+**Verification**: User4 (publisher) now receives 0.006 MINIMA (3 accumulated deferred rewards × 0.002) as REWARD_VOUCHER, correctly tracked in Earnings with "1 Pending settlement".
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`
+
+**AGENTS.md updated**: yes — §6 updated.
+
+---
+
 ### Session: 2026-06-10 — Fix false settlement on node re-sync + remove optimistic settleChannel
 
 **Task**: Two linked bugs around settlement:
@@ -1015,8 +1063,64 @@ Built-in snippets work because the publisher IS the viewer and sends their own P
 - `handleChannelOpenRequest()` viewer role (all 3 `openChannel()` call sites + corresponding `_swDispatchChannelOpen()` + stale-pending Tx2 retry): pass `frameId` from payload instead of `''`. Also added retroactive `UPDATE CHANNEL_STATE SET FRAME_ID` for existing open channels with empty FRAME_ID.
 - `_handleRewardRequestInner()` and `checkOnePendingVoucher()`: skip `_maybeGeneratePublisherVoucher()` when `channelFrameId` starts with `'builtin:'` — built-in publisher handles their own rewards; skipping prevents duplicate vouchers.
 
-**Files modified**: `public/service-workers/handlers/channel.handler.js`
+**Files modified**: `public/service-workers/handlers/channel.handler.js`, `sdk/index.js`
 
 **AGENTS.md updated**: yes — §6 updated.
 
+---
+
+### Session: 2026-06-11 — Fix built-in publisher reward not dispatched on channel open
+
+**Task**: Built-in publisher (user4) opened a publisher channel successfully but received no REWARD_VOUCHER. Root cause: `_publisherChannelFlow()` in the SDK opens a new channel (STATUS='pending') but discards the pending `amount`. When CHANNEL_OPEN arrives, `_doChannelOpenUpsert()` checks `PENDING_REWARD_<campaignId>` (which is never set by the publisher flow) and does nothing. The CHANNEL_OPENED signal had no `role` field so the SDK couldn't distinguish viewer from publisher channels.
+
+**Why built-in specifically**: Our earlier fix (`_isBuiltinFid` check in `_handleRewardRequestInner()`) correctly skips `_maybeGeneratePublisherVoucher()` for built-in frames to avoid duplicate vouchers. This means the creator never sends deferred rewards for built-in publishers — the publisher must self-dispatch via REWARD_REQUEST.
+
+**Fix**:
+- `channel.handler.js`: added `role` field to the CHANNEL_OPENED signal from `_doChannelOpenUpsert()`.
+- `sdk/index.js` — `_publisherChannelFlow()`: for built-in frames, stores pending `amount` in `PENDING_PUB_REWARD_<campaignId>` keypair when opening a new channel or accumulating while pending.
+- `sdk/index.js` — `_onChannelOpenedCore()`: when `role='publisher'`, retrieves `PENDING_PUB_REWARD_<campaignId>` and dispatches `_sendPublisherRewardRequest()`. Non-builtin frames still handled by creator-side deferred replay.
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`, `sdk/index.js`
+
+**AGENTS.md updated**: yes — §6 updated.
+
+---
+
+### Session: 2026-06-11 — Redundant Profile item, Settings Redirection Flow, Scroll Reset, Viewer Status, & Campaign Redirect
+
+**Task**:
+1. Remove redundant "Profile" option from vertical drawer menu.
+2. Fix jarring page reload/database reset when registering a permanent Maxima route in Settings.
+3. Fix window not scrolling to top on route changes (resulting in home page loading scrolled down).
+4. Update ad viewer status message to green "Reward received! +X.XX MINIMA" when payment voucher arrives.
+5. Automatically redirect user to "My Campaigns" view after successfully creating/publishing a campaign.
+
+**Fix**:
+- **UI & Drawer cleanups**: Removed redundant drawer Profile button from `public/index.html` and unused `openProfileFromDrawer` from `dapp/app.js`.
+- **Settings Redirection & Scroll Reset**: Replaced `location.reload()` callback with SPA routing (`goHome()`) in `dapp/views/settings-maxima-routes.js`. Added `window.scrollTo(0, 0)` at the beginning of `doRender()` in `dapp/app.js` to reset viewport scroll position on route/page transitions.
+- **Viewer Status Update**: Implemented `onViewerVoucherReceived` in `dapp/views/viewer.js` and wired it to `VOUCHER_RECEIVED` event in `dapp/app.js` to change the status element's text and color upon payment voucher confirmation.
+- **Campaign Redirect**: Modified `saveCampaignAndBroadcast` in `dapp/views/creator.js` to show a `"Campaign published successfully. Redirecting…"` message and perform a delayed SPA redirect (`window.location.hash = '#mycampaigns'`) after 1.5 seconds.
+
+**Files modified**: `public/index.html`, `dapp/app.js`, `dapp/views/settings-maxima-routes.js`, `dapp/views/viewer.js`, `dapp/views/creator.js`, `MinimaAds.mds.zip`
+
+**AGENTS.md updated**: yes — §6 updated.
+
+---
+
+### Session: 2026-06-11 — Support Immediate Viewer & Creator Error Messages for Reward Limits
+
+**Task**: Display error/status messages immediately on the viewer screen if reward limits (campaign limits, daily limit, cooldown) are hit when opening the campaign details view. Previously, limits were only checked when requesting a reward, causing silent failures, and clicking the ad still attempted to process the click reward. Also, fix the viewer details "Back" button failing to return to the campaigns list in viewer mode, and display a "Limit Reached" badge on the campaigns list when the campaign's viewer reward limit is exceeded.
+
+**Fix**:
+- **Viewer-Side Pre-Validation**: Modified `_startDetailAd()` in `dapp/views/viewer.js` to call `validateView()` before initiating the 3-second timer and progress bar.
+- **Immediate Rejection UI**: If validation fails, the progress bar and timer are skipped entirely, and the status text displays the rejection reason (e.g. cooldown, daily limit, campaign reward limit reached) in red immediately.
+- **Enhanced Limit Rejection Mapping**: Added support for the reason `'campaign reward limit reached for this user'` in both the pre-check and reward feedback UI, rendering errors in red (`var(--pico-del-color,#c0392b)`).
+- **Core Database Validation**: Updated `validateView` and `validateClick` inside `core/validation.js` to query `CHANNEL_STATE` for the viewer key and campaign ID. If the cumulative rewards (`CUMULATIVE_EARNED` + reward rate) exceed the channel `MAX_AMOUNT`, return `{ valid: false, reason: 'campaign reward limit reached for this user' }`.
+- **Bypass Invalid Click Rewards**: Added a `rewardAllowed` flag to `_viewerState` in `dapp/views/viewer.js`. When a campaign is invalid, clicking the ad link simply opens the URL and returns to the list without broadcasting a click reward request or showing the processing status.
+- **Back Button Routing**: Fixed `_goBackToList()` in `dapp/views/viewer.js` which attempted to update `window.location.hash = 'campaigns'`. Because the hash was already `'campaigns'` (rendered inline), no hashchange fired and the DApp remained stuck. Replaced it with an explicit call to the global router `doRender()`.
+- **Campaign List Limit Badges**: Updated `mkStatusBadge` in `dapp/views/ui-helpers.js` to map status `'completed'` to a red `"Limit Reached"` badge. Joined `CHANNEL_STATE` in the campaign list queries (`dapp/views/campaigns.js` and `dapp/views/viewer.js`) and appended the red `"Limit Reached"` badge next to the status badge if the viewer's cumulative rewards for the active channel exceed the max amount.
+
+**Files modified**: `core/validation.js`, `dapp/views/viewer.js`, `dapp/views/campaigns.js`, `dapp/views/ui-helpers.js`, `dapp/views/help.js`, `MinimaAds.mds.zip`
+
+**AGENTS.md updated**: yes — §6 updated.
 

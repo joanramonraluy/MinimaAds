@@ -61,7 +61,7 @@ function setNumberFormat(fmt) {
 }
 
 var MODE_VIEWS = {
-  viewer:    ['campaigns', 'earnings'],
+  viewer:    ['campaigns', 'earnings', 'campaign-detail'],
   creator:   ['creator', 'mycampaigns', 'campaigns'],
   publisher: ['frames', 'earnings', 'campaigns']
 };
@@ -75,8 +75,25 @@ function generateUID() {
 
 function currentRoute() {
   var h = (window.location.hash || '').replace(/^#/, '');
-  if (h === 'creator' || h === 'mycampaigns' || h === 'viewer' || h === 'earnings' || h === 'frames' || h === 'campaigns' || h === 'settings' || h === 'settings/maxima-routes' || h === 'profile' || h === 'help') { return h; }
+  var base = h.split('?')[0];
+  if (base === 'creator' || base === 'mycampaigns' || base === 'viewer' || base === 'earnings' || base === 'frames' || base === 'campaigns' || base === 'settings' || base === 'settings/maxima-routes' || base === 'profile' || base === 'help' || base === 'campaign-detail') { return base; }
   return 'viewer';
+}
+
+function getHashParams() {
+  var h = (window.location.hash || '').replace(/^#/, '');
+  var parts = h.split('?');
+  if (parts.length < 2) { return {}; }
+  var query = parts[1];
+  var pairs = query.split('&');
+  var params = {};
+  for (var i = 0; i < pairs.length; i++) {
+    var pair = pairs[i].split('=');
+    if (pair[0]) {
+      params[decodeURIComponent(pair[0])] = decodeURIComponent(pair[1] || '');
+    }
+  }
+  return params;
 }
 
 function renderNav() {
@@ -112,7 +129,7 @@ function renderNav() {
     var a = document.createElement('a');
     a.href = def.href;
     a.textContent = def.label;
-    if (route === view) { a.setAttribute('aria-current', 'page'); }
+    if (route === view || (view === 'campaigns' && route === 'campaign-detail')) { a.setAttribute('aria-current', 'page'); }
     li.appendChild(a);
     linksEl.appendChild(li);
   }
@@ -159,6 +176,7 @@ function setStatus(text) {
 }
 
 function doRender() {
+  window.scrollTo(0, 0);
   renderNav();
   var root = document.getElementById('app');
   if (!root) { return; }
@@ -203,6 +221,8 @@ function doRender() {
     renderMyCampaigns(root);
   } else if (route === 'campaigns' && typeof renderCampaigns === 'function') {
     renderCampaigns(root);
+  } else if (route === 'campaign-detail' && typeof renderCampaignDetail === 'function') {
+    renderCampaignDetail(root);
   } else if (typeof renderViewer === 'function') {
     renderViewer(root);
   } else {
@@ -1766,10 +1786,6 @@ function setModeFromDrawer(mode) {
   setMode(mode);
 }
 
-function openProfileFromDrawer() {
-  closeDrawer();
-  window.location.hash = 'profile';
-}
 
 function openSettingsView() {
   closeDrawer();

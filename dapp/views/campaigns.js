@@ -78,9 +78,15 @@ function _loadCampaigns() {
   listEl.appendChild(loading);
 
   var sql = 'SELECT c.ID, c.TITLE, c.CREATOR_ADDRESS, c.BUDGET_TOTAL, c.BUDGET_REMAINING, c.REWARD_VIEW, '
-    + 'c.REWARD_CLICK, c.STATUS, c.PUBLISHER_REWARD_VIEW, c.CREATOR_MX, c.MAX_PUBLISHER_BUDGET, c.PUBLISHER_BUDGET_SPENT, c.VIEWER_BUDGET_SPENT, c.PUBLISHER_BUDGET_EARNED, '
-    + 'a.TITLE AS AD_TITLE, a.BODY AS AD_BODY '
-    + 'FROM CAMPAIGNS c LEFT JOIN ADS a ON UPPER(a.CAMPAIGN_ID) = UPPER(c.ID)';
+    + 'c.REWARD_CLICK, c.STATUS, c.MAX_VIEWER_REWARD, c.EXPIRES_AT, c.PUBLISHER_REWARD_VIEW, c.CREATOR_MX, c.MAX_PUBLISHER_BUDGET, c.PUBLISHER_BUDGET_SPENT, c.VIEWER_BUDGET_SPENT, c.PUBLISHER_BUDGET_EARNED, '
+    + 'a.ID AS AD_ID, a.TITLE AS AD_TITLE, a.BODY AS AD_BODY, '
+    + 'a.CTA_LABEL AS AD_CTA_LABEL, a.CTA_URL AS AD_CTA_URL, '
+    + 'a.IMAGE_DATA, a.SHOW_TITLE, a.SHOW_BODY, a.SHOW_CTA, '
+    + 'a.BG_COLOR, a.TEXT_COLOR, a.IMAGE_POSITION, a.IMAGE_ZOOM, a.IMAGE_WIDTH_PCT, '
+    + 'cs.CUMULATIVE_EARNED AS USER_CUMULATIVE, cs.MAX_AMOUNT AS USER_MAX_AMOUNT, cs.STATUS AS USER_CHANNEL_STATUS '
+    + 'FROM CAMPAIGNS c '
+    + 'LEFT JOIN ADS a ON UPPER(a.CAMPAIGN_ID) = UPPER(c.ID) '
+    + "LEFT JOIN CHANNEL_STATE cs ON UPPER(cs.CAMPAIGN_ID) = UPPER(c.ID) AND UPPER(cs.VIEWER_KEY) = UPPER('" + escapeSql(MY_ADDRESS || '') + "') AND cs.ROLE = 'viewer'";
   if (_campaignsFilter === 'active') {
     sql += " WHERE UPPER(c.STATUS) = 'ACTIVE'";
   }
@@ -204,7 +210,7 @@ function _buildCampaignsRow(campaign) {
   var row = document.createElement(isClickable ? 'button' : 'div');
   if (isClickable) {
     row.type = 'button';
-    row.addEventListener('click', function() { _openCampaign(campaign); });
+    row.addEventListener('click', function() { window.location.hash = 'campaign-detail?id=' + campaign.ID; });
     row.addEventListener('mouseover', function() {
       row.style.background = document.documentElement.getAttribute('data-theme') === 'dark'
         ? 'rgba(255,255,255,.06)' : 'rgba(15,23,42,.05)';
@@ -242,6 +248,20 @@ function _buildCampaignsRow(campaign) {
 
   var statusBadge = mkStatusBadge(campaign.STATUS);
   titleRow.appendChild(statusBadge);
+
+  if (isViewer && campaign.USER_CHANNEL_STATUS) {
+    var cStatus = campaign.USER_CHANNEL_STATUS || '';
+    if (cStatus === 'open' || cStatus === 'pending') {
+      var cumulative = parseFloat(campaign.USER_CUMULATIVE) || 0;
+      var maxAmount = parseFloat(campaign.USER_MAX_AMOUNT) || 0;
+      var reward = parseFloat(campaign.REWARD_VIEW) || 0;
+      if (cumulative + reward > maxAmount) {
+        var limitBadge = mkStatusBadge('completed');
+        titleRow.appendChild(limitBadge);
+      }
+    }
+  }
+
   textDiv.appendChild(titleRow);
 
   var bodyRaw = ((campaign.AD_BODY || '') + '').replace(/\s+/g, ' ').trim();

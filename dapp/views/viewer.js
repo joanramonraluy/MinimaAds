@@ -9,7 +9,8 @@ var _viewerState = {
   viewTimerId: 0,
   progressId: 0,
   viewTracked: false,
-  listRendering: false
+  listRendering: false,
+  rewardAllowed: false
 };
 
 function renderViewer(root) {
@@ -17,6 +18,7 @@ function renderViewer(root) {
   _viewerState.mode = 'list';
   _viewerState.campaign = null;
   _viewerState.viewTracked = false;
+  _viewerState.rewardAllowed = false;
   root.innerHTML = '';
   _buildListShell(root);
   _loadAndRenderList();
@@ -94,8 +96,10 @@ function _loadAndRenderList() {
       + "a.ID AS AD_ID, a.TITLE AS AD_TITLE, a.BODY AS AD_BODY, "
       + "a.CTA_LABEL AS AD_CTA_LABEL, a.CTA_URL AS AD_CTA_URL, "
       + "a.IMAGE_DATA, a.SHOW_TITLE, a.SHOW_BODY, a.SHOW_CTA, "
-      + "a.BG_COLOR, a.TEXT_COLOR, a.IMAGE_POSITION, a.IMAGE_ZOOM, a.IMAGE_WIDTH_PCT "
+      + "a.BG_COLOR, a.TEXT_COLOR, a.IMAGE_POSITION, a.IMAGE_ZOOM, a.IMAGE_WIDTH_PCT, "
+      + "cs.CUMULATIVE_EARNED AS USER_CUMULATIVE, cs.MAX_AMOUNT AS USER_MAX_AMOUNT, cs.STATUS AS USER_CHANNEL_STATUS "
       + "FROM CAMPAIGNS c LEFT JOIN ADS a ON UPPER(a.CAMPAIGN_ID) = UPPER(c.ID) "
+      + "LEFT JOIN CHANNEL_STATE cs ON UPPER(cs.CAMPAIGN_ID) = UPPER(c.ID) AND UPPER(cs.VIEWER_KEY) = UPPER('" + escapeSql(MY_ADDRESS || '') + "') AND cs.ROLE = 'viewer' "
       + "WHERE UPPER(c.STATUS) = 'ACTIVE'";
 
     sqlQuery(sql, function(err, rows) {
@@ -181,12 +185,28 @@ function _buildCampaignRow(campaign, contact) {
   var textDiv = document.createElement('div');
   textDiv.style.cssText = 'flex:1;min-width:0;';
 
-  var titleEl = document.createElement('div');
-  titleEl.style.cssText = 'font-weight:600;font-size:.95rem;'
-    + 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-  titleEl.textContent = DOMPurify.sanitize(campaign.AD_TITLE || campaign.TITLE || 'Untitled');
+  var titleRow = document.createElement('div');
+  titleRow.style.cssText = 'display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;';
 
-  textDiv.appendChild(titleEl);
+  var titleEl = document.createElement('div');
+  titleEl.style.cssText = 'font-weight:600;font-size:.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+  titleEl.textContent = DOMPurify.sanitize(campaign.AD_TITLE || campaign.TITLE || 'Untitled');
+  titleRow.appendChild(titleEl);
+
+  if (campaign.USER_CHANNEL_STATUS) {
+    var cStatus = campaign.USER_CHANNEL_STATUS || '';
+    if (cStatus === 'open' || cStatus === 'pending') {
+      var cumulative = parseFloat(campaign.USER_CUMULATIVE) || 0;
+      var maxAmount = parseFloat(campaign.USER_MAX_AMOUNT) || 0;
+      var reward = parseFloat(campaign.REWARD_VIEW) || 0;
+      if (cumulative + reward > maxAmount) {
+        var limitBadge = mkStatusBadge('completed');
+        titleRow.appendChild(limitBadge);
+      }
+    }
+  }
+
+  textDiv.appendChild(titleRow);
 
   if (contact && contact.name) {
     var creatorEl = document.createElement('div');
@@ -235,7 +255,7 @@ function _buildCampaignRow(campaign, contact) {
     row.style.paddingLeft = '.85rem';
     row.style.borderLeftColor = 'transparent';
   });
-  row.addEventListener('click', function() { _openCampaign(campaign); });
+  row.addEventListener('click', function() { window.location.hash = 'campaign-detail?id=' + campaign.ID; });
 
   return row;
 }
@@ -252,6 +272,7 @@ function _openCampaign(campaign) {
   _viewerState.mode = 'detail';
   _viewerState.campaign = campaign;
   _viewerState.viewTracked = false;
+  _viewerState.rewardAllowed = false;
 
   var root = document.getElementById('app');
   if (!root) { return; }
@@ -321,13 +342,51 @@ function _startDetailAd() {
   if (!campaign) { return; }
   if (typeof MinimaAds === 'undefined' || typeof MinimaAds.render !== 'function') { return; }
 
+  campaign.force_full = true;
   MinimaAds.render(campaign, 'ma-ad-slot');
   _wireDetailInteractions(campaign);
-  _startProgressBar();
 
-  _viewerState.viewTimerId = setTimeout(function() {
-    _trackDetailView(campaign);
-  }, LIMITS.MIN_VIEW_DURATION_MS);
+  var statusEl = document.getElementById('ma-viewer-status');
+  if (statusEl) {
+    statusEl.textContent = 'Checking reward status...';
+    statusEl.style.color = 'var(--pico-muted-color,#6c757d)';
+  }
+
+  validateView(campaign.ID, MY_ADDRESS, function(result) {
+    if (!result.valid) {
+      _viewerState.rewardAllowed = false;
+      if (statusEl) {
+        var reasonMsg = 'Reward not available';
+        if (result.reason === 'cooldown active') {
+          reasonMsg = 'You must wait before earning again from this campaign.';
+        } else if (result.reason === 'daily view limit reached') {
+          reasonMsg = 'You\'ve reached the daily view limit for this campaign.';
+        } else if (result.reason === 'campaign reward limit reached for this user') {
+          reasonMsg = 'You have reached the maximum reward limit for this campaign.';
+        } else if (result.reason === 'insufficient budget') {
+          reasonMsg = 'Campaign has insufficient budget for this reward.';
+        } else if (result.reason === 'campaign not active') {
+          reasonMsg = 'This campaign is no longer active.';
+        } else if (result.reason === 'creator cannot earn from own campaign') {
+          reasonMsg = 'You cannot earn rewards from your own campaigns.';
+        } else if (result.reason === 'db error') {
+          reasonMsg = 'System error processing reward.';
+        }
+        statusEl.textContent = reasonMsg;
+        statusEl.style.color = 'var(--pico-del-color,#c0392b)';
+      }
+      return;
+    }
+
+    _viewerState.rewardAllowed = true;
+    if (statusEl) {
+      statusEl.textContent = '';
+    }
+    _startProgressBar();
+    _viewerState.viewTimerId = setTimeout(function() {
+      _trackDetailView(campaign);
+    }, LIMITS.MIN_VIEW_DURATION_MS);
+  });
 }
 
 function _trackDetailView(campaign) {
@@ -358,6 +417,12 @@ function _wireDetailInteractions(campaign) {
     links[i].addEventListener('click', function(e) {
       e.preventDefault();
       var href = e.currentTarget.getAttribute('href');
+
+      if (!_viewerState.rewardAllowed) {
+        if (href) { window.open(href, '_blank', 'noopener'); }
+        return;
+      }
+
       var statusEl = document.getElementById('ma-viewer-status');
       if (statusEl) { statusEl.textContent = 'Processing reward…'; }
       var payload = {
@@ -368,7 +433,6 @@ function _wireDetailInteractions(campaign) {
       };
       window.MDS.comms.broadcast(JSON.stringify(payload), function() {
         if (href) { window.open(href, '_blank', 'noopener'); }
-        _goBackToList();
       });
     });
   }
@@ -379,18 +443,9 @@ function _goBackToList() {
   _viewerState.mode = 'list';
   _viewerState.campaign = null;
   _viewerState.viewTracked = false;
+  _viewerState.rewardAllowed = false;
 
-  // Viewer mode uses Campaigns as landing page
-  if (typeof _activeMode !== 'undefined' && _activeMode === 'viewer') {
-    window.location.hash = 'campaigns';
-    return;
-  }
-
-  var root = document.getElementById('app');
-  if (!root) { return; }
-  root.innerHTML = '';
-  _buildListShell(root);
-  _loadAndRenderList();
+  window.location.hash = 'campaigns';
 }
 
 // ── Progress bar ───────────────────────────────────────────────────────────────
@@ -565,6 +620,8 @@ function onRewardValidation(result) {
       reasonMsg = 'You\'ve reached the daily view limit for this campaign.';
     } else if (result.reason === 'daily click limit reached') {
       reasonMsg = 'You\'ve reached the daily click limit for this campaign.';
+    } else if (result.reason === 'campaign reward limit reached for this user') {
+      reasonMsg = 'You have reached the maximum reward limit for this campaign.';
     } else if (result.reason === 'insufficient budget') {
       reasonMsg = 'Campaign has insufficient budget for this reward.';
     } else if (result.reason === 'campaign not active') {
@@ -575,6 +632,7 @@ function onRewardValidation(result) {
       reasonMsg = 'System error processing reward.';
     }
     statusEl.textContent = reasonMsg;
+    statusEl.style.color = 'var(--pico-del-color,#c0392b)';
   }
 }
 
@@ -589,8 +647,45 @@ function onViewerVoucherReceived(parsed) {
   }
   var statusEl = document.getElementById('ma-viewer-status');
   if (statusEl) {
-    var amt = parseFloat(_viewerState.campaign.REWARD_VIEW) || 0;
+    var rType = parsed.reward_type || 'view';
+    var amt = (rType === 'click')
+      ? (parseFloat(_viewerState.campaign.REWARD_CLICK) || 0)
+      : (parseFloat(_viewerState.campaign.REWARD_VIEW) || 0);
     statusEl.textContent = 'Reward received! +' + fmtAmt(amt, 3) + ' MINIMA';
     statusEl.style.color = '#10b981';
   }
+}
+
+function renderCampaignDetail(root) {
+  _clearViewerTimers();
+  var params = typeof getHashParams === 'function' ? getHashParams() : {};
+  var id = params.id;
+  if (!id) {
+    window.location.hash = 'campaigns';
+    return;
+  }
+  root.innerHTML = '';
+  var loading = mkLoading('Loading campaign details…');
+  loading.style.padding = '3rem 1rem';
+  root.appendChild(loading);
+
+  if (typeof getCampaign !== 'function') {
+    var errP = document.createElement('p');
+    errP.style.cssText = 'color:var(--pico-del-color,#c0392b);padding:1rem;text-align:center;';
+    errP.textContent = 'System error: campaign service not loaded.';
+    root.appendChild(errP);
+    return;
+  }
+
+  getCampaign(id, function(err, campaign) {
+    if (err || !campaign) {
+      root.innerHTML = '';
+      var errP = document.createElement('p');
+      errP.style.cssText = 'color:var(--pico-del-color,#c0392b);padding:1rem;text-align:center;';
+      errP.textContent = 'Campaign not found or error loading campaign details.';
+      root.appendChild(errP);
+      return;
+    }
+    _openCampaign(campaign);
+  });
 }

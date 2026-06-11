@@ -220,14 +220,15 @@
         cta_label: ad.AD_CTA_LABEL || ad.CTA_LABEL,
         cta_url: ad.AD_CTA_URL || ad.CTA_URL,
         image_data: ad.AD_IMAGE_DATA || ad.IMAGE_DATA || ad.image_data || null,
-        show_title: ad.AD_SHOW_TITLE !== undefined ? ad.AD_SHOW_TITLE : (ad.SHOW_TITLE !== undefined ? ad.SHOW_TITLE : 1),
-        show_body:  ad.AD_SHOW_BODY !== undefined ? ad.AD_SHOW_BODY : (ad.SHOW_BODY !== undefined ? ad.SHOW_BODY : 1),
-        show_cta:   ad.AD_SHOW_CTA !== undefined ? ad.AD_SHOW_CTA : (ad.SHOW_CTA !== undefined ? ad.SHOW_CTA : 1),
+        show_title: ad.AD_SHOW_TITLE !== undefined ? parseInt(ad.AD_SHOW_TITLE, 10) : (ad.SHOW_TITLE !== undefined ? parseInt(ad.SHOW_TITLE, 10) : 1),
+        show_body:  ad.AD_SHOW_BODY !== undefined ? parseInt(ad.AD_SHOW_BODY, 10) : (ad.SHOW_BODY !== undefined ? parseInt(ad.SHOW_BODY, 10) : 1),
+        show_cta:   ad.AD_SHOW_CTA !== undefined ? parseInt(ad.AD_SHOW_CTA, 10) : (ad.SHOW_CTA !== undefined ? parseInt(ad.SHOW_CTA, 10) : 1),
         bg_color:       ad.AD_BG_COLOR       || ad.BG_COLOR       || ad.bg_color       || '#ffffff',
         text_color:     ad.AD_TEXT_COLOR     || ad.TEXT_COLOR     || ad.text_color     || '#111111',
         image_position:  ad.AD_IMAGE_POSITION || ad.IMAGE_POSITION || ad.image_position || 'center',
         image_zoom:      parseFloat(ad.AD_IMAGE_ZOOM || ad.IMAGE_ZOOM || ad.image_zoom) || 1.0,
-        image_width_pct: parseInt(ad.AD_IMAGE_WIDTH_PCT || ad.IMAGE_WIDTH_PCT || ad.image_width_pct, 10) || 40
+        image_width_pct: parseInt(ad.AD_IMAGE_WIDTH_PCT || ad.IMAGE_WIDTH_PCT || ad.image_width_pct, 10) || 40,
+        force_full:     ad.force_full || false
       };
     }
     return renderAd(renderable, containerId);
@@ -610,7 +611,8 @@
 
   // --- Channel flow orchestration --------------------------------------
 
-  function _openNewChannel(campaign, eventId, amount, cb) {
+  function _openNewChannel(campaign, eventId, amount, cb, rewardType) {
+    var rType = rewardType || 'view';
     MDS.cmd('getaddress', function(addrRes) {
       var viewerWalletAddr = (addrRes && addrRes.status && addrRes.response && addrRes.response.address)
         ? addrRes.response.address : '';
@@ -637,7 +639,7 @@
               return;
             }
             console.log('[SDK] CHANNEL_STATE(pending) written, storing pending event:' + eventId);
-            var info = { cumulative: amount, viewer_key: viewerKey, amount: amount };
+            var info = { cumulative: amount, viewer_key: viewerKey, amount: amount, reward_type: rType };
             _addPending(campaign.ID, eventId, info, function() {
               _sendToCreator(creatorRoute, {
                 type: 'CHANNEL_OPEN_REQUEST',
@@ -659,10 +661,11 @@
   // Channel is still 'pending' on our side. Accumulate the event under the
   // highest running cumulative we've already queued so the flush on
   // CHANNEL_OPENED replays REWARD_REQUESTs with monotonic cumulatives.
-  function _accumulatePending(campaignId, viewerKey, eventId, amount, cb) {
+  function _accumulatePending(campaignId, viewerKey, eventId, amount, cb, rewardType) {
+    var rType = rewardType || 'view';
     _loadPendingIndex(campaignId, function(list) {
       if (list.length === 0) {
-        _addPending(campaignId, eventId, { cumulative: amount, viewer_key: viewerKey, amount: amount }, cb);
+        _addPending(campaignId, eventId, { cumulative: amount, viewer_key: viewerKey, amount: amount, reward_type: rType }, cb);
         return;
       }
       var maxCum = 0;
@@ -677,7 +680,7 @@
             got++;
             if (got === list.length) {
               var newCum = maxCum + amount;
-              _addPending(campaignId, eventId, { cumulative: newCum, viewer_key: viewerKey, amount: amount }, cb);
+              _addPending(campaignId, eventId, { cumulative: newCum, viewer_key: viewerKey, amount: amount, reward_type: rType }, cb);
             }
           });
         })(list[i]);
@@ -685,23 +688,26 @@
     });
   }
 
-  function _sendRewardRequest(campaign, channel, eventId, amount, cb) {
+  function _sendRewardRequest(campaign, channel, eventId, amount, cb, rewardType) {
+    var rType = rewardType || 'view';
     var newCum = (parseFloat(channel.CUMULATIVE_EARNED) || 0) + amount;
     console.log('[SDK] REWARD_REQUEST campaign:' + campaign.ID + ' event:' + eventId + ' cumulative:' + newCum);
-    var info = { cumulative: newCum, viewer_key: channel.VIEWER_KEY, amount: amount };
+    var info = { cumulative: newCum, viewer_key: channel.VIEWER_KEY, amount: amount, reward_type: rType };
     _addPending(campaign.ID, eventId, info, function() {
       var req = {
         type: 'REWARD_REQUEST',
         campaign_id: campaign.ID,
         viewer_key: channel.VIEWER_KEY,
         event_id: eventId,
-        cumulative: newCum
+        cumulative: newCum,
+        reward_type: rType
       };
       _sendToCreator(channel.CREATOR_MX, req, function() { if (cb) { cb(); } });
     });
   }
 
-  function _channelFlow(campaign, eventId, amount, finalCb) {
+  function _channelFlow(campaign, eventId, amount, finalCb, rewardType) {
+    var rType = rewardType || 'view';
     _getMyChannel(campaign.ID, function(err, channel) {
       if (err) {
         console.log('[SDK] _getMyChannel error:', err);
@@ -710,16 +716,16 @@
       }
       if (!channel) {
         console.log('[SDK] no channel yet for campaign:' + campaign.ID + ' → opening');
-        _openNewChannel(campaign, eventId, amount, finalCb);
+        _openNewChannel(campaign, eventId, amount, finalCb, rType);
         return;
       }
       console.log('[SDK] channel status:' + channel.STATUS + ' campaign:' + campaign.ID + ' event:' + eventId + ' amount:' + amount);
       if (channel.STATUS === 'pending') {
-        _accumulatePending(campaign.ID, channel.VIEWER_KEY, eventId, amount, finalCb);
+        _accumulatePending(campaign.ID, channel.VIEWER_KEY, eventId, amount, finalCb, rType);
         return;
       }
       if (channel.STATUS === 'open') {
-        _sendRewardRequest(campaign, channel, eventId, amount, finalCb);
+        _sendRewardRequest(campaign, channel, eventId, amount, finalCb, rType);
         return;
       }
       // settled/expired — nothing to do; the reward is recorded locally only.
@@ -909,7 +915,7 @@
             campaign_id: parsed.campaign_id,
             ad_id: adId || '',
             user_address: parsed.viewer_key,
-            type: 'view',
+            type: parsed.reward_type || 'view',
             amount: amount
           };
           createRewardEvent(params, function() {
@@ -970,7 +976,7 @@
           function doCreateReward() {
             var eventId = Date.now().toString(16) + '-' + Math.floor(Math.random() * 0xFFFFFFFF).toString(16);
             // Fire-and-forget viewer channel flow.
-            _channelFlow(campaign, eventId, amount, function() {});
+            _channelFlow(campaign, eventId, amount, function() {}, type);
             // Fire-and-forget publisher reward flow when R_p > 0 and frame is set.
             if (parseFloat(campaign.PUBLISHER_REWARD_VIEW) > 0 && type === 'view' && _activeFrameId) {
               _publisherChannelFlow(campaign, _activeFrameId, parseFloat(campaign.PUBLISHER_REWARD_VIEW), function() {});

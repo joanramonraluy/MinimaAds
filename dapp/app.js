@@ -180,7 +180,8 @@ function setStatus(text) {
 function startNetworkStatusMonitoring() {
   console.log('[STATUS] Starting network status monitoring');
   if (_statusCheckInterval) { console.log('[STATUS] Already monitoring'); return; }
-  _statusCheckInterval = setInterval(function() {
+
+  function doStatusCheck() {
     MDS.cmd('status', function(res) {
       console.log('[STATUS] status response:', res);
       var peers = (res && res.response && res.response.network) ? res.response.network.connected : -1;
@@ -188,35 +189,36 @@ function startNetworkStatusMonitoring() {
       console.log('[STATUS] peers:', peers, 'connected:', connected);
       if (connected !== _networkConnected) {
         _networkConnected = connected;
+        console.log('[STATUS] Network status changed to:', connected ? 'connected' : 'disconnected');
         updateStatusBar();
       }
     });
-  }, 10000);
-  MDS.cmd('status', function(res) {
-    console.log('[STATUS] Initial status response:', res);
-    var peers = (res && res.response && res.response.network) ? res.response.network.connected : -1;
-    var connected = peers > 0;
-    console.log('[STATUS] Initial peers:', peers, 'connected:', connected);
-    _networkConnected = connected;
-    updateStatusBar();
-  });
+  }
+
+  doStatusCheck();
+  _statusCheckInterval = setInterval(doStatusCheck, 10000);
 }
 
 function updateStatusBar() {
   var statusEl = document.getElementById('ma-status-text');
   var pulseEl = document.querySelector('.ma-status-pulse');
   console.log('[STATUS] Updating bar - connected:', _networkConnected, 'statusEl:', !!statusEl, 'pulseEl:', !!pulseEl);
+
   if (statusEl) {
     statusEl.textContent = _networkConnected ? 'Connected to Minima' : 'Disconnected from Minima';
+    console.log('[STATUS] Updated status text to:', statusEl.textContent);
+  } else {
+    console.log('[STATUS] ma-status-text element not found!');
   }
+
   if (pulseEl) {
-    if (_networkConnected) {
-      pulseEl.style.backgroundColor = '#10b981';
-      pulseEl.style.boxShadow = '0 0 0 0 rgba(16,185,129,0.4)';
-    } else {
-      pulseEl.style.backgroundColor = '#ef4444';
-      pulseEl.style.boxShadow = '0 0 0 0 rgba(239,68,68,0.4)';
-    }
+    var newBgColor = _networkConnected ? '#10b981' : '#ef4444';
+    var newBoxShadow = _networkConnected ? '0 0 0 0 rgba(16,185,129,0.4)' : '0 0 0 0 rgba(239,68,68,0.4)';
+    pulseEl.style.backgroundColor = newBgColor;
+    pulseEl.style.boxShadow = newBoxShadow;
+    console.log('[STATUS] Updated pulse color to:', newBgColor);
+  } else {
+    console.log('[STATUS] ma-status-pulse element not found!');
   }
 }
 

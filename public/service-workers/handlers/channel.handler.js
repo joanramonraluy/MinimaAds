@@ -407,7 +407,8 @@ function _doChannelOpenUpsert(campaignId, viewerKey, role, channelCoinId, maxAmo
       signalFE("CHANNEL_OPENED", {
         campaign_id:    campaignId,
         channel_coinid: channelCoinId,
-        max_amount:     maxAmount
+        max_amount:     maxAmount,
+        role:           role
       });
       MDS.keypair.get("PENDING_REWARD_" + campaignId, function(prRes) {
         if (!prRes || !prRes.status || !prRes.value) { return; }

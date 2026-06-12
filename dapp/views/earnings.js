@@ -16,7 +16,8 @@ function renderEarnings(root) {
   // 3 stat cards in a row
   var summaryRow = document.createElement('div');
   summaryRow.id = 'ma-earnings-summary';
-  summaryRow.style.cssText = 'display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1.5rem;padding:.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(0,0,0,0.015);border-left:3px solid #27ae60;';
+  summaryRow.className = 'ma-stat-grid cols-3';
+  summaryRow.style.cssText = 'margin-bottom:1.5rem;padding:.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(0,0,0,0.015);border-left:3px solid #27ae60;';
 
   var totalCard = mkStatCard('Total earned', '—');
   totalCard.id = 'ma-stat-total';

@@ -42,8 +42,32 @@
     /* ── Settings UI ──────────────────────────────────────────────────── */
     .ma-accent-swatch { width: 2.2rem; height: 2.2rem; border-radius: 50%; border: 2.5px solid transparent; cursor: pointer; padding: 0; margin: 0; flex-shrink: 0; }
     .ma-accent-swatch.active { box-shadow: 0 0 0 3px var(--pico-background-color,#fff), 0 0 0 5.5px currentColor; }
-    .ma-theme-mode-btn { flex: 1; width: auto; margin: 0; }
-    .ma-theme-mode-btn.active { background: var(--pico-primary-background,#6366f1) !important; color: #fff !important; border-color: var(--pico-primary-border,#6366f1) !important; font-weight: 600; }
+    .ma-theme-mode-btn {
+      flex: 1;
+      width: auto;
+      margin: 0;
+      background: var(--pico-card-sectionning-background-color, #f0f4f8) !important;
+      border: 2px solid var(--pico-primary, #6366f1) !important;
+      color: var(--pico-primary, #6366f1) !important;
+      transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease !important;
+    }
+    [data-theme="dark"] .ma-theme-mode-btn {
+      background: rgba(255, 255, 255, 0.08) !important;
+      border-color: var(--pico-primary, #818cf8) !important;
+      color: var(--pico-primary, #818cf8) !important;
+    }
+    .ma-theme-mode-btn.active {
+      background: var(--pico-primary-background, #6366f1) !important;
+      color: #fff !important;
+      border-color: var(--pico-primary-border, #6366f1) !important;
+      font-weight: 600 !important;
+    }
+    .ma-theme-mode-btn:hover:not(.active) {
+      background: rgba(99, 102, 241, 0.12) !important;
+    }
+    [data-theme="dark"] .ma-theme-mode-btn:hover:not(.active) {
+      background: rgba(255, 255, 255, 0.15) !important;
+    }
 
     body { margin: 0; padding: 0; }
     main { max-width: 960px; margin: 0 auto; padding: 0 1rem; }
@@ -82,31 +106,35 @@
       outline-offset: 2px;
     }
     /* Secondary buttons (outline) */
-    button.secondary:not([disabled]), button[type="button"].outline:not([disabled]) {
-      background: transparent;
-      border: 2px solid var(--pico-muted-border-color, #ddd);
-      color: var(--pico-color, #1f2937);
+    button.secondary:not([disabled]), button[type="button"].outline:not([disabled]), button.outline:not([disabled]) {
+      background: var(--pico-card-sectionning-background-color, #f0f4f8) !important;
+      border: 2px solid var(--pico-primary, #6366f1) !important;
+      color: var(--pico-primary, #6366f1) !important;
+      transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease !important;
     }
     [data-theme="dark"] button.secondary:not([disabled]),
-    [data-theme="dark"] button[type="button"].outline:not([disabled]) {
-      color: var(--pico-color, #f3f4f6);
-      border-color: rgba(255,255,255,.2);
+    [data-theme="dark"] button[type="button"].outline:not([disabled]),
+    [data-theme="dark"] button.outline:not([disabled]) {
+      background: rgba(255,255,255,.08) !important;
+      border-color: var(--pico-primary, #818cf8) !important;
+      color: var(--pico-primary, #818cf8) !important;
     }
-    button.secondary:not([disabled]):hover, button[type="button"].outline:not([disabled]):hover {
-      background: var(--pico-card-sectionning-background-color, #f0f4f8);
-      border-color: var(--pico-primary, #6366f1);
-      color: var(--pico-primary, #6366f1);
+    button.secondary:not([disabled]):hover, button[type="button"].outline:not([disabled]):hover, button.outline:not([disabled]):hover {
+      background: rgba(99, 102, 241, 0.12) !important;
+      border-color: var(--pico-primary, #6366f1) !important;
+      color: var(--pico-primary, #6366f1) !important;
     }
     [data-theme="dark"] button.secondary:not([disabled]):hover,
-    [data-theme="dark"] button[type="button"].outline:not([disabled]):hover {
-      background: rgba(255,255,255,.08);
-      border-color: var(--pico-primary, #818cf8);
-      color: var(--pico-primary, #818cf8);
+    [data-theme="dark"] button[type="button"].outline:not([disabled]):hover,
+    [data-theme="dark"] button.outline:not([disabled]):hover {
+      background: rgba(255, 255, 255, 0.15) !important;
+      border-color: var(--pico-primary, #818cf8) !important;
+      color: var(--pico-primary, #818cf8) !important;
     }
-    button.secondary:not([disabled]):focus, button[type="button"].outline:not([disabled]):focus {
+    button.secondary:not([disabled]):focus, button[type="button"].outline:not([disabled]):focus, button.outline:not([disabled]):focus {
       outline: 2px solid var(--pico-primary, #6366f1);
       outline-offset: 2px;
-      border-color: var(--pico-primary, #6366f1);
+      border-color: var(--pico-primary, #6366f1) !important;
     }
     /* Disabled buttons */
     button[disabled], [role="button"][disabled] {
@@ -281,6 +309,37 @@
     .ma-tabs button[aria-selected="true"] { background: var(--pico-primary-background, #0172ad); color: #fff; border-color: var(--pico-primary-border, #0172ad); font-weight: 600; }
     .ma-tabs button[aria-selected="false"] { background: var(--pico-secondary-background, #5d6b89); color: #fff; border-color: var(--pico-secondary-border, #5d6b89); }
     .ma-tab-panel[hidden] { display: none; }
+    .ma-stat-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.6rem;
+    }
+    @media (min-width: 576px) {
+      .ma-stat-grid {
+        grid-template-columns: repeat(4, 1fr);
+      }
+    }
+    .ma-stat-grid.cols-3 {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    @media (min-width: 576px) {
+      .ma-stat-grid.cols-3 {
+        grid-template-columns: repeat(3, 1fr);
+      }
+    }
+    .ma-stat-grid.cols-5 {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    @media (min-width: 576px) {
+      .ma-stat-grid.cols-5 {
+        grid-template-columns: repeat(3, 1fr);
+      }
+    }
+    @media (min-width: 768px) {
+      .ma-stat-grid.cols-5 {
+        grid-template-columns: repeat(5, 1fr);
+      }
+    }
     /* Creator Grid and Column layouts */
     .ma-creator-grid {
       display: grid;
@@ -423,13 +482,6 @@
     }
     /* 1A-2: Responsive tables — block container enables overflow-x scroll */
     #app table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-    /* 1A-3: Creator on mobile — hide inline preview and size-toggle buttons */
-    #ma-creator-preview-open-btn { display: none; }
-    @media (max-width: 479px) {
-      #ma-creator-preview { display: none !important; }
-      #ma-preview-btn-mobile, #ma-preview-btn-desktop { display: none !important; }
-      #ma-creator-preview-open-btn { display: inline-block !important; }
-    }
   </style>
 </head>
 <body>

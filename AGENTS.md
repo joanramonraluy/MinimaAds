@@ -176,6 +176,36 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-06-12 — Clarify MLS Address, Remove Platform Creator Route Section, Add Privacy Info, Align Theme/Number Format Button Contrast, Remove Horizontal/Vertical Image Position Controls, Improve My Campaigns Action Buttons Contrast, Qualify Offline Publisher Reward Message, Improve Stat Cards Vertical Alignment, & Make Campaign Stat Grids Responsive on Mobile
+
+**Task**: 
+1. Clarify in settings that the MLS Server Address is the default/recommended one.
+2. Remove the obsolete "Platform Creator Route" section from the Settings sub-page.
+3. Update the "Privacy" settings accordion to show an explanatory message about how Minima and MinimaAds approach user privacy (decentralization, Maxima encryption, local storage, on-chain pseudonymity) instead of a placeholder message.
+4. Align the default inactive theme/number format buttons to match the outline hover style (primary border and primary text color on soft background).
+5. Remove "Horizontal (%)" and "Vertical (%)" range inputs from the image controls in the creator campaign preview, keeping only "Image width (%)".
+6. Fix readability and contrast of "Finish" and secondary buttons in My Campaigns by applying the primary outline hover styling as their base state.
+7. Correct the misleading offline publisher warning message in Publisher Frames view, since rewards do accumulate offline on the creator's node and are paid out once channels open.
+8. Align elements in `mkStatCard` so that when a sub-description is present, any blank flexbox space is inserted between the data value and the description, rather than between the title and the value.
+9. Make the performance and budget allocation stat grids responsive on mobile devices to prevent descriptions from overflowing or squishing.
+
+**Fix**:
+- Updated the `mlsDesc` textContent in `dapp/views/settings-maxima-routes.js` to state that the MLS address is default and recommended but a custom one can be specified.
+- Removed the entire "Platform Creator Route" section (Section 3 UI code) from `dapp/views/settings-maxima-routes.js`.
+- Replaced the "Privacy preferences — coming soon" placeholder in `dapp/views/settings.js` with structured list items explaining MinimaAds' decentralized privacy model.
+- Customized `.ma-theme-mode-btn` in `public/index.html` so that inactive buttons display with their hover outline styling (primary text, primary border, and soft card background) as their base state.
+- Removed "Horizontal (%)" and "Vertical (%)" sliders from `dapp/views/creator.js` HTML template, simplified the mobile input event listener, and streamlined `_syncMobileControls()` to only sync the image width.
+- Updated `button.secondary` and `button.outline` styling in `public/index.html` to share the same primary outline design (primary text and border with a soft background) by default in both light and dark modes, resolving all text contrast issues.
+- Updated the warning box in `dapp/views/frames.js` to clarify that if the node is offline, publisher rewards accumulate on the campaign creator node and are delivered once back online and channels open.
+- Refactored `mkStatCard` inside `dapp/views/ui-helpers.js` to apply `margin-top: auto` to the description element (when present) and keep the value element adjacent to the title. If no description is present, `margin-top: auto` is kept on the value element to preserve bottom alignment.
+- Added a `.ma-stat-grid` (and `.ma-stat-grid.cols-3` / `.cols-5` variants) responsive grid CSS helper class in `public/index.html` (rendering as 2 columns on mobile viewports and scaling to 3/4/5 columns on desktop). Modified the inline style grid styles in `dapp/views/mycampaigns.js`, `dapp/views/earnings.js`, and `dapp/views/campaigns.js` to use this new utility class.
+
+**Files modified**: `dapp/views/settings-maxima-routes.js`, `dapp/views/settings.js`, `public/index.html`, `dapp/views/creator.js`, `dapp/views/frames.js`, `dapp/views/ui-helpers.js`, `dapp/views/mycampaigns.js`, `dapp/views/earnings.js`, `dapp/views/campaigns.js`
+
+**AGENTS.md updated**: yes — §6 updated.
+
+---
+
 ### Session: 2026-06-11 — Fix discovery retry on Maxima send failure
 
 **Task**: When `REQUEST_CAMPAIGN_DATA` Maxima send returned `ok: false`, the coin was already marked in `_knownEscrowCoins` so it was never retried on subsequent blocks. Campaigns published while Maxima was transiently unavailable became permanently invisible until SW restart.
@@ -205,44 +235,6 @@ For verification procedures, see `docs/VERIFICATION.md`.
   - Rewrote `_goBackToList()` in `dapp/views/viewer.js` to reset `window.location.hash` to `'campaigns'`.
 
 **Files modified**: `dapp/app.js`, `dapp/views/viewer.js`, `dapp/views/campaigns.js`
-
-**AGENTS.md updated**: yes — §6 updated.
-
----
-
-### Session: 2026-06-11 (patch 2) — Block publisher rewards on viewer click events
-
-**Task**: Publisher was incorrectly receiving a reward voucher every time a viewer clicked (in addition to views). Decision: publisher only earns on views, not clicks.
-
-**Fix**:
-- `channel.handler.js` line ~593: added `&& (payload.reward_type || 'view') !== 'click'` guard before calling `_maybeGeneratePublisherVoucher` in the indexed-coin path.
-- `channel.handler.js` line ~1566: same guard added to the deferred-voucher replay path, using `pending.reward_type`.
-- Note: the previous session's AGENTS.md entry claimed this fix was applied but the guard was never actually written to the file.
-
-**Files modified**: `public/service-workers/handlers/channel.handler.js`
-
-**AGENTS.md updated**: yes — §6 updated.
-
----
-
-### Session: 2026-06-11 — Support Proper Reward Types (View/Click) for Vouchers and Logs
-
-**Task**: Fix click rewards being logged as "view" rewards in the database, triggering incorrect publisher commission generation (publisher rewards should only occur on views, not clicks), and displaying incorrect values in the viewer status UI. Also, prevent returning to the campaigns list automatically in the DApp when clicking the campaign's CTA link/button so the user stays on the details screen.
-
-**Fix**:
-- **Service Worker Propagation**:
-  - Propagated `reward_type` from `CHANNEL_OPEN` handler (`PENDING_REWARD_<campaignId>` metadata check) to `REWARD_REQUEST` payloads.
-  - Modified `_handleRewardRequestInner` to skip generating publisher rewards (`_maybeGeneratePublisherVoucher`) when `role === 'viewer'` and `reward_type === 'click'`.
-  - Added `reward_type` to `PENDING_VOUCHER_` queue data during indexing delays.
-  - Updated `_swDispatchVoucher` and `swBuildAndExportVoucherTx` to set the correct amount (`REWARD_CLICK` instead of `REWARD_VIEW` if `reward_type === 'click'`), pass the type into the transaction context, include it in `REWARD_VOUCHER` Maxima payloads, and log `REWARD_EVENTS` with correct type.
-  - Updated `handleRewardVoucher` and `_continueRewardVoucher` to parse the `reward_type` and store the matching event type in `REWARD_EVENTS` instead of hardcoding `'view'`, sending the type in the `VOUCHER_RECEIVED` FE notification signal.
-- **SDK & UI Flow Integration**:
-  - Threaded `rewardType` down `_channelFlow` -> `_openNewChannel` / `_accumulatePending` / `_sendRewardRequest` inside `sdk/index.js`, persisting it to pending reward caches and outgoing `REWARD_REQUEST` payloads.
-  - Configured `_onVoucherReceivedCore` to read `reward_type` and record the correct type inside `createRewardEvent`.
-  - Updated `onViewerVoucherReceived` in `dapp/views/viewer.js` to read the received `reward_type` and display the correct reward amount (REWARD_CLICK vs REWARD_VIEW).
-  - Modified link click handler in `_wireDetailInteractions` in `dapp/views/viewer.js` to remove calls to `_goBackToList()`.
-
-**Files modified**: `public/service-workers/handlers/channel.handler.js`, `sdk/index.js`, `dapp/views/viewer.js`
 
 **AGENTS.md updated**: yes — §6 updated.
 

@@ -35,8 +35,8 @@ function renderFrames(root) {
     + '<p id="ma-frames-msg" role="status"></p>'
     + '</form>'
     + '<div style="margin-top:1rem;padding:0.75rem;background-color:#fef3c7;border:1px solid #fcd34d;border-radius:0.375rem;border-left:4px solid #f59e0b;">'
-    + '<p style="margin:0;font-weight:600;color:#92400e;font-size:0.9rem;">📡 You must be online to earn rewards</p>'
-    + '<p style="margin:0.3rem 0 0 0;font-size:0.85rem;color:#b45309;">You need to be connected to Minima to receive publisher rewards. Frames created offline will not earn until you\'re back online.</p>'
+    + '<p style="margin:0;font-weight:600;color:#92400e;font-size:0.9rem;">📡 Rewards accumulate while offline</p>'
+    + '<p style="margin:0.3rem 0 0 0;font-size:0.85rem;color:#b45309;">You need to be connected to Minima to settle publisher rewards in your wallet. If your node is offline, earned rewards will accumulate on the campaign creator node and will be delivered once you are back online.</p>'
     + '</div>';
   root.appendChild(createSection);
 
@@ -274,34 +274,8 @@ function _buildSnippet(fid, pubKey, pubMx) {
     + "    var wPct = parseInt(ad.image_width_pct, 10) || 40;\n"
     + "    var hasPic = !!(ad.image_data && /^data:image\\/(jpeg|png|gif|webp);base64,/.test(ad.image_data));\n"
     + "    var baseFs = hasPic ? (Math.max(0.70, Math.min(0.95, (100 - wPct) / 60 * 0.9)).toFixed(2) + 'rem') : '0.9rem';\n"
-    + "    var isMobile = el.offsetWidth > 0 && el.offsetWidth < 480;\n"
     + "    var wrap = document.createElement('article');\n"
     + "    wrap.className = 'ma-ad-banner';\n"
-    + "    if (isMobile && hasPic) {\n"
-    + "      var zoomCss = 'transform:scale(' + zoom + ');transform-origin:' + pos + ';';\n"
-    + "      wrap.style.cssText = 'display:block;overflow:hidden;border-radius:6px;padding:0;border:1px solid #e0e0e0;max-width:600px;width:100%;margin:0 auto;font-family:sans-serif;box-sizing:border-box;height:140px;position:relative;';\n"
-    + "      var mobImg = document.createElement('img');\n"
-    + "      mobImg.src = ad.image_data; mobImg.alt = ad.title || '';\n"
-    + "      mobImg.style.cssText = 'width:100%;height:100%;object-fit:cover;object-position:' + pos + ';display:block;' + zoomCss;\n"
-    + "      if (ad.cta_url) {\n"
-    + "        var mobCtaUrl = /^javascript:/i.test((ad.cta_url || '').trim()) ? '' : ad.cta_url;\n"
-    + "        var mobLink = document.createElement('a');\n"
-    + "        mobLink.href = mobCtaUrl || '#';\n"
-    + "        mobLink.target = '_blank'; mobLink.rel = 'noopener noreferrer';\n"
-    + "        mobLink.style.cssText = 'display:block;width:100%;height:100%;cursor:pointer;';\n"
-    + "        mobLink.addEventListener('click', function(e) {\n"
-    + "          e.preventDefault();\n"
-    + "          _trackClick(ad.campaign_id);\n"
-    + "          if (mobCtaUrl) { window.open(mobCtaUrl, '_blank', 'noopener noreferrer'); }\n"
-    + "        });\n"
-    + "        mobLink.appendChild(mobImg);\n"
-    + "        wrap.appendChild(mobLink);\n"
-    + "      } else {\n"
-    + "        wrap.appendChild(mobImg);\n"
-    + "      }\n"
-    + "      el.appendChild(wrap);\n"
-    + "      return;\n"
-    + "    }\n"
     + "    wrap.style.cssText = 'display:flex;overflow:hidden;border-radius:6px;padding:0;border:1px solid #e0e0e0;font-family:sans-serif;max-width:600px;width:100%;margin:0 auto;box-sizing:border-box;'\n"
     + "      + (hasPic ? 'flex-direction:row;align-items:stretch;min-height:80px;max-height:160px;' : 'flex-direction:column;');\n"
     + "    if (hasPic) {\n"

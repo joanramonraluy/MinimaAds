@@ -148,11 +148,46 @@ function renderSettings(root) {
   var privacyContent = document.createElement('div');
   privacyContent.style.cssText = 'padding-top:0.5rem;';
 
-  var privMsg = document.createElement('p');
-  privMsg.style.cssText = 'color:var(--pico-muted-color,#6c757d);font-size:.875rem;margin:0;';
-  privMsg.textContent = 'Privacy preferences — coming soon.';
-  privacyContent.appendChild(privMsg);
+  var privIntro = document.createElement('p');
+  privIntro.style.cssText = 'font-weight:600;font-size:.9rem;margin-bottom:1rem;';
+  privIntro.textContent = 'MinimaAds is built on top of Minima\'s decentralized architecture, ensuring complete privacy:';
+  privacyContent.appendChild(privIntro);
 
+  var privList = document.createElement('ul');
+  privList.style.cssText = 'margin:0;padding-left:1.2rem;font-size:.875rem;color:var(--pico-muted-color,#6c757d);';
+
+  var points = [
+    {
+      title: 'Zero Tracking',
+      text: 'There are no central servers, cookies, or tracking scripts. Your preferences, interest profile, and reward history are stored strictly locally on your own node.'
+    },
+    {
+      title: 'Encrypted Communication',
+      text: 'All campaign discovery and reward message exchanges are powered by Maxima, Minima\'s peer-to-peer transport layer. All communications are end-to-end encrypted; creators and publishers cannot trace your IP address or link activities to your identity.'
+    },
+    {
+      title: 'Pseudonymous Settlements',
+      text: 'Payment channels and reward transactions are settled directly on the Minima L1 blockchain using cryptographic public keys, with no personal registration or sign-ups required.'
+    }
+  ];
+
+  for (var i = 0; i < points.length; i++) {
+    var li = document.createElement('li');
+    li.style.cssText = 'margin-bottom:0.75rem;line-height:1.4;';
+    
+    var strong = document.createElement('strong');
+    strong.style.cssText = 'color:var(--pico-color);';
+    strong.textContent = points[i].title + ': ';
+    li.appendChild(strong);
+    
+    var span = document.createElement('span');
+    span.textContent = points[i].text;
+    li.appendChild(span);
+    
+    privList.appendChild(li);
+  }
+
+  privacyContent.appendChild(privList);
   privacyDetails.appendChild(privacyContent);
   root.appendChild(privacyDetails);
 

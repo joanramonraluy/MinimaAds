@@ -190,24 +190,7 @@ function renderCreator(root) {
     + '  </div>'
     + '  <div class="ma-section-group content-section">'
     + '    <strong class="ma-section-title">Ad preview</strong>'
-    + '    <div style="display:flex;gap:0.5rem;margin-bottom:0.4rem;flex-wrap:wrap;">'
-    + '      <button type="button" id="ma-preview-btn-mobile"  style="font-size:0.72rem;padding:0.15rem 0.45rem;border-radius:3px;font-weight:700;">Mobile</button>'
-    + '      <button type="button" id="ma-preview-btn-desktop" style="font-size:0.72rem;padding:0.15rem 0.45rem;border-radius:3px;font-weight:400;">Desktop</button>'
-    + '      <button type="button" id="ma-creator-preview-open-btn" style="font-size:0.72rem;padding:0.15rem 0.45rem;border-radius:3px;font-weight:400;">View preview</button>'
-    + '    </div>'
     + '    <div id="ma-creator-preview" style="min-height:2rem;"></div>'
-    + '    <div id="ma-creator-mobile-controls" style="display:none;padding:.5rem 0;margin-top:.5rem;">'
-    + '      <small style="display:block;font-weight:600;margin-bottom:.3rem;">Image position &amp; size</small>'
-    + '      <label style="font-size:.85rem;margin-bottom:.3rem;display:block;">Horizontal (%)'
-    + '        <input type="range" id="ma-img-pos-x" min="0" max="100" value="50" style="margin:.15rem 0 0;">'
-    + '      </label>'
-    + '      <label style="font-size:.85rem;margin-bottom:.3rem;display:block;">Vertical (%)'
-    + '        <input type="range" id="ma-img-pos-y" min="0" max="100" value="50" style="margin:.15rem 0 0;">'
-    + '      </label>'
-    + '      <label style="font-size:.85rem;margin-bottom:.3rem;display:block;">Image width (%)'
-    + '        <input type="range" id="ma-img-width-pct" min="20" max="70" value="40" style="margin:.15rem 0 0;">'
-    + '      </label>'
-    + '    </div>'
     + '  </div>'
     + '</div>'
     + '<div class="ma-tab-panel" id="ma-panel-budget" role="tabpanel" aria-labelledby="ma-tab-budget" hidden>'
@@ -428,80 +411,6 @@ function renderCreator(root) {
     }, 0);
   });
   _renderThemeSwatches(form);
-
-  var previewBtnMobile = document.getElementById('ma-preview-btn-mobile');
-  var previewBtnDesktop = document.getElementById('ma-preview-btn-desktop');
-  if (previewBtnMobile && previewBtnDesktop) {
-    function _setPreviewWidth(mobile) {
-      var p = document.getElementById('ma-creator-preview');
-      if (p) { p.style.maxWidth = mobile ? '360px' : ''; }
-      previewBtnMobile.style.fontWeight = mobile ? '700' : '400';
-      previewBtnDesktop.style.fontWeight = mobile ? '400' : '700';
-      var f = document.getElementById('ma-creator-form');
-      if (f) { updateCreatorPreview(f); }
-    }
-    previewBtnMobile.addEventListener('click', function () { _setPreviewWidth(true); });
-    previewBtnDesktop.addEventListener('click', function () { _setPreviewWidth(false); });
-  }
-
-  // Mobile preview dialog (1A-3)
-  var _creatorPreviewDialog = document.createElement('dialog');
-  _creatorPreviewDialog.id = 'ma-creator-preview-dialog';
-  var _dlgArticle = document.createElement('article');
-  _dlgArticle.style.cssText = 'max-width:420px;';
-  var _dlgHeader = document.createElement('header');
-  var _dlgClose = document.createElement('button');
-  _dlgClose.setAttribute('aria-label', 'Close');
-  _dlgClose.setAttribute('rel', 'prev');
-  _dlgClose.addEventListener('click', function () {
-    var d = document.getElementById('ma-creator-preview-dialog');
-    if (d) { d.removeAttribute('open'); }
-  });
-  _dlgHeader.appendChild(_dlgClose);
-  var _dlgTitle = document.createElement('strong');
-  _dlgTitle.textContent = 'Ad preview';
-  _dlgHeader.appendChild(_dlgTitle);
-  _dlgArticle.appendChild(_dlgHeader);
-  var _dlgBody = document.createElement('div');
-  _dlgBody.id = 'ma-creator-preview-modal-body';
-  _dlgArticle.appendChild(_dlgBody);
-  _creatorPreviewDialog.appendChild(_dlgArticle);
-  _creatorPreviewDialog.addEventListener('click', function (e) {
-    if (e.target === _creatorPreviewDialog) { _creatorPreviewDialog.removeAttribute('open'); }
-  });
-  root.appendChild(_creatorPreviewDialog);
-
-  // "View preview" button — copies rendered preview into modal and opens it (mobile only)
-  var previewOpenBtn = document.getElementById('ma-creator-preview-open-btn');
-  if (previewOpenBtn) {
-    previewOpenBtn.addEventListener('click', function () {
-      var previewSrc = document.getElementById('ma-creator-preview');
-      var modalBody = document.getElementById('ma-creator-preview-modal-body');
-      if (previewSrc && modalBody) { modalBody.innerHTML = previewSrc.innerHTML; }
-      var dlg = document.getElementById('ma-creator-preview-dialog');
-      if (dlg) { dlg.setAttribute('open', ''); }
-    });
-  }
-
-  // Mobile image position / width controls (1A-3) — range inputs replacing drag
-  var posXInput = document.getElementById('ma-img-pos-x');
-  var posYInput = document.getElementById('ma-img-pos-y');
-  var imgWidthInput = document.getElementById('ma-img-width-pct');
-  if (posXInput && posYInput && imgWidthInput) {
-    function _onMobilePosInput() {
-      var posHidden = form.querySelector('[name="image_position"]');
-      var widthHidden = form.querySelector('[name="image_width_pct"]');
-      var x = parseInt(posXInput.value, 10);
-      var y = parseInt(posYInput.value, 10);
-      var w = parseInt(imgWidthInput.value, 10);
-      if (posHidden) { posHidden.value = x + '% ' + y + '%'; }
-      if (widthHidden) { widthHidden.value = w; }
-      updateCreatorPreview(form);
-    }
-    posXInput.addEventListener('input', _onMobilePosInput);
-    posYInput.addEventListener('input', _onMobilePosInput);
-    imgWidthInput.addEventListener('input', _onMobilePosInput);
-  }
 
   var bgColorInput = form.querySelector('[name="bg_color"]');
   if (bgColorInput) { bgColorInput.dataset.textColor = computeTextColor(bgColorInput.value); }
@@ -886,23 +795,6 @@ function _attachDivider(form) {
   };
 }
 
-function _syncMobileControls(form) {
-  var posHidden = form.querySelector('[name="image_position"]');
-  var widthHidden = form.querySelector('[name="image_width_pct"]');
-  var posXInput = document.getElementById('ma-img-pos-x');
-  var posYInput = document.getElementById('ma-img-pos-y');
-  var widthInput = document.getElementById('ma-img-width-pct');
-  if (!posHidden || !posXInput || !posYInput) { return; }
-  var raw = (posHidden.value || '50% 50%').split(' ');
-  var x = parseInt(raw[0], 10) || 50;
-  var y = parseInt(raw[1], 10) || 50;
-  posXInput.value = x;
-  posYInput.value = y;
-  if (widthHidden && widthInput) {
-    widthInput.value = parseInt(widthHidden.value, 10) || 40;
-  }
-}
-
 function updateCreatorPreview(form) {
   if (typeof renderAd !== 'function') { return; }
   var previewEl = document.getElementById('ma-creator-preview');
@@ -938,28 +830,16 @@ function updateCreatorPreview(form) {
     text_color: textColor,
     image_position: imagePosition,
     image_zoom: imageZoom,
-    image_width_pct: imageWidthPct,
-    force_full: true
+    image_width_pct: imageWidthPct
   };
   if (_detachDivider) { _detachDivider(); _detachDivider = null; }
   renderAd(previewAd, 'ma-creator-preview');
   if (document.getElementById('ma-creator-preview-review')) {
     renderAd(previewAd, 'ma-creator-preview-review');
   }
-  if (window.innerWidth < 480) {
-    // Mobile: detach any drag handlers, show numeric controls instead
-    if (_detachPositioner) { _detachPositioner(); _detachPositioner = null; }
-    var mobileCtrl = document.getElementById('ma-creator-mobile-controls');
-    if (mobileCtrl) {
-      mobileCtrl.style.display = _pendingImageData ? 'block' : 'none';
-      if (_pendingImageData) { _syncMobileControls(form); }
-    }
-  } else {
-    // Desktop: attach drag overlay and divider as before
-    if (_pendingImageData) {
-      _attachImagePositioner(form);
-      _attachDivider(form);
-    }
+  if (_pendingImageData) {
+    _attachImagePositioner(form);
+    _attachDivider(form);
   }
 }
 

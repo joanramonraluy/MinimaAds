@@ -206,7 +206,8 @@ function _buildCampaignCard(c, openDetails) {
   var ctr = viewCount > 0 ? (clickCount / viewCount * 100) : 0;
 
   var perfRow = document.createElement('div');
-  perfRow.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:.6rem;margin:.35rem 0 0;';
+  perfRow.className = 'ma-stat-grid cols-5';
+  perfRow.style.cssText = 'margin:.35rem 0 0;';
   perfRow.appendChild(mkStatCard('Views', String(viewCount)));
   perfRow.appendChild(mkStatCard('Clicks', String(clickCount)));
   perfRow.appendChild(mkStatCard('CTR', fmtAmt(ctr, 2) + '%'));
@@ -236,7 +237,8 @@ function _buildCampaignCard(c, openDetails) {
   budgetBody.appendChild(totalBudgetTitle);
   
   var totalBudgetRow = document.createElement('div');
-  totalBudgetRow.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:.6rem;margin:.35rem 0 .75rem;';
+  totalBudgetRow.className = 'ma-stat-grid';
+  totalBudgetRow.style.cssText = 'margin:.35rem 0 .75rem;';
   totalBudgetRow.appendChild(mkStatCard('Total Budget', fmtAmt(budgetTotal, 4) + ' M', 'Initial funding'));
   totalBudgetRow.appendChild(mkStatCard('Total Escrow Left', fmtAmt(budgetRemaining, 4) + ' M', 'Remaining in escrow'));
   totalBudgetRow.appendChild(mkStatCard('Total Locked', fmtAmt(viewerLocked + pubLocked, 4) + ' M', 'Reserved in L2 channels'));
@@ -249,7 +251,8 @@ function _buildCampaignCard(c, openDetails) {
   budgetBody.appendChild(viewerBudgetTitle);
 
   var viewerBudgetRow = document.createElement('div');
-  viewerBudgetRow.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:.6rem;margin:.35rem 0 .75rem;';
+  viewerBudgetRow.className = 'ma-stat-grid';
+  viewerBudgetRow.style.cssText = 'margin:.35rem 0 .75rem;';
   
   var escrowCard = mkStatCard('Max Viewer Budget', fmtAmt(budgetTotal - maxPubBudget, 4) + ' M', 'Configured limit');
   var lockedCard = mkStatCard('Locked in Channels', fmtAmt(viewerLocked, 4) + ' M', viewerActiveCount + ' active channel' + (viewerActiveCount === 1 ? '' : 's') + ' (' + fmtAmt(viewerUnsettled, 4) + ' M earned)');
@@ -269,7 +272,8 @@ function _buildCampaignCard(c, openDetails) {
     budgetBody.appendChild(pubBudgetTitle);
 
     var pubBudgetRow = document.createElement('div');
-    pubBudgetRow.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:.6rem;margin:.35rem 0 .75rem;';
+    pubBudgetRow.className = 'ma-stat-grid';
+    pubBudgetRow.style.cssText = 'margin:.35rem 0 .75rem;';
 
     var pubLimitCard = mkStatCard('Max Pub Budget', fmtAmt(maxPubBudget, 4) + ' M', 'Configured limit');
     var pubReservedCard = mkStatCard('Locked in Channels', fmtAmt(pubActiveCount > 0 ? maxPubBudget : 0, 4) + ' M', pubActiveCount + ' active channel' + (pubActiveCount === 1 ? '' : 's') + ' (' + fmtAmt(pubUnsettled, 4) + ' M earned)');

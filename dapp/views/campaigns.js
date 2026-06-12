@@ -20,7 +20,7 @@ function renderCampaigns(root) {
 
   var summaryRow = document.createElement('div');
   summaryRow.id = 'ma-campaigns-summary';
-  summaryRow.style.cssText = 'display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1.5rem;padding:.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(0,0,0,0.015);border-left:3px solid #8b5cf6;';
+  summaryRow.style.cssText = 'margin-bottom:1.5rem;padding:.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:rgba(0,0,0,0.015);border-left:3px solid #8b5cf6;';
   root.appendChild(summaryRow);
 
   var filterRow = document.createElement('div');
@@ -134,6 +134,7 @@ function _renderCampaignsList(listEl, campaigns) {
 function _updateCampaignsSummary(campaigns) {
   var summaryEl = document.getElementById('ma-campaigns-summary');
   if (!summaryEl) { return; }
+  summaryEl.className = 'ma-stat-grid' + (_activeMode === 'viewer' ? ' cols-5' : ' cols-3');
   summaryEl.innerHTML = '';
 
   var filtered = _campaignsFilter === 'active'

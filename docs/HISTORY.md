@@ -46,6 +46,40 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-11 (patch 2) — Block publisher rewards on viewer click events
+
+**Task**: Publisher was incorrectly receiving a reward voucher every time a viewer clicked (in addition to views). Decision: publisher only earns on views, not clicks.
+
+**Fix**:
+- `channel.handler.js` line ~593: added `&& (payload.reward_type || 'view') !== 'click'` guard before calling `_maybeGeneratePublisherVoucher` in the indexed-coin path.
+- `channel.handler.js` line ~1566: same guard added to the deferred-voucher replay path, using `pending.reward_type`.
+- Note: the previous session's AGENTS.md entry claimed this fix was applied but the guard was never actually written to the file.
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`
+
+---
+
+### Session: 2026-06-11 — Support Proper Reward Types (View/Click) for Vouchers and Logs
+
+**Task**: Fix click rewards being logged as "view" rewards in the database, triggering incorrect publisher commission generation (publisher rewards should only occur on views, not clicks), and displaying incorrect values in the viewer status UI. Also, prevent returning to the campaigns list automatically in the DApp when clicking the campaign's CTA link/button so the user stays on the details screen.
+
+**Fix**:
+- **Service Worker Propagation**:
+  - Propagated `reward_type` from `CHANNEL_OPEN` handler (`PENDING_REWARD_<campaignId>` metadata check) to `REWARD_REQUEST` payloads.
+  - Modified `_handleRewardRequestInner` to skip generating publisher rewards (`_maybeGeneratePublisherVoucher`) when `role === 'viewer'` and `reward_type === 'click'`.
+  - Added `reward_type` to `PENDING_VOUCHER_` queue data during indexing delays.
+  - Updated `_swDispatchVoucher` and `swBuildAndExportVoucherTx` to set the correct amount (`REWARD_CLICK` instead of `REWARD_VIEW` if `reward_type === 'click'`), pass the type into the transaction context, include it in `REWARD_VOUCHER` Maxima payloads, and log `REWARD_EVENTS` with correct type.
+  - Updated `handleRewardVoucher` and `_continueRewardVoucher` to parse the `reward_type` and store the matching event type in `REWARD_EVENTS` instead of hardcoding `'view'`, sending the type in the `VOUCHER_RECEIVED` FE notification signal.
+- **SDK & UI Flow Integration**:
+  - Threaded `rewardType` down `_channelFlow` -> `_openNewChannel` / `_accumulatePending` / `_sendRewardRequest` inside `sdk/index.js`, persisting it to pending reward caches and outgoing `REWARD_REQUEST` payloads.
+  - Configured `_onVoucherReceivedCore` to read `reward_type` and record the correct type inside `createRewardEvent`.
+  - Updated `onViewerVoucherReceived` in `dapp/views/viewer.js` to read the received `reward_type` and display the correct reward amount (REWARD_CLICK vs REWARD_VIEW).
+  - Modified link click handler in `_wireDetailInteractions` in `dapp/views/viewer.js` to remove calls to `_goBackToList()`.
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`, `sdk/index.js`, `dapp/views/viewer.js`
+
+---
+
 ### Session: 2026-06-11 — Align Campaign Image Selector Button Layout
 
 **Task**: Align the file selector button and its label/text correctly inside the campaign image upload field. Previously, due to specificity override conflicts on `input:not([type="checkbox"]):not([type="radio"])` vs `input[type="file"]`, the padding wasn't applied correctly and the native button was touching the bottom boundary of the input box and misaligned.

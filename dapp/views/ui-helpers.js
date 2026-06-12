@@ -33,14 +33,15 @@ function mkStatCard(label, value, sub) {
     + 'font-size:.72rem;margin-bottom:.2rem;text-transform:uppercase;letter-spacing:.04em;';
   lbl.textContent = label;
   var val = document.createElement('strong');
-  val.style.cssText = 'display:block;font-size:1.05rem;margin-top:auto;';
+  val.style.cssText = 'display:block;font-size:1.05rem;'
+    + (sub ? 'margin-top:.1rem;' : 'margin-top:auto;');
   val.textContent = value;
   card.appendChild(lbl);
   card.appendChild(val);
   if (sub) {
     var s = document.createElement('small');
     s.style.cssText = 'display:block;color:var(--pico-muted-color,#6c757d);'
-      + 'font-size:.7rem;margin-top:.15rem;';
+      + 'font-size:.7rem;margin-top:auto;padding-top:.15rem;';
     s.textContent = sub;
     card.appendChild(s);
   }

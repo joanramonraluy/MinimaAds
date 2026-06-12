@@ -238,6 +238,13 @@ function renderMaximaRoutesSettings(root) {
 
   permanentSection.appendChild(permanentBtn);
   permanentSection.appendChild(permanentStatus);
+
+  var onlineWarning = document.createElement('div');
+  onlineWarning.style.cssText = 'margin-top:1rem;padding:0.75rem;background-color:#fef3c7;border:1px solid #fcd34d;border-radius:0.375rem;border-left:4px solid #f59e0b;';
+  onlineWarning.innerHTML = '<p style="margin:0;font-weight:600;color:#92400e;font-size:0.9rem;">&#128276; You must be online to earn rewards</p>'
+    + '<p style="margin:0.3rem 0 0 0;font-size:0.82rem;color:#b45309;">Creators: campaigns are only visible to viewers while your node is online. Publishers: you must be online to receive rewards from ad views.</p>';
+  permanentSection.appendChild(onlineWarning);
+
   root.appendChild(permanentSection);
 
   // ── Section 3: MinimaAds Platform Creator Route Configuration ───────────

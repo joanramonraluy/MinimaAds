@@ -321,10 +321,6 @@ function renderCreator(root) {
     + '    <div id="ma-campaign-cost" style="margin-top:0.75rem;"></div>'
     + '    <button type="submit" style="width:100%;margin-top:1.25rem;">Publish Campaign</button>'
     + '    <p id="ma-creator-msg" role="status" style="margin-top:1rem;margin-bottom:0;text-align:center;font-weight:600;"></p>'
-    + '    <div style="margin-top:1rem;padding:0.75rem;background-color:#fef3c7;border:1px solid #fcd34d;border-radius:0.375rem;border-left:4px solid #f59e0b;">'
-    + '      <p style="margin:0;font-weight:600;color:#92400e;font-size:0.9rem;">&#128276; You must be online to distribute rewards</p>'
-    + '      <p style="margin:0.3rem 0 0 0;font-size:0.82rem;color:#b45309;">If your node goes offline, your campaign will not be visible to viewers until you reconnect.</p>'
-    + '    </div>'
     + '  </div>'
     + '</div>';
   root.appendChild(form);

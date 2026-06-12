@@ -28,7 +28,9 @@ var _dbReady = false;
 var _activeMode = 'viewer';
 var _profileInterestsSaveTimer = 0;
 var _networkConnected = true;
-var _statusCheckInterval = null;
+var _lastNewblockTime = 0;
+var _newblockOfflineTimer = null;
+var _NEWBLOCK_OFFLINE_MS = 120000;
 
 // Number format preference: 'EU' = 1.234,56  |  'EN' = 1,234.56
 window.NUMFMT = 'EU';
@@ -178,47 +180,41 @@ function setStatus(text) {
 }
 
 function startNetworkStatusMonitoring() {
-  console.log('[STATUS] Starting network status monitoring');
-  if (_statusCheckInterval) { console.log('[STATUS] Already monitoring'); return; }
+  _lastNewblockTime = Date.now();
+  _scheduleOfflineCheck();
+}
 
-  function doStatusCheck() {
-    MDS.cmd('status', function(res) {
-      console.log('[STATUS] status response:', res);
-      var peers = (res && res.response && res.response.network) ? res.response.network.connected : -1;
-      var connected = peers > 0;
-      console.log('[STATUS] peers:', peers, 'connected:', connected);
-      if (connected !== _networkConnected) {
-        _networkConnected = connected;
-        console.log('[STATUS] Network status changed to:', connected ? 'connected' : 'disconnected');
-        updateStatusBar();
-      }
-    });
+function _scheduleOfflineCheck() {
+  if (_newblockOfflineTimer) { clearTimeout(_newblockOfflineTimer); }
+  _newblockOfflineTimer = setTimeout(function() {
+    var sinceLastBlock = Date.now() - _lastNewblockTime;
+    if (sinceLastBlock >= _NEWBLOCK_OFFLINE_MS && _networkConnected) {
+      _networkConnected = false;
+      updateStatusBar();
+    }
+    _scheduleOfflineCheck();
+  }, 15000);
+}
+
+function onNewblock() {
+  _lastNewblockTime = Date.now();
+  if (!_networkConnected) {
+    _networkConnected = true;
+    updateStatusBar();
   }
-
-  doStatusCheck();
-  _statusCheckInterval = setInterval(doStatusCheck, 10000);
 }
 
 function updateStatusBar() {
   var statusEl = document.getElementById('ma-status-text');
   var pulseEl = document.querySelector('.ma-status-pulse');
-  console.log('[STATUS] Updating bar - connected:', _networkConnected, 'statusEl:', !!statusEl, 'pulseEl:', !!pulseEl);
-
   if (statusEl) {
     statusEl.textContent = _networkConnected ? 'Connected to Minima' : 'Disconnected from Minima';
-    console.log('[STATUS] Updated status text to:', statusEl.textContent);
-  } else {
-    console.log('[STATUS] ma-status-text element not found!');
   }
-
   if (pulseEl) {
-    var newBgColor = _networkConnected ? '#10b981' : '#ef4444';
-    var newBoxShadow = _networkConnected ? '0 0 0 0 rgba(16,185,129,0.4)' : '0 0 0 0 rgba(239,68,68,0.4)';
-    pulseEl.style.backgroundColor = newBgColor;
-    pulseEl.style.boxShadow = newBoxShadow;
-    console.log('[STATUS] Updated pulse color to:', newBgColor);
-  } else {
-    console.log('[STATUS] ma-status-pulse element not found!');
+    pulseEl.style.backgroundColor = _networkConnected ? '#10b981' : '#ef4444';
+    pulseEl.style.boxShadow = _networkConnected
+      ? '0 0 0 0 rgba(16,185,129,0.4)'
+      : '0 0 0 0 rgba(239,68,68,0.4)';
   }
 }
 
@@ -2081,6 +2077,7 @@ function onInited() {
       return;
     }
     if (msg.event === 'NEWBLOCK') {
+      onNewblock();
       if (msg.data && msg.data.txpow && msg.data.txpow.header) {
         var blockEl = document.getElementById('ma-footer-block-height');
         if (blockEl) { blockEl.textContent = '#' + msg.data.txpow.header.block; }

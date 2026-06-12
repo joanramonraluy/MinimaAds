@@ -318,6 +318,10 @@ function renderCreator(root) {
     + '    <div id="ma-campaign-cost" style="margin-top:0.75rem;"></div>'
     + '    <button type="submit" style="width:100%;margin-top:1.25rem;">Publish Campaign</button>'
     + '    <p id="ma-creator-msg" role="status" style="margin-top:1rem;margin-bottom:0;text-align:center;font-weight:600;"></p>'
+    + '    <div style="margin-top:1rem;padding:0.75rem;background-color:#fef3c7;border:1px solid #fcd34d;border-radius:0.375rem;border-left:4px solid #f59e0b;">'
+    + '      <p style="margin:0;font-weight:600;color:#92400e;font-size:0.9rem;">&#128276; You must be online to distribute rewards</p>'
+    + '      <p style="margin:0.3rem 0 0 0;font-size:0.82rem;color:#b45309;">If your node goes offline, your campaign will not be visible to viewers until you reconnect.</p>'
+    + '    </div>'
     + '  </div>'
     + '</div>';
   root.appendChild(form);
@@ -400,23 +404,15 @@ function renderCreator(root) {
   _loadL1PublisherCountForCreator(form);
 
   getCreatorMaximaRoute(function(route) {
-    console.log('[CREATOR] getCreatorMaximaRoute callback - route:', route);
     var submitBtn = form.querySelector('[type="submit"]');
     var msgEl = document.getElementById('ma-creator-msg');
-    console.log('[CREATOR] submitBtn found:', !!submitBtn, 'msgEl found:', !!msgEl);
     if (!route) {
-      console.log('[CREATOR] No route - disabling button and showing message');
       if (submitBtn) { submitBtn.disabled = true; }
       if (msgEl) {
-        msgEl.innerHTML = '🔒 No Maxima route registered<br><small>Go to <a href="#settings/maxima-routes">Settings → Maxima Routes</a> to register one before creating campaigns.</small>';
+        msgEl.innerHTML = '&#128274; No Maxima route registered &mdash; <a href="#settings/maxima-routes">Settings &rarr; Maxima Routes</a>';
         msgEl.style.color = '#d32f2f';
-        msgEl.style.fontWeight = '600';
-        console.log('[CREATOR] Message updated');
-      } else {
-        console.log('[CREATOR] msgEl is null!');
       }
     } else {
-      console.log('[CREATOR] Route exists - enabling button');
       if (submitBtn) { submitBtn.disabled = false; }
       if (msgEl) { msgEl.textContent = ''; }
     }

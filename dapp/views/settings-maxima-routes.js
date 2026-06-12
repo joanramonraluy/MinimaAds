@@ -241,8 +241,8 @@ function renderMaximaRoutesSettings(root) {
 
   var onlineWarning = document.createElement('div');
   onlineWarning.style.cssText = 'margin-top:1rem;padding:0.75rem;background-color:#fef3c7;border:1px solid #fcd34d;border-radius:0.375rem;border-left:4px solid #f59e0b;';
-  onlineWarning.innerHTML = '<p style="margin:0;font-weight:600;color:#92400e;font-size:0.9rem;">&#128276; Creators and Publishers must stay online</p>'
-    + '<p style="margin:0.3rem 0 0 0;font-size:0.82rem;color:#b45309;"><strong>Creators</strong> must be online for viewers to see campaigns and distribute rewards. <strong>Publishers</strong> must be online to receive payment for ad clicks.</p>';
+  onlineWarning.innerHTML = '<p style="margin:0;font-weight:600;color:#92400e;font-size:0.9rem;">&#128276; Creators and Publishers must stay online and reachable</p>'
+    + '<p style="margin:0.3rem 0 0 0;font-size:0.82rem;color:#b45309;"><strong>Creators</strong> must be online and reachable via Maxima for viewers to see campaigns and distribute rewards. <strong>Publishers</strong> must be online and reachable to receive payment for ad clicks.</p>';
   permanentSection.appendChild(onlineWarning);
 
   root.appendChild(permanentSection);

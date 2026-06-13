@@ -75,12 +75,15 @@ function sendMaxima(publicKey, mxAddress, payload, cb) {
   MDS.log("[MINIMA] sendMaxima called: publicKey=" + (publicKey ? publicKey.substring(0, 16) + "..." : "null") + " mxAddress=" + (mxAddress ? mxAddress.substring(0, 20) + "..." : "null") + " payloadType=" + (payload && payload.type));
   var hex = "0x" + utf8ToHex(JSON.stringify(payload)).toUpperCase();
   if (publicKey && mxAddress) {
-    // Both routes available: send via publickey: first, then ALSO via to: as a
-    // parallel second attempt. Use response.delivered (not res.status which is
-    // always true) to determine real delivery success.
+    // Per PLATFORM_NOTES §4.2: try publickey: first (requires contact),
+    // fall back to to:Mx... on failure (works without contact via MLS relay).
     MDS.cmd("maxima action:send publickey:" + publicKey + " application:" + APP_NAME + " data:" + hex + " poll:false", function(res) {
+      if (_maxDelivered(res, "publickey")) {
+        cb(true);
+        return;
+      }
       MDS.cmd("maxima action:send to:" + mxAddress + " application:" + APP_NAME + " data:" + hex + " poll:false", function(res2) {
-        cb(_maxDelivered(res, "publickey") || _maxDelivered(res2, "to"));
+        cb(_maxDelivered(res2, "to"));
       });
     });
   } else if (publicKey) {

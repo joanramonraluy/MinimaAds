@@ -57,17 +57,21 @@ function sqlQuery(query, cb) {
 }
 
 function sendMaxima(publicKey, mxAddress, payload, cb) {
-  MDS.log("[MINIMA] sendMaxima called: publicKey=" + publicKey + " mxAddress=" + mxAddress + " payloadType=" + (payload && payload.type));
+  MDS.log("[MINIMA] sendMaxima called: publicKey=" + (publicKey ? publicKey.substring(0, 16) + "..." : "null") + " mxAddress=" + (mxAddress ? mxAddress.substring(0, 20) + "..." : "null") + " payloadType=" + (payload && payload.type));
   var hex = "0x" + utf8ToHex(JSON.stringify(payload)).toUpperCase();
-  if (publicKey) {
+  if (publicKey && mxAddress) {
+    // Both routes available: send via publickey: first, then ALSO via to: as a
+    // parallel second attempt. publickey: poll:false returns ok:true even when
+    // the peer is unreachable (message queued locally but never forwarded), so
+    // the to: send provides reliable backup delivery via the MLS contact address.
     MDS.cmd("maxima action:send publickey:" + publicKey + " application:" + APP_NAME + " data:" + hex + " poll:false", function(res) {
-      if (!res.status && mxAddress) {
-        MDS.cmd("maxima action:send to:" + mxAddress + " application:" + APP_NAME + " data:" + hex + " poll:false", function(res2) {
-          cb(res2.status);
-        });
-      } else {
-        cb(res.status);
-      }
+      MDS.cmd("maxima action:send to:" + mxAddress + " application:" + APP_NAME + " data:" + hex + " poll:false", function(res2) {
+        cb(res.status || res2.status);
+      });
+    });
+  } else if (publicKey) {
+    MDS.cmd("maxima action:send publickey:" + publicKey + " application:" + APP_NAME + " data:" + hex + " poll:false", function(res) {
+      cb(res.status);
     });
   } else if (mxAddress) {
     MDS.cmd("maxima action:send to:" + mxAddress + " application:" + APP_NAME + " data:" + hex + " poll:false", function(res) {

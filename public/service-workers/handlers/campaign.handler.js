@@ -192,7 +192,7 @@ function _sendRequestCampaignData(campaignId, creatorPk, creatorMx, cb) {
   // handleChannelOpenRequest). Without this, to: routing via MLS may fail
   // if the local Maxima node hasn't cached a route to the creator.
   if (creatorMx && isMaximaRoute(creatorMx)) {
-    MDS.cmd("maxima action:addcontact contact:" + creatorMx, function() {});
+    MDS.cmd("maxcontacts action:add contact:" + creatorMx, function() {});
   }
   MDS.keypair.get("USER_PERMANENT_ROUTE", function(kpRes) {
     var myRoute = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : "";
@@ -245,12 +245,14 @@ function processEscrowCoin(coin) {
         MDS.log("[DISCOVERY] Outdated route format in coin: " + creatorRaw + " — falling back to direct contact: " + routePk);
         creatorMxAddr = routePk;
       } else {
-        // Valid permanent route: use PK routing; fallback to the MLS contact
-        // address (routeParts[2]) — NOT the full MAX# string, which is invalid
-        // for the "to:" parameter in "maxima action:send".
+        // Valid permanent route: use PK routing; pass the full MAX#pk#mls string
+        // as mxAddress fallback. Minima detects the MAX# prefix in maxima.java
+        // and calls maxextra.getMaxAddress() to resolve the creator's current
+        // address via MLS lookup before delivering — do NOT strip to routeParts[2]
+        // (that would send to the MLS server itself, not the creator node).
         creatorPkRoute = routePk;
-        creatorMxAddr = routeParts[2] || '';
-        MDS.log("[DISCOVERY] Permanent route in coin: " + creatorRaw + " — using PK routing: " + routePk.substring(0, 10) + "... fallback MLS: " + (creatorMxAddr ? creatorMxAddr.substring(0, 20) + "..." : "NONE"));
+        creatorMxAddr = creatorRaw;
+        MDS.log("[DISCOVERY] Permanent route in coin: " + creatorRaw.substring(0, 60) + "... PK routing: " + routePk.substring(0, 10) + "...");
       }
     }
   }

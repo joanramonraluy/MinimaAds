@@ -56,26 +56,36 @@ function sqlQuery(query, cb) {
   });
 }
 
+// Delivery helper: res.status is always true (Minima default); real delivery
+// result is in res.response.delivered (boolean). Log error when not delivered.
+function _maxDelivered(res, label) {
+  var delivered = !!(res && res.response && res.response.delivered);
+  if (!delivered) {
+    var err = (res && res.response && res.response.error) ? res.response.error : "not delivered";
+    MDS.log("[MINIMA] " + label + " delivery failed: " + err);
+  }
+  return delivered;
+}
+
 function sendMaxima(publicKey, mxAddress, payload, cb) {
   MDS.log("[MINIMA] sendMaxima called: publicKey=" + (publicKey ? publicKey.substring(0, 16) + "..." : "null") + " mxAddress=" + (mxAddress ? mxAddress.substring(0, 20) + "..." : "null") + " payloadType=" + (payload && payload.type));
   var hex = "0x" + utf8ToHex(JSON.stringify(payload)).toUpperCase();
   if (publicKey && mxAddress) {
     // Both routes available: send via publickey: first, then ALSO via to: as a
-    // parallel second attempt. publickey: poll:false returns ok:true even when
-    // the peer is unreachable (message queued locally but never forwarded), so
-    // the to: send provides reliable backup delivery via the MLS contact address.
+    // parallel second attempt. Use response.delivered (not res.status which is
+    // always true) to determine real delivery success.
     MDS.cmd("maxima action:send publickey:" + publicKey + " application:" + APP_NAME + " data:" + hex + " poll:false", function(res) {
       MDS.cmd("maxima action:send to:" + mxAddress + " application:" + APP_NAME + " data:" + hex + " poll:false", function(res2) {
-        cb(res.status || res2.status);
+        cb(_maxDelivered(res, "publickey") || _maxDelivered(res2, "to"));
       });
     });
   } else if (publicKey) {
     MDS.cmd("maxima action:send publickey:" + publicKey + " application:" + APP_NAME + " data:" + hex + " poll:false", function(res) {
-      cb(res.status);
+      cb(_maxDelivered(res, "publickey"));
     });
   } else if (mxAddress) {
     MDS.cmd("maxima action:send to:" + mxAddress + " application:" + APP_NAME + " data:" + hex + " poll:false", function(res) {
-      cb(res.status);
+      cb(_maxDelivered(res, "to"));
     });
   } else {
     cb(false);

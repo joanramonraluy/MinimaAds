@@ -246,47 +246,4 @@ function renderMaximaRoutesSettings(root) {
   permanentSection.appendChild(onlineWarning);
 
   root.appendChild(permanentSection);
-
-  // ── Section 3: MLS Relay ─────────────────────────────────────────────────
-  var relaySection = document.createElement('section');
-  relaySection.style.cssText = 'margin-top:2rem;padding:1rem;border:1px solid var(--pico-border-color);border-radius:0.375rem;';
-
-  var relayTitle = document.createElement('h3');
-  relayTitle.textContent = 'Act as MLS Relay';
-  relayTitle.style.cssText = 'margin:0 0 0.5rem;';
-  relaySection.appendChild(relayTitle);
-
-  var relayDesc = document.createElement('p');
-  relayDesc.style.cssText = 'font-size:0.85rem;color:var(--pico-muted-color,#6c757d);margin:0 0 0.75rem;';
-  relayDesc.textContent = 'When enabled, other MinimaAds nodes can ask your node to register their permanent route at your MLS server. Only enable this if you are running a known, trusted MLS node.';
-  relaySection.appendChild(relayDesc);
-
-  var relayLabel = document.createElement('label');
-  relayLabel.style.cssText = 'display:flex;align-items:center;gap:0.5rem;cursor:pointer;user-select:none;';
-  var relayChk = document.createElement('input');
-  relayChk.type = 'checkbox';
-  relayChk.id = 'ma-relay-toggle';
-  var relayLabelText = document.createElement('span');
-  relayLabelText.textContent = 'Allow relay registration requests from other nodes';
-  relayLabel.appendChild(relayChk);
-  relayLabel.appendChild(relayLabelText);
-  relaySection.appendChild(relayLabel);
-
-  var relayStatus = document.createElement('p');
-  relayStatus.style.cssText = 'margin:0.5rem 0 0;font-size:0.82rem;min-height:1.2em;';
-  relaySection.appendChild(relayStatus);
-
-  MDS.keypair.get('MINIMAADS_ALLOW_RELAY', function(res) {
-    relayChk.checked = !!(res && res.status && (res.value === 'true' || res.value === true));
-  });
-
-  relayChk.addEventListener('change', function() {
-    var val = relayChk.checked ? 'true' : 'false';
-    MDS.keypair.set('MINIMAADS_ALLOW_RELAY', val, function() {
-      relayStatus.textContent = relayChk.checked ? 'Relay enabled.' : 'Relay disabled.';
-      relayStatus.style.color = relayChk.checked ? 'var(--pico-ins-color,#2ecc71)' : 'var(--pico-muted-color,#6c757d)';
-    });
-  });
-
-  root.appendChild(relaySection);
 }

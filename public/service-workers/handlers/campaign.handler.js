@@ -187,6 +187,13 @@ function getStateVar(states, port) {
 // then dispatches via PK routing (creatorPk) or direct contact (creatorMx).
 // creatorPk = hex public key string or null; creatorMx = Mx... address or null.
 function _sendRequestCampaignData(campaignId, creatorPk, creatorMx, cb) {
+  // Add creator to local Maxima contacts before sending so Maxima has a
+  // direct routing path (mirrors what the creator does for the viewer in
+  // handleChannelOpenRequest). Without this, to: routing via MLS may fail
+  // if the local Maxima node hasn't cached a route to the creator.
+  if (creatorMx && isMaximaRoute(creatorMx)) {
+    MDS.cmd("maxima action:addcontact contact:" + creatorMx, function() {});
+  }
   MDS.keypair.get("USER_PERMANENT_ROUTE", function(kpRes) {
     var myRoute = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : "";
     var requesterMx = (myRoute && myRoute.indexOf("MAX#") === 0) ? myRoute : MY_MX_ADDRESS;

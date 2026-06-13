@@ -202,7 +202,22 @@ function _sendRequestCampaignData(campaignId, creatorPk, creatorMx, cb) {
       campaign_id: campaignId,
       requester_mx: requesterMx
     };
-    sendMaxima(creatorPk, creatorMx, payload, cb);
+    sendMaxima(creatorPk, creatorMx, payload, function(ok) {
+      if (ok) {
+        cb(true);
+        return;
+      }
+      // Direct routing failed (MLS unreachable or creator not in contacts).
+      // Fall back to broadcast — any Maxima peer that has this campaign will
+      // receive the request and respond to requester_mx. This handles the case
+      // where the MLS address in the escrow coin is stale or the nodes are not
+      // directly peered via MLS but share P2P Maxima peers.
+      MDS.log("[DISCOVERY] direct routing failed, trying broadcastMaxima for: " + campaignId);
+      broadcastMaxima(payload, function(ok2) {
+        MDS.log("[DISCOVERY] broadcastMaxima REQUEST_CAMPAIGN_DATA ok=" + ok2 + " campaign=" + campaignId);
+        cb(ok2);
+      });
+    });
   });
 }
 

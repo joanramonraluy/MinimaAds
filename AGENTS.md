@@ -176,6 +176,20 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-06-13 (patch 4) — Perf fix: eliminate duplicate getCampaign() in REWARD_REQUEST hot path
+
+**Task**: Performance regression identified post-audit: reward receipt was taking noticeably longer (seconds) after T7 added a `getCampaign()` call inside `_handleRewardRequestInner`. The campaign had already been loaded by the caller `handleRewardRequest`, so the inner call was a redundant MDS.sql() round-trip on every single reward request.
+
+**Fix**:
+- **Remove duplicate DB call**: Changed `_handleRewardRequestInner` signature to accept `campaign` as a 6th parameter. `handleRewardRequest` now passes its already-loaded campaign object down. The `getCampaign()` call inside `_handleRewardRequestInner` is removed; the T7 accrual delta and cooldown checks now use the passed `campaign` directly.
+- **No security impact**: The campaign object is loaded from the creator node's own DB within the same call stack — it is not controlled by the sender.
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry moved to `docs/HISTORY.md §17`.
+
+---
+
 ### Session: 2026-06-13 (patch 3) — Fix direct routing fallback and rate-limit clearing on discovery failures
 
 **Task**: Fix viewer discovery failing to request campaign details from the creator node when the contact relationship is not yet established. If `publickey` routing fails, fallback to direct `to:` routing was attempting to send to the MLS server address itself instead of the full permanent route address (causing the request to be lost). Also, ensure that if campaign requests fail (`ok: false`), the rate limit is reset so that discovery retries immediately on subsequent blocks rather than waiting 30 seconds.
@@ -205,24 +219,4 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 ---
 
-### Session: 2026-06-13 — Security audit T7/T9: server-side voucher accrual + cooldown guards (C-1)
-
-**Task**: Implement the remaining `[Opus]` security-audit tasks (T7, T9) to close C-1 (channel over-claim). T10 (two-node test) deferred to manual testing.
-
-**Fix** (all in `public/service-workers/handlers/channel.handler.js`):
-- **T7** — `_handleRewardRequestInner`: after the existing `MAX_AMOUNT` cap and before `isDuplicate`, reload the campaign via `getCampaign` and validate the per-request accrual delta: `delta = cumulative − channel.CUMULATIVE_EARNED` must satisfy `0 < delta <= unit + ε` (ε = 0.000001), where `unit = REWARD_CLICK` when `payload.reward_type === 'click'` else `REWARD_VIEW`. Also enforce the campaign cooldown server-side: reject when `channel.LAST_VOUCHER_AT > 0 && (Date.now() − LAST_VOUCHER_AT) < cooldown` (cooldown = `campaign.COOLDOWN_MS` or `LIMITS.COOLDOWN_BETWEEN_REWARDS_MS`).
-- **T9** — `_doGeneratePublisherVoucher`: verify `pubReward <= PUBLISHER_REWARD_VIEW + ε` (publisher unit is always view-based) and enforce cooldown via `pubChannel.LAST_VOUCHER_AT`. `_replayDeferredPublisherRewardsNow`: reload the campaign and skip any deferred row whose `AMOUNT` exceeds the unit before accumulating; bail if no valid rows remain.
-
-**T10 (open)**: requires manual two-node test — (a) normal view/click voucher settles, (b) forged `cumulative = MAX_AMOUNT` is rejected by the delta check, (c) cooldown enforced server-side.
-
-**Files modified**: `public/service-workers/handlers/channel.handler.js`, `docs/audit_report.md`
-
-**AGENTS.md updated**: yes — §6 updated. Maxima schemas / DB schema unchanged (no §8/§3.5 changes needed).
-
----
-
-> Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, Auto-Sync Platform Creator Route, Unify MLS DevTools, Fix Viewer and Publisher Reward Delivery, Fix Publisher Budget (Multi-Publisher Support), Fix Stale-Pending Publisher Channel Deadlock, Minima Foundation Fee (3%) + V4 Escrow Script Fixes, 2026-06-10 settlement fixes, and all earlier) are archived in `docs/HISTORY.md §17`.
-
-
-
-
+> Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, Auto-Sync Platform Creator Route, Unify MLS DevTools, Fix Viewer and Publisher Reward Delivery, Fix Publisher Budget (Multi-Publisher Support), Fix Stale-Pending Publisher Channel Deadlock, Minima Foundation Fee (3%) + V4 Escrow Script Fixes, 2026-06-10 settlement fixes, Security audit T7/T9, and all earlier) are archived in `docs/HISTORY.md §17`.

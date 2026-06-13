@@ -46,6 +46,20 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-13 — Security audit T7/T9: server-side voucher accrual + cooldown guards (C-1)
+
+**Task**: Implement the remaining `[Opus]` security-audit tasks (T7, T9) to close C-1 (channel over-claim). T10 (two-node test) deferred to manual testing.
+
+**Fix** (all in `public/service-workers/handlers/channel.handler.js`):
+- **T7** — `_handleRewardRequestInner`: after the existing `MAX_AMOUNT` cap and before `isDuplicate`, reload the campaign via `getCampaign` and validate the per-request accrual delta: `delta = cumulative − channel.CUMULATIVE_EARNED` must satisfy `0 < delta <= unit + ε` (ε = 0.000001), where `unit = REWARD_CLICK` when `payload.reward_type === 'click'` else `REWARD_VIEW`. Also enforce the campaign cooldown server-side: reject when `channel.LAST_VOUCHER_AT > 0 && (Date.now() − LAST_VOUCHER_AT) < cooldown` (cooldown = `campaign.COOLDOWN_MS` or `LIMITS.COOLDOWN_BETWEEN_REWARDS_MS`). **Note**: the redundant `getCampaign()` call introduced here was subsequently optimised away in patch 4 (2026-06-13) by passing the already-loaded campaign object from the outer `handleRewardRequest`.
+- **T9** — `_doGeneratePublisherVoucher`: verify `pubReward <= PUBLISHER_REWARD_VIEW + ε` (publisher unit is always view-based) and enforce cooldown via `pubChannel.LAST_VOUCHER_AT`. `_replayDeferredPublisherRewardsNow`: reload the campaign and skip any deferred row whose `AMOUNT` exceeds the unit before accumulating; bail if no valid rows remain.
+
+**T10 (open)**: requires manual two-node test — (a) normal view/click voucher settles, (b) forged `cumulative = MAX_AMOUNT` is rejected by the delta check, (c) cooldown enforced server-side.
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`, `docs/audit_report.md`
+
+---
+
 ### Session: 2026-06-11 — Support Dedicated Routing for Campaign Details
 
 **Task**: Fix the DApp returning to the campaigns list when clicking the CTA/banner links inside campaign detail views. Introduce dedicated hash routing `#campaign-detail?id=<campaignId>` for detail views to guarantee state preservation and enable standard navigation history.

@@ -500,7 +500,7 @@ function handleRewardRequest(payload, senderPk) {
       }
       return;
     }
-    _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumulative);
+    _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumulative, campaign);
   });
 }
 
@@ -548,7 +548,7 @@ function handleRewardRejected(payload) {
   });
 }
 
-function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumulative) {
+function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumulative, campaign) {
   var role         = payload.role || 'viewer';
   var frameId      = payload.frame_id || '';
   var publisherKey = payload.publisher_key || '';
@@ -569,34 +569,30 @@ function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumu
       return;
     }
 
-    // C-1 server-side accrual check: reload campaign to validate the per-request
-    // delta against the campaign's reward unit, and enforce the campaign cooldown
-    // server-side using LAST_VOUCHER_AT. Prevents a malicious viewer from forging
-    // an inflated cumulative or spamming requests faster than the cooldown.
-    getCampaign(campaignId, function(accErr, accCampaign) {
-      if (accErr || !accCampaign) {
-        MDS.log("[CHANNEL] REWARD_REQUEST: accrual check campaign not found: " + campaignId);
-        return;
-      }
-      var epsilon  = 0.000001;
-      var earned   = parseFloat(channel.CUMULATIVE_EARNED) || 0;
-      var delta    = cumulative - earned;
-      var unit     = (payload.reward_type === 'click')
-        ? (parseFloat(accCampaign.REWARD_CLICK) || 0)
-        : (parseFloat(accCampaign.REWARD_VIEW) || 0);
-      if (!(delta > 0 && delta <= unit + epsilon)) {
-        MDS.log("[CHANNEL] REWARD_REQUEST: accrual delta invalid. delta=" + delta + " unit=" + unit + " type=" + (payload.reward_type || 'view') + " campaign: " + campaignId);
-        return;
-      }
-      var cooldown = (accCampaign.COOLDOWN_MS !== null && accCampaign.COOLDOWN_MS !== undefined)
-        ? parseInt(accCampaign.COOLDOWN_MS, 10) : LIMITS.COOLDOWN_BETWEEN_REWARDS_MS;
-      var lastAt   = parseInt(channel.LAST_VOUCHER_AT, 10) || 0;
-      if (lastAt > 0 && (Date.now() - lastAt) < cooldown) {
-        MDS.log("[CHANNEL] REWARD_REQUEST: cooldown not elapsed. since=" + (Date.now() - lastAt) + " cooldown=" + cooldown + " campaign: " + campaignId);
-        return;
-      }
+    // C-1 server-side accrual check: use the campaign already loaded by handleRewardRequest
+    // (avoids a redundant getCampaign() SQL round-trip in the hot path — perf fix).
+    // Validates the per-request delta against the campaign's reward unit, and enforces
+    // the campaign cooldown server-side using LAST_VOUCHER_AT. Prevents a malicious viewer
+    // from forging an inflated cumulative or spamming requests faster than the cooldown.
+    var epsilon  = 0.000001;
+    var earned   = parseFloat(channel.CUMULATIVE_EARNED) || 0;
+    var delta    = cumulative - earned;
+    var unit     = (payload.reward_type === 'click')
+      ? (parseFloat(campaign.REWARD_CLICK) || 0)
+      : (parseFloat(campaign.REWARD_VIEW) || 0);
+    if (!(delta > 0 && delta <= unit + epsilon)) {
+      MDS.log("[CHANNEL] REWARD_REQUEST: accrual delta invalid. delta=" + delta + " unit=" + unit + " type=" + (payload.reward_type || 'view') + " campaign: " + campaignId);
+      return;
+    }
+    var cooldown = (campaign.COOLDOWN_MS !== null && campaign.COOLDOWN_MS !== undefined)
+      ? parseInt(campaign.COOLDOWN_MS, 10) : LIMITS.COOLDOWN_BETWEEN_REWARDS_MS;
+    var lastAt   = parseInt(channel.LAST_VOUCHER_AT, 10) || 0;
+    if (lastAt > 0 && (Date.now() - lastAt) < cooldown) {
+      MDS.log("[CHANNEL] REWARD_REQUEST: cooldown not elapsed. since=" + (Date.now() - lastAt) + " cooldown=" + cooldown + " campaign: " + campaignId);
+      return;
+    }
 
-      isDuplicate(eventId, function(isDup) {
+    isDuplicate(eventId, function(isDup) {
       if (isDup) {
         MDS.log("[CHANNEL] REWARD_REQUEST: duplicate event_id: " + eventId);
         return;
@@ -659,7 +655,6 @@ function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumu
           });
         }
       });
-    });
     });
   });
 }

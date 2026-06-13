@@ -108,28 +108,69 @@ function persistCampaign(payload, campaignId) {
   });
 }
 
-function handleCampaignPause(payload) {
+function handleCampaignPause(payload, senderPk) {
   if (!payload.campaign_id) {
     MDS.log("[CAMPAIGN] PAUSE missing campaign_id");
     return;
   }
-  applyStatusChange(payload.campaign_id, "paused");
+  _assertCreatorThen(payload.campaign_id, senderPk, function() {
+    applyStatusChange(payload.campaign_id, "paused");
+  });
 }
 
-function handleCampaignFinish(payload) {
+function handleCampaignFinish(payload, senderPk) {
   if (!payload.campaign_id) {
     MDS.log("[CAMPAIGN] FINISH missing campaign_id");
     return;
   }
-  applyStatusChange(payload.campaign_id, "finished");
+  _assertCreatorThen(payload.campaign_id, senderPk, function() {
+    applyStatusChange(payload.campaign_id, "finished");
+  });
 }
 
-function handleCampaignResume(payload) {
+function handleCampaignResume(payload, senderPk) {
   if (!payload.campaign_id) {
     MDS.log("[CAMPAIGN] RESUME missing campaign_id");
     return;
   }
-  applyStatusChange(payload.campaign_id, "active");
+  _assertCreatorThen(payload.campaign_id, senderPk, function() {
+    applyStatusChange(payload.campaign_id, "active");
+  });
+}
+
+// Verifies the Maxima sender PK matches the campaign creator before applying
+// any status change. Extracts the creator PK from CREATOR_MX (MAX#<pk>#<mls>
+// permanent route) or falls back to CREATOR_ADDRESS. Comparison is
+// case-insensitive — public keys may arrive in mixed hex case.
+// senderPk comes from msg.data.from (Maxima-layer, cryptographically verified).
+function _assertCreatorThen(campaignId, senderPk, ok) {
+  if (!senderPk) {
+    MDS.log("[CAMPAIGN] status change rejected: no sender PK. campaign=" + campaignId);
+    return;
+  }
+  getCampaign(campaignId, function(err, c) {
+    if (err || !c) {
+      MDS.log("[CAMPAIGN] status change rejected: campaign not found. campaign=" + campaignId);
+      return;
+    }
+    var creatorPk = '';
+    var route = (c.CREATOR_MX || '');
+    if (route.indexOf('MAX#') === 0) {
+      var parts = route.split('#');
+      if (parts.length === 3) { creatorPk = parts[1]; }
+    }
+    if (!creatorPk) {
+      // Fallback: CREATOR_ADDRESS is a Maxima PK for campaigns discovered via
+      // CAMPAIGN_ANNOUNCE (set from payload.campaign.creator_address).
+      creatorPk = c.CREATOR_ADDRESS || '';
+    }
+    if (creatorPk && creatorPk.toUpperCase() === senderPk.toUpperCase()) {
+      ok();
+      return;
+    }
+    MDS.log("[CAMPAIGN] status change rejected: sender is not the creator. campaign=" + campaignId
+      + " sender=" + senderPk.substring(0, 16) + "...");
+  });
 }
 
 // Returns the data value for a given port in coin.state (array of {port, data} objects).

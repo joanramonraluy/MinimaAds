@@ -215,7 +215,17 @@ function handleChannelOpenRequest(payload, senderPk) {
         MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: insufficient budget. remaining: " + campaign.BUDGET_REMAINING + " requested: " + maxAmount);
         return;
       }
+      // Cap reservation so a single channel cannot pre-reserve the entire budget.
+      var reservationCap = LIMITS.MAX_CHANNEL_RESERVATION || 10;
+      if (maxAmount > reservationCap) {
+        MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: capping reservation " + maxAmount + " -> " + reservationCap + " campaign=" + campaignId);
+        maxAmount = reservationCap;
+      }
 
+      if (viewerMx && !isMaximaRoute(viewerMx)) {
+        MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST rejected: malformed viewer_mx");
+        return;
+      }
       MDS.cmd("maxima action:addcontact contact:" + viewerMx, function(addRes) {
         // Optional/informational: contact may already exist; either way routing via
         // to: still works, so a non-true status here is NOT a failure.

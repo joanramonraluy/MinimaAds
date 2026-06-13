@@ -22,8 +22,25 @@ function renderAd(ad, containerId) {
 
   function safeUrl(val) {
     var s = safeText(val);
-    if (/^javascript:/i.test(s.trim())) { return '#'; }
-    return s;
+    var t = s.trim();
+    // Scheme whitelist: only http/https/mailto are allowed (closes L-3).
+    if (!/^(https?:|mailto:)/i.test(t)) { return '#'; }
+    return t;
+  }
+
+  // Validates advertiser-controlled CSS colour values to prevent CSS injection
+  // (e.g. background-image beacons). Only #RGB / #RRGGBB / #RRGGBBAA hex allowed.
+  function safeColor(val, fallback) {
+    var s = val ? String(val).trim() : '';
+    return /^#[0-9A-Fa-f]{3,8}$/.test(s) ? s : fallback;
+  }
+
+  // Restricts image_position to a fixed enum — raw value would go into cssText.
+  function safePos(val) {
+    var s = val ? String(val).trim().toLowerCase() : 'center';
+    var allowed = { 'center': 1, 'top': 1, 'bottom': 1, 'left': 1, 'right': 1,
+                    'top left': 1, 'top right': 1, 'bottom left': 1, 'bottom right': 1 };
+    return allowed[s] ? s : 'center';
   }
 
   function safeImageData(val) {
@@ -33,11 +50,11 @@ function renderAd(ad, containerId) {
     return '';
   }
 
-  var bgColor    = ad.bg_color        || '#ffffff';
-  var textColor  = ad.text_color      || '#111111';
-  var imgPos     = ad.image_position  || 'center';
-  var imgZoom    = parseFloat(ad.image_zoom) || 1.0;
-  var imgWidthPct = parseInt(ad.image_width_pct, 10) || 40;
+  var bgColor    = safeColor(ad.bg_color, '#ffffff');
+  var textColor  = safeColor(ad.text_color, '#111111');
+  var imgPos     = safePos(ad.image_position);
+  var imgZoom    = Math.max(1.0, Math.min(3.0, parseFloat(ad.image_zoom) || 1.0));
+  var imgWidthPct = Math.max(10, Math.min(80, parseInt(ad.image_width_pct, 10) || 40));
   var imgSrc   = safeImageData(ad.image_data);
 
   var showTitle = ad.show_title !== undefined ? parseInt(ad.show_title, 10) : 1;

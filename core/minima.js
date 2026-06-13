@@ -30,7 +30,19 @@ function utf8ToHex(str) {
 }
 
 function escapeSql(str) {
-  return str.replace(/'/g, "''");
+  return String(str == null ? '' : str).replace(/'/g, "''");
+}
+
+// Returns true if s is a bare 0x hex string with no whitespace or metacharacters.
+// Used to validate remote payload fields before interpolating into MDS.cmd strings.
+function isHexKey(s) {
+  return typeof s === "string" && /^0x[0-9A-Fa-f]{2,140}$/.test(s);
+}
+
+// Returns true if s is a plausible Maxima contact string or MAX# permanent route
+// with no whitespace (which would inject additional command parameters).
+function isMaximaRoute(s) {
+  return typeof s === "string" && s.length > 0 && s.length < 600 && !/\s/.test(s);
 }
 
 function sqlQuery(query, cb) {

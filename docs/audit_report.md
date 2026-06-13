@@ -391,28 +391,28 @@ Add a hex/route validator in `core/minima.js` and use it at both sinks.
 
 ### Phase 1 — Quick wins (aïllats, risc ~zero)
 
-- [ ] **T1 · `[Sonnet]` · C‑2a — Validate `publickey` before `MDS.cmd`.** Add `isHexKey()` to `core/minima.js`; guard `handleRegisterPermanentRequest` (`maxima.handler.js`). *(also fixes L‑2: `escapeSql` non‑string guard)*
-- [ ] **T2 · `[Sonnet]` · C‑2b — Validate `viewer_mx` before `addcontact`.** Add `isMaximaRoute()` to `core/minima.js`; guard `handleChannelOpenRequest` (`channel.handler.js:219`). Sweep for any other raw‑payload‑string → `MDS.cmd` sinks.
-- [ ] **T3 · `[Haiku]` · M‑2 — `poll:true` → `poll:false`** in `sdk/index.js` `_sendToCreator` and `dapp/app.js` `sendChannelMaxima`.
-- [ ] **T4 · `[Sonnet]` · M‑3 — Sanitise advertiser style fields** in `renderer/renderAd.js` (`safeColor`, `safePos`, zoom/width clamps, CTA scheme whitelist → also closes L‑3).
+- [x] **T1 · `[Sonnet]` · C‑2a — Validate `publickey` before `MDS.cmd`.** Add `isHexKey()` to `core/minima.js`; guard `handleRegisterPermanentRequest` (`maxima.handler.js`). *(also fixes L‑2: `escapeSql` non‑string guard)*
+- [x] **T2 · `[Sonnet]` · C‑2b — Validate `viewer_mx` before `addcontact`.** Add `isMaximaRoute()` to `core/minima.js`; guard `handleChannelOpenRequest` (`channel.handler.js:219`). Sweep for any other raw‑payload‑string → `MDS.cmd` sinks.
+- [x] **T3 · `[Haiku]` · M‑2 — `poll:true` → `poll:false`** in `sdk/index.js` `_sendToCreator` and `dapp/app.js` `sendChannelMaxima`.
+- [x] **T4 · `[Sonnet]` · M‑3 — Sanitise advertiser style fields** in `renderer/renderAd.js` (`safeColor`, `safePos`, zoom/width clamps, CTA scheme whitelist → also closes L‑3).
 
 ### Phase 2 — Sender authentication
 
-- [ ] **T5 · `[Sonnet]` · M‑1 — Authenticate campaign status messages.** Thread `senderPk` from the dispatcher into `handleCampaignPause/Finish/Resume`; add `_assertCreatorThen()` comparing sender PK against the campaign's creator route PK (`CREATOR_MX` / on‑chain `STATE(4)`). **Test the legitimate creator‑broadcast path still works** on a two‑node setup before merging.
+- [x] **T5 · `[Sonnet]` · M‑1 — Authenticate campaign status messages.** Thread `senderPk` from the dispatcher into `handleCampaignPause/Finish/Resume`; add `_assertCreatorThen()` comparing sender PK against the campaign's creator route PK (`CREATOR_MX` / on‑chain `STATE(4)`). **Test the legitimate creator‑broadcast path still works** on a two‑node setup before merging.
 
 ### Phase 3 — Economic fix (C‑1)
 
-- [ ] **T6 · `[Sonnet]` · Schema — `LAST_VOUCHER_AT`.** `ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS LAST_VOUCHER_AT BIGINT DEFAULT 0` in **both** `public/service-workers/db-init.js` **and** the FE DB init. Set it inside `updateChannelVoucher` (`core/channels.js`).
+- [x] **T6 · `[Sonnet]` · Schema — `LAST_VOUCHER_AT`.** `ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS LAST_VOUCHER_AT BIGINT DEFAULT 0` in **both** `public/service-workers/db-init.js` **and** the FE DB init. Set it inside `updateChannelVoucher` (`core/channels.js`).
 - [ ] **T7 · `[Opus]` · C‑1 core — Server‑side accrual check.** In `_handleRewardRequestInner` (`channel.handler.js`), after the `MAX_AMOUNT` cap: load campaign, compute `delta = cumulative − channel.CUMULATIVE_EARNED`, reject `delta <= 0` or `delta > unit (+ε)` where `unit = REWARD_CLICK` for clicks else `REWARD_VIEW`; enforce campaign cooldown via `LAST_VOUCHER_AT`.
-- [ ] **T8 · `[Sonnet]` · C‑1 reservation cap.** In `handleChannelOpenRequest` (viewer path), clamp `max_amount` to a policy ceiling so one channel cannot pre‑reserve the whole budget. Add the limit to the `LIMITS` constant in `service.js`.
+- [x] **T8 · `[Sonnet]` · C‑1 reservation cap.** In `handleChannelOpenRequest` (viewer path), clamp `max_amount` to a policy ceiling so one channel cannot pre‑reserve the whole budget. Add the limit to the `LIMITS` constant in `service.js`.
 - [ ] **T9 · `[Opus]` · C‑1 — apply the same accrual guard to the publisher voucher path** (`_doGeneratePublisherVoucher` / `_maybeGeneratePublisherVoucher`) so publisher channels can't be over‑claimed either.
 - [ ] **T10 · `[Opus]` · Two‑node verification** of the three attack scenarios in §6 + confirm a normal view/click voucher still settles end‑to‑end.
 
 ### Phase 4 — Hardening & cleanup
 
-- [ ] **T11 · `[Sonnet]` · M‑4 — Consolidate budget accounting** to a single authoritative path (on‑chain `processEscrowCoin` sync); remove redundant `updateBudget` debits that can prematurely flip a campaign to `finished`.
-- [ ] **T12 · `[Sonnet]` · L‑1 — Route `dapp/views/frames.js:247` through `core/frames.js`/`sqlQuery`** instead of direct `MDS.sql`.
-- [ ] **T13 · `[Sonnet]` · L‑4 — Gate `maxextra addpermanent`** behind an allow‑list or explicit user opt‑in.
+- [x] **T11 · `[Sonnet]` · M‑4 — Consolidate budget accounting** to a single authoritative path (on‑chain `processEscrowCoin` sync); remove redundant `updateBudget` debits that can prematurely flip a campaign to `finished`.
+- [x] **T12 · `[Sonnet]` · L‑1 — Route `dapp/views/frames.js:247` through `core/frames.js`/`sqlQuery`** instead of direct `MDS.sql`.
+- [x] **T13 · `[Sonnet]` · L‑4 — Gate `maxextra addpermanent`** behind an allow‑list or explicit user opt‑in.
 
 ### Model assignment summary
 

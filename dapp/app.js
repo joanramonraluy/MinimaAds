@@ -395,13 +395,13 @@ function handleMdsComms(parsed) {
 // Send a unicast Maxima message. Prefers publickey: routing (same as SW sendMaxima)
 // which is more reliable than to: (contact string may lack @host:port).
 // Falls back to to:mxAddress when no publicKey provided.
-// poll:true so messages survive the recipient being offline (per §6.5/§6.6).
+// poll:false — poll:true blocks the event loop ~77s when peer is offline (KNOWN_ISSUES #17).
 function sendChannelMaxima(mxAddress, payload, cb) {
   var hex = '0x' + utf8ToHex(JSON.stringify(payload)).toUpperCase();
   var cmd = 'maxima action:send to:' + mxAddress
           + ' application:' + APP_NAME
           + ' data:' + hex
-          + ' poll:true';
+          + ' poll:false';
   MDS.cmd(cmd, function(res) {
     if (!res || !res.status) {
       console.error('[CHANNEL] sendChannelMaxima failed to=' + mxAddress.substring(0, 20) + ':', res && res.error);
@@ -1918,7 +1918,13 @@ function initFEChannelState(cb) {
     + "VIEWER_WALLET_ADDR VARCHAR(512)  DEFAULT '',"
     + "PRIMARY KEY (CAMPAIGN_ID, VIEWER_KEY, ROLE)"
     + ")";
-  sqlQuery(sql, function() { if (cb) { cb(); } });
+  sqlQuery(sql, function() {
+    sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS VIEWER_WALLET_PK VARCHAR(512) DEFAULT ''", function() {
+    sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS LAST_VOUCHER_AT BIGINT DEFAULT 0", function() {
+      if (cb) { cb(); }
+    }); // end LAST_VOUCHER_AT migration
+    }); // end VIEWER_WALLET_PK migration
+  });
 }
 
 function initFEChannelHistory(cb) {

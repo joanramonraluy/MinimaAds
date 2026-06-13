@@ -28,11 +28,11 @@ function onMaxima(msg) {
   if (payload.type === "CAMPAIGN_ANNOUNCE") {
     handleCampaignAnnounce(payload);
   } else if (payload.type === "CAMPAIGN_PAUSE") {
-    handleCampaignPause(payload);
+    handleCampaignPause(payload, msg.data.from || '');
   } else if (payload.type === "CAMPAIGN_FINISH") {
-    handleCampaignFinish(payload);
+    handleCampaignFinish(payload, msg.data.from || '');
   } else if (payload.type === "CAMPAIGN_RESUME") {
-    handleCampaignResume(payload);
+    handleCampaignResume(payload, msg.data.from || '');
   } else if (payload.type === "REQUEST_CAMPAIGN_DATA") {
     handleRequestCampaignData(payload);
   } else if (payload.type === "CAMPAIGN_DATA_RESPONSE") {
@@ -79,6 +79,23 @@ function handleRegisterPermanentRequest(payload, fromRoute) {
     return;
   }
   var pubkey = payload.publickey;
+  if (!isHexKey(pubkey)) {
+    MDS.log("[MAXIMA] REGISTER_PERMANENT_REQUEST rejected: malformed publickey");
+    return;
+  }
+  // Gate: only act as a relay if the node operator has explicitly opted in.
+  // Set keypair MINIMAADS_ALLOW_RELAY=true in Settings > Maxima Routes to enable.
+  MDS.keypair.get("MINIMAADS_ALLOW_RELAY", function(relayRes) {
+    var allowed = relayRes && relayRes.status && (relayRes.value === "true" || relayRes.value === true);
+    if (!allowed) {
+      MDS.log("[MAXIMA] REGISTER_PERMANENT_REQUEST rejected: relay not enabled on this node");
+      return;
+    }
+    _doRegisterPermanent(payload, fromRoute, pubkey);
+  });
+}
+
+function _doRegisterPermanent(payload, fromRoute, pubkey) {
   var requesterContact = payload.requester_contact || '';
   MDS.log("[MAXIMA] REGISTER_PERMANENT_REQUEST from " + (fromRoute ? fromRoute.substring(0, 20) + "..." : "unknown") + " for key: " + pubkey.substring(0, 20) + "...");
 

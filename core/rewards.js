@@ -58,7 +58,19 @@ function createRewardEvent(params, cb) {
           return;
         }
 
-        updateBudget(campaignId, amount, function(err3) {
+        // For channel viewer rewards (view/click), BUDGET_REMAINING is the authoritative
+        // on-chain escrow amount synced by processEscrowCoin. Skip the redundant local debit
+        // to prevent prematurely flipping the campaign to 'finished' (M-4 fix).
+        // publisher_view still debits locally — no on-chain publisher-budget sync exists.
+        var isChanViewerReward = (type === 'view' || type === 'click');
+
+        if (isChanViewerReward) {
+          _afterBudget(null);
+        } else {
+          updateBudget(campaignId, amount, _afterBudget);
+        }
+
+        function _afterBudget(err3) {
           if (err3) {
             MDS.log("[REWARD] createRewardEvent: updateBudget error: " + err3);
             cb(err3, null);
@@ -126,7 +138,7 @@ function createRewardEvent(params, cb) {
               cb(null, rewardEvent);
             });
           });
-        });
+        }
       });
     });
   });

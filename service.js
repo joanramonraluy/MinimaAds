@@ -15,7 +15,10 @@ var LIMITS = {
   MIN_REWARD_VIEW:                 0.001,
   MIN_REWARD_CLICK:                0.005,
   MAX_CAMPAIGN_DAYS:               90,
-  MIN_PUBLISHER_REWARD_VIEW:       0.001
+  MIN_PUBLISHER_REWARD_VIEW:       0.001,
+  // Maximum Minima a viewer channel may reserve in a single CHANNEL_OPEN_REQUEST.
+  // Prevents a single attacker channel from pre-reserving the entire campaign budget.
+  MAX_CHANNEL_RESERVATION:         10
 };
 
 // Node identity — set once in onInited after maxima action:info

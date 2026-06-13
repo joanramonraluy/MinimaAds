@@ -32,11 +32,10 @@ function _doMergeChannel(campaignId, viewerKey, creatorMx, maxAmount, r, fid, wA
     ")";
   sqlQuery(sql, function(err) {
     if (err) { cb(err); return; }
-    if (r === 'viewer') {
-      updateBudget(campaignId, maxAmount, cb);
-    } else {
-      cb(null);
-    }
+    // BUDGET_REMAINING is the authoritative on-chain escrow amount synced by
+    // processEscrowCoin after the split tx mines. Skip the local pre-reservation
+    // debit here to avoid double-accounting and premature 'finished' flips (M-4 fix).
+    cb(null);
   });
 }
 
@@ -67,9 +66,11 @@ function getChannelState(campaignId, viewerKey, role, cb) {
 
 function updateChannelVoucher(campaignId, viewerKey, role, cumulativeEarned, latestTxHex, cb) {
   var r = role || 'viewer';
+  var now = Date.now();
   var sql = "UPDATE CHANNEL_STATE " +
     "SET CUMULATIVE_EARNED = " + cumulativeEarned + ", " +
-    "LATEST_TX_HEX = '" + escapeSql(latestTxHex) + "' " +
+    "LATEST_TX_HEX = '" + escapeSql(latestTxHex) + "', " +
+    "LAST_VOUCHER_AT = " + now + " " +
     "WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') " +
     "AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(viewerKey) + "') " +
     "AND UPPER(ROLE) = UPPER('" + escapeSql(r) + "')";

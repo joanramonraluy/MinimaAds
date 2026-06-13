@@ -117,8 +117,12 @@
           if (res.status) {
             mlsRegisterBtn.textContent = '✓ Registered!';
             MDS.keypair.set('MLS_SERVER_ADDRESS', p2pId, function() {
-              updateMlsStatus();
-              refreshKeypairInspector();
+              // Implicitly enable relay: a node that acts as MLS server
+              // must also process REGISTER_PERMANENT_REQUEST from other nodes.
+              MDS.keypair.set('MINIMAADS_ALLOW_RELAY', 'true', function() {
+                updateMlsStatus();
+                refreshKeypairInspector();
+              });
             });
           } else {
             mlsRegisterBtn.textContent = '✕ Failed: ' + (res.error || 'unknown');

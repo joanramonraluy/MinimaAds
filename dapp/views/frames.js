@@ -244,8 +244,9 @@ function _showSnippet(fid) {
 }
 
 function _loadSnippet(fid, cb) {
-  MDS.sql("SELECT PUBLISHER_KEY, PUBLISHER_MX FROM FRAMES WHERE UPPER(FRAME_ID) = UPPER('" + fid.replace(/'/g, "''") + "') LIMIT 1", function(res) {
-    var row = (res && res.status && res.rows && res.rows.length > 0) ? res.rows[0] : null;
+  var sql = "SELECT PUBLISHER_KEY, PUBLISHER_MX FROM FRAMES WHERE UPPER(FRAME_ID) = UPPER('" + fid.replace(/'/g, "''") + "') LIMIT 1";
+  sqlQuery(sql, function(err, rows) {
+    var row = (!err && rows && rows.length > 0) ? rows[0] : null;
     var pubKey = row ? (row.PUBLISHER_KEY || '') : '';
     var pubMx  = row ? (row.PUBLISHER_MX  || '') : '';
     cb(_buildSnippet(fid, pubKey, pubMx));

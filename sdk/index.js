@@ -265,7 +265,7 @@
     return _myMx;
   }
 
-  // Unicast Maxima send with poll:true.
+  // Unicast Maxima send with poll:false (poll:true blocks the event loop ~77s when peer is offline).
   // creatorRoute may be an Mx contact string (starts with "Mx" or "MX") or a
   // Maxima public key (starts with "0x"). Mx uses `to:` routing; pk uses
   // `publickey:` routing (requires the peer to be in the contacts list).
@@ -279,7 +279,7 @@
     var cmd = 'maxima action:send ' + routeParam
             + ' application:' + APP_NAME
             + ' data:' + hex
-            + ' poll:true';
+            + ' poll:false';
     MDS.cmd(cmd, function(res) {
       var ok = !!(res && res.status);
       console.log('[SDK] sendToCreator type:' + payload.type + ' route:' + (isMx ? 'Mx' : 'pk') + ' ok:' + ok + (ok ? '' : ' err:' + (res && res.error)));

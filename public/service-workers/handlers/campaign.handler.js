@@ -236,10 +236,12 @@ function processEscrowCoin(coin) {
         MDS.log("[DISCOVERY] Outdated route format in coin: " + creatorRaw + " — falling back to direct contact: " + routePk);
         creatorMxAddr = routePk;
       } else {
-        // Valid permanent route: use PK routing with full route as fallback
+        // Valid permanent route: use PK routing; fallback to the MLS contact
+        // address (routeParts[2]) — NOT the full MAX# string, which is invalid
+        // for the "to:" parameter in "maxima action:send".
         creatorPkRoute = routePk;
-        creatorMxAddr = creatorRaw;
-        MDS.log("[DISCOVERY] Permanent route in coin: " + creatorRaw + " — using PK routing: " + routePk.substring(0, 10) + "...");
+        creatorMxAddr = routeParts[2] || '';
+        MDS.log("[DISCOVERY] Permanent route in coin: " + creatorRaw + " — using PK routing: " + routePk.substring(0, 10) + "... fallback MLS: " + (creatorMxAddr ? creatorMxAddr.substring(0, 20) + "..." : "NONE"));
       }
     }
   }

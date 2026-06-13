@@ -205,8 +205,10 @@ function _sendRequestCampaignData(campaignId, creatorPk, creatorMx, cb) {
 // _knownEscrowCoins and MY_MX_ADDRESS are globals defined in main.js.
 function processEscrowCoin(coin) {
   var coinId = coin.coinid;
+  // Only skip if the campaign is already confirmed in the local DB.
+  // Coins for unknown campaigns are NOT cached here so REQUEST_CAMPAIGN_DATA
+  // can be retried on subsequent NEWBLOCKs if delivery was lost.
   if (_knownEscrowCoins[coinId]) { return; }
-  _knownEscrowCoins[coinId] = true;
 
   var states = coin.state || [];
   var campaignIdHex     = getStateVar(states, 3);
@@ -253,6 +255,8 @@ function processEscrowCoin(coin) {
 
   getCampaign(campaignId, function(err, campaign) {
     if (campaign) {
+      // Campaign is in local DB — mark coin as fully processed, no further action needed.
+      _knownEscrowCoins[coinId] = true;
       // Detect stale publisher data: on-chain STATE(6) has a publisher budget
       // but local DB has MAX_PUBLISHER_BUDGET = 0 (saved with pre-fix code).
       var onChainPubBudget = parseFloat(getStateVar(states, 6) || 0);
@@ -348,9 +352,17 @@ function processEscrowCoin(coin) {
         return;
       }
 
+      // Rate-limit retries: send at most once every 30 s per campaign.
+      // _pendingCampaignRequests is a global map defined in service.js.
+      var now = Date.now();
+      var lastSent = (_pendingCampaignRequests && _pendingCampaignRequests[campaignId]) ? _pendingCampaignRequests[campaignId] : 0;
+      if (now - lastSent < 30000) {
+        MDS.log("[DISCOVERY] REQUEST_CAMPAIGN_DATA rate-limited for: " + campaignId + " (retry in " + Math.round((30000 - (now - lastSent)) / 1000) + "s)");
+        return;
+      }
+      if (_pendingCampaignRequests) { _pendingCampaignRequests[campaignId] = now; }
       _sendRequestCampaignData(campaignId, creatorPkRoute, creatorMxAddr, function(ok) {
         MDS.log("[DISCOVERY] REQUEST_CAMPAIGN_DATA sent for: " + campaignId + " ok: " + ok);
-        if (!ok) { delete _knownEscrowCoins[coinId]; }
       });
     });
   });

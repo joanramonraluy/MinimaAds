@@ -38,8 +38,14 @@ var ESCROW_ADDRESS_V4 = '';
 var CHANNEL_SCRIPT         = 'IF @COINAGE GT (40*1728) AND SIGNEDBY(PREVSTATE(1)) THEN RETURN TRUE ENDIF RETURN MULTISIG(2 PREVSTATE(1) PREVSTATE(2))';
 var CHANNEL_SCRIPT_ADDRESS = '';
 
-// Tracks which escrow coinIds have already triggered a REQUEST to avoid re-asking
+// Tracks escrow coinIds whose campaign is already in the local DB (no further action needed).
+// Only set once the campaign is confirmed present. Coins for unknown campaigns are NOT cached
+// here so REQUEST_CAMPAIGN_DATA can be retried on subsequent NEWBLOCKs.
 var _knownEscrowCoins = {};
+
+// Rate-limits REQUEST_CAMPAIGN_DATA retries for unknown campaigns.
+// Maps campaignId -> timestamp of last send. Retries at most once every 30 s.
+var _pendingCampaignRequests = {};
 
 var ESCROW_SCRIPT = 'LET creatorkey=PREVSTATE(1) ASSERT SIGNEDBY(creatorkey) LET payout=STATE(10) LET change=@AMOUNT-payout IF change GT 0 THEN ASSERT VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE) ENDIF RETURN TRUE';
 

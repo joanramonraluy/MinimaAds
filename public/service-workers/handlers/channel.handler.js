@@ -32,6 +32,16 @@ function handleChannelOpenRequest(payload, senderPk) {
   var frameId          = payload.frame_id || '';
   var sndrPk           = senderPk || '';
 
+  // N-2: validate wallet fields before they reach MDS.cmd (txnoutput address/publickey).
+  if (viewerWalletAddr && !isMaximaRoute(viewerWalletAddr)) {
+    MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST rejected: malformed viewer_wallet_addr");
+    return;
+  }
+  if (viewerWalletPK && !isHexKey(viewerWalletPK)) {
+    MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST rejected: malformed viewer_wallet_pk");
+    return;
+  }
+
   if (role === 'publisher') {
     if (!frameId) {
       MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): missing frame_id");

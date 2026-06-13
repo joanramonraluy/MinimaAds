@@ -414,12 +414,17 @@ Add a hex/route validator in `core/minima.js` and use it at both sinks.
 - [x] **T12 · `[Sonnet]` · L‑1 — Route `dapp/views/frames.js:247` through `core/frames.js`/`sqlQuery`** instead of direct `MDS.sql`.
 - [x] **T13 · `[Sonnet]` · L‑4 — Gate `maxextra addpermanent`** behind an allow‑list or explicit user opt‑in.
 
+### Phase 5 — Post-remediation findings (re-audit 2026-06-13)
+
+- [x] **T14 · `[Sonnet]` · N‑2 (MEDIUM) — Validate `viewer_wallet_addr` / `viewer_wallet_pk` before `txnoutput`.** In `handleChannelOpenRequest` (`channel.handler.js`), `payload.viewer_wallet_addr` and `payload.viewer_wallet_pk` reach `MDS.cmd("txnoutput … address:" + ctx.viewerAddr)` unvalidated — same injection class as C‑2 but on a fund-signing path. Add `isMaximaRoute` guard for `viewer_wallet_addr` and `isHexKey` guard for `viewer_wallet_pk`.
+- [x] **T15 · `[Sonnet]` · N‑4 (LOW) — Validate `requester_contact` before `sendMaxima`.** In `_doRegisterPermanent` (`maxima.handler.js`), `payload.requester_contact` reaches `sendMaxima(null, requesterContact, …)` → `MDS.cmd("maxima action:send to:" + …)` unvalidated. Add `isMaximaRoute` guard before use.
+
 ### Model assignment summary
 
 | Model | Tasks |
 |---|---|
 | **Haiku** | T3 |
-| **Sonnet** | T1, T2, T4, T5, T6, T8, T11, T12, T13 |
+| **Sonnet** | T1, T2, T4, T5, T6, T8, T11, T12, T13, T14, T15 |
 | **Opus** | T7, T9, T10 |
 
 ### Cross‑cutting reminders (per CLAUDE.md / KNOWN_ISSUES)
@@ -428,4 +433,58 @@ Add a hex/route validator in `core/minima.js` and use it at both sinks.
 - SW edits stay Rhino‑safe: `var`, `function()`, string concat, `MDS.log`, no trailing commas.
 - Public‑key / route comparisons `.toUpperCase()` on both sides.
 - Update `MinimaAds.md` §8 if any message schema gains a field; add a handoff entry to `AGENTS.md §6`.
+
+---
+
+## 8) Post‑Remediation Re‑Audit (2026‑06‑13)
+
+**Auditor role:** Senior Smart Contract & Decentralized Application Security Auditor
+**Scope of this pass:** only the code changed across commits `34c2e16`, `e30d5c6`, `0b1bacd` (fixes T1–T13 / C‑1, C‑2, M‑1, M‑3, M‑4, L‑3, L‑4) plus their immediate call paths. Pre‑existing code outside the diff was not re‑reviewed except where a fix's correctness depends on it.
+
+**Verdict:** All thirteen tasks are implemented and the four headline vulnerabilities (C‑1, C‑2, M‑1, M‑3) are closed for the attack surfaces the original audit identified. Rhino hygiene is clean in all changed SW code (no `let`/`const`/arrow/template‑literal/`console.log`; the only backtick is inside a `//` comment). Two callback‑nesting fixes (T7) balance correctly with no brace leak. One **new MEDIUM** issue of the same class as C‑2 was found in a sink the T2 sweep did not reach, plus several informational notes.
+
+### VERIFIED FIXES
+
+- **C‑1 / T7 — server‑side accrual + cooldown (`_handleRewardRequestInner`, channel.handler.js L562‑587).** Correct. After the `MAX_AMOUNT` cap, the campaign is reloaded via `getCampaign`; `delta = cumulative − channel.CUMULATIVE_EARNED` is rejected unless `0 < delta ≤ unit + 1e‑6`, where `unit = REWARD_CLICK` for clicks else `REWARD_VIEW`. Cooldown uses `channel.LAST_VOUCHER_AT` vs `accCampaign.COOLDOWN_MS` (falls back to `LIMITS.COOLDOWN_BETWEEN_REWARDS_MS`). The four nested callbacks (`getCampaign`→`isDuplicate`→`coins`→`getChannelState`) close with exactly four `});` at L651‑654 — **no brace leak**. `parseFloat` is used on both `cumulative` and `CUMULATIVE_EARNED`; the `delta` uses raw subtraction with an epsilon, which is equivalent to and safer than the `toFixed(6)` shown in the §5 diff. Rhino‑safe throughout.
+- **C‑1 / T8 — `MAX_CHANNEL_RESERVATION = 10` cap (channel.handler.js L218‑223).** Correct and applied **only** in the viewer `else` branch (L194+); the publisher path (L166+) is a separate `if` branch with its own `PUBLISHER_BUDGET_SPENT` / SUM(CUMULATIVE_EARNED) accounting and is untouched by the cap. `LIMITS.MAX_CHANNEL_RESERVATION` exists in `service.js`. **Cap sizing is sensible:** with `REWARD_VIEW` ∈ [0.001, 0.01], 10 Minima allows 1 000–10 000 views per channel before a re‑open is required, and is only ~10 % of the `MIN_BUDGET` (100), so it meaningfully limits a single‑channel drain without impeding normal use.
+- **C‑1 / T9 — publisher voucher guards (`_doGeneratePublisherVoucher` L1488‑1515, `_replayDeferredPublisherRewardsNow` L1424‑1457).** Cooldown (`pubChannel.LAST_VOUCHER_AT`) and `MAX_AMOUNT` caps are correct, and the deferred‑replay path **meaningfully** validates each stored `rows[i].AMOUNT ≤ PUBLISHER_REWARD_VIEW + ε` before summing, skipping over‑sized rows — this is the right place to check since AMOUNT is frozen at defer time. The PUB‑4 afterSend cleanup chain (DEDUP_LOG MERGE → DELETE FROM DEFERRED_PUB_REWARDS) is preserved and only runs after a successful send. *(See informational note N‑3 on the tautological guard in `_doGeneratePublisherVoucher`.)*
+- **C‑2 / T1+T2 — `isHexKey` / `isMaximaRoute` (core/minima.js L38‑46).** `isHexKey` = `^0x[0-9A-Fa-f]{2,140}$` correctly accepts a bare `0x…` Maxima/wallet PK and rejects any whitespace or command metacharacter. `isMaximaRoute` rejects anything containing whitespace (`!/\s/`) with a length bound — sufficient to stop `MDS.cmd` parameter injection because the parser is space‑delimited; it correctly admits both `MAX#<hex>#<mls>` and `Mx…@host:port` forms (neither contains spaces). `escapeSql` now `String()`‑coerces (closes L‑2). Guards are live at `handleRegisterPermanentRequest` (maxima.handler.js L82) and `handleChannelOpenRequest` (channel.handler.js L225). `minima.js` is `MDS.load`‑ed before all handlers (service.js L93), so both validators are in scope in the SW.
+- **M‑1 / T5 — `_assertCreatorThen` (campaign.handler.js L146‑174).** Correct. `senderPk` is threaded from `msg.data.from` for PAUSE/FINISH/RESUME (maxima.handler.js L31‑35). The function extracts the creator PK from `CREATOR_MX` (`MAX#<pk>#<mls>`, requires exactly 3 `#`‑parts) and **falls back to `CREATOR_ADDRESS`**. I verified the fallback is sound: `CREATOR_ADDRESS` is populated from `campaign.creator_address = MY_ADDRESS` (dapp/views/creator.js L1414), and `MY_ADDRESS` is the node's **Maxima public key** (`maxima action:info → publickey`, dapp/app.js L2010), i.e. the *same* identity space as `msg.data.from`. Comparison is `.toUpperCase()` on both sides. **No race for fresh campaigns:** a campaign discovered via `CAMPAIGN_ANNOUNCE` has `CREATOR_ADDRESS` set at persist time (saveCampaign, core/campaigns.js L37) even before `CREATOR_MX` is populated by `processEscrowCoin`, so the fallback authenticates legitimate pause/finish that arrives before the on‑chain sync. An empty/absent `senderPk` is rejected. The legitimate creator‑broadcast path still requires the two‑node manual test noted in T5/T10.
+- **M‑2 / T3 — `poll:false` on FE sends.** Confirmed zero remaining `poll:true` in `sdk/index.js` and `dapp/app.js` (`_sendToCreator` L282, liveness ping L535, `sendChannelMaxima` L404).
+- **M‑3 + L‑3 / T4 — renderAd sanitisation (renderer/renderAd.js L23‑57).** `safeColor` (`^#[0-9A-Fa-f]{3,8}$`), `safePos` (fixed enum), `imgZoom` clamp [1.0, 3.0], `imgWidthPct` clamp [10, 80], and `safeUrl` scheme whitelist (`^(https?:|mailto:)`) are all present and applied to the advertiser‑controlled fields before they reach `style.cssText`. CSS‑beacon vector closed.
+- **M‑4 / T11 — budget consolidation.** `openChannel` (core/channels.js) no longer debits `BUDGET_REMAINING` (viewer path now `cb(null)`); `createRewardEvent` (core/rewards.js L65‑71) skips `updateBudget` for `view`/`click` via the hoisted `_afterBudget` function declaration (Rhino‑safe) and **still** debits for `publisher_view` (correct — no on‑chain publisher‑budget sync exists). `updateChannelVoucher` correctly sets `LAST_VOUCHER_AT` (core/channels.js L73), and the schema column exists in **both** runtimes (SW db‑init.js L186, FE app.js L1923). *(See N‑1 on the transient display window — informational, accepted by design.)*
+- **L‑4 / T13 — relay gate.** `handleRegisterPermanentRequest` is gated behind `MDS.keypair.get("MINIMAADS_ALLOW_RELAY")` with `relayRes.value === "true" || relayRes.value === true` (maxima.handler.js L89) — handles both the H2/keypair string form and a boolean. The FE settings toggle writes the string `'true'`/`'false'` (settings‑maxima‑routes.js L284) and reads it back with the same dual check (L280). Consistent end‑to‑end.
+- **L‑1 / T12 — frames.js routes through `sqlQuery`** (dapp/views/frames.js L248); no direct `MDS.sql` remains there.
+
+### NEW FINDINGS
+
+#### N‑2 (MEDIUM) — `viewer_wallet_addr` / `viewer_wallet_pk` reach `MDS.cmd` unvalidated (C‑2 class, missed by the T2 sweep)
+
+**Files:** `channel.handler.js` — `handleChannelOpenRequest` reads `payload.viewer_wallet_addr` (L29) and `payload.viewer_wallet_pk` (L30); these persist to `CHANNEL_STATE.VIEWER_WALLET_ADDR` and flow as `ctx.viewerAddr` into `swBuildAndExportVoucherTx`, where they are concatenated raw into a command string:
+
+```js
+MDS.cmd("txnoutput id:" + txId + " storestate:false amount:" + ctx.cumulative + " address:" + ctx.viewerAddr, ...)   // ~L1774
+```
+
+`viewer_wallet_addr` is a fully attacker‑controlled remote payload string and is **not** passed through `isMaximaRoute`/`isHexKey` (the only validations on this path are `escapeSql` for the SQL write, which does not neutralise spaces). A value such as `MxFAKE… mine:true storestate:true` injects additional parameters into the `txnoutput`/voucher‑build command — the same injection class as C‑2 that the original audit fixed for `publickey` and `viewer_mx`. Blast radius is bounded (it only perturbs a voucher tx the creator is already signing to that viewer, and a malformed address typically aborts tx construction), hence MEDIUM rather than CRITICAL, but it is remotely reachable and unauthenticated.
+
+**Recommended fix:** in `handleChannelOpenRequest`, immediately after reading them, reject the request unless `isMaximaRoute(viewer_wallet_addr)` and (`viewer_wallet_pk === '' || isHexKey(viewer_wallet_pk)`). A wallet address is a single token with no whitespace, so `isMaximaRoute` (the `!/\s/` guard) is sufficient and consistent with the T2 pattern.
+
+#### N‑4 (LOW) — `requester_contact` reaches `MDS.cmd("maxima action:send to:" + …)` unvalidated
+
+**Files:** `maxima.handler.js` `_doRegisterPermanent` (L119‑123) → `sendMaxima(null, requesterContact, …)` → `core/minima.js sendMaxima` L73 `MDS.cmd("maxima action:send to:" + mxAddress + …)`. `requester_contact` is an attacker‑controlled payload string interpolated into the `to:` parameter without `isMaximaRoute`. This is now reachable only when the node operator has opted into relay (L‑4/T13 gate), which narrows it, but it is still the same injection class. **Recommended fix:** guard `requesterContact` with `isMaximaRoute` before calling `sendMaxima`, or add the validation inside `sendMaxima` itself (defence in depth — would also cover N‑2's SQL‑then‑cmd path centrally).
+
+### INFORMATIONAL NOTES (no action required for security)
+
+- **N‑1 — T11 transient budget display window.** Removing the local `updateBudget` debit means `BUDGET_REMAINING` is not decremented until `processEscrowCoin` syncs after the split tx mines (~1 block). During that window the UI shows the pre‑spend (higher) budget. This is a UX inaccuracy, not a correctness/security defect — the on‑chain escrow is authoritative and this is the documented intent of M‑4 (avoid premature `finished` flips). No fund risk.
+- **N‑3 — T9 tautological guard.** In `_doGeneratePublisherVoucher` (L1499) `pubReward` is derived from `campaign.PUBLISHER_REWARD_VIEW` and then compared against `campaign.PUBLISHER_REWARD_VIEW + ε` — always true, so this specific check never rejects. It is harmless (the value is server‑sourced, not attacker‑supplied) and the real protections on that path are the cooldown and `MAX_AMOUNT` caps; the meaningful per‑amount check lives correctly in the deferred‑replay path. Optional cleanup only.
+- **N‑5 — T7 NEWBLOCK replay does not re‑run the accrual check.** `checkOnePendingVoucher` (L1592+) replays a queued voucher with the stored `pending.cumulative` without re‑validating the delta. This is acceptable: the delta/cooldown were validated in `_handleRewardRequestInner` *before* the row was queued, only one pending row exists per (campaign, viewer, role) key, and `swBuildAndExportVoucherTx` still enforces the `MAX_AMOUNT` cap. Defence‑in‑depth only.
+- **N‑6 — cooldown default mismatch.** T7 falls back to `LIMITS.COOLDOWN_BETWEEN_REWARDS_MS` (30 000 ms) when `COOLDOWN_MS` is null, but the DB default for `COOLDOWN_MS` is 300 000 ms. The campaign‑level value wins in practice (the column is never null for real campaigns), so this is cosmetic.
+
+### RECOMMENDED ACTIONS (priority order)
+
+1. **N‑2 (MEDIUM)** — add `isMaximaRoute`/`isHexKey` guards on `viewer_wallet_addr`/`viewer_wallet_pk` in `handleChannelOpenRequest`. Small, isolated, closes the last C‑2‑class injection on a fund‑signing path.
+2. **N‑4 (LOW)** — guard `requester_contact` (or harden `sendMaxima` centrally).
+3. **N‑3 / N‑6** — optional cleanups; no security impact.
+4. **T10 two‑node verification still pending** — confirm (a) a normal view/click voucher settles, (b) forged `cumulative = MAX_AMOUNT` is rejected by the T7 delta check, (c) a sub‑cooldown second request is rejected, (d) a non‑creator `CAMPAIGN_FINISH` leaves the victim campaign `active`, and (e) the *legitimate* creator broadcast path still applies the status change (the M‑1 fallback now depends on `CREATOR_ADDRESS` matching `msg.data.from`).
 

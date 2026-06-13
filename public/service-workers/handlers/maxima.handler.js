@@ -97,6 +97,11 @@ function handleRegisterPermanentRequest(payload, fromRoute) {
 
 function _doRegisterPermanent(payload, fromRoute, pubkey) {
   var requesterContact = payload.requester_contact || '';
+  // N-4: validate before use in sendMaxima → MDS.cmd("maxima action:send to:" + …).
+  if (requesterContact && !isMaximaRoute(requesterContact)) {
+    MDS.log("[MAXIMA] REGISTER_PERMANENT_REQUEST rejected: malformed requester_contact");
+    return;
+  }
   MDS.log("[MAXIMA] REGISTER_PERMANENT_REQUEST from " + (fromRoute ? fromRoute.substring(0, 20) + "..." : "unknown") + " for key: " + pubkey.substring(0, 20) + "...");
 
   var cmd = "maxextra action:addpermanent publickey:" + pubkey;

@@ -61,8 +61,12 @@ function sqlQuery(query, cb) {
 function _maxDelivered(res, label) {
   var delivered = !!(res && res.response && res.response.delivered);
   if (!delivered) {
-    var err = (res && res.response && res.response.error) ? res.response.error : "not delivered";
-    MDS.log("[MINIMA] " + label + " delivery failed: " + err);
+    var err = "not delivered";
+    if (res && res.response) {
+      if (res.response.error) { err = res.response.error; }
+      else if (res.response.message) { err = res.response.message; }
+    }
+    MDS.log("[MINIMA] " + label + " delivery failed: " + err + " | resp=" + JSON.stringify(res && res.response ? res.response : res));
   }
   return delivered;
 }

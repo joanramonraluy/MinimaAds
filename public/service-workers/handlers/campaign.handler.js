@@ -194,8 +194,11 @@ function _sendRequestCampaignData(campaignId, creatorPk, creatorMx, cb) {
   // Using only creatorMx (Mx...@MLS_host) would add the MLS server itself as
   // a contact, not the creator node — which is why publickey: routing fails.
   if (creatorPk && creatorMx) {
-    var creatorFullRoute = "MAX#" + creatorPk + "#" + creatorMx;
+    var creatorFullRoute = (creatorMx.indexOf("MAX#") === 0) ? creatorMx : ("MAX#" + creatorPk + "#" + creatorMx);
     MDS.cmd("maxcontacts action:add contact:" + creatorFullRoute, function() {});
+    // Ensure creatorMx is also set to the full permanent route string so
+    // that the sendMaxima fallback uses the correct to:MAX#... address.
+    creatorMx = creatorFullRoute;
   }
   MDS.keypair.get("USER_PERMANENT_ROUTE", function(kpRes) {
     var myRoute = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : "";
@@ -263,13 +266,11 @@ function processEscrowCoin(coin) {
         MDS.log("[DISCOVERY] Outdated route format in coin: " + creatorRaw + " — falling back to direct contact: " + routePk);
         creatorMxAddr = routePk;
       } else {
-        // Valid permanent route: PK routing primary, to:Mx... fallback.
-        // routeParts[2] is the creator's Mx contact at the MLS (Mx...@host:port).
-        // Per PLATFORM_NOTES §4.2, to:Mx... works WITHOUT contact relationship
-        // via MLS relay — do NOT pass the full MAX# string (gives "MAX address invalid").
+        // Valid permanent route: PK routing primary, permanent route fallback.
+        // Keep the full MAX#... route so to: fallback resolves the creator via MLS registry.
         creatorPkRoute = routePk;
-        creatorMxAddr = routeParts[2] || '';
-        MDS.log("[DISCOVERY] Permanent route: PK=" + routePk.substring(0, 10) + "... MLS=" + (creatorMxAddr ? creatorMxAddr.substring(0, 20) + "..." : "NONE"));
+        creatorMxAddr = creatorRaw;
+        MDS.log("[DISCOVERY] Permanent route: PK=" + routePk.substring(0, 10) + "... Route=" + creatorRaw.substring(0, 30) + "...");
       }
     }
   }
@@ -389,6 +390,9 @@ function processEscrowCoin(coin) {
       if (_pendingCampaignRequests) { _pendingCampaignRequests[campaignId] = now; }
       _sendRequestCampaignData(campaignId, creatorPkRoute, creatorMxAddr, function(ok) {
         MDS.log("[DISCOVERY] REQUEST_CAMPAIGN_DATA sent for: " + campaignId + " ok: " + ok);
+        if (!ok) {
+          if (_pendingCampaignRequests) { _pendingCampaignRequests[campaignId] = 0; }
+        }
       });
     });
   });

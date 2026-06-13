@@ -176,6 +176,35 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-06-13 (patch 3) — Fix direct routing fallback and rate-limit clearing on discovery failures
+
+**Task**: Fix viewer discovery failing to request campaign details from the creator node when the contact relationship is not yet established. If `publickey` routing fails, fallback to direct `to:` routing was attempting to send to the MLS server address itself instead of the full permanent route address (causing the request to be lost). Also, ensure that if campaign requests fail (`ok: false`), the rate limit is reset so that discovery retries immediately on subsequent blocks rather than waiting 30 seconds.
+
+**Fix**:
+- **Full Fallback Routing**: Modified `processEscrowCoin` in `campaign.handler.js` to preserve the full permanent route string (`MAX#<pk>#<mls_address>`) in `creatorMxAddr` instead of extracting only the MLS server address (`routeParts[2]`).
+- **Dynamic Contact Handling**: Modified `_sendRequestCampaignData` in `campaign.handler.js` to dynamically handle both raw addresses and full permanent routes, setting the `creatorMx` parameter passed to `sendMaxima` to the full permanent route. This ensures `sendMaxima`'s `to:` fallback executes `to:MAX#...`, which correctly query-resolves the destination's current direct address via MLS lookup.
+- **Immediate Discovery Retries**: Added a check in `processEscrowCoin`'s `_sendRequestCampaignData` callback to clear `_pendingCampaignRequests[campaignId]` if the request failed (`ok: false`), enabling immediate retry on subsequent blocks.
+
+**Files modified**: `public/service-workers/handlers/campaign.handler.js`
+
+**AGENTS.md updated**: yes — §6 updated.
+
+---
+
+### Session: 2026-06-13 (patch 2) — Fix validation & self-healing for custom key overrides
+
+**Task**: Fix creator campaign launch failure caused by invalid `FOUNDATION_KEY_OVERRIDE` or `PLATFORM_KEY_OVERRIDE` values (e.g. Maxima route strings `MAX#...` saved instead of wallet `0x...` hex addresses), causing escrow transaction builds to fail with a `NumberFormatException`.
+
+**Fix**:
+- **Self-Healing on Boot**: Added format validation checks using `isHexKey` to key override loaders during bootstrap in `service.js` (SW) and `dapp/app.js` (FE). Any malformed or invalid custom override key detected on startup is automatically cleared from the MDS keypair storage.
+- **Input Validation**: Added `isHexKey` format checks inside `dapp/views/devtools.js` when saving custom override values or using "Set Self Wallet" actions. Malformed keys are rejected immediately with a user-facing error message in the status bar.
+
+**Files modified**: `service.js`, `dapp/app.js`, `dapp/views/devtools.js`
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry moved to `docs/HISTORY.md §17`.
+
+---
+
 ### Session: 2026-06-13 — Security audit T7/T9: server-side voucher accrual + cooldown guards (C-1)
 
 **Task**: Implement the remaining `[Opus]` security-audit tasks (T7, T9) to close C-1 (channel over-claim). T10 (two-node test) deferred to manual testing.
@@ -192,49 +221,8 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 ---
 
-### Session: 2026-06-12 — Clarify MLS Address, Remove Platform Creator Route Section, Add Privacy Info, Align Theme/Number Format Button Contrast, Remove Horizontal/Vertical Image Position Controls, Improve My Campaigns Action Buttons Contrast, Qualify Offline Publisher Reward Message, Improve Stat Cards Vertical Alignment, & Make Campaign Stat Grids Responsive on Mobile
-
-**Task**: 
-1. Clarify in settings that the MLS Server Address is the default/recommended one.
-2. Remove the obsolete "Platform Creator Route" section from the Settings sub-page.
-3. Update the "Privacy" settings accordion to show an explanatory message about how Minima and MinimaAds approach user privacy (decentralization, Maxima encryption, local storage, on-chain pseudonymity) instead of a placeholder message.
-4. Align the default inactive theme/number format buttons to match the outline hover style (primary border and primary text color on soft background).
-5. Remove "Horizontal (%)" and "Vertical (%)" range inputs from the image controls in the creator campaign preview, keeping only "Image width (%)".
-6. Fix readability and contrast of "Finish" and secondary buttons in My Campaigns by applying the primary outline hover styling as their base state.
-7. Correct the misleading offline publisher warning message in Publisher Frames view, since rewards do accumulate offline on the creator's node and are paid out once channels open.
-8. Align elements in `mkStatCard` so that when a sub-description is present, any blank flexbox space is inserted between the data value and the description, rather than between the title and the value.
-9. Make the performance and budget allocation stat grids responsive on mobile devices to prevent descriptions from overflowing or squishing.
-
-**Fix**:
-- Updated the `mlsDesc` textContent in `dapp/views/settings-maxima-routes.js` to state that the MLS address is default and recommended but a custom one can be specified.
-- Removed the entire "Platform Creator Route" section (Section 3 UI code) from `dapp/views/settings-maxima-routes.js`.
-- Replaced the "Privacy preferences — coming soon" placeholder in `dapp/views/settings.js` with structured list items explaining MinimaAds' decentralized privacy model.
-- Customized `.ma-theme-mode-btn` in `public/index.html` so that inactive buttons display with their hover outline styling (primary text, primary border, and soft card background) as their base state.
-- Removed "Horizontal (%)" and "Vertical (%)" sliders from `dapp/views/creator.js` HTML template, simplified the mobile input event listener, and streamlined `_syncMobileControls()` to only sync the image width.
-- Updated `button.secondary` and `button.outline` styling in `public/index.html` to share the same primary outline design (primary text and border with a soft background) by default in both light and dark modes, resolving all text contrast issues.
-- Updated the warning box in `dapp/views/frames.js` to clarify that if the node is offline, publisher rewards accumulate on the campaign creator node and are delivered once back online and channels open.
-- Refactored `mkStatCard` inside `dapp/views/ui-helpers.js` to apply `margin-top: auto` to the description element (when present) and keep the value element adjacent to the title. If no description is present, `margin-top: auto` is kept on the value element to preserve bottom alignment.
-- Added a `.ma-stat-grid` (and `.ma-stat-grid.cols-3` / `.cols-5` variants) responsive grid CSS helper class in `public/index.html` (rendering as 2 columns on mobile viewports and scaling to 3/4/5 columns on desktop). Modified the inline style grid styles in `dapp/views/mycampaigns.js`, `dapp/views/earnings.js`, and `dapp/views/campaigns.js` to use this new utility class.
-
-**Files modified**: `dapp/views/settings-maxima-routes.js`, `dapp/views/settings.js`, `public/index.html`, `dapp/views/creator.js`, `dapp/views/frames.js`, `dapp/views/ui-helpers.js`, `dapp/views/mycampaigns.js`, `dapp/views/earnings.js`, `dapp/views/campaigns.js`
-
-**AGENTS.md updated**: yes — §6 updated.
-
----
-
-### Session: 2026-06-11 — Fix discovery retry on Maxima send failure
-
-**Task**: When `REQUEST_CAMPAIGN_DATA` Maxima send returned `ok: false`, the coin was already marked in `_knownEscrowCoins` so it was never retried on subsequent blocks. Campaigns published while Maxima was transiently unavailable became permanently invisible until SW restart.
-
-**Fix**: In `campaign.handler.js` `processEscrowCoin`, delete the coin from `_knownEscrowCoins` when `_sendRequestCampaignData` returns `ok: false`, allowing retry on the next NEWBLOCK.
-
-**Files modified**: `public/service-workers/handlers/campaign.handler.js`
-
-**AGENTS.md updated**: yes — §6 updated.
-
----
-
 > Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, Auto-Sync Platform Creator Route, Unify MLS DevTools, Fix Viewer and Publisher Reward Delivery, Fix Publisher Budget (Multi-Publisher Support), Fix Stale-Pending Publisher Channel Deadlock, Minima Foundation Fee (3%) + V4 Escrow Script Fixes, 2026-06-10 settlement fixes, and all earlier) are archived in `docs/HISTORY.md §17`.
+
 
 
 

@@ -1975,11 +1975,23 @@ function onInited() {
     }
     MDS.keypair.get('PLATFORM_KEY_OVERRIDE', function(kpRes) {
       if (kpRes && kpRes.status && kpRes.value) {
-        PLATFORM_KEY = kpRes.value;
+        var pkVal = kpRes.value;
+        if (typeof isHexKey === 'function' && !isHexKey(pkVal)) {
+          console.warn('[APP] Invalid/malformed PLATFORM_KEY_OVERRIDE detected (' + pkVal + '), clearing');
+          MDS.keypair.set('PLATFORM_KEY_OVERRIDE', '', function() {});
+        } else {
+          PLATFORM_KEY = pkVal;
+        }
       }
       MDS.keypair.get('FOUNDATION_KEY_OVERRIDE', function(fkRes) {
         if (fkRes && fkRes.status && fkRes.value) {
-          FOUNDATION_KEY = fkRes.value;
+          var fkVal = fkRes.value;
+          if (typeof isHexKey === 'function' && !isHexKey(fkVal)) {
+            console.warn('[APP] Invalid/malformed FOUNDATION_KEY_OVERRIDE detected (' + fkVal + '), clearing');
+            MDS.keypair.set('FOUNDATION_KEY_OVERRIDE', '', function() {});
+          } else {
+            FOUNDATION_KEY = fkVal;
+          }
         }
       });
       MDS.keypair.get('MINIMAADS_CREATOR_ROUTE', function(crRes) {

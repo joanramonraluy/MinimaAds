@@ -321,6 +321,12 @@
           return;
         }
         var addr = res.response.address;
+        if (typeof isHexKey === 'function' && !isHexKey(addr)) {
+          fkStatus.textContent = 'ERROR: derived address is invalid hex';
+          fkStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
+          fkStatus.style.color = 'var(--pico-del-color, #c0392b)';
+          return;
+        }
         MDS.keypair.set('FOUNDATION_KEY_OVERRIDE', addr, function() {
           FOUNDATION_KEY = addr;
           updateFoundationKeyStatus();
@@ -378,6 +384,12 @@
       var fk = (fkInput.value || '').trim();
       if (!fk) {
         fkStatus.textContent = 'ERROR: enter a wallet address first';
+        fkStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
+        fkStatus.style.color = 'var(--pico-del-color, #c0392b)';
+        return;
+      }
+      if (typeof isHexKey === 'function' && !isHexKey(fk)) {
+        fkStatus.textContent = 'ERROR: invalid wallet address (must start with 0x and be hex)';
         fkStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
         fkStatus.style.color = 'var(--pico-del-color, #c0392b)';
         return;
@@ -600,6 +612,12 @@
           return;
         }
         var addr = res.response.address;
+        if (typeof isHexKey === 'function' && !isHexKey(addr)) {
+          pkStatus.textContent = 'ERROR: derived address is invalid hex';
+          pkStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
+          pkStatus.style.color = 'var(--pico-del-color, #c0392b)';
+          return;
+        }
         MDS.keypair.set('PLATFORM_KEY_OVERRIDE', addr, function() {
           PLATFORM_KEY = addr;
           updatePlatformKeyStatus();
@@ -656,6 +674,12 @@
       var pk = (extInput.value || '').trim();
       if (!pk) {
         pkStatus.textContent = 'ERROR: enter a wallet address first';
+        pkStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
+        pkStatus.style.color = 'var(--pico-del-color, #c0392b)';
+        return;
+      }
+      if (typeof isHexKey === 'function' && !isHexKey(pk)) {
+        pkStatus.textContent = 'ERROR: invalid wallet address (must start with 0x and be hex)';
         pkStatus.style.borderColor = 'var(--pico-del-color, #c0392b)';
         pkStatus.style.color = 'var(--pico-del-color, #c0392b)';
         return;

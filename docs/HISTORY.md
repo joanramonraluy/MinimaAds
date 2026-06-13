@@ -46,6 +46,28 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-11 — Support Dedicated Routing for Campaign Details
+
+**Task**: Fix the DApp returning to the campaigns list when clicking the CTA/banner links inside campaign detail views. Introduce dedicated hash routing `#campaign-detail?id=<campaignId>` for detail views to guarantee state preservation and enable standard navigation history.
+
+**Fix**:
+- **Routing Infrastructure**:
+  - Registered `campaign-detail` inside `MODE_VIEWS.viewer` in `dapp/app.js`.
+  - Updated `currentRoute()` to parse hash parameters and match route base names (e.g. splitting at `?`).
+  - Added the helper `getHashParams()` to extract query parameters from the hash dynamically in any view.
+  - Set active link status inside `renderNav()` if view matches `campaigns` and current route is `campaign-detail`.
+  - Added a routing fallback block inside `doRender()` for `campaign-detail` calling `renderCampaignDetail(root)`.
+- **View Integration**:
+  - Implemented `renderCampaignDetail(root)` in `dapp/views/viewer.js` to extract campaign ID, show loading status, query the campaign details from the H2 DB via `getCampaign(id, cb)`, and invoke the detail UI via `_openCampaign(campaign)`.
+  - Updated click listeners in `dapp/views/campaigns.js` and list renderer in `dapp/views/viewer.js` to change `window.location.hash` to `'campaign-detail?id=' + campaign.ID` instead of calling `_openCampaign` directly.
+  - Rewrote `_goBackToList()` in `dapp/views/viewer.js` to reset `window.location.hash` to `'campaigns'`.
+
+**Files modified**: `dapp/app.js`, `dapp/views/viewer.js`, `dapp/views/campaigns.js`
+
+**AGENTS.md updated**: yes — §6 updated.
+
+---
+
 ### Session: 2026-06-11 (patch 2) — Block publisher rewards on viewer click events
 
 **Task**: Publisher was incorrectly receiving a reward voucher every time a viewer clicked (in addition to views). Decision: publisher only earns on views, not clicks.

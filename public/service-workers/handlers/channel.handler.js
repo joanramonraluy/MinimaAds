@@ -559,7 +559,34 @@ function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumu
       return;
     }
 
-    isDuplicate(eventId, function(isDup) {
+    // C-1 server-side accrual check: reload campaign to validate the per-request
+    // delta against the campaign's reward unit, and enforce the campaign cooldown
+    // server-side using LAST_VOUCHER_AT. Prevents a malicious viewer from forging
+    // an inflated cumulative or spamming requests faster than the cooldown.
+    getCampaign(campaignId, function(accErr, accCampaign) {
+      if (accErr || !accCampaign) {
+        MDS.log("[CHANNEL] REWARD_REQUEST: accrual check campaign not found: " + campaignId);
+        return;
+      }
+      var epsilon  = 0.000001;
+      var earned   = parseFloat(channel.CUMULATIVE_EARNED) || 0;
+      var delta    = cumulative - earned;
+      var unit     = (payload.reward_type === 'click')
+        ? (parseFloat(accCampaign.REWARD_CLICK) || 0)
+        : (parseFloat(accCampaign.REWARD_VIEW) || 0);
+      if (!(delta > 0 && delta <= unit + epsilon)) {
+        MDS.log("[CHANNEL] REWARD_REQUEST: accrual delta invalid. delta=" + delta + " unit=" + unit + " type=" + (payload.reward_type || 'view') + " campaign: " + campaignId);
+        return;
+      }
+      var cooldown = (accCampaign.COOLDOWN_MS !== null && accCampaign.COOLDOWN_MS !== undefined)
+        ? parseInt(accCampaign.COOLDOWN_MS, 10) : LIMITS.COOLDOWN_BETWEEN_REWARDS_MS;
+      var lastAt   = parseInt(channel.LAST_VOUCHER_AT, 10) || 0;
+      if (lastAt > 0 && (Date.now() - lastAt) < cooldown) {
+        MDS.log("[CHANNEL] REWARD_REQUEST: cooldown not elapsed. since=" + (Date.now() - lastAt) + " cooldown=" + cooldown + " campaign: " + campaignId);
+        return;
+      }
+
+      isDuplicate(eventId, function(isDup) {
       if (isDup) {
         MDS.log("[CHANNEL] REWARD_REQUEST: duplicate event_id: " + eventId);
         return;
@@ -622,6 +649,7 @@ function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumu
           });
         }
       });
+    });
     });
   });
 }
@@ -1394,14 +1422,32 @@ function _replayDeferredPublisherRewards(campaignId, frameId, publisherKey) {
 }
 
 function _replayDeferredPublisherRewardsNow(campaignId, frameId, rows, pubChannel) {
+      // C-1 server-side accrual guard: reload campaign to validate each deferred
+      // row's fixed amount against the publisher reward unit (PUBLISHER_REWARD_VIEW).
+      getCampaign(campaignId, function(rdErr, rdCampaign) {
+        if (rdErr || !rdCampaign) {
+          MDS.log("[CHANNEL] _replayDeferredPublisherRewards: campaign not found: " + campaignId);
+          return;
+        }
+        var rdEpsilon = 0.000001;
+        var rdUnit    = parseFloat(rdCampaign.PUBLISHER_REWARD_VIEW) || 0;
         var base = parseFloat(pubChannel.CUMULATIVE_EARNED);
         var totalAmount = 0;
         var stableIds    = [];
         var idPlaceholds = [];
         for (var i = 0; i < rows.length; i++) {
-          totalAmount += parseFloat(rows[i].AMOUNT);
+          var rowAmount = parseFloat(rows[i].AMOUNT);
+          if (rowAmount > rdUnit + rdEpsilon) {
+            MDS.log("[CHANNEL] _replayDeferredPublisherRewards: row amount exceeds unit, skipping. amount=" + rowAmount + " unit=" + rdUnit + " id=" + rows[i].ID);
+            continue;
+          }
+          totalAmount += rowAmount;
           stableIds.push(escapeSql(rows[i].ID));
           idPlaceholds.push("'" + escapeSql(rows[i].ID) + "'");
+        }
+        if (stableIds.length === 0) {
+          MDS.log("[CHANNEL] _replayDeferredPublisherRewards: no valid rows after accrual check. campaign: " + campaignId);
+          return;
         }
         var cumulative = base + totalAmount;
         var maxAmount = parseFloat(pubChannel.MAX_AMOUNT);
@@ -1436,6 +1482,7 @@ function _replayDeferredPublisherRewardsNow(campaignId, frameId, rows, pubChanne
             'view'
           );
         });
+      });
 }
 
 function _doGeneratePublisherVoucher(campaignId, frameId, eventId, pubChannel) {
@@ -1446,6 +1493,21 @@ function _doGeneratePublisherVoucher(campaignId, frameId, eventId, pubChannel) {
     if (err2 || !campaign) { return; }
     var pubReward = parseFloat(campaign.PUBLISHER_REWARD_VIEW) || 0;
     if (pubReward <= 0) { return; }
+    // C-1 server-side accrual guard: publisher reward unit is always
+    // PUBLISHER_REWARD_VIEW (never click-based). Reject inflated per-request deltas.
+    var pubEpsilon = 0.000001;
+    if (pubReward > parseFloat(campaign.PUBLISHER_REWARD_VIEW) + pubEpsilon) {
+      MDS.log("[CHANNEL] _doGeneratePublisherVoucher: reward exceeds unit. reward=" + pubReward + " unit=" + campaign.PUBLISHER_REWARD_VIEW + " campaign: " + campaignId);
+      return;
+    }
+    // Enforce campaign cooldown server-side via LAST_VOUCHER_AT.
+    var pubCooldown = (campaign.COOLDOWN_MS !== null && campaign.COOLDOWN_MS !== undefined)
+      ? parseInt(campaign.COOLDOWN_MS, 10) : LIMITS.COOLDOWN_BETWEEN_REWARDS_MS;
+    var pubLastAt   = parseInt(pubChannel.LAST_VOUCHER_AT, 10) || 0;
+    if (pubLastAt > 0 && (Date.now() - pubLastAt) < pubCooldown) {
+      MDS.log("[CHANNEL] _doGeneratePublisherVoucher: cooldown not elapsed. since=" + (Date.now() - pubLastAt) + " cooldown=" + pubCooldown + " campaign: " + campaignId);
+      return;
+    }
     var cumulative = parseFloat(pubChannel.CUMULATIVE_EARNED) + pubReward;
     if (cumulative > parseFloat(pubChannel.MAX_AMOUNT)) {
       MDS.log("[CHANNEL] _doGeneratePublisherVoucher: cumulative exceeds max. campaign: " + campaignId);

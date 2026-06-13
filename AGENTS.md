@@ -176,6 +176,22 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-06-13 — Security audit T7/T9: server-side voucher accrual + cooldown guards (C-1)
+
+**Task**: Implement the remaining `[Opus]` security-audit tasks (T7, T9) to close C-1 (channel over-claim). T10 (two-node test) deferred to manual testing.
+
+**Fix** (all in `public/service-workers/handlers/channel.handler.js`):
+- **T7** — `_handleRewardRequestInner`: after the existing `MAX_AMOUNT` cap and before `isDuplicate`, reload the campaign via `getCampaign` and validate the per-request accrual delta: `delta = cumulative − channel.CUMULATIVE_EARNED` must satisfy `0 < delta <= unit + ε` (ε = 0.000001), where `unit = REWARD_CLICK` when `payload.reward_type === 'click'` else `REWARD_VIEW`. Also enforce the campaign cooldown server-side: reject when `channel.LAST_VOUCHER_AT > 0 && (Date.now() − LAST_VOUCHER_AT) < cooldown` (cooldown = `campaign.COOLDOWN_MS` or `LIMITS.COOLDOWN_BETWEEN_REWARDS_MS`).
+- **T9** — `_doGeneratePublisherVoucher`: verify `pubReward <= PUBLISHER_REWARD_VIEW + ε` (publisher unit is always view-based) and enforce cooldown via `pubChannel.LAST_VOUCHER_AT`. `_replayDeferredPublisherRewardsNow`: reload the campaign and skip any deferred row whose `AMOUNT` exceeds the unit before accumulating; bail if no valid rows remain.
+
+**T10 (open)**: requires manual two-node test — (a) normal view/click voucher settles, (b) forged `cumulative = MAX_AMOUNT` is rejected by the delta check, (c) cooldown enforced server-side.
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`, `docs/audit_report.md`
+
+**AGENTS.md updated**: yes — §6 updated. Maxima schemas / DB schema unchanged (no §8/§3.5 changes needed).
+
+---
+
 ### Session: 2026-06-12 — Clarify MLS Address, Remove Platform Creator Route Section, Add Privacy Info, Align Theme/Number Format Button Contrast, Remove Horizontal/Vertical Image Position Controls, Improve My Campaigns Action Buttons Contrast, Qualify Offline Publisher Reward Message, Improve Stat Cards Vertical Alignment, & Make Campaign Stat Grids Responsive on Mobile
 
 **Task**: 
@@ -213,28 +229,6 @@ For verification procedures, see `docs/VERIFICATION.md`.
 **Fix**: In `campaign.handler.js` `processEscrowCoin`, delete the coin from `_knownEscrowCoins` when `_sendRequestCampaignData` returns `ok: false`, allowing retry on the next NEWBLOCK.
 
 **Files modified**: `public/service-workers/handlers/campaign.handler.js`
-
-**AGENTS.md updated**: yes — §6 updated.
-
----
-
-### Session: 2026-06-11 — Support Dedicated Routing for Campaign Details
-
-**Task**: Fix the DApp returning to the campaigns list when clicking the CTA/banner links inside campaign detail views. Introduce dedicated hash routing `#campaign-detail?id=<campaignId>` for detail views to guarantee state preservation and enable standard navigation history.
-
-**Fix**:
-- **Routing Infrastructure**:
-  - Registered `campaign-detail` inside `MODE_VIEWS.viewer` in `dapp/app.js`.
-  - Updated `currentRoute()` to parse hash parameters and match route base names (e.g. splitting at `?`).
-  - Added the helper `getHashParams()` to extract query parameters from the hash dynamically in any view.
-  - Set active link status inside `renderNav()` if view matches `campaigns` and current route is `campaign-detail`.
-  - Added a routing fallback block inside `doRender()` for `campaign-detail` calling `renderCampaignDetail(root)`.
-- **View Integration**:
-  - Implemented `renderCampaignDetail(root)` in `dapp/views/viewer.js` to extract campaign ID, show loading status, query the campaign details from the H2 DB via `getCampaign(id, cb)`, and invoke the detail UI via `_openCampaign(campaign)`.
-  - Updated click listeners in `dapp/views/campaigns.js` and list renderer in `dapp/views/viewer.js` to change `window.location.hash` to `'campaign-detail?id=' + campaign.ID` instead of calling `_openCampaign` directly.
-  - Rewrote `_goBackToList()` in `dapp/views/viewer.js` to reset `window.location.hash` to `'campaigns'`.
-
-**Files modified**: `dapp/app.js`, `dapp/views/viewer.js`, `dapp/views/campaigns.js`
 
 **AGENTS.md updated**: yes — §6 updated.
 

@@ -43,6 +43,13 @@ var CHANNEL_SCRIPT_ADDRESS = '';
 // here so REQUEST_CAMPAIGN_DATA can be retried on subsequent NEWBLOCKs.
 var _knownEscrowCoins = {};
 
+// Per-session escrow address scan flags (Change #3 perf).
+// _escrowHasCoins[addr]=true  → coins were found at this address at some point this session.
+// _escrowScanned[addr]=true   → at least one scan completed for this address this session.
+// Legacy addresses (V? / V3) are skipped once confirmed empty for the session.
+var _escrowHasCoins = {};
+var _escrowScanned  = {};
+
 // Rate-limits REQUEST_CAMPAIGN_DATA retries for unknown campaigns.
 // Maps campaignId -> timestamp of last send. Retries at most once every 30 s.
 var _pendingCampaignRequests = {};
@@ -264,21 +271,44 @@ function registerEscrowScript() {
 }
 
 function scanEscrowCoins() {
-  _scanAddress(ESCROW_ADDRESS);
-  _scanAddress(ESCROW_ADDRESS_V3);
+  // V4 is the current active version — always scan.
   _scanAddress(ESCROW_ADDRESS_V4);
+  // Legacy addresses: scan until confirmed empty for this session, then skip.
+  // _escrowScanned[addr]=true means at least one scan completed. If coins were
+  // never found there, no need to keep scanning (new campaigns always use V4).
+  if (ESCROW_ADDRESS    && (!_escrowScanned[ESCROW_ADDRESS]    || _escrowHasCoins[ESCROW_ADDRESS]))    { _scanAddress(ESCROW_ADDRESS); }
+  if (ESCROW_ADDRESS_V3 && (!_escrowScanned[ESCROW_ADDRESS_V3] || _escrowHasCoins[ESCROW_ADDRESS_V3])) { _scanAddress(ESCROW_ADDRESS_V3); }
+}
+
+// _checkChannelCoinsOnBlock — performs ONE coins address:CHANNEL_SCRIPT_ADDRESS
+// scan per NEWBLOCK and passes the result to both checkPendingVouchers and
+// checkOpenChannelsSettled, eliminating up to K+1 redundant scans per block.
+function _checkChannelCoinsOnBlock() {
+  var chAddr = CHANNEL_SCRIPT_ADDRESS || '';
+  if (!chAddr) {
+    checkPendingVouchers(null);
+    checkOpenChannelsSettled(null);
+    return;
+  }
+  MDS.cmd("coins address:" + chAddr, function(cRes) {
+    var coins = (cRes && cRes.status && cRes.response) ? cRes.response : [];
+    checkPendingVouchers(coins);
+    checkOpenChannelsSettled(coins);
+  });
 }
 
 function _scanAddress(addr) {
   if (!addr) { return; }
   MDS.cmd("coins address:" + addr, function(res) {
-    if (!res.status || !res.response) { return; }
+    if (!res.status || !res.response) { _escrowScanned[addr] = true; return; }
     var coins = res.response;
+    _escrowScanned[addr] = true;
     if (coins.length > 0) {
+      _escrowHasCoins[addr] = true;
       MDS.log("[DISCOVERY] escrow coins at " + addr.substring(0, 10) + "...: " + coins.length);
-    }
-    for (var i = 0; i < coins.length; i++) {
-      processEscrowCoin(coins[i]);
+      for (var i = 0; i < coins.length; i++) {
+        processEscrowCoin(coins[i]);
+      }
     }
   });
 }
@@ -351,7 +381,7 @@ MDS.init(function(msg) {
   if (msg.event === "inited")   { onInited(); }
   if (msg.event === "MAXIMA")   { onMaxima(msg); }
   if (msg.event === "NEWBLOCK") {
-    scanEscrowCoins(); checkPendingChannelOpens(); checkPendingVouchers(); checkExpiredCampaigns(); checkOpenChannelsSettled();
+    scanEscrowCoins(); checkPendingChannelOpens(); checkExpiredCampaigns(); _checkChannelCoinsOnBlock();
     _livenessCheckBlock++;
     if (_livenessCheckBlock % 20 === 0) { checkCampaignStatuses(); }
   }

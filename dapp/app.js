@@ -1152,7 +1152,7 @@ function buildAndExportVoucherTx(ctx) {
               if (typeof updateChannelVoucher === 'function') {
                 updateChannelVoucher(ctx.campaignId, ctx.viewerKey, role, ctx.cumulative, txHex, function(err) {
                   if (err) { console.error('[CHANNEL] updateChannelVoucher failed:', err); }
-                });
+                }, ctx.rewardType);
               }
 
               var voucherMsg = {
@@ -1747,7 +1747,7 @@ function handleFePending(msg) {
         if (typeof updateChannelVoucher === 'function') {
           updateChannelVoucher(ctx.campaignId, ctx.viewerKey, pendRole, ctx.cumulative, txHex, function(err) {
             if (err) { console.error('[CHANNEL] updateChannelVoucher failed:', err); }
-          });
+          }, ctx.rewardType);
         }
         var pendMsg = {
           type:        'REWARD_VOUCHER',
@@ -1921,7 +1921,9 @@ function initFEChannelState(cb) {
   sqlQuery(sql, function() {
     sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS VIEWER_WALLET_PK VARCHAR(512) DEFAULT ''", function() {
     sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS LAST_VOUCHER_AT BIGINT DEFAULT 0", function() {
+    sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS LAST_CLICK_VOUCHER_AT BIGINT DEFAULT 0", function() {
       if (cb) { cb(); }
+    }); // end LAST_CLICK_VOUCHER_AT migration
     }); // end LAST_VOUCHER_AT migration
     }); // end VIEWER_WALLET_PK migration
   });

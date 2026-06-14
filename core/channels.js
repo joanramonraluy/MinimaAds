@@ -64,13 +64,16 @@ function getChannelState(campaignId, viewerKey, role, cb) {
   });
 }
 
-function updateChannelVoucher(campaignId, viewerKey, role, cumulativeEarned, latestTxHex, cb) {
+function updateChannelVoucher(campaignId, viewerKey, role, cumulativeEarned, latestTxHex, cb, rewardType) {
   var r = role || 'viewer';
   var now = Date.now();
+  // Clicks bump a SEPARATE timestamp so a click immediately after a view is
+  // allowed, but click->click spam is still rate-limited server-side (N2-2).
+  var clickSet = (rewardType === 'click') ? (", LAST_CLICK_VOUCHER_AT = " + now) : "";
   var sql = "UPDATE CHANNEL_STATE " +
     "SET CUMULATIVE_EARNED = " + cumulativeEarned + ", " +
     "LATEST_TX_HEX = '" + escapeSql(latestTxHex) + "', " +
-    "LAST_VOUCHER_AT = " + now + " " +
+    "LAST_VOUCHER_AT = " + now + clickSet + " " +
     "WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') " +
     "AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(viewerKey) + "') " +
     "AND UPPER(ROLE) = UPPER('" + escapeSql(r) + "')";

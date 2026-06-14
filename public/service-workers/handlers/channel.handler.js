@@ -584,17 +584,17 @@ function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumu
       MDS.log("[CHANNEL] REWARD_REQUEST: accrual delta invalid. delta=" + delta + " unit=" + unit + " type=" + (payload.reward_type || 'view') + " campaign: " + campaignId);
       return;
     }
-    // Click events bypass the shared view cooldown: a click is an explicit user
-    // action that must be allowed immediately after a view. Anti-spam for clicks
-    // is already enforced by isDuplicate(eventId) + the accrual delta check above.
-    if ((payload.reward_type || 'view') !== 'click') {
-      var cooldown = (campaign.COOLDOWN_MS !== null && campaign.COOLDOWN_MS !== undefined)
-        ? parseInt(campaign.COOLDOWN_MS, 10) : LIMITS.COOLDOWN_BETWEEN_REWARDS_MS;
-      var lastAt   = parseInt(channel.LAST_VOUCHER_AT, 10) || 0;
-      if (lastAt > 0 && (Date.now() - lastAt) < cooldown) {
-        MDS.log("[CHANNEL] REWARD_REQUEST: cooldown not elapsed. since=" + (Date.now() - lastAt) + " cooldown=" + cooldown + " campaign: " + campaignId);
-        return;
-      }
+    // Cooldown is paced against the LAST voucher OF THE SAME TYPE. A click is
+    // paced against the last CLICK voucher (not the last view), so a click right
+    // after a view is allowed, but click->click spam is still rate-limited (N2-2).
+    var cooldown = (campaign.COOLDOWN_MS !== null && campaign.COOLDOWN_MS !== undefined)
+      ? parseInt(campaign.COOLDOWN_MS, 10) : LIMITS.COOLDOWN_BETWEEN_REWARDS_MS;
+    var lastAt = ((payload.reward_type || 'view') === 'click')
+      ? (parseInt(channel.LAST_CLICK_VOUCHER_AT, 10) || 0)
+      : (parseInt(channel.LAST_VOUCHER_AT, 10) || 0);
+    if (lastAt > 0 && (Date.now() - lastAt) < cooldown) {
+      MDS.log("[CHANNEL] REWARD_REQUEST: cooldown not elapsed. type=" + (payload.reward_type || 'view') + " since=" + (Date.now() - lastAt) + " cooldown=" + cooldown + " campaign: " + campaignId);
+      return;
     }
 
     isDuplicate(eventId, function(isDup) {
@@ -795,7 +795,7 @@ function _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHe
         );
       }
     });
-  });
+  }, rewardType);
 }
 
 function handleRewardVoucher(payload) {
@@ -1837,7 +1837,7 @@ function swBuildAndExportVoucherTx(ctx, afterSend) {
 
               updateChannelVoucher(ctx.campaignId, ctx.viewerKey, role, ctx.cumulative, txHex, function(err) {
                 if (err) { MDS.log("[CHANNEL] swBuildAndExportVoucherTx: updateChannelVoucher failed: " + err); }
-              });
+              }, ctx.rewardType);
 
               var voucherMsg = {
                 type:        "REWARD_VOUCHER",

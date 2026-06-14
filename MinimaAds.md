@@ -868,8 +868,10 @@ activateChannel(campaignId, viewerKey, role, channelCoinId, cb)
 getChannelState(campaignId, viewerKey, role, cb)
 // Returns: callback(err, ChannelState | null)
 
-updateChannelVoucher(campaignId, viewerKey, role, cumulativeEarned, latestTxHex, cb)
-// Updates CUMULATIVE_EARNED and LATEST_TX_HEX.
+updateChannelVoucher(campaignId, viewerKey, role, cumulativeEarned, latestTxHex, cb, rewardType)
+// Updates CUMULATIVE_EARNED, LATEST_TX_HEX and LAST_VOUCHER_AT.
+// rewardType (optional): when 'click', also bumps LAST_CLICK_VOUCHER_AT so the
+//   server-side click cooldown is paced click->click separately from views (N2-2).
 // Returns: callback(err, boolean)
 
 getLatestVoucher(campaignId, viewerKey, role, cb)

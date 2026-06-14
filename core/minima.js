@@ -44,7 +44,7 @@ function isHexKey(s) {
 // Returns true if s is a plausible Maxima contact string or MAX# permanent route
 // with no whitespace (which would inject additional command parameters).
 function isMaximaRoute(s) {
-  return typeof s === "string" && s.length > 0 && s.length < 600 && !/\s/.test(s);
+  return typeof s === "string" && s.length > 0 && s.length < 1200 && !/\s/.test(s);
 }
 
 function sqlQuery(query, cb) {

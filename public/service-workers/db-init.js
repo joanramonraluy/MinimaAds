@@ -184,6 +184,8 @@ function initDB(cb) {
                     sqlQuery("ALTER TABLE CAMPAIGNS ADD COLUMN IF NOT EXISTS VIEWER_BUDGET_SPENT DECIMAL(20,6) NOT NULL DEFAULT 0", function() {
                     sqlQuery("ALTER TABLE CAMPAIGNS ADD COLUMN IF NOT EXISTS PUBLISHER_BUDGET_EARNED DECIMAL(20,6) NOT NULL DEFAULT 0", function() {
                     sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS LAST_VOUCHER_AT BIGINT DEFAULT 0", function() {
+                    sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS LAST_CLICK_VOUCHER_AT BIGINT DEFAULT 0", function() {
+                    }); // end LAST_CLICK_VOUCHER_AT migration
                     }); // end LAST_VOUCHER_AT migration
                     }); // end PUBLISHER_BUDGET_EARNED migration
                     sqlQuery("UPDATE CAMPAIGNS SET MAX_PUBLISHER_BUDGET = PUBLISHER_REWARD_VIEW * 10 WHERE MAX_PUBLISHER_BUDGET <= 0 AND PUBLISHER_REWARD_VIEW > 0", function(patchErr) {

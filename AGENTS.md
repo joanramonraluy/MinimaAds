@@ -176,6 +176,20 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-06-14 (patch 6) — Fix: increase isMaximaRoute length limit
+
+**Problem**: outbound Maxima communication (channel open, rewards, liveness) failed with `[MINIMA] sendMaxima rejected: malformed mxAddress`. The validation regex limit of 600 characters in `isMaximaRoute` was too strict because Maxima permanent routes (`MAX#...`) concatenate prefix + 328-char public key hex + `#` + 286-char contact route, yielding 619 characters which exceeded the limit.
+
+**Fix**: Increased the maximum character limit in `isMaximaRoute` in `core/minima.js` from 600 to 1200. This accommodates any valid permanent route containing MLS/IP connection addresses.
+
+**Files modified**: `core/minima.js`
+
+**AGENTS.md updated**: yes — §6 updated, oldest entries (patch 3 and patch 2) archived to `docs/HISTORY.md §17`.
+
+**Verification**: reload the browser and nodes → verify that CAMPAIGN_DATA_RESPONSE and CHANNEL_OPEN_REQUEST messages are successfully transmitted and rewards/discovery resume.
+
+---
+
 ### Session: 2026-06-14 (patch 5) — Fix: isHexKey case-insensitivity (N2-1 regression)
 
 **Problem**: After deploying N2-1 (sendMaxima validation guard in patch 3), viewers could not see any campaigns. Root cause: `isHexKey()` validator used regex `/^0x.../` (lowercase x) but Minima stores Maxima PKs via `.toUpperCase()` → `0X...` (uppercase x). ALL sendMaxima calls from viewers were rejected, blocking REQUEST_CAMPAIGN_DATA and CHANNEL_OPEN_REQUEST messages.
@@ -208,32 +222,5 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 ---
 
-### Session: 2026-06-14 (patch 3) — Second security audit + N2-1 fix (sendMaxima injection guard)
-
-**Task**: Second comprehensive security audit (`docs/audit_report_2.md`). Verified all first-audit fixes (C-1, C-2, M-1..M-4, L-1..L-4, N-2, N-4) are resolved. Found new issues: N2-1 (MEDIUM, command injection via `sendMaxima`), N2-2 (MEDIUM, click cooldown regression from `508b7ed`), N2-3 (MEDIUM, publisher budget not capped at voucher time), N2-4/N2-5/N2-6 (LOW).
-
-**Fix applied (N2-1 only)**: Added central validation in `sendMaxima` (`core/minima.js`) — rejects a `publicKey` that fails `isHexKey` or an `mxAddress` that fails `isMaximaRoute` before they reach `MDS.cmd("maxima action:send ...")`. Closes the C-2-class injection on `viewer_key`/`publisher_key`/`publisher_mx` (the original T1/T2/T14 sweep guarded the call sites but not these routing keys, and `sendMaxima` itself had no guard). Worst-case averted: injected `poll:true` → ~77s SW freeze (remote DoS).
-
-**Deferred (documented in `docs/audit_report_2.md` §10)**: N2-2/N2-3 → dedicated Opus sessions (hot path + schema in both runtimes / concurrent logic). N2-4 → design task (naive `senderPk === viewer_key` guard breaks the SDK path, which opens channels with a wallet key as `viewer_key`).
-
-**Files modified**: `core/minima.js`, `docs/audit_report_2.md` (new), `AGENTS.md`, `docs/HISTORY.md`.
-
-**AGENTS.md updated**: yes — §6 updated, oldest entry (2026-06-13 patch 4) moved to `docs/HISTORY.md §17`.
-
----
-
-### Session: 2026-06-14 (patch 2) — Fix click reward blocked by view cooldown
-
-**Task**: Click reward not delivered to viewer after clicking an ad. Viewer SDK sent REWARD_REQUEST with `reward_type:'click'` and correct cumulative, but creator SW rejected it with "cooldown not elapsed."
-
-**Root cause**: `LAST_VOUCHER_AT` in `CHANNEL_STATE` is a single timestamp shared by view and click events. After issuing a view voucher, the cooldown timer resets. A click sent within the cooldown window (e.g. 4 s < 30 s) was incorrectly blocked.
-
-**Fix**: In `_handleRewardRequestInner` (`channel.handler.js` line ~590), wrapped the LAST_VOUCHER_AT cooldown check in `if ((payload.reward_type || 'view') !== 'click')`. Click events now bypass the view cooldown; anti-spam for clicks is already enforced by `isDuplicate(eventId)` + the accrual delta check.
-
-**Files modified**: `public/service-workers/handlers/channel.handler.js`
-
-**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 3, 2026-06-13) moved to `docs/HISTORY.md §17`.
-
----
-
 > Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, Auto-Sync Platform Creator Route, Unify MLS DevTools, Fix Viewer and Publisher Reward Delivery, Fix Publisher Budget (Multi-Publisher Support), Fix Stale-Pending Publisher Channel Deadlock, Minima Foundation Fee (3%) + V4 Escrow Script Fixes, 2026-06-10 settlement fixes, Security audit T7/T9, and all earlier) are archived in `docs/HISTORY.md §17`.
+

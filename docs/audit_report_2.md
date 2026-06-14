@@ -378,7 +378,7 @@ The project's security posture is **materially better than at the first audit**:
 | Task | Sev | Model | Session | Status |
 |---|---|---|---|---|
 | **N2-1** — validate `publicKey`/`mxAddress` centrally in `sendMaxima` | MEDIUM | Sonnet | this audit session | ✅ **Done 2026-06-14** — guard added in `core/minima.js sendMaxima` (rejects non-`isHexKey` PK / non-`isMaximaRoute` route before `MDS.cmd`). Not yet 2-node verified. |
-| **N2-2** — restore click rate-limit via `LAST_CLICK_VOUCHER_AT` | MEDIUM | **Opus** | new (hot path + schema in 2 runtimes + `updateChannelVoucher` signature) | ⬜ Pending |
+| **N2-2** — restore click rate-limit via `LAST_CLICK_VOUCHER_AT` | MEDIUM | **Opus** | this session | ✅ **Done 2026-06-14** — added `LAST_CLICK_VOUCHER_AT` column (both runtimes); cooldown in `channel.handler.js` now reads the per-type timestamp (click→click paced, view→click still immediate); `updateChannelVoucher` bumps it when `rewardType==='click'`. Not yet 2-node verified. |
 | **N2-3** — enforce `MAX_PUBLISHER_BUDGET` at voucher time | MEDIUM | **Opus** | new (concurrent logic, 3 sites) | ⬜ Pending |
 | **N2-4** — bind `REWARD_REQUEST` sender to channel opener | LOW | **Opus** | new (DESIGN — unify SDK `viewer_key` convention or add `OPENER_MX_PK` column) | ⬜ Pending — naive guard breaks SDK; see §6/§8 |
 | **N2-5** — prune `DEDUP_LOG` | LOW | Sonnet | new | ⬜ Pending |

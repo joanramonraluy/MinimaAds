@@ -1075,7 +1075,7 @@
         role: role,
         frame_id: payload.frame_id || ''
       });
-    });
+    }, payload.reward_type);
   }
 
   function handleMdsEvent(event) {

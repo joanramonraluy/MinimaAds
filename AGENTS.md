@@ -176,20 +176,24 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
-### Session: 2026-06-14 (patch 8) — Fix: click cooldown warning on subsequent CTA clicks
+### Session: 2026-06-14 (patch 8) — Fix: click cooldown warning and auto-clear timer
 
-**Problem**: Once a click reward is successfully claimed or rejected in a campaign details page, further clicks on the CTA in the same session open the link but do not update the UI status. The message remains stuck on `Reward received! +0,050 MINIMA` or the previous message, leaving the user without any visual feedback that subsequent clicks are not eligible for rewards due to the cooldown.
+**Problem**: 
+1. Once a click reward is successfully claimed or rejected in a campaign details page, further clicks on the CTA in the same session open the link but do not update the UI status. The message remains stuck on `Reward received! +0,050 MINIMA` or the previous message, leaving the user without any visual feedback that subsequent clicks are not eligible for rewards due to the cooldown.
+2. If the user is in a view or click cooldown, they must manually exit and reopen the campaign details page to try again once the waiting period expires.
 
 **Fix**:
-1. **Viewer State** (`dapp/views/viewer.js`): Added a `clickRewardErrorMsg` field to the global `_viewerState` object. It is initialized to an empty string on entry/exit transitions.
-2. **Rejection/Confirmation Handlers** (`dapp/views/viewer.js`): When a click is confirmed, it stores the standard warning message in `clickRewardErrorMsg`. When a click is rejected, it stores the exact `reasonMsg` (e.g. daily click limit or cooldown active) in the field.
-3. **CTA Click Event Listener** (`dapp/views/viewer.js`): If the link is clicked when `rewardAllowed` is false and a `clickRewardErrorMsg` is present, the UI updates to show the warning message in red.
+1. **Viewer State & Interaction** (`dapp/views/viewer.js`): Added `clickRewardErrorMsg` to the global `_viewerState` and reset it on transitions. If the link is clicked when `rewardAllowed` is false and `clickRewardErrorMsg` is present, it displays the warning message in red.
+2. **Auto-clearing view/click cooldowns**: 
+   - Modified `validateView` and `validateClick` (`core/validation.js`) to return the exact `remainingMs` left on active cooldowns.
+   - Propagated `remainingMs` in `MA_TRACK_RESULT` signal to the FE.
+   - Wired `setTimeout` timers on the FE using `_viewerState.viewTimerId`. When the view cooldown expires, the ad detail reloads automatically. When the click cooldown expires, the CTA click reward is re-enabled, the error message is cleared, and the green view reward status is restored.
 
-**Files modified**: `dapp/views/viewer.js`
+**Files modified**: `dapp/views/viewer.js`, `core/validation.js`, `public/service-workers/handlers/comms.handler.js`
 
 **AGENTS.md updated**: yes — §6 updated, oldest entry (patch 5) moved to `docs/HISTORY.md §17`.
 
-**Verification**: Claim a click reward, then click the CTA a second time within the cooldown window and verify that the red warning message `You must wait before earning another click reward from this campaign.` appears instantly.
+**Verification**: Trigger a view or click cooldown, stay on the details page, and verify that the red warning message disappears and is replaced by either the ad progress bar (for view cooldown) or the green reward message (for click cooldown) automatically when the timer expires.
 
 ---
 

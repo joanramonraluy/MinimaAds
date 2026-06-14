@@ -154,7 +154,7 @@ function handleTrackClick(payload) {
     if (!result.valid) {
       MDS.log("[COMMS] MA_TRACK_CLICK rejected: " + result.reason);
       MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: result.reason, reward_type: "click"}), function() {});
-      signalFE("MA_TRACK_RESULT", {confirmed: false, reason: result.reason, reward_type: "click"});
+      signalFE("MA_TRACK_RESULT", {confirmed: false, reason: result.reason, reward_type: "click", remainingMs: result.remainingMs});
       return;
     }
     getCampaign(campaignId, function(err, campaign) {

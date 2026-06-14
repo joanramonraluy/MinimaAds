@@ -79,7 +79,8 @@ function validateView(campaignId, userAddress, cb) {
           var cooldown = (campaign.COOLDOWN_MS !== null && campaign.COOLDOWN_MS !== undefined)
             ? parseInt(campaign.COOLDOWN_MS, 10) : LIMITS.COOLDOWN_BETWEEN_REWARDS_MS;
           if (now - lastAt < cooldown) {
-            cb({ valid: false, reason: 'cooldown active' });
+            var remainingMs = cooldown - (now - lastAt);
+            cb({ valid: false, reason: 'cooldown active', remainingMs: remainingMs });
             return;
           }
         }
@@ -162,7 +163,8 @@ function validateClick(campaignId, userAddress, cb) {
           var cooldown = (campaign.COOLDOWN_MS !== null && campaign.COOLDOWN_MS !== undefined)
             ? parseInt(campaign.COOLDOWN_MS, 10) : LIMITS.COOLDOWN_BETWEEN_REWARDS_MS;
           if (now - lastAt < cooldown) {
-            cb({ valid: false, reason: 'cooldown active' });
+            var remainingMs = cooldown - (now - lastAt);
+            cb({ valid: false, reason: 'cooldown active', remainingMs: remainingMs });
             return;
           }
         }

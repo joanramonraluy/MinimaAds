@@ -362,6 +362,10 @@ function _startDetailAd() {
         var reasonMsg = 'Reward not available';
         if (result.reason === 'cooldown active') {
           reasonMsg = 'You must wait before earning again from this campaign.';
+          var remainingMs = result.remainingMs || 30000;
+          _viewerState.viewTimerId = setTimeout(function() {
+            _startDetailAd();
+          }, remainingMs + 500);
         } else if (result.reason === 'daily view limit reached') {
           reasonMsg = 'You\'ve reached the daily view limit for this campaign.';
         } else if (result.reason === 'campaign reward limit reached for this user') {
@@ -626,12 +630,27 @@ function onRewardValidation(result) {
     if (result.reward_type === 'click') {
       _viewerState.rewardAllowed = false;
       _viewerState.clickRewardErrorMsg = 'You must wait before earning another click reward from this campaign.';
+      var cooldown = (_viewerState.campaign.COOLDOWN_MS !== null && _viewerState.campaign.COOLDOWN_MS !== undefined)
+        ? parseInt(_viewerState.campaign.COOLDOWN_MS, 10) : LIMITS.COOLDOWN_BETWEEN_REWARDS_MS;
+      _viewerState.viewTimerId = setTimeout(function() {
+        _viewerState.clickRewardErrorMsg = '';
+      }, cooldown + 500);
     }
   } else {
     var reasonMsg = 'Reward not available';
     if (result.reason === 'cooldown active') {
       if (result.reward_type === 'click') {
         reasonMsg = 'You must wait before earning another click reward from this campaign.';
+        var remainingMs = result.remainingMs || 30000;
+        _viewerState.viewTimerId = setTimeout(function() {
+          _viewerState.rewardAllowed = true;
+          _viewerState.clickRewardErrorMsg = '';
+          var statusEl = document.getElementById('ma-viewer-status');
+          if (statusEl) {
+            statusEl.textContent = 'Reward received! +' + fmtAmt(_viewerState.campaign.REWARD_VIEW, 3) + ' MINIMA';
+            statusEl.style.color = 'var(--pico-ins-color,#27ae60)';
+          }
+        }, remainingMs + 500);
       } else {
         reasonMsg = 'You must wait before earning again from this campaign.';
       }

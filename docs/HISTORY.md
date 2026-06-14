@@ -46,6 +46,20 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-13 (patch 4) — Perf fix: eliminate duplicate getCampaign() in REWARD_REQUEST hot path
+
+**Task**: Performance regression identified post-audit: reward receipt was taking noticeably longer (seconds) after T7 added a `getCampaign()` call inside `_handleRewardRequestInner`. The campaign had already been loaded by the caller `handleRewardRequest`, so the inner call was a redundant MDS.sql() round-trip on every single reward request.
+
+**Fix**:
+- **Remove duplicate DB call**: Changed `_handleRewardRequestInner` signature to accept `campaign` as a 6th parameter. `handleRewardRequest` now passes its already-loaded campaign object down. The `getCampaign()` call inside `_handleRewardRequestInner` is removed; the T7 accrual delta and cooldown checks now use the passed `campaign` directly.
+- **No security impact**: The campaign object is loaded from the creator node's own DB within the same call stack — it is not controlled by the sender.
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry moved to `docs/HISTORY.md §17`.
+
+---
+
 ### Session: 2026-06-13 (patch 3) — Fix direct routing fallback and rate-limit clearing on discovery failures
 
 **Task**: Fix viewer discovery failing to request campaign details from the creator node when the contact relationship is not yet established. If `publickey` routing fails, fallback to direct `to:` routing was attempting to send to the MLS server address itself instead of the full permanent route address (causing the request to be lost). Also, ensure that if campaign requests fail (`ok: false`), the rate limit is reset so that discovery retries immediately on subsequent blocks rather than waiting 30 seconds.

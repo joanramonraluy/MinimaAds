@@ -74,6 +74,23 @@ function _maxDelivered(res, label) {
 }
 
 function sendMaxima(publicKey, mxAddress, payload, cb) {
+  // SECURITY (audit_report_2 N2-1): publicKey / mxAddress may originate from
+  // remote Maxima payloads (viewer_key, publisher_key, publisher_mx, etc.).
+  // Without validation a crafted value injects extra parameters into the
+  // "maxima action:send ..." command string — most dangerously poll:true, which
+  // freezes the SW event loop ~77s (KNOWN_ISSUES #5). isHexKey accepts both
+  // Maxima PKs and 0x wallet keys; isMaximaRoute accepts Mx... contacts and
+  // MAX#pk#mls routes (neither contains whitespace).
+  if (publicKey && !isHexKey(publicKey)) {
+    MDS.log("[MINIMA] sendMaxima rejected: malformed publicKey");
+    if (cb) { cb(false); }
+    return;
+  }
+  if (mxAddress && !isMaximaRoute(mxAddress)) {
+    MDS.log("[MINIMA] sendMaxima rejected: malformed mxAddress");
+    if (cb) { cb(false); }
+    return;
+  }
   MDS.log("[MINIMA] sendMaxima called: publicKey=" + (publicKey ? publicKey.substring(0, 16) + "..." : "null") + " mxAddress=" + (mxAddress ? mxAddress.substring(0, 20) + "..." : "null") + " payloadType=" + (payload && payload.type));
   var hex = "0x" + utf8ToHex(JSON.stringify(payload)).toUpperCase();
   if (publicKey && mxAddress) {

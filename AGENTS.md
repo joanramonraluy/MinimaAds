@@ -176,6 +176,20 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-06-14 (patch 3) — Second security audit + N2-1 fix (sendMaxima injection guard)
+
+**Task**: Second comprehensive security audit (`docs/audit_report_2.md`). Verified all first-audit fixes (C-1, C-2, M-1..M-4, L-1..L-4, N-2, N-4) are resolved. Found new issues: N2-1 (MEDIUM, command injection via `sendMaxima`), N2-2 (MEDIUM, click cooldown regression from `508b7ed`), N2-3 (MEDIUM, publisher budget not capped at voucher time), N2-4/N2-5/N2-6 (LOW).
+
+**Fix applied (N2-1 only)**: Added central validation in `sendMaxima` (`core/minima.js`) — rejects a `publicKey` that fails `isHexKey` or an `mxAddress` that fails `isMaximaRoute` before they reach `MDS.cmd("maxima action:send ...")`. Closes the C-2-class injection on `viewer_key`/`publisher_key`/`publisher_mx` (the original T1/T2/T14 sweep guarded the call sites but not these routing keys, and `sendMaxima` itself had no guard). Worst-case averted: injected `poll:true` → ~77s SW freeze (remote DoS).
+
+**Deferred (documented in `docs/audit_report_2.md` §10)**: N2-2/N2-3 → dedicated Opus sessions (hot path + schema in both runtimes / concurrent logic). N2-4 → design task (naive `senderPk === viewer_key` guard breaks the SDK path, which opens channels with a wallet key as `viewer_key`).
+
+**Files modified**: `core/minima.js`, `docs/audit_report_2.md` (new), `AGENTS.md`, `docs/HISTORY.md`.
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (2026-06-13 patch 4) moved to `docs/HISTORY.md §17`.
+
+---
+
 ### Session: 2026-06-14 (patch 2) — Fix click reward blocked by view cooldown
 
 **Task**: Click reward not delivered to viewer after clicking an ad. Viewer SDK sent REWARD_REQUEST with `reward_type:'click'` and correct cumulative, but creator SW rejected it with "cooldown not elapsed."
@@ -206,20 +220,6 @@ For verification procedures, see `docs/VERIFICATION.md`.
 **Files modified**: `service.js`, `public/service-workers/handlers/channel.handler.js`
 
 **AGENTS.md updated**: yes — §6 updated, oldest entry (patch 2) moved to `docs/HISTORY.md §17`.
-
----
-
-### Session: 2026-06-13 (patch 4) — Perf fix: eliminate duplicate getCampaign() in REWARD_REQUEST hot path
-
-**Task**: Performance regression identified post-audit: reward receipt was taking noticeably longer (seconds) after T7 added a `getCampaign()` call inside `_handleRewardRequestInner`. The campaign had already been loaded by the caller `handleRewardRequest`, so the inner call was a redundant MDS.sql() round-trip on every single reward request.
-
-**Fix**:
-- **Remove duplicate DB call**: Changed `_handleRewardRequestInner` signature to accept `campaign` as a 6th parameter. `handleRewardRequest` now passes its already-loaded campaign object down. The `getCampaign()` call inside `_handleRewardRequestInner` is removed; the T7 accrual delta and cooldown checks now use the passed `campaign` directly.
-- **No security impact**: The campaign object is loaded from the creator node's own DB within the same call stack — it is not controlled by the sender.
-
-**Files modified**: `public/service-workers/handlers/channel.handler.js`
-
-**AGENTS.md updated**: yes — §6 updated, oldest entry moved to `docs/HISTORY.md §17`.
 
 ---
 

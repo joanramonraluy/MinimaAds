@@ -194,7 +194,7 @@ function renderMaximaRoutesSettings(root) {
         return;
       }
 
-      permanentStatus.style.color = 'var(--pico-ins-color,#27ae60)';
+      permanentStatus.style.color = 'var(--pico-muted-color,#6c757d)';
       permanentStatus.textContent = 'Registering with MLS...';
 
       // Request SW to register permanent route (runs in background even if DApp closed)
@@ -212,8 +212,8 @@ function renderMaximaRoutesSettings(root) {
         if (typeof setCreatorMaximaRoute === 'function') {
           setCreatorMaximaRoute(function(err, route) {
             if (!err && route) {
-              permanentStatus.style.color = 'var(--pico-ins-color,#27ae60)';
-              permanentStatus.textContent = 'Success! Route registered: ' + route;
+              permanentStatus.style.color = '';
+              permanentStatus.textContent = '';
               permanentStatusDisplay.textContent = '✓ Registered permanent route: ' + route;
               permanentStatusDisplay.style.borderColor = 'var(--pico-ins-color, #27ae60)';
               permanentStatusDisplay.style.color = 'var(--pico-ins-color, #27ae60)';

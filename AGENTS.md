@@ -176,6 +176,38 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-06-14 (patch 5) — Fix: isHexKey case-insensitivity (N2-1 regression)
+
+**Problem**: After deploying N2-1 (sendMaxima validation guard in patch 3), viewers could not see any campaigns. Root cause: `isHexKey()` validator used regex `/^0x.../` (lowercase x) but Minima stores Maxima PKs via `.toUpperCase()` → `0X...` (uppercase x). ALL sendMaxima calls from viewers were rejected, blocking REQUEST_CAMPAIGN_DATA and CHANNEL_OPEN_REQUEST messages.
+
+**Fix**: Changed `/^0x.../` to `/^0[xX].../` in `core/minima.js:41` to accept both cases. Same class of bug as commit 424207c (isHexKey limit too strict). Added fragility point #45 to `docs/KNOWN_ISSUES.md` explaining the issue and rule for future validators.
+
+**Files modified**: `core/minima.js`, `docs/KNOWN_ISSUES.md`.
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 2, click reward blocked by view cooldown) moved to `docs/HISTORY.md §17`.
+
+**Verification**: Reinstall MiniDapp + reload browser → viewers see campaigns in all nodes.
+
+---
+
+### Session: 2026-06-14 (patch 4) — N2-2 fix: restore click cooldown via LAST_CLICK_VOUCHER_AT
+
+**Task**: Reverse the click-cooldown regression from `508b7ed` (audit finding N2-2). That commit made click `REWARD_REQUEST`s skip the server-side cooldown entirely, leaving clicks rate-limited only by the per-channel cap + accrual delta — fund-affecting (self-reported clicks could drain a channel's `MAX_AMOUNT` in seconds).
+
+**Fix**: Added a SEPARATE click timestamp so a click immediately after a view is still allowed, but click→click is paced by the campaign cooldown.
+1. **DB (both runtimes)**: `ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS LAST_CLICK_VOUCHER_AT BIGINT DEFAULT 0` in `public/service-workers/db-init.js` and FE init in `dapp/app.js`.
+2. **SW cooldown** (`channel.handler.js` ~590): removed the `!== 'click'` bypass; now selects `LAST_CLICK_VOUCHER_AT` for clicks vs `LAST_VOUCHER_AT` for views, then applies the same cooldown.
+3. **Core** (`core/channels.js`): `updateChannelVoucher(...,, cb, rewardType)` — appends `LAST_CLICK_VOUCHER_AT = now` only when `rewardType==='click'`. Backward-compatible (omitted param → unchanged behaviour).
+4. **Callers threaded**: SW `swBuildAndExportVoucherTx` (creator-side commit — authoritative for cooldown) + `_continueRewardVoucher`; FE `app.js` voucher paths; SDK `_handleRewardVoucherPayload`.
+
+**Files modified**: `public/service-workers/db-init.js`, `dapp/app.js`, `core/channels.js`, `public/service-workers/handlers/channel.handler.js`, `sdk/index.js`, `MinimaAds.md` (§7 signature), `docs/audit_report_2.md` (N2-2 → Done).
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (Timing + 3 NEWBLOCK perf fixes) moved to `docs/HISTORY.md §17`.
+
+**Not yet 2-node verified.**
+
+---
+
 ### Session: 2026-06-14 (patch 3) — Second security audit + N2-1 fix (sendMaxima injection guard)
 
 **Task**: Second comprehensive security audit (`docs/audit_report_2.md`). Verified all first-audit fixes (C-1, C-2, M-1..M-4, L-1..L-4, N-2, N-4) are resolved. Found new issues: N2-1 (MEDIUM, command injection via `sendMaxima`), N2-2 (MEDIUM, click cooldown regression from `508b7ed`), N2-3 (MEDIUM, publisher budget not capped at voucher time), N2-4/N2-5/N2-6 (LOW).
@@ -201,25 +233,6 @@ For verification procedures, see `docs/VERIFICATION.md`.
 **Files modified**: `public/service-workers/handlers/channel.handler.js`
 
 **AGENTS.md updated**: yes — §6 updated, oldest entry (patch 3, 2026-06-13) moved to `docs/HISTORY.md §17`.
-
----
-
-### Session: 2026-06-14 — Timing investigation + 3 NEWBLOCK perf fixes + click reward bug pending
-
-**Task**: Investigated perceived reward/settlement slowness post-audit. Found no timing regression from audit commits — block latency was the bottleneck. Identified and implemented 3 performance improvements:
-
-**Fixes implemented**:
-1. **Shared channel coin scan per NEWBLOCK** (`service.js` + `channel.handler.js`): Added `_checkChannelCoinsOnBlock()` which does ONE `coins address:CHANNEL_SCRIPT_ADDRESS` per block and passes the coin list to both `checkPendingVouchers(coins)` and `checkOpenChannelsSettled(coins)`, eliminating K+1 redundant scans per block. Extracted `_dispatchPendingVoucher` and `_processSettledChannels` helpers.
-2. **Removed redundant `getCampaign()` in `_swDispatchVoucher`** (`channel.handler.js`): Added optional 11th `campaign` param. Callers at lines 626, 629, 1491, 1593 now pass the already-loaded campaign. Added `_continueSwDispatchVoucher` helper. Falls back to DB load when campaign not supplied (e.g. `_dispatchPendingVoucher`).
-3. **Skip empty legacy escrow address scans** (`service.js`): Added `_escrowHasCoins`/`_escrowScanned` flags. `scanEscrowCoins` always scans V4, skips V? and V3 once confirmed empty in this session.
-
-**Result verified in new logs (14/06)**: View reward flow now completes in **~4 seconds** vs ~66 seconds before (coin already indexed when REWARD_REQUEST arrives — fast path active).
-
-**Open bug**: Click reward does NOT work. Viewer clicks ad, but reward is not delivered. Needs investigation in next session. The view reward path now works correctly.
-
-**Files modified**: `service.js`, `public/service-workers/handlers/channel.handler.js`
-
-**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 2) moved to `docs/HISTORY.md §17`.
 
 ---
 

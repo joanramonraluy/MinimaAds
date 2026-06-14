@@ -46,6 +46,25 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-14 — Timing investigation + 3 NEWBLOCK perf fixes + click reward bug pending
+
+**Task**: Investigated perceived reward/settlement slowness post-audit. Found no timing regression from audit commits — block latency was the bottleneck. Identified and implemented 3 performance improvements:
+
+**Fixes implemented**:
+1. **Shared channel coin scan per NEWBLOCK** (`service.js` + `channel.handler.js`): Added `_checkChannelCoinsOnBlock()` which does ONE `coins address:CHANNEL_SCRIPT_ADDRESS` per block and passes the coin list to both `checkPendingVouchers(coins)` and `checkOpenChannelsSettled(coins)`, eliminating K+1 redundant scans per block. Extracted `_dispatchPendingVoucher` and `_processSettledChannels` helpers.
+2. **Removed redundant `getCampaign()` in `_swDispatchVoucher`** (`channel.handler.js`): Added optional 11th `campaign` param. Callers at lines 626, 629, 1491, 1593 now pass the already-loaded campaign. Added `_continueSwDispatchVoucher` helper. Falls back to DB load when campaign not supplied (e.g. `_dispatchPendingVoucher`).
+3. **Skip empty legacy escrow address scans** (`service.js`): Added `_escrowHasCoins`/`_escrowScanned` flags. `scanEscrowCoins` always scans V4, skips V? and V3 once confirmed empty in this session.
+
+**Result verified in new logs (14/06)**: View reward flow now completes in **~4 seconds** vs ~66 seconds before (coin already indexed when REWARD_REQUEST arrives — fast path active).
+
+**Open bug**: Click reward does NOT work. Viewer clicks ad, but reward is not delivered. Needs investigation in next session. The view reward path now works correctly.
+
+**Files modified**: `service.js`, `public/service-workers/handlers/channel.handler.js`
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 2) moved to `docs/HISTORY.md §17`.
+
+---
+
 ### Session: 2026-06-13 (patch 4) — Perf fix: eliminate duplicate getCampaign() in REWARD_REQUEST hot path
 
 **Task**: Performance regression identified post-audit: reward receipt was taking noticeably longer (seconds) after T7 added a `getCampaign()` call inside `_handleRewardRequestInner`. The campaign had already been loaded by the caller `handleRewardRequest`, so the inner call was a redundant MDS.sql() round-trip on every single reward request.
@@ -1275,5 +1294,18 @@ Built-in snippets work because the publisher IS the viewer and sends their own P
 
 **AGENTS.md updated**: yes — §6 updated.
 
+---
+
+### Session: 2026-06-14 (patch 2) — Fix click reward blocked by view cooldown
+
+**Task**: Click reward not delivered to viewer after clicking an ad. Viewer SDK sent REWARD_REQUEST with `reward_type:'click'` and correct cumulative, but creator SW rejected it with "cooldown not elapsed."
+
+**Root cause**: `LAST_VOUCHER_AT` in `CHANNEL_STATE` is a single timestamp shared by view and click events. After issuing a view voucher, the cooldown timer resets. A click sent within the cooldown window (e.g. 4 s < 30 s) was incorrectly blocked.
+
+**Fix**: In `_handleRewardRequestInner` (`channel.handler.js` line ~590), wrapped the LAST_VOUCHER_AT cooldown check in `if ((payload.reward_type || 'view') !== 'click')`. Click events now bypass the view cooldown; anti-spam for clicks is already enforced by `isDuplicate(eventId)` + the accrual delta check.
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`
+
+**AGENTS.md updated**: yes — §6 updated.
 
 

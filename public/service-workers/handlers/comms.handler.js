@@ -97,34 +97,40 @@ function handleTrackView(payload) {
   MDS.log("[COMMS] MA_TRACK_VIEW received: userAddress format=" + (userAddress && userAddress.indexOf('MAX#')===0 ? 'PERMANENT_ROUTE' : 'DIRECT_ADDRESS') + " publisherKey format=" + (publisherKey && publisherKey.indexOf('MAX#')===0 ? 'PERMANENT_ROUTE' : 'RSA_KEY'));
 
   if (!campaignId || !userAddress) {
-    MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "missing fields"}), function() {});
+    MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "missing fields", reward_type: "view"}), function() {});
+    signalFE("MA_TRACK_RESULT", {confirmed: false, reason: "missing fields", reward_type: "view"});
     return;
   }
 
   validateView(campaignId, userAddress, function(result) {
     if (!result.valid) {
       MDS.log("[COMMS] MA_TRACK_VIEW rejected: " + result.reason);
-      MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: result.reason}), function() {});
+      MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: result.reason, reward_type: "view"}), function() {});
+      signalFE("MA_TRACK_RESULT", {confirmed: false, reason: result.reason, reward_type: "view"});
       return;
     }
     getCampaign(campaignId, function(err, campaign) {
       if (err || !campaign) {
-        MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "campaign not found"}), function() {});
+        MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "campaign not found", reward_type: "view"}), function() {});
+        signalFE("MA_TRACK_RESULT", {confirmed: false, reason: "campaign not found", reward_type: "view"});
         return;
       }
       if (campaign.CREATOR_ADDRESS.toUpperCase() === userAddress.toUpperCase()) {
-        MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "creator cannot earn"}), function() {});
+        MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "creator cannot earn", reward_type: "view"}), function() {});
+        signalFE("MA_TRACK_RESULT", {confirmed: false, reason: "creator cannot earn", reward_type: "view"});
         return;
       }
       var amount = parseFloat(campaign.REWARD_VIEW) || 0;
       var eventId = Date.now().toString(16) + '-' + Math.floor(Math.random() * 0xFFFFFFFF).toString(16);
       updateBudget(campaignId, amount, function(budErr) {
         if (budErr) {
-          MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "budget update failed"}), function() {});
+          MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "budget update failed", reward_type: "view"}), function() {});
+          signalFE("MA_TRACK_RESULT", {confirmed: false, reason: "budget update failed", reward_type: "view"});
           return;
         }
         MDS.log("[COMMS] MA_TRACK_VIEW confirmed: campaign=" + campaignId + " amount=" + amount);
-        MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: true, amount: amount}), function() {});
+        MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: true, amount: amount, reward_type: "view"}), function() {});
+        signalFE("MA_TRACK_RESULT", {confirmed: true, amount: amount, reward_type: "view"});
         _triggerChannelPayment(campaignId, campaign, userAddress, amount, eventId, publisherKey, frameId, publisherMx, 'view');
       });
     });
@@ -139,34 +145,40 @@ function handleTrackClick(payload) {
   var publisherMx  = payload.publisherMx || "";
 
   if (!campaignId || !userAddress) {
-    MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "missing fields"}), function() {});
+    MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "missing fields", reward_type: "click"}), function() {});
+    signalFE("MA_TRACK_RESULT", {confirmed: false, reason: "missing fields", reward_type: "click"});
     return;
   }
 
   validateClick(campaignId, userAddress, function(result) {
     if (!result.valid) {
       MDS.log("[COMMS] MA_TRACK_CLICK rejected: " + result.reason);
-      MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: result.reason}), function() {});
+      MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: result.reason, reward_type: "click"}), function() {});
+      signalFE("MA_TRACK_RESULT", {confirmed: false, reason: result.reason, reward_type: "click"});
       return;
     }
     getCampaign(campaignId, function(err, campaign) {
       if (err || !campaign) {
-        MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "campaign not found"}), function() {});
+        MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "campaign not found", reward_type: "click"}), function() {});
+        signalFE("MA_TRACK_RESULT", {confirmed: false, reason: "campaign not found", reward_type: "click"});
         return;
       }
       if (campaign.CREATOR_ADDRESS.toUpperCase() === userAddress.toUpperCase()) {
-        MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "creator cannot earn"}), function() {});
+        MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "creator cannot earn", reward_type: "click"}), function() {});
+        signalFE("MA_TRACK_RESULT", {confirmed: false, reason: "creator cannot earn", reward_type: "click"});
         return;
       }
       var amount = parseFloat(campaign.REWARD_CLICK) || 0;
       var eventId = Date.now().toString(16) + '-' + Math.floor(Math.random() * 0xFFFFFFFF).toString(16);
       updateBudget(campaignId, amount, function(budErr) {
         if (budErr) {
-          MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "budget update failed"}), function() {});
+          MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "budget update failed", reward_type: "click"}), function() {});
+          signalFE("MA_TRACK_RESULT", {confirmed: false, reason: "budget update failed", reward_type: "click"});
           return;
         }
         MDS.log("[COMMS] MA_TRACK_CLICK confirmed: campaign=" + campaignId + " amount=" + amount);
-        MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: true, amount: amount}), function() {});
+        MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: true, amount: amount, reward_type: "click"}), function() {});
+        signalFE("MA_TRACK_RESULT", {confirmed: true, amount: amount, reward_type: "click"});
         _triggerChannelPayment(campaignId, campaign, userAddress, amount, eventId, publisherKey, frameId, publisherMx, 'click');
       });
     });

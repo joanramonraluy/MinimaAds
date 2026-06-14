@@ -1322,5 +1322,38 @@ Built-in snippets work because the publisher IS the viewer and sends their own P
 
 **AGENTS.md updated**: yes — §6 updated, oldest entry (2026-06-13 patch 4) moved to `docs/HISTORY.md §17`.
 
+---
+
+### Session: 2026-06-14 (patch 4) — N2-2 fix: restore click cooldown via LAST_CLICK_VOUCHER_AT
+
+**Task**: Reverse the click-cooldown regression from `508b7ed` (audit finding N2-2). That commit made click `REWARD_REQUEST`s skip the server-side cooldown entirely, leaving clicks rate-limited only by the per-channel cap + accrual delta — fund-affecting (self-reported clicks could drain a channel's `MAX_AMOUNT` in seconds).
+
+**Fix**: Added a SEPARATE click timestamp so a click immediately after a view is still allowed, but click→click is paced by the campaign cooldown.
+1. **DB (both runtimes)**: `ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS LAST_CLICK_VOUCHER_AT BIGINT DEFAULT 0` in `public/service-workers/db-init.js` and FE init in `dapp/app.js`.
+2. **SW cooldown** (`channel.handler.js` ~590): removed the `!== 'click'` bypass; now selects `LAST_CLICK_VOUCHER_AT` for clicks vs `LAST_VOUCHER_AT` for views, then applies the same cooldown.
+3. **Core** (`core/channels.js`): `updateChannelVoucher(..., cb, rewardType)` — appends `LAST_CLICK_VOUCHER_AT = now` only when `rewardType==='click'`. Backward-compatible (omitted param → unchanged behaviour).
+4. **Callers threaded**: SW `swBuildAndExportVoucherTx` (creator-side commit — authoritative for cooldown) + `_continueRewardVoucher`; FE `app.js` voucher paths; SDK `_handleRewardVoucherPayload`.
+
+**Files modified**: `public/service-workers/db-init.js`, `dapp/app.js`, `core/channels.js`, `public/service-workers/handlers/channel.handler.js`, `sdk/index.js`, `MinimaAds.md` (§7 signature), `docs/audit_report_2.md` (N2-2 → Done).
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (Timing + 3 NEWBLOCK perf fixes) moved to `docs/HISTORY.md §17`.
+
+**Not yet 2-node verified.**
+
+---
+
+### Session: 2026-06-14 (patch 5) — Fix: isHexKey case-insensitivity (N2-1 regression)
+
+**Problem**: After deploying N2-1 (sendMaxima validation guard in patch 3), viewers could not see any campaigns. Root cause: `isHexKey()` validator used regex `/^0x.../` (lowercase x) but Minima stores Maxima PKs via `.toUpperCase()` → `0X...` (uppercase x). ALL sendMaxima calls from viewers were rejected, blocking REQUEST_CAMPAIGN_DATA and CHANNEL_OPEN_REQUEST messages.
+
+**Fix**: Changed `/^0x.../` to `/^0[xX].../` in `core/minima.js:41` to accept both cases. Same class of bug as commit 424207c (isHexKey limit too strict). Added fragility point #45 to `docs/KNOWN_ISSUES.md` explaining the issue and rule for future validators.
+
+**Files modified**: `core/minima.js`, `docs/KNOWN_ISSUES.md`.
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 2, click reward blocked by view cooldown) moved to `docs/HISTORY.md §17`.
+
+**Verification**: Reinstall MiniDapp + reload browser → viewers see campaigns in all nodes.
+
+
 
 

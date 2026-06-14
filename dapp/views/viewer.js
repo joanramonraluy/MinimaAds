@@ -10,7 +10,8 @@ var _viewerState = {
   progressId: 0,
   viewTracked: false,
   listRendering: false,
-  rewardAllowed: false
+  rewardAllowed: false,
+  clickRewardErrorMsg: ''
 };
 
 function renderViewer(root) {
@@ -19,6 +20,7 @@ function renderViewer(root) {
   _viewerState.campaign = null;
   _viewerState.viewTracked = false;
   _viewerState.rewardAllowed = false;
+  _viewerState.clickRewardErrorMsg = '';
   root.innerHTML = '';
   _buildListShell(root);
   _loadAndRenderList();
@@ -273,6 +275,7 @@ function _openCampaign(campaign) {
   _viewerState.campaign = campaign;
   _viewerState.viewTracked = false;
   _viewerState.rewardAllowed = false;
+  _viewerState.clickRewardErrorMsg = '';
 
   var root = document.getElementById('app');
   if (!root) { return; }
@@ -420,6 +423,13 @@ function _wireDetailInteractions(campaign) {
 
       if (!_viewerState.rewardAllowed) {
         if (href) { window.open(href, '_blank', 'noopener'); }
+        if (_viewerState.clickRewardErrorMsg) {
+          var statusEl = document.getElementById('ma-viewer-status');
+          if (statusEl) {
+            statusEl.textContent = _viewerState.clickRewardErrorMsg;
+            statusEl.style.color = 'var(--pico-del-color,#c0392b)';
+          }
+        }
         return;
       }
 
@@ -444,6 +454,7 @@ function _goBackToList() {
   _viewerState.campaign = null;
   _viewerState.viewTracked = false;
   _viewerState.rewardAllowed = false;
+  _viewerState.clickRewardErrorMsg = '';
 
   window.location.hash = 'campaigns';
 }
@@ -612,10 +623,18 @@ function onRewardValidation(result) {
   if (!statusEl) { return; }
   if (result.confirmed) {
     statusEl.textContent = 'Reward confirmed! Opening secure channel…';
+    if (result.reward_type === 'click') {
+      _viewerState.rewardAllowed = false;
+      _viewerState.clickRewardErrorMsg = 'You must wait before earning another click reward from this campaign.';
+    }
   } else {
     var reasonMsg = 'Reward not available';
     if (result.reason === 'cooldown active') {
-      reasonMsg = 'You must wait before earning again from this campaign.';
+      if (result.reward_type === 'click') {
+        reasonMsg = 'You must wait before earning another click reward from this campaign.';
+      } else {
+        reasonMsg = 'You must wait before earning again from this campaign.';
+      }
     } else if (result.reason === 'daily view limit reached') {
       reasonMsg = 'You\'ve reached the daily view limit for this campaign.';
     } else if (result.reason === 'daily click limit reached') {
@@ -633,6 +652,10 @@ function onRewardValidation(result) {
     }
     statusEl.textContent = reasonMsg;
     statusEl.style.color = 'var(--pico-del-color,#c0392b)';
+    if (result.reward_type === 'click') {
+      _viewerState.rewardAllowed = false;
+      _viewerState.clickRewardErrorMsg = reasonMsg;
+    }
   }
 }
 

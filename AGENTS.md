@@ -174,7 +174,40 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 ## 6) Current Handoff Notes
 
-> **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
+> **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
+
+### Session: 2026-06-14 (patch 8) — Fix: click cooldown warning on subsequent CTA clicks
+
+**Problem**: Once a click reward is successfully claimed or rejected in a campaign details page, further clicks on the CTA in the same session open the link but do not update the UI status. The message remains stuck on `Reward received! +0,050 MINIMA` or the previous message, leaving the user without any visual feedback that subsequent clicks are not eligible for rewards due to the cooldown.
+
+**Fix**:
+1. **Viewer State** (`dapp/views/viewer.js`): Added a `clickRewardErrorMsg` field to the global `_viewerState` object. It is initialized to an empty string on entry/exit transitions.
+2. **Rejection/Confirmation Handlers** (`dapp/views/viewer.js`): When a click is confirmed, it stores the standard warning message in `clickRewardErrorMsg`. When a click is rejected, it stores the exact `reasonMsg` (e.g. daily click limit or cooldown active) in the field.
+3. **CTA Click Event Listener** (`dapp/views/viewer.js`): If the link is clicked when `rewardAllowed` is false and a `clickRewardErrorMsg` is present, the UI updates to show the warning message in red.
+
+**Files modified**: `dapp/views/viewer.js`
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 5) moved to `docs/HISTORY.md §17`.
+
+**Verification**: Claim a click reward, then click the CTA a second time within the cooldown window and verify that the red warning message `You must wait before earning another click reward from this campaign.` appears instantly.
+
+---
+
+### Session: 2026-06-14 (patch 7) — Fix: Display click cooldown UI warning
+
+**Problem**: Although click-specific cooldown tracking was implemented in patch 4, the UI failed to display click-cooldown warning messages. When a click reward request was rejected due to an active cooldown, the Service Worker sent an `MA_TRACK_RESULT` broadcast, but the FE ignored public broadcasts to avoid signal collisions. This left the user interface stuck on "Processing reward..." indefinitely.
+
+**Fix**:
+1. **Comms Handler** (`public/service-workers/handlers/comms.handler.js`): Added private FE signals via `signalFE("MA_TRACK_RESULT", ...)` alongside the public broadcasts, and included the explicit `reward_type: "click"` / `"view"` key in the payload.
+2. **Viewer UI** (`dapp/views/viewer.js`): Modified `onRewardValidation` to process the `reward_type` property. It now displays a custom warning message (`You must wait before earning another click reward from this campaign.`) and disables further click tracking (sets `_viewerState.rewardAllowed = false`) once a click is validated.
+
+**Files modified**: `public/service-workers/handlers/comms.handler.js`, `dapp/views/viewer.js`
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 4) moved to `docs/HISTORY.md §17`.
+
+**Verification**: Trigger click cooldown in a viewer flow and verify that the red click-specific cooldown warning message is displayed immediately in the status bar instead of hanging on "Processing reward...".
+
+---
 
 ### Session: 2026-06-14 (patch 6) — Fix: increase isMaximaRoute length limit
 
@@ -190,37 +223,6 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 ---
 
-### Session: 2026-06-14 (patch 5) — Fix: isHexKey case-insensitivity (N2-1 regression)
-
-**Problem**: After deploying N2-1 (sendMaxima validation guard in patch 3), viewers could not see any campaigns. Root cause: `isHexKey()` validator used regex `/^0x.../` (lowercase x) but Minima stores Maxima PKs via `.toUpperCase()` → `0X...` (uppercase x). ALL sendMaxima calls from viewers were rejected, blocking REQUEST_CAMPAIGN_DATA and CHANNEL_OPEN_REQUEST messages.
-
-**Fix**: Changed `/^0x.../` to `/^0[xX].../` in `core/minima.js:41` to accept both cases. Same class of bug as commit 424207c (isHexKey limit too strict). Added fragility point #45 to `docs/KNOWN_ISSUES.md` explaining the issue and rule for future validators.
-
-**Files modified**: `core/minima.js`, `docs/KNOWN_ISSUES.md`.
-
-**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 2, click reward blocked by view cooldown) moved to `docs/HISTORY.md §17`.
-
-**Verification**: Reinstall MiniDapp + reload browser → viewers see campaigns in all nodes.
-
----
-
-### Session: 2026-06-14 (patch 4) — N2-2 fix: restore click cooldown via LAST_CLICK_VOUCHER_AT
-
-**Task**: Reverse the click-cooldown regression from `508b7ed` (audit finding N2-2). That commit made click `REWARD_REQUEST`s skip the server-side cooldown entirely, leaving clicks rate-limited only by the per-channel cap + accrual delta — fund-affecting (self-reported clicks could drain a channel's `MAX_AMOUNT` in seconds).
-
-**Fix**: Added a SEPARATE click timestamp so a click immediately after a view is still allowed, but click→click is paced by the campaign cooldown.
-1. **DB (both runtimes)**: `ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS LAST_CLICK_VOUCHER_AT BIGINT DEFAULT 0` in `public/service-workers/db-init.js` and FE init in `dapp/app.js`.
-2. **SW cooldown** (`channel.handler.js` ~590): removed the `!== 'click'` bypass; now selects `LAST_CLICK_VOUCHER_AT` for clicks vs `LAST_VOUCHER_AT` for views, then applies the same cooldown.
-3. **Core** (`core/channels.js`): `updateChannelVoucher(...,, cb, rewardType)` — appends `LAST_CLICK_VOUCHER_AT = now` only when `rewardType==='click'`. Backward-compatible (omitted param → unchanged behaviour).
-4. **Callers threaded**: SW `swBuildAndExportVoucherTx` (creator-side commit — authoritative for cooldown) + `_continueRewardVoucher`; FE `app.js` voucher paths; SDK `_handleRewardVoucherPayload`.
-
-**Files modified**: `public/service-workers/db-init.js`, `dapp/app.js`, `core/channels.js`, `public/service-workers/handlers/channel.handler.js`, `sdk/index.js`, `MinimaAds.md` (§7 signature), `docs/audit_report_2.md` (N2-2 → Done).
-
-**AGENTS.md updated**: yes — §6 updated, oldest entry (Timing + 3 NEWBLOCK perf fixes) moved to `docs/HISTORY.md §17`.
-
-**Not yet 2-node verified.**
-
----
-
 > Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, Auto-Sync Platform Creator Route, Unify MLS DevTools, Fix Viewer and Publisher Reward Delivery, Fix Publisher Budget (Multi-Publisher Support), Fix Stale-Pending Publisher Channel Deadlock, Minima Foundation Fee (3%) + V4 Escrow Script Fixes, 2026-06-10 settlement fixes, Security audit T7/T9, and all earlier) are archived in `docs/HISTORY.md §17`.
+
 

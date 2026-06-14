@@ -38,7 +38,7 @@ function escapeSql(str) {
 // Minima Maxima public keys are DER-encoded RSA 1024-bit keys: ~270 hex chars.
 // Max set to 600 to accommodate current and future key sizes while blocking injection.
 function isHexKey(s) {
-  return typeof s === "string" && /^0x[0-9A-Fa-f]{2,600}$/.test(s);
+  return typeof s === "string" && /^0[xX][0-9A-Fa-f]{2,600}$/.test(s);
 }
 
 // Returns true if s is a plausible Maxima contact string or MAX# permanent route

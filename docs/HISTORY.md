@@ -46,6 +46,31 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-13 (patch 3) — Fix direct routing fallback and rate-limit clearing on discovery failures
+
+**Task**: Fix viewer discovery failing to request campaign details from the creator node when the contact relationship is not yet established. If `publickey` routing fails, fallback to direct `to:` routing was attempting to send to the MLS server address itself instead of the full permanent route address (causing the request to be lost). Also, ensure that if campaign requests fail (`ok: false`), the rate limit is reset so that discovery retries immediately on subsequent blocks rather than waiting 30 seconds.
+
+**Fix**:
+- **Full Fallback Routing**: Modified `processEscrowCoin` in `campaign.handler.js` to preserve the full permanent route string (`MAX#<pk>#<mls_address>`) in `creatorMxAddr` instead of extracting only the MLS server address (`routeParts[2]`).
+- **Dynamic Contact Handling**: Modified `_sendRequestCampaignData` in `campaign.handler.js` to dynamically handle both raw addresses and full permanent routes, setting the `creatorMx` parameter passed to `sendMaxima` to the full permanent route. This ensures `sendMaxima`'s `to:` fallback executes `to:MAX#...`, which correctly query-resolves the destination's current direct address via MLS lookup.
+- **Immediate Discovery Retries**: Added a check in `processEscrowCoin`'s `_sendRequestCampaignData` callback to clear `_pendingCampaignRequests[campaignId]` if the request failed (`ok: false`), enabling immediate retry on subsequent blocks.
+
+**Files modified**: `public/service-workers/handlers/campaign.handler.js`
+
+---
+
+### Session: 2026-06-13 (patch 2) — Fix validation & self-healing for custom key overrides
+
+**Task**: Fix creator campaign launch failure caused by invalid `FOUNDATION_KEY_OVERRIDE` or `PLATFORM_KEY_OVERRIDE` values (e.g. Maxima route strings `MAX#...` saved instead of wallet `0x...` hex addresses), causing escrow transaction builds to fail with a `NumberFormatException`.
+
+**Fix**:
+- **Self-Healing on Boot**: Added format validation checks using `isHexKey` to key override loaders during bootstrap in `service.js` (SW) and `dapp/app.js` (FE). Any malformed or invalid custom override key detected on startup is automatically cleared from the MDS keypair storage.
+- **Input Validation**: Added `isHexKey` format checks inside `dapp/views/devtools.js` when saving custom override values or using "Set Self Wallet" actions. Malformed keys are rejected immediately with a user-facing error message in the status bar.
+
+**Files modified**: `service.js`, `dapp/app.js`, `dapp/views/devtools.js`
+
+---
+
 ### Session: 2026-06-13 — Security audit T7/T9: server-side voucher accrual + cooldown guards (C-1)
 
 **Task**: Implement the remaining `[Opus]` security-audit tasks (T7, T9) to close C-1 (channel over-claim). T10 (two-node test) deferred to manual testing.

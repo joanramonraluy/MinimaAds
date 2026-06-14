@@ -584,12 +584,17 @@ function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumu
       MDS.log("[CHANNEL] REWARD_REQUEST: accrual delta invalid. delta=" + delta + " unit=" + unit + " type=" + (payload.reward_type || 'view') + " campaign: " + campaignId);
       return;
     }
-    var cooldown = (campaign.COOLDOWN_MS !== null && campaign.COOLDOWN_MS !== undefined)
-      ? parseInt(campaign.COOLDOWN_MS, 10) : LIMITS.COOLDOWN_BETWEEN_REWARDS_MS;
-    var lastAt   = parseInt(channel.LAST_VOUCHER_AT, 10) || 0;
-    if (lastAt > 0 && (Date.now() - lastAt) < cooldown) {
-      MDS.log("[CHANNEL] REWARD_REQUEST: cooldown not elapsed. since=" + (Date.now() - lastAt) + " cooldown=" + cooldown + " campaign: " + campaignId);
-      return;
+    // Click events bypass the shared view cooldown: a click is an explicit user
+    // action that must be allowed immediately after a view. Anti-spam for clicks
+    // is already enforced by isDuplicate(eventId) + the accrual delta check above.
+    if ((payload.reward_type || 'view') !== 'click') {
+      var cooldown = (campaign.COOLDOWN_MS !== null && campaign.COOLDOWN_MS !== undefined)
+        ? parseInt(campaign.COOLDOWN_MS, 10) : LIMITS.COOLDOWN_BETWEEN_REWARDS_MS;
+      var lastAt   = parseInt(channel.LAST_VOUCHER_AT, 10) || 0;
+      if (lastAt > 0 && (Date.now() - lastAt) < cooldown) {
+        MDS.log("[CHANNEL] REWARD_REQUEST: cooldown not elapsed. since=" + (Date.now() - lastAt) + " cooldown=" + cooldown + " campaign: " + campaignId);
+        return;
+      }
     }
 
     isDuplicate(eventId, function(isDup) {
@@ -623,10 +628,10 @@ function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumu
         if (indexed) {
           if (role === 'publisher') {
             MDS.log("[CHANNEL] REWARD_REQUEST (publisher): coin indexed. building publisher voucher in SW. campaign: " + campaignId + " cumulative: " + cumulative);
-            _swDispatchVoucher(campaignId, viewerKey, channel.CREATOR_MX, eventId, cumulative, channel, 'publisher', channelFrameId, null, 'view');
+            _swDispatchVoucher(campaignId, viewerKey, channel.CREATOR_MX, eventId, cumulative, channel, 'publisher', channelFrameId, null, 'view', campaign);
           } else {
             MDS.log("[CHANNEL] REWARD_REQUEST: coin indexed. building viewer voucher in SW. campaign: " + campaignId + " cumulative: " + cumulative);
-            _swDispatchVoucher(campaignId, viewerKey, channel.CREATOR_MX, eventId, cumulative, channel, 'viewer', '', null, payload.reward_type || 'view');
+            _swDispatchVoucher(campaignId, viewerKey, channel.CREATOR_MX, eventId, cumulative, channel, 'viewer', '', null, payload.reward_type || 'view', campaign);
             // Skip publisher voucher generation only when the viewer IS the built-in publisher
             // (same node viewing their own snippet — they self-dispatch via REWARD_REQUEST).
             // When a different viewer uses the publisher's built-in frame, generate normally.
@@ -1057,7 +1062,9 @@ function _enqueuePendingChOpenSplitRetry(ctx) {
 // DO_REWARD_VOUCHER or DO_PUBLISHER_REWARD_VOUCHER and clears the queue.
 // Rhino-safe: var, function(), string concat, no arrow functions, no trailing commas.
 // ---------------------------------------------------------------------------
-function checkPendingVouchers() {
+// channelCoins: pre-fetched coin array from _checkChannelCoinsOnBlock (Change #1).
+// When provided, checkOnePendingVoucher skips its own coins address scan.
+function checkPendingVouchers(channelCoins) {
   // Also include recently-settled channels (within 5 min) to recover from the
   // race where checkOpenChannelsSettled prematurely settled a just-activated
   // channel before its coin was locally indexed (Fix 2).
@@ -1077,7 +1084,8 @@ function checkPendingVouchers() {
         rows[i].CAMPAIGN_ID,
         rows[i].VIEWER_KEY,
         rows[i].ROLE || 'viewer',
-        rows[i].CHANNEL_COINID
+        rows[i].CHANNEL_COINID,
+        channelCoins
       );
     }
   });
@@ -1484,7 +1492,8 @@ function _replayDeferredPublisherRewardsNow(campaignId, frameId, rows, pubChanne
                 }
               );
             },
-            'view'
+            'view',
+            rdCampaign
           );
         });
       });
@@ -1586,7 +1595,7 @@ function _doGeneratePublisherVoucher(campaignId, frameId, eventId, pubChannel) {
           "MERGE INTO DEDUP_LOG (ID, LOGGED_AT) KEY (ID) VALUES ('" + escapeSql(pubEventId) + "'," + now + ")",
           function() {
             MDS.log("[CHANNEL] publisher voucher SW: campaign: " + campaignId + " frame: " + frameId + " cumulative: " + cumulative);
-            _swDispatchVoucher(campaignId, pubChannel.VIEWER_KEY, pubChannel.CREATOR_MX, pubEventId, cumulative, pubChannel, 'publisher', frameId, null, 'view');
+            _swDispatchVoucher(campaignId, pubChannel.VIEWER_KEY, pubChannel.CREATOR_MX, pubEventId, cumulative, pubChannel, 'publisher', frameId, null, 'view', campaign);
           }
         );
       });
@@ -1594,7 +1603,9 @@ function _doGeneratePublisherVoucher(campaignId, frameId, eventId, pubChannel) {
   });
 }
 
-function checkOnePendingVoucher(campaignId, viewerKey, role, channelCoinId) {
+// channelCoins: optional pre-fetched coin array (Change #1). When provided, skips
+// the individual coins address scan; falls back to scanning when null/undefined.
+function checkOnePendingVoucher(campaignId, viewerKey, role, channelCoinId, channelCoins) {
   var r = role || 'viewer';
   var kpKey = "PENDING_VOUCHER_" + campaignId + "_" + viewerKey.toUpperCase() + "_" + r.toUpperCase();
   MDS.keypair.get(kpKey, function(kpRes) {
@@ -1612,40 +1623,53 @@ function checkOnePendingVoucher(campaignId, viewerKey, role, channelCoinId) {
       return;
     }
 
-    var _chAddr2 = CHANNEL_SCRIPT_ADDRESS || '';
-    if (!_chAddr2) { return; }
-    MDS.cmd("coins address:" + _chAddr2, function(coinRes) {
-      var coinList2 = (coinRes && coinRes.status && coinRes.response) ? coinRes.response : [];
+    if (channelCoins !== null && channelCoins !== undefined) {
       var indexed = false;
-      for (var ci2 = 0; ci2 < coinList2.length; ci2++) {
-        if (coinList2[ci2].coinid && coinList2[ci2].coinid.toUpperCase() === channelCoinId.toUpperCase()) {
+      for (var ci2 = 0; ci2 < channelCoins.length; ci2++) {
+        if (channelCoins[ci2].coinid && channelCoins[ci2].coinid.toUpperCase() === channelCoinId.toUpperCase()) {
           indexed = true;
           break;
         }
       }
-      if (!indexed) {
+      if (!indexed) { return; }
+      _dispatchPendingVoucher(kpKey, pending, r);
+    } else {
+      var _chAddr2 = CHANNEL_SCRIPT_ADDRESS || '';
+      if (!_chAddr2) { return; }
+      MDS.cmd("coins address:" + _chAddr2, function(coinRes) {
+        var coinList2 = (coinRes && coinRes.status && coinRes.response) ? coinRes.response : [];
+        var indexed2 = false;
+        for (var ci3 = 0; ci3 < coinList2.length; ci3++) {
+          if (coinList2[ci3].coinid && coinList2[ci3].coinid.toUpperCase() === channelCoinId.toUpperCase()) {
+            indexed2 = true;
+            break;
+          }
+        }
+        if (!indexed2) { return; }
+        _dispatchPendingVoucher(kpKey, pending, r);
+      });
+    }
+  });
+}
+
+function _dispatchPendingVoucher(kpKey, pending, r) {
+  MDS.keypair.set(kpKey, '', function() {
+    MDS.log("[CHANNEL] pending voucher found, building in SW: " + pending.campaign_id + " cumulative: " + pending.cumulative + " role: " + r);
+    getChannelState(pending.campaign_id, pending.viewer_key, r, function(chErr, ch) {
+      if (chErr || !ch) {
+        MDS.log("[CHANNEL] checkOnePendingVoucher: channel not found. campaign: " + pending.campaign_id);
         return;
       }
-
-      MDS.keypair.set(kpKey, '', function() {
-        MDS.log("[CHANNEL] pending voucher found, building in SW: " + campaignId + " cumulative: " + pending.cumulative + " role: " + r);
-        getChannelState(pending.campaign_id, pending.viewer_key, r, function(chErr, ch) {
-          if (chErr || !ch) {
-            MDS.log("[CHANNEL] checkOnePendingVoucher: channel not found. campaign: " + pending.campaign_id);
-            return;
-          }
-          _swDispatchVoucher(pending.campaign_id, pending.viewer_key, pending.viewer_mx, pending.event_id, pending.cumulative, ch, r, pending.frame_id || '', null, pending.reward_type || 'view');
-          if (r === 'viewer') {
-            var _pendingFid = pending.frame_id || '';
-            var _pendingBuiltinPk = (_pendingFid && _pendingFid.toLowerCase().indexOf('builtin:') === 0)
-              ? _pendingFid.substring(8).toUpperCase() : '';
-            var _pendingViewerIsPublisher = _pendingBuiltinPk && (pending.viewer_key.toUpperCase() === _pendingBuiltinPk);
-            if (!_pendingViewerIsPublisher && (_pendingFid || pending.publisher_key) && (pending.reward_type || 'view') !== 'click') {
-              _maybeGeneratePublisherVoucher(pending.campaign_id, _pendingFid, pending.event_id, pending.publisher_key || '', pending.publisher_mx || '');
-            }
-          }
-        });
-      });
+      _swDispatchVoucher(pending.campaign_id, pending.viewer_key, pending.viewer_mx, pending.event_id, pending.cumulative, ch, r, pending.frame_id || '', null, pending.reward_type || 'view', null);
+      if (r === 'viewer') {
+        var _pendingFid = pending.frame_id || '';
+        var _pendingBuiltinPk = (_pendingFid && _pendingFid.toLowerCase().indexOf('builtin:') === 0)
+          ? _pendingFid.substring(8).toUpperCase() : '';
+        var _pendingViewerIsPublisher = _pendingBuiltinPk && (pending.viewer_key.toUpperCase() === _pendingBuiltinPk);
+        if (!_pendingViewerIsPublisher && (_pendingFid || pending.publisher_key) && (pending.reward_type || 'view') !== 'click') {
+          _maybeGeneratePublisherVoucher(pending.campaign_id, _pendingFid, pending.event_id, pending.publisher_key || '', pending.publisher_mx || '');
+        }
+      }
     });
   });
 }
@@ -1685,42 +1709,52 @@ function _swDispatchChannelOpen(campaignId, viewerKey, viewerMx, maxAmount, role
 // swBuildAndExportVoucherTx. Used by handleRewardRequest, checkOnePendingVoucher,
 // and _doGeneratePublisherVoucher.
 // ---------------------------------------------------------------------------
-function _swDispatchVoucher(campaignId, viewerKey, viewerMx, eventId, cumulative, channel, role, frameId, afterSend, rewardType) {
+// campaign (11th param, optional — Change #2 perf): when the caller already has
+// the campaign loaded, pass it here to skip the getCampaign() SQL round-trip.
+function _swDispatchVoucher(campaignId, viewerKey, viewerMx, eventId, cumulative, channel, role, frameId, afterSend, rewardType, campaign) {
   var rType = rewardType || 'view';
-  getCampaign(campaignId, function(err, campaign) {
-    if (err || !campaign || !campaign.ESCROW_WALLET_PK) {
-      MDS.log("[CHANNEL] _swDispatchVoucher: campaign or ESCROW_WALLET_PK missing. campaign: " + campaignId);
-      return;
-    }
-    var viewerAddr = channel.VIEWER_WALLET_ADDR || '';
-    if (!viewerAddr) {
-      MDS.log("[CHANNEL] _swDispatchVoucher: VIEWER_WALLET_ADDR missing. campaign: " + campaignId + " role: " + role);
-      return;
-    }
-    // rewardAmount passed to the voucher builder so it can create a creator-side
-    // REWARD_EVENT after the voucher is sent.
-    var rewardAmount = 0;
-    if (role === 'viewer') {
-      rewardAmount = (rType === 'click') ? (parseFloat(campaign.REWARD_CLICK) || 0) : (parseFloat(campaign.REWARD_VIEW) || 0);
-    } else {
-      rewardAmount = (parseFloat(campaign.PUBLISHER_REWARD_VIEW) || 0);
-    }
-    swBuildAndExportVoucherTx({
-      campaignId:      campaignId,
-      viewerKey:       viewerKey,
-      viewerMx:        viewerMx,
-      eventId:         eventId,
-      cumulative:      cumulative,
-      maxAmount:       parseFloat(channel.MAX_AMOUNT),
-      channelCoinId:   channel.CHANNEL_COINID,
-      creatorWalletPK: campaign.ESCROW_WALLET_PK,
-      viewerAddr:      viewerAddr,
-      role:            role || 'viewer',
-      frameId:         frameId || '',
-      rewardAmount:    rewardAmount,
-      rewardType:      rType
-    }, afterSend || null);
-  });
+  if (campaign && campaign.ESCROW_WALLET_PK) {
+    _continueSwDispatchVoucher(campaignId, viewerKey, viewerMx, eventId, cumulative, channel, role, frameId, afterSend, rType, campaign);
+  } else {
+    getCampaign(campaignId, function(err, loadedCampaign) {
+      if (err || !loadedCampaign || !loadedCampaign.ESCROW_WALLET_PK) {
+        MDS.log("[CHANNEL] _swDispatchVoucher: campaign or ESCROW_WALLET_PK missing. campaign: " + campaignId);
+        return;
+      }
+      _continueSwDispatchVoucher(campaignId, viewerKey, viewerMx, eventId, cumulative, channel, role, frameId, afterSend, rType, loadedCampaign);
+    });
+  }
+}
+
+function _continueSwDispatchVoucher(campaignId, viewerKey, viewerMx, eventId, cumulative, channel, role, frameId, afterSend, rType, campaign) {
+  var viewerAddr = channel.VIEWER_WALLET_ADDR || '';
+  if (!viewerAddr) {
+    MDS.log("[CHANNEL] _swDispatchVoucher: VIEWER_WALLET_ADDR missing. campaign: " + campaignId + " role: " + role);
+    return;
+  }
+  // rewardAmount passed to the voucher builder so it can create a creator-side
+  // REWARD_EVENT after the voucher is sent.
+  var rewardAmount = 0;
+  if (role === 'viewer') {
+    rewardAmount = (rType === 'click') ? (parseFloat(campaign.REWARD_CLICK) || 0) : (parseFloat(campaign.REWARD_VIEW) || 0);
+  } else {
+    rewardAmount = (parseFloat(campaign.PUBLISHER_REWARD_VIEW) || 0);
+  }
+  swBuildAndExportVoucherTx({
+    campaignId:      campaignId,
+    viewerKey:       viewerKey,
+    viewerMx:        viewerMx,
+    eventId:         eventId,
+    cumulative:      cumulative,
+    maxAmount:       parseFloat(channel.MAX_AMOUNT),
+    channelCoinId:   channel.CHANNEL_COINID,
+    creatorWalletPK: campaign.ESCROW_WALLET_PK,
+    viewerAddr:      viewerAddr,
+    role:            role || 'viewer',
+    frameId:         frameId || '',
+    rewardAmount:    rewardAmount,
+    rewardType:      rType
+  }, afterSend || null);
 }
 
 // ===========================================================================
@@ -2168,58 +2202,66 @@ function swBuildAndPostChannelOpenTx(ctx) {
 // checkOpenChannelsSettled fires in the same NEWBLOCK event as Tx2 and
 // immediately settles the channel before checkPendingVouchers can process it.
 // ---------------------------------------------------------------------------
-function checkOpenChannelsSettled() {
-  var chAddr = CHANNEL_SCRIPT_ADDRESS || '';
-  if (!chAddr) { return; }
-
+// channelCoins: pre-fetched coin array from _checkChannelCoinsOnBlock (Change #1).
+// When provided, skips the individual coins address scan.
+function checkOpenChannelsSettled(channelCoins) {
   var sql = "SELECT CAMPAIGN_ID, VIEWER_KEY, ROLE, CHANNEL_COINID, CREATED_AT, CUMULATIVE_EARNED FROM CHANNEL_STATE WHERE STATUS = 'open'";
   sqlQuery(sql, function(err, rows) {
     if (err || !rows || rows.length === 0) { return; }
 
-    MDS.cmd("coins address:" + chAddr, function(cRes) {
-      var coins = (cRes && cRes.status && cRes.response) ? cRes.response : [];
-      var activeCoinIds = {};
-      for (var i = 0; i < coins.length; i++) {
-        if (coins[i].coinid) {
-          activeCoinIds[coins[i].coinid.toUpperCase()] = true;
-        }
-      }
+    if (channelCoins !== null && channelCoins !== undefined) {
+      _processSettledChannels(rows, channelCoins);
+    } else {
+      var chAddr = CHANNEL_SCRIPT_ADDRESS || '';
+      if (!chAddr) { return; }
+      MDS.cmd("coins address:" + chAddr, function(cRes) {
+        var coins = (cRes && cRes.status && cRes.response) ? cRes.response : [];
+        _processSettledChannels(rows, coins);
+      });
+    }
+  });
+}
 
-      var now = Date.now();
-      for (var j = 0; j < rows.length; j++) {
-        var row = rows[j];
-        var coinId = row.CHANNEL_COINID || '';
-        if (coinId && !activeCoinIds[coinId.toUpperCase()]) {
-          // Grace period: skip settling channels activated within the last 60 s.
-          // The channel coin may not be locally indexed yet even though the TX
-          // was mined in this block — indexation lags by up to one block event.
-          var age = now - parseInt(row.CREATED_AT || 0);
-          if (age < 60000) {
-            MDS.log("[CHANNEL] checkOpenChannelsSettled: coin " + coinId.substring(0, 18) + "... not found but channel is new (age=" + age + "ms) — grace period, skipping settle.");
-          } else {
-            // Verify via targeted query before settling — the address scan can return
-            // an empty list transiently during node re-sync, causing false positives.
-            (function(r) {
-              MDS.cmd("coins coinid:" + r.CHANNEL_COINID + " relevant:true", function(vRes) {
-                var vCoins = (vRes && vRes.status && vRes.response) ? vRes.response : [];
-                if (vCoins.length > 0) {
-                  MDS.log("[CHANNEL] checkOpenChannelsSettled: coin " + r.CHANNEL_COINID.substring(0, 18) + "... confirmed present via direct query — address scan transient, skipping.");
+function _processSettledChannels(rows, coins) {
+  var activeCoinIds = {};
+  for (var i = 0; i < coins.length; i++) {
+    if (coins[i].coinid) {
+      activeCoinIds[coins[i].coinid.toUpperCase()] = true;
+    }
+  }
+  var now = Date.now();
+  for (var j = 0; j < rows.length; j++) {
+    var row = rows[j];
+    var coinId = row.CHANNEL_COINID || '';
+    if (coinId && !activeCoinIds[coinId.toUpperCase()]) {
+      // Grace period: skip settling channels activated within the last 60 s.
+      // The channel coin may not be locally indexed yet even though the TX
+      // was mined in this block — indexation lags by up to one block event.
+      var age = now - parseInt(row.CREATED_AT || 0);
+      if (age < 60000) {
+        MDS.log("[CHANNEL] checkOpenChannelsSettled: coin " + coinId.substring(0, 18) + "... not found but channel is new (age=" + age + "ms) — grace period, skipping settle.");
+      } else {
+        // Verify via targeted query before settling — the address scan can return
+        // an empty list transiently during node re-sync, causing false positives.
+        (function(r) {
+          MDS.cmd("coins coinid:" + r.CHANNEL_COINID + " relevant:true", function(vRes) {
+            var vCoins = (vRes && vRes.status && vRes.response) ? vRes.response : [];
+            if (vCoins.length > 0) {
+              MDS.log("[CHANNEL] checkOpenChannelsSettled: coin " + r.CHANNEL_COINID.substring(0, 18) + "... confirmed present via direct query — address scan transient, skipping.");
+            } else {
+              MDS.log("[CHANNEL] checkOpenChannelsSettled: coin " + r.CHANNEL_COINID + " confirmed spent on-chain. Settling locally.");
+              settleChannel(r.CAMPAIGN_ID, r.VIEWER_KEY, r.ROLE || 'viewer', function(settleErr) {
+                if (settleErr) {
+                  MDS.log("[CHANNEL] checkOpenChannelsSettled: settleChannel failed for " + r.CAMPAIGN_ID + " error: " + settleErr);
                 } else {
-                  MDS.log("[CHANNEL] checkOpenChannelsSettled: coin " + r.CHANNEL_COINID + " confirmed spent on-chain. Settling locally.");
-                  settleChannel(r.CAMPAIGN_ID, r.VIEWER_KEY, r.ROLE || 'viewer', function(settleErr) {
-                    if (settleErr) {
-                      MDS.log("[CHANNEL] checkOpenChannelsSettled: settleChannel failed for " + r.CAMPAIGN_ID + " error: " + settleErr);
-                    } else {
-                      _signalCampaignUpdated(r.CAMPAIGN_ID);
-                      signalFE("SETTLE_CONFIRMED", { campaign_id: r.CAMPAIGN_ID, amount: parseFloat(r.CUMULATIVE_EARNED || 0) });
-                    }
-                  });
+                  _signalCampaignUpdated(r.CAMPAIGN_ID);
+                  signalFE("SETTLE_CONFIRMED", { campaign_id: r.CAMPAIGN_ID, amount: parseFloat(r.CUMULATIVE_EARNED || 0) });
                 }
               });
-            })(row);
-          }
-        }
+            }
+          });
+        })(row);
       }
-    });
-  });
+    }
+  }
 }

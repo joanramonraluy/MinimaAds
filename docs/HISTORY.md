@@ -46,6 +46,36 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-14 (patch 7) — Fix: Display click cooldown UI warning
+
+**Problem**: Although click-specific cooldown tracking was implemented in patch 4, the UI failed to display click-cooldown warning messages. When a click reward request was rejected due to an active cooldown, the Service Worker sent an `MA_TRACK_RESULT` broadcast, but the FE ignored public broadcasts to avoid signal collisions. This left the user interface stuck on "Processing reward..." indefinitely.
+
+**Fix**:
+1. **Comms Handler** (`public/service-workers/handlers/comms.handler.js`): Added private FE signals via `signalFE("MA_TRACK_RESULT", ...)` alongside the public broadcasts, and included the explicit `reward_type: "click"` / `"view"` key in the payload.
+2. **Viewer UI** (`dapp/views/viewer.js`): Modified `onRewardValidation` to process the `reward_type` property. It now displays a custom warning message (`You must wait before earning another click reward from this campaign.`) and disables further click tracking (sets `_viewerState.rewardAllowed = false`) once a click is validated.
+
+**Files modified**: `public/service-workers/handlers/comms.handler.js`, `dapp/views/viewer.js`
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 4) moved to `docs/HISTORY.md §17`.
+
+**Verification**: Trigger click cooldown in a viewer flow and verify that the red click-specific cooldown warning message is displayed immediately in the status bar instead of hanging on "Processing reward...".
+
+---
+
+### Session: 2026-06-14 (patch 6) — Fix: increase isMaximaRoute length limit
+
+**Problem**: outbound Maxima communication (channel open, rewards, liveness) failed with `[MINIMA] sendMaxima rejected: malformed mxAddress`. The validation regex limit of 600 characters in `isMaximaRoute` was too strict because Maxima permanent routes (`MAX#...`) concatenate prefix + 328-char public key hex + `#` + 286-char contact route, yielding 619 characters which exceeded the limit.
+
+**Fix**: Increased the maximum character limit in `isMaximaRoute` in `core/minima.js` from 600 to 1200. This accommodates any valid permanent route containing MLS/IP connection addresses.
+
+**Files modified**: `core/minima.js`
+
+**AGENTS.md updated**: yes — §6 updated, oldest entries (patch 3 and patch 2) archived to `docs/HISTORY.md §17`.
+
+**Verification**: reload the browser and nodes → verify that CAMPAIGN_DATA_RESPONSE and CHANNEL_OPEN_REQUEST messages are successfully transmitted and rewards/discovery resume.
+
+---
+
 ### Session: 2026-06-14 — Timing investigation + 3 NEWBLOCK perf fixes + click reward bug pending
 
 **Task**: Investigated perceived reward/settlement slowness post-audit. Found no timing regression from audit commits — block latency was the bottleneck. Identified and implemented 3 performance improvements:

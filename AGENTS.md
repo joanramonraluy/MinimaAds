@@ -176,6 +176,48 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
+### Session: 2026-06-14 (patch 10) — Fix: Reset click reward cooldown state, clear warning message, and improve channel opening status
+
+**Problem**: 
+1. Once a viewer was in click cooldown, any subsequent click on the CTA button showed a red warning message. However, after the cooldown expired:
+   - The red warning message did not disappear and was instead replaced by a green success message (from the previous reward), which was confusing to the user.
+   - The `rewardAllowed` state was never reset back to `true` on confirmed click rewards, meaning the viewer could not earn any subsequent click rewards in the same details page session.
+2. The initial channel opening status message was not descriptive enough regarding the L1 blockchain transaction mining wait.
+
+**Fix**:
+- **Viewer UI** (`dapp/views/viewer.js`):
+  1. Updated `onRewardValidation` click timers (both for confirmed rewards and cooldown rejections) to set `statusEl.textContent = ''` (clearing the message entirely) when the cooldown expires.
+  2. Correctly set `_viewerState.rewardAllowed = true` when the confirmed click reward cooldown timer expires.
+  3. Reset `statusEl.style.color = ''` to prevent the red warning color from leaking into the "Processing reward…" and "Reward confirmed…" status messages.
+  4. Conditionalized the channel opening status message in `onRewardValidation` to show a detailed message when a new channel needs L1 block confirmation (`Opening secure channel (first time requires L1 block confirmation, ~60s). Once established, subsequent rewards will be near-instant!`) and a faster one for open channels (`Sending payment voucher…`).
+  5. Implemented `onChannelOpened(parsed)` hook to dynamically update the session campaign channel status state to `'open'` when mined.
+
+**Files modified**: `dapp/views/viewer.js`, `MinimaAds.mds.zip`
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 7) moved to `docs/HISTORY.md §17`.
+
+**Verification**: Trigger a click reward and let it confirm. Stay on the details page. Verify that once the cooldown expires, the reward status message completely disappears and subsequent CTA clicks are correctly allowed. Verify that the first channel open warns about the L1 wait while subsequent ones show a direct voucher payment status.
+
+---
+
+### Session: 2026-06-14 (patch 9) — Fix: click success amount typo and build package zip
+
+**Problem**:
+1. When the click cooldown timer expires, the frontend status success message incorrectly displayed the view reward amount instead of the click reward amount.
+2. The packaged `MinimaAds.mds.zip` file needed to be rebuilt with the latest code so that when users reload/reinstall the DApp on their nodes, the updated Service Worker and frontend are active.
+
+**Fix**:
+1. **Viewer UI** (`dapp/views/viewer.js`): Corrected `REWARD_VIEW` to `REWARD_CLICK` in the click cooldown timer callback.
+2. **MiniDapp Package**: Re-zipped the repository files into `MinimaAds.mds.zip` using the `zip` command.
+
+**Files modified**: `dapp/views/viewer.js`, `MinimaAds.mds.zip`
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 6) moved to `docs/HISTORY.md §17`.
+
+**Verification**: Reinstall/update the MiniDapp using the rebuilt `MinimaAds.mds.zip`. Trigger a click cooldown, wait for it to expire, and verify that the status success message correctly reverts to the click reward amount (`+0.050 MINIMA` or the configured campaign click reward).
+
+---
+
 ### Session: 2026-06-14 (patch 8) — Fix: click cooldown warning and auto-clear timer
 
 **Problem**: 
@@ -194,36 +236,6 @@ For verification procedures, see `docs/VERIFICATION.md`.
 **AGENTS.md updated**: yes — §6 updated, oldest entry (patch 5) moved to `docs/HISTORY.md §17`.
 
 **Verification**: Trigger a view or click cooldown, stay on the details page, and verify that the red warning message disappears and is replaced by either the ad progress bar (for view cooldown) or the green reward message (for click cooldown) automatically when the timer expires.
-
----
-
-### Session: 2026-06-14 (patch 7) — Fix: Display click cooldown UI warning
-
-**Problem**: Although click-specific cooldown tracking was implemented in patch 4, the UI failed to display click-cooldown warning messages. When a click reward request was rejected due to an active cooldown, the Service Worker sent an `MA_TRACK_RESULT` broadcast, but the FE ignored public broadcasts to avoid signal collisions. This left the user interface stuck on "Processing reward..." indefinitely.
-
-**Fix**:
-1. **Comms Handler** (`public/service-workers/handlers/comms.handler.js`): Added private FE signals via `signalFE("MA_TRACK_RESULT", ...)` alongside the public broadcasts, and included the explicit `reward_type: "click"` / `"view"` key in the payload.
-2. **Viewer UI** (`dapp/views/viewer.js`): Modified `onRewardValidation` to process the `reward_type` property. It now displays a custom warning message (`You must wait before earning another click reward from this campaign.`) and disables further click tracking (sets `_viewerState.rewardAllowed = false`) once a click is validated.
-
-**Files modified**: `public/service-workers/handlers/comms.handler.js`, `dapp/views/viewer.js`
-
-**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 4) moved to `docs/HISTORY.md §17`.
-
-**Verification**: Trigger click cooldown in a viewer flow and verify that the red click-specific cooldown warning message is displayed immediately in the status bar instead of hanging on "Processing reward...".
-
----
-
-### Session: 2026-06-14 (patch 6) — Fix: increase isMaximaRoute length limit
-
-**Problem**: outbound Maxima communication (channel open, rewards, liveness) failed with `[MINIMA] sendMaxima rejected: malformed mxAddress`. The validation regex limit of 600 characters in `isMaximaRoute` was too strict because Maxima permanent routes (`MAX#...`) concatenate prefix + 328-char public key hex + `#` + 286-char contact route, yielding 619 characters which exceeded the limit.
-
-**Fix**: Increased the maximum character limit in `isMaximaRoute` in `core/minima.js` from 600 to 1200. This accommodates any valid permanent route containing MLS/IP connection addresses.
-
-**Files modified**: `core/minima.js`
-
-**AGENTS.md updated**: yes — §6 updated, oldest entries (patch 3 and patch 2) archived to `docs/HISTORY.md §17`.
-
-**Verification**: reload the browser and nodes → verify that CAMPAIGN_DATA_RESPONSE and CHANNEL_OPEN_REQUEST messages are successfully transmitted and rewards/discovery resume.
 
 ---
 

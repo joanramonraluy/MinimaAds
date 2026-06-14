@@ -403,7 +403,10 @@ function _trackDetailView(campaign) {
   _stopProgressBar();
 
   var statusEl = document.getElementById('ma-viewer-status');
-  if (statusEl) { statusEl.textContent = 'Processing reward…'; }
+  if (statusEl) {
+    statusEl.textContent = 'Processing reward…';
+    statusEl.style.color = '';
+  }
 
   var payload = {
     type: 'MA_TRACK_VIEW',
@@ -438,7 +441,10 @@ function _wireDetailInteractions(campaign) {
       }
 
       var statusEl = document.getElementById('ma-viewer-status');
-      if (statusEl) { statusEl.textContent = 'Processing reward…'; }
+      if (statusEl) {
+        statusEl.textContent = 'Processing reward…';
+        statusEl.style.color = '';
+      }
       var payload = {
         type: 'MA_TRACK_CLICK',
         campaignId: campaign.ID,
@@ -626,18 +632,24 @@ function onRewardValidation(result) {
   var statusEl = document.getElementById('ma-viewer-status');
   if (!statusEl) { return; }
   if (result.confirmed) {
-    statusEl.textContent = 'Reward confirmed! Opening secure channel…';
+    var isOpen = (_viewerState.campaign && _viewerState.campaign.USER_CHANNEL_STATUS === 'open');
+    if (isOpen) {
+      statusEl.textContent = 'Reward confirmed! Sending payment voucher…';
+    } else {
+      statusEl.textContent = 'Reward confirmed! Opening secure channel (first time requires L1 block confirmation, ~60s). Once established, subsequent rewards will be near-instant!';
+    }
+    statusEl.style.color = '#10b981';
     if (result.reward_type === 'click') {
       _viewerState.rewardAllowed = false;
       _viewerState.clickRewardErrorMsg = 'You must wait before earning another click reward from this campaign.';
       var cooldown = (_viewerState.campaign.COOLDOWN_MS !== null && _viewerState.campaign.COOLDOWN_MS !== undefined)
         ? parseInt(_viewerState.campaign.COOLDOWN_MS, 10) : LIMITS.COOLDOWN_BETWEEN_REWARDS_MS;
       _viewerState.viewTimerId = setTimeout(function() {
+        _viewerState.rewardAllowed = true;
         _viewerState.clickRewardErrorMsg = '';
         var statusEl2 = document.getElementById('ma-viewer-status');
         if (statusEl2) {
-          statusEl2.textContent = 'Reward received! +' + fmtAmt(_viewerState.campaign.REWARD_CLICK, 3) + ' MINIMA';
-          statusEl2.style.color = 'var(--pico-ins-color,#27ae60)';
+          statusEl2.textContent = '';
         }
       }, cooldown + 500);
     }
@@ -652,8 +664,7 @@ function onRewardValidation(result) {
           _viewerState.clickRewardErrorMsg = '';
           var statusEl = document.getElementById('ma-viewer-status');
           if (statusEl) {
-            statusEl.textContent = 'Reward received! +' + fmtAmt(_viewerState.campaign.REWARD_VIEW, 3) + ' MINIMA';
-            statusEl.style.color = 'var(--pico-ins-color,#27ae60)';
+            statusEl.textContent = '';
           }
         }, remainingMs + 500);
       } else {
@@ -700,6 +711,17 @@ function onViewerVoucherReceived(parsed) {
       : (parseFloat(_viewerState.campaign.REWARD_VIEW) || 0);
     statusEl.textContent = 'Reward received! +' + fmtAmt(amt, 3) + ' MINIMA';
     statusEl.style.color = '#10b981';
+  }
+}
+
+function onChannelOpened(parsed) {
+  console.log('[VIEWER] onChannelOpened parsed:', parsed, 'current campaign:', _viewerState.campaign);
+  if (_viewerState.mode !== 'detail' || !_viewerState.campaign || !parsed) { return; }
+  var pId = String(parsed.campaign_id || '').trim().toUpperCase();
+  var cId = String(_viewerState.campaign.ID || '').trim().toUpperCase();
+  var role = parsed.role || 'viewer';
+  if (pId === cId && role === 'viewer') {
+    _viewerState.campaign.USER_CHANNEL_STATUS = 'open';
   }
 }
 

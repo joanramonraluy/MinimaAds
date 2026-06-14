@@ -634,6 +634,11 @@ function onRewardValidation(result) {
         ? parseInt(_viewerState.campaign.COOLDOWN_MS, 10) : LIMITS.COOLDOWN_BETWEEN_REWARDS_MS;
       _viewerState.viewTimerId = setTimeout(function() {
         _viewerState.clickRewardErrorMsg = '';
+        var statusEl2 = document.getElementById('ma-viewer-status');
+        if (statusEl2) {
+          statusEl2.textContent = 'Reward received! +' + fmtAmt(_viewerState.campaign.REWARD_CLICK, 3) + ' MINIMA';
+          statusEl2.style.color = 'var(--pico-ins-color,#27ae60)';
+        }
       }, cooldown + 500);
     }
   } else {

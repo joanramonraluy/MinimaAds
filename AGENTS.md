@@ -176,6 +176,34 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
+### Session: 2026-06-15 (patch 17) — Fix: Implement payment channel synchronization and accrual recovery
+
+**Problem**: When a viewer loses local state and a creator reopens a channel, the viewer's CUMULATIVE_EARNED resets to 0 while the creator expects it to continue from the previous balance, causing persistent "accrual delta invalid" errors. Additionally, pending rewards accumulated while the channel was inactive could be discarded.
+
+**Fix**:
+- **Service Worker** (`public/service-workers/handlers/channel.handler.js`):
+  - Modified `handleChannelOpen()` to extract `cumulative_earned` and `latest_tx_hex` from CHANNEL_OPEN payload
+  - Updated `_doChannelOpenUpsert()` to initialize CHANNEL_STATE with these values instead of hardcoded 0 and ''
+  - Enhanced CHANNEL_OPEN resending in all three paths (publisher, viewer, VOUCHER_SYNC_REQUEST) to include cumulative_earned and latest_tx_hex from the existing channel state
+  - Added voucher recovery logic: if accrual delta validation fails with delta <= 0, resend the latest stored voucher to recover the viewer state
+  - Enhanced logging to include current CUMULATIVE_EARNED value for debugging
+- **SDK** (`sdk/index.js`):
+  - Enhanced `_handleChannelOpenPayload()` to extract and persist cumulative_earned and latest_tx_hex via `updateChannelVoucher()`
+  - Fixed `_flushPending()` to replay ALL accumulated REWARD_REQUESTs instead of discarding them, using stored cumulative values
+- **Documentation** (`MinimaAds.md §8.9`): Updated CHANNEL_OPEN schema documentation
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`, `sdk/index.js`, `MinimaAds.md`
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 14) moved to `docs/HISTORY.md §17`.
+
+**Verification**:
+1. Simulate viewer state loss by clearing CHANNEL_STATE row for a campaign while keeping creator's record
+2. Trigger a view reward and verify creator resends CHANNEL_OPEN with correct cumulative_earned
+3. Verify viewer receives it, initializes correctly, and no accrual delta invalid errors occur
+4. Verify _flushPending replays all accumulated REWARD_REQUESTs
+
+---
+
 ### Session: 2026-06-15 (patch 16) — Fix: Implement Maxima Outbox Queue & Case-Insensitive Normalization
 
 **Problem**: Maxima signaling messages (e.g. campaign discovery, reward requests, vouchers) failed with "No Contact found" errors due to strict key case sensitivity checks in the platform's contact manager (e.g. `0X` vs `0x` prefixes) and race conditions where signals are sent before target contacts are fully established on-chain/in-network.
@@ -215,25 +243,4 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 ---
 
-### Session: 2026-06-15 (patch 14) — Fix: Optimize Service Worker auto-settlement triggers
-
-**Problem**: The Service Worker previously auto-settled every reward voucher as soon as it arrived. This spent the channel coin prematurely and invalidated all subsequent vouchers for the same channel, causing double-spend transaction submission errors and leading to loss of potential rewards.
-
-**Fix**:
-- **Service Worker** (`public/service-workers/handlers/channel.handler.js`):
-  - Modified `_continueRewardVoucher` to only trigger `_swAutoSettleVoucher` when the channel reaches its reward cap (`cumulative >= MAX_AMOUNT`).
-  - Added `autoSettleChannelsForCampaign(campaignId)` which selects all open channels for that campaign and triggers auto-settlement for each of them.
-  - Updated `handleChannelOpen` to automatically call `_swAutoSettleVoucher` when archiving a positive-balance active channel before replacing/overwriting it with a new channel coin.
-- **Service Worker** (`public/service-workers/handlers/campaign.handler.js`):
-  - In `applyStatusChange`, when a campaign status transitions to `'finished'`, call `autoSettleChannelsForCampaign(campaignId)` to automatically settle any open channels for that campaign.
-- **MiniDapp Package**: Bumped version to `0.26.6.5` in `dapp.conf` and updated the packaged `MinimaAds.mds.zip`.
-
-**Files modified**: `public/service-workers/handlers/channel.handler.js`, `public/service-workers/handlers/campaign.handler.js`, `dapp.conf`, `MinimaAds.mds.zip`
-
-**AGENTS.md updated**: yes — §6 updated, oldest entry (Security N2-4) moved to `docs/HISTORY.md §17`.
-
-**Verification**: Deploy and trigger view/click rewards. Verify that rewards accumulate off-chain without triggering a transaction on the first reward. Once the channel is full, the campaign finishes, or the channel is replaced, confirm that the SW auto-settles the channel.
-
----
-
-> Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, Auto-Sync Platform Creator Route, Unify MLS DevTools, Fix Viewer and Publisher Reward Delivery, Fix Publisher Budget (Multi-Publisher Support), Fix Stale-Pending Publisher Channel Deadlock, Minima Foundation Fee (3%) + V4 Escrow Script Fixes, 2026-06-10 settlement fixes, Security audit T7/T9, Security N2-4: bind REWARD_REQUEST sender, and all earlier) are archived in `docs/HISTORY.md §17`.
+> Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, Auto-Sync Platform Creator Route, Unify MLS DevTools, Fix Viewer and Publisher Reward Delivery, Fix Publisher Budget (Multi-Publisher Support), Fix Stale-Pending Publisher Channel Deadlock, Minima Foundation Fee (3%) + V4 Escrow Script Fixes, 2026-06-10 settlement fixes, Security audit T7/T9, Security N2-4: bind REWARD_REQUEST sender, and all earlier including patch 14) are archived in `docs/HISTORY.md §17`.

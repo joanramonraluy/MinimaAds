@@ -746,10 +746,33 @@
           console.log('[SDK] flushPending campaign:' + campaignId + ' — nothing pending');
           return;
         }
-        console.log('[SDK] flushPending campaign:' + campaignId + ' events:' + list.length + ' → clearing (channel now open)');
-        _savePendingIndex(campaignId, [], function() {
-          console.log('[SDK] flushPending cleared pending for campaign:' + campaignId);
-        });
+        console.log('[SDK] flushPending campaign:' + campaignId + ' events:' + list.length + ' → replaying REWARD_REQUESTs');
+        var done = 0;
+        var total = list.length;
+        for (var i = 0; i < list.length; i++) {
+          (function(eventId) {
+            _readPendingInfo(campaignId, eventId, function(info) {
+              if (info && info.cumulative !== undefined) {
+                var req = {
+                  type: 'REWARD_REQUEST',
+                  campaign_id: campaignId,
+                  viewer_key: channel.VIEWER_KEY,
+                  event_id: eventId,
+                  cumulative: parseFloat(info.cumulative),
+                  reward_type: info.reward_type || 'view'
+                };
+                console.log('[SDK] flushPending replaying event:' + eventId + ' cumulative:' + info.cumulative);
+                _sendToCreator(channel.CREATOR_MX, req, function() {});
+              }
+              done++;
+              if (done === total) {
+                _savePendingIndex(campaignId, [], function() {
+                  console.log('[SDK] flushPending cleared pending for campaign:' + campaignId);
+                });
+              }
+            });
+          })(list[i]);
+        }
       });
     });
   }
@@ -1045,18 +1068,35 @@
   function _handleChannelOpenPayload(payload) {
     if (!payload || !payload.campaign_id || !payload.viewer_key || !payload.channel_coinid) { return; }
     var role = payload.role || 'viewer';
+    var cumulativeEarned = parseFloat(payload.cumulative_earned) || 0;
+    var latestTxHex = payload.latest_tx_hex || '';
     activateChannel(payload.campaign_id, payload.viewer_key, role, payload.channel_coinid, function(err) {
       if (err) {
         console.log('[SDK] CHANNEL_OPEN activate failed:', err);
         return;
       }
-      _onChannelOpenedCore({
-        campaign_id: payload.campaign_id,
-        channel_coinid: payload.channel_coinid,
-        max_amount: parseFloat(payload.max_amount) || 0,
-        role: role,
-        frame_id: payload.frame_id || ''
-      });
+      if (cumulativeEarned > 0 || latestTxHex) {
+        updateChannelVoucher(payload.campaign_id, payload.viewer_key, role, cumulativeEarned, latestTxHex, function(vErr) {
+          if (vErr) {
+            console.log('[SDK] CHANNEL_OPEN updateChannelVoucher failed:', vErr);
+          }
+          _onChannelOpenedCore({
+            campaign_id: payload.campaign_id,
+            channel_coinid: payload.channel_coinid,
+            max_amount: parseFloat(payload.max_amount) || 0,
+            role: role,
+            frame_id: payload.frame_id || ''
+          });
+        });
+      } else {
+        _onChannelOpenedCore({
+          campaign_id: payload.campaign_id,
+          channel_coinid: payload.channel_coinid,
+          max_amount: parseFloat(payload.max_amount) || 0,
+          role: role,
+          frame_id: payload.frame_id || ''
+        });
+      }
     });
   }
 

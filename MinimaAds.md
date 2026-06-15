@@ -1080,7 +1080,7 @@ Sent by the viewer SDK the first time it wants to earn rewards from a campaign. 
 
 **Direction**: Creator FE → Viewer FE (unicast via `to:<viewer_mx>`, `poll:true`)
 
-Sent after the creator has successfully opened the channel coin on-chain.
+Sent after the creator has successfully opened the channel coin on-chain. When resending an existing channel to a viewer that may have lost local state, includes the creator's current `cumulative_earned` and `latest_tx_hex` so the viewer initializes correctly and can resume accrual without delta errors.
 
 ```json
 {
@@ -1089,10 +1089,16 @@ Sent after the creator has successfully opened the channel coin on-chain.
   "viewer_key": "0x...",
   "channel_coinid": "0x...",
   "max_amount": 0.66,
+  "cumulative_earned": 0.12,
+  "latest_tx_hex": "0x...",
   "role": "viewer",
   "frame_id": ""
 }
 ```
+
+> `cumulative_earned` (optional, default 0) — the creator's current accumulated earnings on this channel. When present, the viewer initializes CHANNEL_STATE with this value to avoid delta validation errors if state was lost.
+>
+> `latest_tx_hex` (optional, default '') — the creator's last stored partially-signed transaction. When present, the viewer stores it so the channel can be settled even if new vouchers are not immediately issued after reconnection.
 
 ### 8.10 REWARD_REQUEST
 

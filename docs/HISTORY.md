@@ -46,6 +46,27 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-15 (patch 14) — Fix: Optimize Service Worker auto-settlement triggers
+
+**Problem**: The Service Worker previously auto-settled every reward voucher as soon as it arrived. This spent the channel coin prematurely and invalidated all subsequent vouchers for the same channel, causing double-spend transaction submission errors and leading to loss of potential rewards.
+
+**Fix**:
+- **Service Worker** (`public/service-workers/handlers/channel.handler.js`):
+  - Modified `_continueRewardVoucher` to only trigger `_swAutoSettleVoucher` when the channel reaches its reward cap (`cumulative >= MAX_AMOUNT`).
+  - Added `autoSettleChannelsForCampaign(campaignId)` which selects all open channels for that campaign and triggers auto-settlement for each of them.
+  - Updated `handleChannelOpen` to automatically call `_swAutoSettleVoucher` when archiving a positive-balance active channel before replacing/overwriting it with a new channel coin.
+- **Service Worker** (`public/service-workers/handlers/campaign.handler.js`):
+  - In `applyStatusChange`, when a campaign status transitions to `'finished'`, call `autoSettleChannelsForCampaign(campaignId)` to automatically settle any open channels for that campaign.
+- **MiniDapp Package**: Bumped version to `0.26.6.5` in `dapp.conf` and updated the packaged `MinimaAds.mds.zip`.
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`, `public/service-workers/handlers/campaign.handler.js`, `dapp.conf`, `MinimaAds.mds.zip`
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 14) moved to `docs/HISTORY.md §17`.
+
+**Verification**: Deploy and trigger view/click rewards. Verify that rewards accumulate off-chain without triggering a transaction on the first reward. Once the channel is full, the campaign finishes, or the channel is replaced, confirm that the SW auto-settles the channel.
+
+---
+
 ### Session: 2026-06-15 (patch 12) — Fix: Prevent zero-token settlements and duplicate publisher channel creation
 
 **Problem**: 

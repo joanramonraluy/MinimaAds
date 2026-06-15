@@ -107,13 +107,15 @@ function handleChannelOpenRequest(payload, senderPk) {
         if (!chErr && existing && existing.STATUS === 'open') {
           MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): channel already open — resending CHANNEL_OPEN. campaign: " + campaignId + " coinId: " + existing.CHANNEL_COINID);
           sendMaxima(viewerKey, viewerMx, {
-            type:           "CHANNEL_OPEN",
-            campaign_id:    campaignId,
-            viewer_key:     viewerKey,
-            channel_coinid: existing.CHANNEL_COINID,
-            max_amount:     parseFloat(existing.MAX_AMOUNT),
-            role:           "publisher",
-            frame_id:       frameId
+            type:              "CHANNEL_OPEN",
+            campaign_id:       campaignId,
+            viewer_key:        viewerKey,
+            channel_coinid:    existing.CHANNEL_COINID,
+            max_amount:        parseFloat(existing.MAX_AMOUNT),
+            cumulative_earned: parseFloat(existing.CUMULATIVE_EARNED || 0),
+            latest_tx_hex:     (existing.LATEST_TX_HEX || ''),
+            role:              "publisher",
+            frame_id:          frameId
           }, function(ok) {
             MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): CHANNEL_OPEN resent ok=" + ok);
           });
@@ -268,12 +270,14 @@ function handleChannelOpenRequest(payload, senderPk) {
               }
               MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: channel already open — resending CHANNEL_OPEN. campaign: " + campaignId + " coinId: " + existing.CHANNEL_COINID);
               sendMaxima(viewerKey, viewerMx, {
-                type:           "CHANNEL_OPEN",
-                campaign_id:    campaignId,
-                viewer_key:     viewerKey,
-                channel_coinid: existing.CHANNEL_COINID,
-                max_amount:     parseFloat(existing.MAX_AMOUNT),
-                role:           "viewer"
+                type:              "CHANNEL_OPEN",
+                campaign_id:       campaignId,
+                viewer_key:        viewerKey,
+                channel_coinid:    existing.CHANNEL_COINID,
+                max_amount:        parseFloat(existing.MAX_AMOUNT),
+                cumulative_earned: parseFloat(existing.CUMULATIVE_EARNED || 0),
+                latest_tx_hex:     (existing.LATEST_TX_HEX || ''),
+                role:              "viewer"
               }, function(ok) {
                 MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: CHANNEL_OPEN resent ok=" + ok);
               });
@@ -366,16 +370,18 @@ function handleChannelOpen(payload) {
     return;
   }
 
-  var campaignId    = payload.campaign_id;
-  var viewerKey     = payload.viewer_key;
-  var channelCoinId = payload.channel_coinid;
-  var maxAmount     = parseFloat(payload.max_amount) || 0;
-  var role          = payload.role || 'viewer';
-  var frameId       = payload.frame_id || '';
+  var campaignId      = payload.campaign_id;
+  var viewerKey       = payload.viewer_key;
+  var channelCoinId   = payload.channel_coinid;
+  var maxAmount       = parseFloat(payload.max_amount) || 0;
+  var cumulativeEarned = parseFloat(payload.cumulative_earned) || 0;
+  var latestTxHex     = payload.latest_tx_hex || '';
+  var role            = payload.role || 'viewer';
+  var frameId         = payload.frame_id || '';
   if (frameId && frameId.indexOf('builtin:') !== 0 && frameId.toUpperCase().indexOf('0X') === 0) {
     frameId = 'builtin:' + frameId.toUpperCase();
   }
-  var now           = Date.now();
+  var now             = Date.now();
 
   MDS.keypair.get("CREATOR_MX_" + campaignId, function(kpRes) {
     var _cmxRaw = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : null;
@@ -394,21 +400,21 @@ function handleChannelOpen(payload) {
             }
             settleChannel(campaignId, viewerKey, role, function(archErr) {
               if (archErr) { MDS.log("[CHANNEL] CHANNEL_OPEN: archive old channel failed (non-fatal): " + archErr); }
-              _doChannelOpenUpsert(campaignId, viewerKey, role, channelCoinId, maxAmount, now, creatorMx, viewerWalletAddr, frameId);
+              _doChannelOpenUpsert(campaignId, viewerKey, role, channelCoinId, maxAmount, cumulativeEarned, latestTxHex, now, creatorMx, viewerWalletAddr, frameId);
             });
           } else {
             MDS.log("[CHANNEL] CHANNEL_OPEN: overwriting existing " + existing.STATUS + " channel with zero balance without archiving. campaign: " + campaignId + " old coin: " + existing.CHANNEL_COINID);
-            _doChannelOpenUpsert(campaignId, viewerKey, role, channelCoinId, maxAmount, now, creatorMx, viewerWalletAddr, frameId);
+            _doChannelOpenUpsert(campaignId, viewerKey, role, channelCoinId, maxAmount, cumulativeEarned, latestTxHex, now, creatorMx, viewerWalletAddr, frameId);
           }
         } else {
-          _doChannelOpenUpsert(campaignId, viewerKey, role, channelCoinId, maxAmount, now, creatorMx, viewerWalletAddr, frameId);
+          _doChannelOpenUpsert(campaignId, viewerKey, role, channelCoinId, maxAmount, cumulativeEarned, latestTxHex, now, creatorMx, viewerWalletAddr, frameId);
         }
       });
     });
   });
 }
 
-function _doChannelOpenUpsert(campaignId, viewerKey, role, channelCoinId, maxAmount, now, creatorMx, viewerWalletAddr, frameId) {
+function _doChannelOpenUpsert(campaignId, viewerKey, role, channelCoinId, maxAmount, cumulativeEarned, latestTxHex, now, creatorMx, viewerWalletAddr, frameId) {
       var sql = "MERGE INTO CHANNEL_STATE " +
         "(CAMPAIGN_ID, VIEWER_KEY, ROLE, FRAME_ID, CREATOR_MX, CHANNEL_COINID, MAX_AMOUNT, " +
         "CUMULATIVE_EARNED, LATEST_TX_HEX, STATUS, CREATED_AT, VIEWER_WALLET_ADDR) " +
@@ -420,8 +426,8 @@ function _doChannelOpenUpsert(campaignId, viewerKey, role, channelCoinId, maxAmo
         "'" + escapeSql(creatorMx) + "'," +
         "'" + escapeSql(channelCoinId) + "'," +
         maxAmount + "," +
-        "0," +
-        "''," +
+        cumulativeEarned + "," +
+        "'" + escapeSql(latestTxHex) + "'," +
         "'open'," +
         now + "," +
         "'" + escapeSql(viewerWalletAddr) + "'" +
@@ -597,7 +603,26 @@ function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumu
       ? (parseFloat(campaign.REWARD_CLICK) || 0)
       : (parseFloat(campaign.REWARD_VIEW) || 0);
     if (!(delta > 0 && delta <= unit + epsilon)) {
-      MDS.log("[CHANNEL] REWARD_REQUEST: accrual delta invalid. delta=" + delta + " unit=" + unit + " type=" + (payload.reward_type || 'view') + " campaign: " + campaignId);
+      MDS.log("[CHANNEL] REWARD_REQUEST: accrual delta invalid. delta=" + delta + " unit=" + unit + " type=" + (payload.reward_type || 'view') + " cumulative_earned=" + earned + " campaign: " + campaignId);
+      if (delta <= 0 && cumulative > earned) {
+        MDS.log("[CHANNEL] REWARD_REQUEST: resending latest voucher to recover viewer. campaign: " + campaignId);
+        getLatestVoucher(campaignId, viewerKey, role, function(vErr, vData) {
+          if (!vErr && vData && vData.latest_tx_hex) {
+            sendMaxima(senderPk, channel.CREATOR_MX, {
+              type: "REWARD_VOUCHER",
+              campaign_id: campaignId,
+              viewer_key: viewerKey,
+              event_id: eventId,
+              cumulative: vData.cumulative_earned,
+              tx_hex: vData.latest_tx_hex,
+              role: role,
+              frame_id: (channel.FRAME_ID || '')
+            }, function(ok) {
+              MDS.log("[CHANNEL] REWARD_REQUEST: resent voucher ok=" + ok);
+            });
+          }
+        });
+      }
       return;
     }
     // Cooldown is paced against the LAST voucher OF THE SAME TYPE. A click is
@@ -903,12 +928,14 @@ function handleVoucherSyncRequest(payload) {
     } else {
       MDS.log("[CHANNEL] VOUCHER_SYNC_REQUEST: no voucher yet, resending CHANNEL_OPEN. campaign: " + campaignId);
       sendMaxima(viewerKey, viewerMx, {
-        type:           "CHANNEL_OPEN",
-        campaign_id:    campaignId,
-        viewer_key:     viewerKey,
-        channel_coinid: channel.CHANNEL_COINID,
-        max_amount:     parseFloat(channel.MAX_AMOUNT),
-        role:           role
+        type:              "CHANNEL_OPEN",
+        campaign_id:       campaignId,
+        viewer_key:        viewerKey,
+        channel_coinid:    channel.CHANNEL_COINID,
+        max_amount:        parseFloat(channel.MAX_AMOUNT),
+        cumulative_earned: parseFloat(channel.CUMULATIVE_EARNED || 0),
+        latest_tx_hex:     (channel.LATEST_TX_HEX || ''),
+        role:              role
       }, function(ok) {
         MDS.log("[CHANNEL] VOUCHER_SYNC_REQUEST: CHANNEL_OPEN resent ok=" + ok);
       });

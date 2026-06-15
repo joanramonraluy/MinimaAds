@@ -176,6 +176,42 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
+### Session: 2026-06-15 (patch 11) — Fix: viewer campaigns list stuck rendering
+
+**Problem**:
+If the campaigns list in `dapp/views/viewer.js` initially loaded 0 campaigns (before any campaigns were discovered or synced) or encountered an H2 SQL query error or missing element, the lock variable `_viewerState.listRendering` was left set to `true`. This blocked any subsequent updates or refreshes to the list (e.g. from `NEW_CAMPAIGN` / `CAMPAIGN_UPDATED` SW signals or block events), leaving the UI stuck on "No ads available right now." or "Loading campaigns..." forever.
+
+**Fix**:
+- **Viewer UI** (`dapp/views/viewer.js`): Added proper cleanup resets to ensure `_viewerState.listRendering = false` is executed on all return and exit paths (error handler, list element missing check, empty campaign list branch) inside the `_loadAndRenderList` SQL query callback.
+- **MiniDapp Package**: Bumped version to `0.26.6.2` in `dapp.conf` and re-zipped the repository files into `MinimaAds.mds.zip`.
+
+**Files modified**: `dapp/views/viewer.js`, `dapp.conf`, `MinimaAds.mds.zip`
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 9) moved to `docs/HISTORY.md §17`.
+
+**Verification**: Reload the viewer page. Verify that list refreshes are not blocked and that newly discovered or modified campaigns appear dynamically on the View Ads list.
+
+---
+
+### Session: 2026-06-15 — Security N2-3: enforce `MAX_PUBLISHER_BUDGET` at voucher time
+
+**Problem**: `MAX_PUBLISHER_BUDGET` was enforced only at publisher channel-open (via `SUM(CUMULATIVE_EARNED)`), never at voucher/payout time. Concurrent publishers can each open a channel while `SUM=0`, then collectively over-pay and spend into the viewer reward pool, violating the documented `MAX_PUBLISHER_BUDGET ⊆ BUDGET_TOTAL` invariant.
+
+**Fix** (`public/service-workers/handlers/channel.handler.js`, 3 sites): before dispatching each publisher voucher, sum `CUMULATIVE_EARNED` across all `ROLE='publisher'` channels for the campaign and reject when `earnedAll − thisChannelOldCumulative + newCumulative > MAX_PUBLISHER_BUDGET + 1e-6`.
+1. `_doGeneratePublisherVoucher` — added the SUM query after the per-channel `MAX_AMOUNT` check; remainder of the function moved into a hoisted `_continuePublisherVoucher()` inner function called from the callback.
+2. `_replayDeferredPublisherRewardsNow` — same check before the deferred-replay `isDuplicate`/dispatch, wrapped in `_continueReplayPublisherVoucher()`.
+3. Publisher branch of `_handleRewardRequestInner` — same check wrapping the `_swDispatchVoucher('publisher')` call.
+
+All additions are Rhino-safe (`var`, `function()`, string concat, no trailing commas, `MDS.log`, `escapeSql`, UPPERCASE H2 row keys). SW-only — no FE mirror of this logic exists.
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`, `docs/audit_report_2.md` (§10 tracker).
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 8) moved to `docs/HISTORY.md §17`.
+
+**Verification**: On a two-node setup, configure a campaign with a small `MAX_PUBLISHER_BUDGET` (e.g. enough for ~2 publisher views) and open 3+ publisher channels concurrently (multiple frames/nodes) before any earnings record. Generate enough publisher views to push the aggregate past the cap. Expect: publisher vouchers settle only up to `MAX_PUBLISHER_BUDGET`; beyond that the SW logs `MAX_PUBLISHER_BUDGET exceeded. projected=… cap=…` and dispatches no further publisher voucher. Confirm viewer rewards are unaffected and no FE console errors.
+
+---
+
 ### Session: 2026-06-14 (patch 10) — Fix: Reset click reward cooldown state, clear warning message, and improve channel opening status
 
 **Problem**: 
@@ -200,45 +236,4 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 ---
 
-### Session: 2026-06-14 (patch 9) — Fix: click success amount typo and build package zip
-
-**Problem**:
-1. When the click cooldown timer expires, the frontend status success message incorrectly displayed the view reward amount instead of the click reward amount.
-2. The packaged `MinimaAds.mds.zip` file needed to be rebuilt with the latest code so that when users reload/reinstall the DApp on their nodes, the updated Service Worker and frontend are active.
-
-**Fix**:
-1. **Viewer UI** (`dapp/views/viewer.js`): Corrected `REWARD_VIEW` to `REWARD_CLICK` in the click cooldown timer callback.
-2. **MiniDapp Package**: Re-zipped the repository files into `MinimaAds.mds.zip` using the `zip` command.
-
-**Files modified**: `dapp/views/viewer.js`, `MinimaAds.mds.zip`
-
-**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 6) moved to `docs/HISTORY.md §17`.
-
-**Verification**: Reinstall/update the MiniDapp using the rebuilt `MinimaAds.mds.zip`. Trigger a click cooldown, wait for it to expire, and verify that the status success message correctly reverts to the click reward amount (`+0.050 MINIMA` or the configured campaign click reward).
-
----
-
-### Session: 2026-06-14 (patch 8) — Fix: click cooldown warning and auto-clear timer
-
-**Problem**: 
-1. Once a click reward is successfully claimed or rejected in a campaign details page, further clicks on the CTA in the same session open the link but do not update the UI status. The message remains stuck on `Reward received! +0,050 MINIMA` or the previous message, leaving the user without any visual feedback that subsequent clicks are not eligible for rewards due to the cooldown.
-2. If the user is in a view or click cooldown, they must manually exit and reopen the campaign details page to try again once the waiting period expires.
-
-**Fix**:
-1. **Viewer State & Interaction** (`dapp/views/viewer.js`): Added `clickRewardErrorMsg` to the global `_viewerState` and reset it on transitions. If the link is clicked when `rewardAllowed` is false and `clickRewardErrorMsg` is present, it displays the warning message in red.
-2. **Auto-clearing view/click cooldowns**: 
-   - Modified `validateView` and `validateClick` (`core/validation.js`) to return the exact `remainingMs` left on active cooldowns.
-   - Propagated `remainingMs` in `MA_TRACK_RESULT` signal to the FE.
-   - Wired `setTimeout` timers on the FE using `_viewerState.viewTimerId`. When the view cooldown expires, the ad detail reloads automatically. When the click cooldown expires, the CTA click reward is re-enabled, the error message is cleared, and the green view reward status is restored.
-
-**Files modified**: `dapp/views/viewer.js`, `core/validation.js`, `public/service-workers/handlers/comms.handler.js`
-
-**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 5) moved to `docs/HISTORY.md §17`.
-
-**Verification**: Trigger a view or click cooldown, stay on the details page, and verify that the red warning message disappears and is replaced by either the ad progress bar (for view cooldown) or the green reward message (for click cooldown) automatically when the timer expires.
-
----
-
 > Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, Auto-Sync Platform Creator Route, Unify MLS DevTools, Fix Viewer and Publisher Reward Delivery, Fix Publisher Budget (Multi-Publisher Support), Fix Stale-Pending Publisher Channel Deadlock, Minima Foundation Fee (3%) + V4 Escrow Script Fixes, 2026-06-10 settlement fixes, Security audit T7/T9, and all earlier) are archived in `docs/HISTORY.md §17`.
-
-

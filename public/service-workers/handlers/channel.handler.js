@@ -627,8 +627,24 @@ function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumu
         }
         if (indexed) {
           if (role === 'publisher') {
-            MDS.log("[CHANNEL] REWARD_REQUEST (publisher): coin indexed. building publisher voucher in SW. campaign: " + campaignId + " cumulative: " + cumulative);
-            _swDispatchVoucher(campaignId, viewerKey, channel.CREATOR_MX, eventId, cumulative, channel, 'publisher', channelFrameId, null, 'view', campaign);
+            // Global publisher-budget cap (N2-3): re-check at voucher time that the
+            // sum of ALL publisher payouts for this campaign stays within
+            // MAX_PUBLISHER_BUDGET (concurrent publisher channels open reading SUM=0).
+            sqlQuery(
+              "SELECT COALESCE(SUM(CUMULATIVE_EARNED),0) AS E FROM CHANNEL_STATE WHERE " +
+              "UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') AND ROLE = 'publisher'",
+              function(rrSumErr, rrSumRows) {
+                var rrEarnedAll = (rrSumRows && rrSumRows[0]) ? parseFloat(rrSumRows[0].E) : 0;
+                var rrProjected = rrEarnedAll - (parseFloat(channel.CUMULATIVE_EARNED) || 0) + cumulative;
+                var rrCap = parseFloat(campaign.MAX_PUBLISHER_BUDGET || 0) || 0;
+                if (rrCap > 0 && rrProjected > rrCap + 0.000001) {
+                  MDS.log("[CHANNEL] REWARD_REQUEST (publisher): MAX_PUBLISHER_BUDGET exceeded. projected=" + rrProjected + " cap=" + rrCap + " campaign: " + campaignId);
+                  return;
+                }
+                MDS.log("[CHANNEL] REWARD_REQUEST (publisher): coin indexed. building publisher voucher in SW. campaign: " + campaignId + " cumulative: " + cumulative);
+                _swDispatchVoucher(campaignId, viewerKey, channel.CREATOR_MX, eventId, cumulative, channel, 'publisher', channelFrameId, null, 'view', campaign);
+              }
+            );
           } else {
             MDS.log("[CHANNEL] REWARD_REQUEST: coin indexed. building viewer voucher in SW. campaign: " + campaignId + " cumulative: " + cumulative);
             _swDispatchVoucher(campaignId, viewerKey, channel.CREATOR_MX, eventId, cumulative, channel, 'viewer', '', null, payload.reward_type || 'view', campaign);
@@ -1469,6 +1485,25 @@ function _replayDeferredPublisherRewardsNow(campaignId, frameId, rows, pubChanne
           cumulative = maxAmount;
         }
         var pubEventId = 'pub-replay-' + stableIds.join('-');
+        // Global publisher-budget cap (N2-3): same check as _doGeneratePublisherVoucher.
+        // The sum of ALL publisher payouts for this campaign must not exceed
+        // MAX_PUBLISHER_BUDGET, even across concurrently-opened publisher channels.
+        sqlQuery(
+          "SELECT COALESCE(SUM(CUMULATIVE_EARNED),0) AS E FROM CHANNEL_STATE WHERE " +
+          "UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') AND ROLE = 'publisher'",
+          function(rdSumErr, rdSumRows) {
+            var rdEarnedAll = (rdSumRows && rdSumRows[0]) ? parseFloat(rdSumRows[0].E) : 0;
+            var rdProjected = rdEarnedAll - (parseFloat(pubChannel.CUMULATIVE_EARNED) || 0) + cumulative;
+            var rdCap = parseFloat(rdCampaign.MAX_PUBLISHER_BUDGET || 0) || 0;
+            if (rdCap > 0 && rdProjected > rdCap + 0.000001) {
+              MDS.log("[CHANNEL] _replayDeferredPublisherRewards: MAX_PUBLISHER_BUDGET exceeded. projected=" + rdProjected + " cap=" + rdCap + " campaign: " + campaignId);
+              return;
+            }
+            _continueReplayPublisherVoucher();
+          }
+        );
+        return;
+        function _continueReplayPublisherVoucher() {
         isDuplicate(pubEventId, function(isDup) {
           if (isDup) {
             MDS.log("[CHANNEL] _replayDeferredPublisherRewards: already replayed. campaign: " + campaignId);
@@ -1496,6 +1531,7 @@ function _replayDeferredPublisherRewardsNow(campaignId, frameId, rows, pubChanne
             rdCampaign
           );
         });
+        }
       });
 }
 
@@ -1527,6 +1563,26 @@ function _doGeneratePublisherVoucher(campaignId, frameId, eventId, pubChannel) {
       MDS.log("[CHANNEL] _doGeneratePublisherVoucher: cumulative exceeds max. campaign: " + campaignId);
       return;
     }
+    // Global publisher-budget cap (N2-3): the sum of ALL publisher payouts for this
+    // campaign must not exceed MAX_PUBLISHER_BUDGET. Concurrent publishers can each
+    // open a channel reading SUM=0 at open-time, so re-check here at voucher time;
+    // otherwise they over-allocate into the viewer budget.
+    sqlQuery(
+      "SELECT COALESCE(SUM(CUMULATIVE_EARNED),0) AS E FROM CHANNEL_STATE WHERE " +
+      "UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') AND ROLE = 'publisher'",
+      function(sumErr, sumRows) {
+        var earnedAll = (sumRows && sumRows[0]) ? parseFloat(sumRows[0].E) : 0;
+        var projected = earnedAll - (parseFloat(pubChannel.CUMULATIVE_EARNED) || 0) + cumulative;
+        var cap = parseFloat(campaign.MAX_PUBLISHER_BUDGET || 0) || 0;
+        if (cap > 0 && projected > cap + 0.000001) {
+          MDS.log("[CHANNEL] _doGeneratePublisherVoucher: MAX_PUBLISHER_BUDGET exceeded. projected=" + projected + " cap=" + cap + " campaign: " + campaignId);
+          return;
+        }
+        _continuePublisherVoucher();
+      }
+    );
+    return;
+    function _continuePublisherVoucher() {
     var pubEventId = 'pub-' + eventId;
     isDuplicate(pubEventId, function(isDup) {
       if (isDup) {
@@ -1600,6 +1656,7 @@ function _doGeneratePublisherVoucher(campaignId, frameId, eventId, pubChannel) {
         );
       });
     });
+    }
   });
 }
 

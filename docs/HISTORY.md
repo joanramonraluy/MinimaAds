@@ -46,6 +46,45 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-14 (patch 9) — Fix: click success amount typo and build package zip
+
+**Problem**:
+1. When the click cooldown timer expires, the frontend status success message incorrectly displayed the view reward amount instead of the click reward amount.
+2. The packaged `MinimaAds.mds.zip` file needed to be rebuilt with the latest code so that when users reload/reinstall the DApp on their nodes, the updated Service Worker and frontend are active.
+
+**Fix**:
+1. **Viewer UI** (`dapp/views/viewer.js`): Corrected `REWARD_VIEW` to `REWARD_CLICK` in the click cooldown timer callback.
+2. **MiniDapp Package**: Re-zipped the repository files into `MinimaAds.mds.zip` using the `zip` command.
+
+**Files modified**: `dapp/views/viewer.js`, `MinimaAds.mds.zip`
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 6) moved to `docs/HISTORY.md §17`.
+
+**Verification**: Reinstall/update the MiniDapp using the rebuilt `MinimaAds.mds.zip`. Trigger a click cooldown, wait for it to expire, and verify that the status success message correctly reverts to the click reward amount (`+0.050 MINIMA` or the configured campaign click reward).
+
+---
+
+### Session: 2026-06-14 (patch 8) — Fix: click cooldown warning and auto-clear timer
+
+**Problem**: 
+1. Once a click reward is successfully claimed or rejected in a campaign details page, further clicks on the CTA in the same session open the link but do not update the UI status. The message remains stuck on `Reward received! +0,050 MINIMA` or the previous message, leaving the user without any visual feedback that subsequent clicks are not eligible for rewards due to the cooldown.
+2. If the user is in a view or click cooldown, they must manually exit and reopen the campaign details page to try again once the waiting period expires.
+
+**Fix**:
+1. **Viewer State & Interaction** (`dapp/views/viewer.js`): Added `clickRewardErrorMsg` to the global `_viewerState` and reset it on transitions. If the link is clicked when `rewardAllowed` is false and `clickRewardErrorMsg` is present, it displays the warning message in red.
+2. **Auto-clearing view/click cooldowns**: 
+   - Modified `validateView` and `validateClick` (`core/validation.js`) to return the exact `remainingMs` left on active cooldowns.
+   - Propagated `remainingMs` in `MA_TRACK_RESULT` signal to the FE.
+   - Wired `setTimeout` timers on the FE using `_viewerState.viewTimerId`. When the view cooldown expires, the ad detail reloads automatically. When the click cooldown expires, the CTA click reward is re-enabled, the error message is cleared, and the green view reward status is restored.
+
+**Files modified**: `dapp/views/viewer.js`, `core/validation.js`, `public/service-workers/handlers/comms.handler.js`
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 5) moved to `docs/HISTORY.md §17`.
+
+**Verification**: Trigger a view or click cooldown, stay on the details page, and verify that the red warning message disappears and is replaced by either the ad progress bar (for view cooldown) or the green reward message (for click cooldown) automatically when the timer expires.
+
+---
+
 ### Session: 2026-06-14 (patch 7) — Fix: Display click cooldown UI warning
 
 **Problem**: Although click-specific cooldown tracking was implemented in patch 4, the UI failed to display click-cooldown warning messages. When a click reward request was rejected due to an active cooldown, the Service Worker sent an `MA_TRACK_RESULT` broadcast, but the FE ignored public broadcasts to avoid signal collisions. This left the user interface stuck on "Processing reward..." indefinitely.

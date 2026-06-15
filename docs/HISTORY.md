@@ -46,6 +46,19 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-15 (patch 16) — Fix: Implement Maxima Outbox Queue & Case-Insensitive Normalization
+
+**Problem**: Maxima signaling messages (e.g. campaign discovery, reward requests, vouchers) failed with "No Contact found" errors due to strict key case sensitivity checks in the platform's contact manager (e.g. `0X` vs `0x` prefixes) and race conditions where signals are sent before target contacts are fully established on-chain/in-network.
+
+**Fix**:
+- **Core** (`core/minima.js`): Added `normalizePublicKey(pk)` to enforce standard lowercase `0x` prefix and uppercase key hex format. Implemented a memory-resident `_maximaOutbox` queue and `processMaximaOutbox()` helper. Refactored `sendMaxima()` to route through `_sendMaximaDirect()`, catch contact routing failures ("No contact found"), and automatically queue them in the outbox.
+- **Service Worker** (`service.js`): Normalized all public key variables and configuration key checks on initialization. Added event listeners for `MAXIMACONTACTS` and `MAXIMAHOSTS` events to trigger outbox flushes. Added outbox flushing inside the `NEWBLOCK` event handler.
+- **MiniDapp Package**: Bumped version to `0.26.6.7` in `dapp.conf` and updated the packaged `MinimaAds.mds.zip`.
+
+**Files modified**: `core/minima.js`, `service.js`, `dapp.conf`, `MinimaAds.mds.zip`
+
+---
+
 ### Session: 2026-06-15 (patch 15) — Fix: Prevent premature channel settlement by updating CREATED_AT on activation
 
 **Problem**: When a channel open request is received, the creator node inserts the channel row in `CHANNEL_STATE` with status `'pending'` and `CREATED_AT = now`. Because L1 block mining (Tx1 split + Tx2 channel open) takes time, the channel often remains in `pending` for over 60 seconds. Once the channel is finally activated (`activateChannel` updates status to `'open'`), the old `CREATED_AT` is kept. Consequently, `checkOpenChannelsSettled` running in the same block calculates an age > 60s, bypassing the grace period. Because of internal Minima indexing latency, the newly created coin is not yet found, causing the node to immediately settle the channel with 0 tokens.

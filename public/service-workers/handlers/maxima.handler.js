@@ -139,7 +139,7 @@ function handleEscrowInfoRequest(payload, fromRoute) {
     return;
   }
 
-  var campaignSql = "SELECT ID, BUDGET_TOTAL, BUDGET_REMAINING, MAX_PUBLISHER_BUDGET, "
+  var campaignSql = "SELECT ID, CREATOR_ADDRESS, BUDGET_TOTAL, BUDGET_REMAINING, MAX_PUBLISHER_BUDGET, "
     + "PUBLISHER_BUDGET_SPENT, STATUS FROM CAMPAIGNS WHERE UPPER(ID) = UPPER('"
     + escapeSql(campaignId) + "')";
 
@@ -153,6 +153,34 @@ function handleEscrowInfoRequest(payload, fromRoute) {
     }
 
     var row = rows[0];
+
+    // N2-6: restrict escrow financials to the campaign creator or known channel
+    // counterparties. A stranger (no channel, not the creator) gets no data.
+    var fromPk = fromRoute || '';
+    var creatorAddr = row.CREATOR_ADDRESS || '';
+    var isCreator = (fromPk && creatorAddr && fromPk.toUpperCase() === creatorAddr.toUpperCase());
+    if (!isCreator && fromPk) {
+      var escapedCampaignId = escapeSql(campaignId);
+      var escapedFromPk = escapeSql(fromPk);
+      sqlQuery(
+        "SELECT COUNT(*) AS C FROM CHANNEL_STATE WHERE UPPER(CAMPAIGN_ID)=UPPER('" + escapedCampaignId + "')" +
+        " AND UPPER(OPENER_MX_PK)=UPPER('" + escapedFromPk + "') AND OPENER_MX_PK != ''",
+        function(authErr, authRows) {
+          var count = (!authErr && authRows && authRows[0]) ? (parseInt(authRows[0].C, 10) || 0) : 0;
+          if (count === 0) {
+            MDS.log("[MAXIMA] ESCROW_INFO_REQUEST rejected: requester is not creator or counterparty. campaign: " + campaignId);
+            return;
+          }
+          _doEscrowInfoResponse(row, campaignId, fromRoute);
+        }
+      );
+      return;
+    }
+    _doEscrowInfoResponse(row, campaignId, fromRoute);
+  });
+}
+
+function _doEscrowInfoResponse(row, campaignId, fromRoute) {
     var budgetTotal = parseFloat(row.BUDGET_TOTAL) || 0;
     var budgetRemaining = parseFloat(row.BUDGET_REMAINING) || 0;
     var maxPubBudget = parseFloat(row.MAX_PUBLISHER_BUDGET) || 0;
@@ -205,5 +233,4 @@ function handleEscrowInfoRequest(payload, fromRoute) {
     });
     });
     });
-  });
 }

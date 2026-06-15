@@ -723,6 +723,22 @@ function checkExpiredCampaigns() {
   );
 }
 
+// N2-5: Throttled prune of DEDUP_LOG — at most once every 6 hours per SW session.
+// Deletes rows older than 7 days. Prevents unbounded table growth without affecting
+// dedup correctness (no reward event can replay after 7 days).
+var _lastDedupPruneAt = 0;
+function pruneDedupLog() {
+  var now = Date.now();
+  var SIX_HOURS_MS = 21600000;
+  if (now - _lastDedupPruneAt < SIX_HOURS_MS) { return; }
+  _lastDedupPruneAt = now;
+  var cutoff = now - 604800000;
+  sqlQuery("DELETE FROM DEDUP_LOG WHERE LOGGED_AT < " + cutoff, function(err) {
+    if (err) { MDS.log("[CAMPAIGN] pruneDedupLog: failed — " + err); return; }
+    MDS.log("[CAMPAIGN] pruneDedupLog: pruned DEDUP_LOG rows older than 7 days");
+  });
+}
+
 // ---------------------------------------------------------------------------
 // PROFILE_REQUEST — received on creator's node from a viewer FE.
 // Reads own Maxima name and icon, responds with PROFILE_RESPONSE (poll:false).

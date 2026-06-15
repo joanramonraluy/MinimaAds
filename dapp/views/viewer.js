@@ -106,11 +106,15 @@ function _loadAndRenderList() {
 
     sqlQuery(sql, function(err, rows) {
       var listEl = document.getElementById('ma-campaign-list');
-      if (!listEl) { return; }
+      if (!listEl) {
+        _viewerState.listRendering = false;
+        return;
+      }
 
       listEl.innerHTML = '';
 
       if (err) {
+        _viewerState.listRendering = false;
         listEl.innerHTML = '';
         listEl.style.border = 'none';
         listEl.style.boxShadow = 'none';
@@ -129,6 +133,7 @@ function _loadAndRenderList() {
       });
 
       if (campaigns.length === 0) {
+        _viewerState.listRendering = false;
         listEl.innerHTML = '';
         listEl.style.border = 'none';
         listEl.style.boxShadow = 'none';

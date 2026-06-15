@@ -254,10 +254,9 @@
 
   function _computeMaxAmount(campaign) {
     var explicit = parseFloat(campaign.MAX_VIEWER_REWARD);
-    if (explicit > 0) { return explicit; }
-    var rv = parseFloat(campaign.REWARD_VIEW) || 0;
-    var rc = parseFloat(campaign.REWARD_CLICK) || 0;
-    return (rv + rc) * _campaignDays();
+    var raw = (explicit > 0) ? explicit : ((parseFloat(campaign.REWARD_VIEW) || 0) + (parseFloat(campaign.REWARD_CLICK) || 0)) * _campaignDays();
+    var cap = (typeof LIMITS !== 'undefined' && LIMITS.MAX_CHANNEL_RESERVATION) ? LIMITS.MAX_CHANNEL_RESERVATION : 10;
+    return Math.min(raw, cap);
   }
 
   function _myMxAddress() {

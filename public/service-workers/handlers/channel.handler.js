@@ -1600,13 +1600,6 @@ function _doGeneratePublisherVoucher(campaignId, frameId, eventId, pubChannel) {
     if (err2 || !campaign) { return; }
     var pubReward = parseFloat(campaign.PUBLISHER_REWARD_VIEW) || 0;
     if (pubReward <= 0) { return; }
-    // C-1 server-side accrual guard: publisher reward unit is always
-    // PUBLISHER_REWARD_VIEW (never click-based). Reject inflated per-request deltas.
-    var pubEpsilon = 0.000001;
-    if (pubReward > parseFloat(campaign.PUBLISHER_REWARD_VIEW) + pubEpsilon) {
-      MDS.log("[CHANNEL] _doGeneratePublisherVoucher: reward exceeds unit. reward=" + pubReward + " unit=" + campaign.PUBLISHER_REWARD_VIEW + " campaign: " + campaignId);
-      return;
-    }
     // Enforce campaign cooldown server-side via LAST_VOUCHER_AT.
     var pubCooldown = (campaign.COOLDOWN_MS !== null && campaign.COOLDOWN_MS !== undefined)
       ? parseInt(campaign.COOLDOWN_MS, 10) : LIMITS.COOLDOWN_BETWEEN_REWARDS_MS;

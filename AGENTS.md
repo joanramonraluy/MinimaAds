@@ -226,24 +226,18 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 ---
 
-### Session: 2026-06-15 — Security N2-5 + N2-6: prune DEDUP_LOG & restrict ESCROW_INFO_REQUEST
+### Session: 2026-06-15 — Security cleanups I-2/N-3/N-6 (cosmetic)
 
-**N2-5 — DEDUP_LOG unbounded growth:**
-Added `pruneDedupLog()` to `campaign.handler.js`. Throttled to once per 6 hours via `_lastDedupPruneAt` module var. Deletes `DEDUP_LOG` rows with `LOGGED_AT < now − 7 days`. Called on every `NEWBLOCK` from `service.js` (alongside `checkExpiredCampaigns`). No schema change needed.
+**N-3**: Removed tautological guard in `_doGeneratePublisherVoucher` (`channel.handler.js`): `pubReward = parseFloat(PUBLISHER_REWARD_VIEW)` so `pubReward > pubReward + epsilon` was always false. Dead code removed.
 
-**N2-6 — ESCROW_INFO_REQUEST information disclosure:**
-`handleEscrowInfoRequest` in `maxima.handler.js` now gates on: (a) requester is campaign creator (`CREATOR_ADDRESS` match, `.toUpperCase()` both sides), or (b) requester has a known channel (`CHANNEL_STATE.OPENER_MX_PK` match). Strangers are silently dropped with log `ESCROW_INFO_REQUEST rejected: requester is not creator or counterparty`. The response logic was extracted to `_doEscrowInfoResponse()` to keep the auth check flat. `PROFILE_REQUEST` left unrestricted — name+icon is effectively public info and restricting it would break campaign discovery UI for viewers who haven't opened a channel yet.
+**N-6**: Aligned `COOLDOWN_MS DEFAULT 30000` in `db-init.js` CREATE TABLE and ALTER TABLE migration to match `LIMITS.COOLDOWN_BETWEEN_REWARDS_MS = 30000`. Was `300000` (10× too large).
 
-**Files modified**: `public/service-workers/handlers/campaign.handler.js`, `service.js`, `public/service-workers/handlers/maxima.handler.js`, `docs/audit_report_2.md` (§10 tracker), `AGENTS.md §6`, `docs/HISTORY.md §17`.
+**I-2**: Capped viewer `maxAmount` at `LIMITS.MAX_CHANNEL_RESERVATION` in `comms.handler.js` `_doSendChannelOpenRequest` and `sdk/index.js` `_computeMaxAmount`. Viewer's local `MAX_AMOUNT` now matches what the creator enforces server-side.
 
-**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 16) moved to `docs/HISTORY.md §17`.
+**Files modified**: `public/service-workers/handlers/channel.handler.js`, `public/service-workers/db-init.js`, `public/service-workers/handlers/comms.handler.js`, `sdk/index.js`, `docs/audit_report_2.md`, `AGENTS.md §6`, `docs/HISTORY.md §17`.
 
-**Verification**:
-1. `DEDUP_LOG` prune: after the SW has been running > 6 h, a NEWBLOCK should log `pruneDedupLog: pruned DEDUP_LOG rows older than 7 days`. No reward dedup regressions.
-2. `ESCROW_INFO_REQUEST` from a node with an open channel for the campaign → response received normally.
-3. `ESCROW_INFO_REQUEST` from a stranger node (no channel, not creator) → creator SW logs rejection; no `ESCROW_INFO_RESPONSE` returned.
-4. Normal view + click reward flow unaffected.
+**AGENTS.md updated**: yes — §6 updated, oldest entry (N2-5/N2-6) moved to `docs/HISTORY.md §17`.
 
 ---
 
-> Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, Auto-Sync Platform Creator Route, Unify MLS DevTools, Fix Viewer and Publisher Reward Delivery, Fix Publisher Budget (Multi-Publisher Support), Fix Stale-Pending Publisher Channel Deadlock, Minima Foundation Fee (3%) + V4 Escrow Script Fixes, 2026-06-10 settlement fixes, Security audit T7/T9, Security N2-4, patch 16, and all earlier) are archived in `docs/HISTORY.md §17`.
+> Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, Auto-Sync Platform Creator Route, Unify MLS DevTools, Fix Viewer and Publisher Reward Delivery, Fix Publisher Budget (Multi-Publisher Support), Fix Stale-Pending Publisher Channel Deadlock, Minima Foundation Fee (3%) + V4 Escrow Script Fixes, 2026-06-10 settlement fixes, Security audit T7/T9, Security N2-4, N2-5/N2-6, patch 16, and all earlier) are archived in `docs/HISTORY.md §17`.

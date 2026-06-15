@@ -46,6 +46,16 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-15 — Security N2-5 + N2-6: prune DEDUP_LOG & restrict ESCROW_INFO_REQUEST
+
+**N2-5**: Added `pruneDedupLog()` to `campaign.handler.js`, throttled to once per 6 hours, deletes DEDUP_LOG rows older than 7 days. Called on NEWBLOCK from `service.js`.
+
+**N2-6**: `handleEscrowInfoRequest` now requires requester is campaign creator (CREATOR_ADDRESS match) or known channel counterparty (OPENER_MX_PK match). Strangers silently dropped. Logic extracted to `_doEscrowInfoResponse()`. PROFILE_REQUEST left unrestricted.
+
+**Files modified**: `public/service-workers/handlers/campaign.handler.js`, `service.js`, `public/service-workers/handlers/maxima.handler.js`, `docs/audit_report_2.md`.
+
+---
+
 ### Session: 2026-06-15 (patch 16) — Fix: Implement Maxima Outbox Queue & Case-Insensitive Normalization
 
 **Problem**: Maxima signaling messages (e.g. campaign discovery, reward requests, vouchers) failed with "No Contact found" errors due to strict key case sensitivity checks in the platform's contact manager (e.g. `0X` vs `0x` prefixes) and race conditions where signals are sent before target contacts are fully established on-chain/in-network.

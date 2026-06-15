@@ -383,7 +383,7 @@ The project's security posture is **materially better than at the first audit**:
 | **N2-4** — bind `REWARD_REQUEST` sender to channel opener | LOW | **Opus** | 2026-06-15 | ✅ **Done 2026-06-15** — Option B: `OPENER_MX_PK VARCHAR(512) DEFAULT ''` added to `CHANNEL_STATE` (both runtimes); `openChannel` / `_doMergeChannel` store it from `senderPk`; guard in `_handleRewardRequestInner` rejects when stored PK ≠ `msg.data.from` (fails-open on empty column). SDK call site passes `''`. Not yet 2-node verified. |
 | **N2-5** — prune `DEDUP_LOG` | LOW | Sonnet | 2026-06-15 | ✅ **Done 2026-06-15** — `pruneDedupLog()` added to `campaign.handler.js`; throttled to once per 6 h via `_lastDedupPruneAt`; deletes rows older than 7 days; called on every NEWBLOCK from `service.js`. |
 | **N2-6** — restrict `ESCROW_INFO_REQUEST` / `PROFILE_REQUEST` | LOW | Haiku/Sonnet | 2026-06-15 | ✅ **Done 2026-06-15** — `handleEscrowInfoRequest` now requires requester is campaign creator (CREATOR_ADDRESS match) or channel counterparty (`OPENER_MX_PK` match in CHANNEL_STATE); strangers are silently dropped. `PROFILE_REQUEST` left unrestricted (name+icon is public info, restricting breaks campaign discovery UI). Logic extracted to `_doEscrowInfoResponse()`. |
-| **I-2/N-3/N-6** — cosmetic cleanups | INFO | Haiku | new | ⬜ Optional |
+| **I-2/N-3/N-6** — cosmetic cleanups | INFO | Haiku | 2026-06-15 | ✅ **Done 2026-06-15** — N-3: removed tautological `pubReward > pubReward + epsilon` guard in `_doGeneratePublisherVoucher`. N-6: aligned `COOLDOWN_MS DEFAULT 30000` in `db-init.js` to match `LIMITS.COOLDOWN_BETWEEN_REWARDS_MS`. I-2: capped viewer `maxAmount` at `LIMITS.MAX_CHANNEL_RESERVATION` in both `comms.handler.js` and `sdk/index.js` `_computeMaxAmount`. |
 
 ---
 

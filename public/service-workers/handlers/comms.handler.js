@@ -248,7 +248,8 @@ function _resolveViewerAddrAndSend(campaignId, campaign, walletPK, amount, event
 function _doSendChannelOpenRequest(campaignId, campaign, viewerWalletAddr, amount, eventId, publisherKey, viewerWalletPK, frameId, publisherMx, rewardType) {
   var capExplicit = parseFloat(campaign.MAX_VIEWER_REWARD) || 0;
   var perView = parseFloat(campaign.REWARD_VIEW) || 0;
-  var maxAmount = capExplicit > 0 ? capExplicit : perView * 10;
+  var reservationCap = (LIMITS && LIMITS.MAX_CHANNEL_RESERVATION) ? LIMITS.MAX_CHANNEL_RESERVATION : 10;
+  var maxAmount = Math.min(capExplicit > 0 ? capExplicit : perView * 10, reservationCap);
   var payload = {
     type:               "CHANNEL_OPEN_REQUEST",
     campaign_id:        campaignId,

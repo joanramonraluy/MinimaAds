@@ -719,7 +719,7 @@ function onViewerVoucherReceived(parsed) {
   }
 }
 
-function onChannelOpened(parsed) {
+function viewerOnChannelOpened(parsed) {
   console.log('[VIEWER] onChannelOpened parsed:', parsed, 'current campaign:', _viewerState.campaign);
   if (_viewerState.mode !== 'detail' || !_viewerState.campaign || !parsed) { return; }
   var pId = String(parsed.campaign_id || '').trim().toUpperCase();

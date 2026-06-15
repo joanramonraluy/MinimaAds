@@ -292,6 +292,9 @@ function handleMdsComms(parsed) {
     if (currentRoute() === 'viewer' && typeof onCampaignsChanged === 'function') {
       onCampaignsChanged();
     }
+    if (currentRoute() === 'campaigns' && typeof _loadCampaigns === 'function') {
+      _loadCampaigns();
+    }
     if (currentRoute() === 'mycampaigns' && typeof loadMyCampaigns === 'function') {
       loadMyCampaigns(true);
     }
@@ -327,6 +330,7 @@ function handleMdsComms(parsed) {
   }
   if (parsed.type === 'CHANNEL_OPENED') {
     if (typeof onChannelOpened === 'function') { onChannelOpened(parsed); }
+    if (typeof viewerOnChannelOpened === 'function') { viewerOnChannelOpened(parsed); }
     return;
   }
   if (parsed.type === 'VOUCHER_RECEIVED') {

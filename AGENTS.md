@@ -176,6 +176,28 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
+### Session: 2026-06-15 (patch 18) — Fix: Campaigns discovery UI refresh & channel open collision resolution
+
+**Problem**: The campaign discovery list did not automatically refresh when new campaigns were discovered. The routing structure uses the `#campaigns` route in viewer/creator/publisher modes (rendered by `campaigns.js`), but the message handler in `app.js` only checked `currentRoute() === 'viewer'` before calling `onCampaignsChanged()`, leaving the `#campaigns` page unrefreshed. Additionally, both `viewer.js` and `earnings.js` defined a global `onChannelOpened` handler, causing the latter to override the former and leaving the viewer's detail view without status update events when secure channels successfully open.
+
+**Fix**:
+- **App** (`dapp/app.js`):
+  - In `handleMdsComms` (`NEW_CAMPAIGN` / `CAMPAIGN_UPDATED` branch), added a check for `currentRoute() === 'campaigns'` and triggered `_loadCampaigns()` to refresh the active campaigns list.
+  - In the `CHANNEL_OPENED` branch, added an explicit call to `viewerOnChannelOpened(parsed)` alongside `onChannelOpened(parsed)`.
+- **Viewer** (`dapp/views/viewer.js`):
+  - Renamed the global `onChannelOpened` handler to `viewerOnChannelOpened` to avoid namespace collisions with `earnings.js`.
+- **MiniDapp Package**: Bumped version to `0.26.6.8` in `dapp.conf` and updated the packaged `MinimaAds.mds.zip`.
+
+**Files modified**: `dapp/app.js`, `dapp/views/viewer.js`, `dapp.conf`, `MinimaAds.mds.zip`
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 15) moved to `docs/HISTORY.md §17`.
+
+**Verification**:
+1. Navigate to the "View Ads" list and verify that newly discovered campaigns are rendered dynamically in the list.
+2. Open a campaign's detail page, trigger a view, and verify that the status changes to `'open'` upon receiving the channel opening event.
+
+---
+
 ### Session: 2026-06-15 (patch 17) — Fix: Implement payment channel synchronization and accrual recovery
 
 **Problem**: When a viewer loses local state and a creator reopens a channel, the viewer's CUMULATIVE_EARNED resets to 0 while the creator expects it to continue from the previous balance, causing persistent "accrual delta invalid" errors. Additionally, pending rewards accumulated while the channel was inactive could be discarded.
@@ -227,20 +249,4 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 ---
 
-### Session: 2026-06-15 (patch 15) — Fix: Prevent premature channel settlement by updating CREATED_AT on activation
-
-**Problem**: When a channel open request is received, the creator node inserts the channel row in `CHANNEL_STATE` with status `'pending'` and `CREATED_AT = now`. Because L1 block mining (Tx1 split + Tx2 channel open) takes time, the channel often remains in `pending` for over 60 seconds. Once the channel is finally activated (`activateChannel` updates status to `'open'`), the old `CREATED_AT` is kept. Consequently, `checkOpenChannelsSettled` running in the same block calculates an age > 60s, bypassing the grace period. Because of internal Minima indexing latency, the newly created coin is not yet found, causing the node to immediately settle the channel with 0 tokens.
-
-**Fix**:
-- **Core** (`core/channels.js`): In `activateChannel`, update the `CREATED_AT` timestamp to the current time (`Date.now()`). This resets the channel's age starting from the exact moment it transitions to `'open'`, ensuring the 60-second indexing grace period correctly protects it against premature settlement.
-- **MiniDapp Package**: Bumped version to `0.26.6.6` in `dapp.conf` and updated the packaged `MinimaAds.mds.zip`.
-
-**Files modified**: `core/channels.js`, `dapp.conf`, `MinimaAds.mds.zip`
-
-**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 12) moved to `docs/HISTORY.md §17`.
-
-**Verification**: Deploy and verify that the creator node logs show the grace period correctly skipping settlement of newly activated viewer and publisher channels during indexation lag, allowing them to remain open.
-
----
-
-> Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, Auto-Sync Platform Creator Route, Unify MLS DevTools, Fix Viewer and Publisher Reward Delivery, Fix Publisher Budget (Multi-Publisher Support), Fix Stale-Pending Publisher Channel Deadlock, Minima Foundation Fee (3%) + V4 Escrow Script Fixes, 2026-06-10 settlement fixes, Security audit T7/T9, Security N2-4: bind REWARD_REQUEST sender, and all earlier including patch 14) are archived in `docs/HISTORY.md §17`.
+> Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, Auto-Sync Platform Creator Route, Unify MLS DevTools, Fix Viewer and Publisher Reward Delivery, Fix Publisher Budget (Multi-Publisher Support), Fix Stale-Pending Publisher Channel Deadlock, Minima Foundation Fee (3%) + V4 Escrow Script Fixes, 2026-06-10 settlement fixes, Security audit T7/T9, Security N2-4: bind REWARD_REQUEST sender, and all earlier including patch 15) are archived in `docs/HISTORY.md §17`.

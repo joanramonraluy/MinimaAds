@@ -46,6 +46,22 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-15 (patch 15) — Fix: Prevent premature channel settlement by updating CREATED_AT on activation
+
+**Problem**: When a channel open request is received, the creator node inserts the channel row in `CHANNEL_STATE` with status `'pending'` and `CREATED_AT = now`. Because L1 block mining (Tx1 split + Tx2 channel open) takes time, the channel often remains in `pending` for over 60 seconds. Once the channel is finally activated (`activateChannel` updates status to `'open'`), the old `CREATED_AT` is kept. Consequently, `checkOpenChannelsSettled` running in the same block calculates an age > 60s, bypassing the grace period. Because of internal Minima indexing latency, the newly created coin is not yet found, causing the node to immediately settle the channel with 0 tokens.
+
+**Fix**:
+- **Core** (`core/channels.js`): In `activateChannel`, update the `CREATED_AT` timestamp to the current time (`Date.now()`). This resets the channel's age starting from the exact moment it transitions to `'open'`, ensuring the 60-second indexing grace period correctly protects it against premature settlement.
+- **MiniDapp Package**: Bumped version to `0.26.6.6` in `dapp.conf` and updated the packaged `MinimaAds.mds.zip`.
+
+**Files modified**: `core/channels.js`, `dapp.conf`, `MinimaAds.mds.zip`
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 12) moved to `docs/HISTORY.md §17`.
+
+**Verification**: Deploy and verify that the creator node logs show the grace period correctly skipping settlement of newly activated viewer and publisher channels during indexation lag, allowing them to remain open.
+
+---
+
 ### Session: 2026-06-15 (patch 14) — Fix: Optimize Service Worker auto-settlement triggers
 
 **Problem**: The Service Worker previously auto-settled every reward voucher as soon as it arrived. This spent the channel coin prematurely and invalidated all subsequent vouchers for the same channel, causing double-spend transaction submission errors and leading to loss of potential rewards.

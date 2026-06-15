@@ -46,6 +46,62 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-15 (patch 12) — Fix: Prevent zero-token settlements and duplicate publisher channel creation
+
+**Problem**: 
+1. When archiving an existing channel to open a new one (or when a stale pending channel is cleared), `settleChannel` unconditionally inserted a row into `CHANNEL_HISTORY` even when the channel's `CUMULATIVE_EARNED` was 0, polluting the history.
+2. In the publisher flow, when a reward request was sent right after the channel was opened, the new channel coin was not yet indexed locally by the creator node's UTXO index. Because `_doGeneratePublisherVoucher` had no indexing grace period (unlike the viewer's `checkOpenChannelsSettled`), it assumed the coin was spent and reopened the channel, leading to duplicate channel creation.
+
+**Fix**:
+1. **Core** (`core/channels.js`): Added a guard clause in `settleChannel` to skip inserting a record into `CHANNEL_HISTORY` if `CUMULATIVE_EARNED <= 0`, while still allowing the `CHANNEL_STATE` status update to run.
+2. **Service Worker** (`public/service-workers/handlers/channel.handler.js`):
+   - In `handleChannelOpen`: Check `parseFloat(existing.CUMULATIVE_EARNED) > 0` before calling `settleChannel` to archive it.
+   - In `_doGeneratePublisherVoucher`: Added a 60-second grace period check for newly created channels. If the channel is under 60 seconds old, defer the reward to `DEFERRED_PUB_REWARDS` and return immediately without reopening. The reward is automatically replayed by the NEWBLOCK handler as soon as the coin is indexed.
+
+**Files modified**: `core/channels.js`, `public/service-workers/handlers/channel.handler.js`
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (N2-3) moved to `docs/HISTORY.md §17`.
+
+**Verification**: Triggering a publisher view immediately after channel open correctly defers the reward voucher until the coin is indexed on-chain, avoiding any duplicate channel openings and preventing zero-token entries in `CHANNEL_HISTORY`.
+
+---
+
+### Session: 2026-06-15 (patch 11) — Fix: viewer campaigns list stuck rendering
+
+**Problem**:
+If the campaigns list in `dapp/views/viewer.js` initially loaded 0 campaigns (before any campaigns were discovered or synced) or encountered an H2 SQL query error or missing element, the lock variable `_viewerState.listRendering` was left set to `true`. This blocked any subsequent updates or refreshes to the list (e.g. from `NEW_CAMPAIGN` / `CAMPAIGN_UPDATED` SW signals or block events), leaving the UI stuck on "No ads available right now." or "Loading campaigns..." forever.
+
+**Fix**:
+- **Viewer UI** (`dapp/views/viewer.js`): Added proper cleanup resets to ensure `_viewerState.listRendering = false` is executed on all return and exit paths (error handler, list element missing check, empty campaign list branch) inside the `_loadAndRenderList` SQL query callback.
+- **MiniDapp Package**: Bumped version to `0.26.6.2` in `dapp.conf` and re-zipped the repository files into `MinimaAds.mds.zip`.
+
+**Files modified**: `dapp/views/viewer.js`, `dapp.conf`, `MinimaAds.mds.zip`
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 9) moved to `docs/HISTORY.md §17`.
+
+**Verification**: Reload the viewer page. Verify that list refreshes are not blocked and that newly discovered or modified campaigns appear dynamically on the View Ads list.
+
+---
+
+### Session: 2026-06-15 — Security N2-3: enforce `MAX_PUBLISHER_BUDGET` at voucher time
+
+**Problem**: `MAX_PUBLISHER_BUDGET` was enforced only at publisher channel-open (via `SUM(CUMULATIVE_EARNED)`), never at voucher/payout time. Concurrent publishers can each open a channel while `SUM=0`, then collectively over-pay and spend into the viewer reward pool, violating the documented `MAX_PUBLISHER_BUDGET ⊆ BUDGET_TOTAL` invariant.
+
+**Fix** (`public/service-workers/handlers/channel.handler.js`, 3 sites): before dispatching each publisher voucher, sum `CUMULATIVE_EARNED` across all `ROLE='publisher'` channels for the campaign and reject when `earnedAll − thisChannelOldCumulative + newCumulative > MAX_PUBLISHER_BUDGET + 1e-6`.
+1. `_doGeneratePublisherVoucher` — added the SUM query after the per-channel `MAX_AMOUNT` check; remainder of the function moved into a hoisted `_continuePublisherVoucher()` inner function called from the callback.
+2. `_replayDeferredPublisherRewardsNow` — same check before the deferred-replay `isDuplicate`/dispatch, wrapped in `_continueReplayPublisherVoucher()`.
+3. Publisher branch of `_handleRewardRequestInner` — same check wrapping the `_swDispatchVoucher('publisher')` call.
+
+All additions are Rhino-safe (`var`, `function()`, string concat, no trailing commas, `MDS.log`, `escapeSql`, UPPERCASE H2 row keys). SW-only — no FE mirror of this logic exists.
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`, `docs/audit_report_2.md` (§10 tracker).
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 8) moved to `docs/HISTORY.md §17`.
+
+**Verification**: On a two-node setup, configure a campaign with a small `MAX_PUBLISHER_BUDGET` (e.g. enough for ~2 publisher views) and open 3+ publisher channels concurrently (multiple frames/nodes) before any earnings record. Generate enough publisher views to push the aggregate past the cap. Expect: publisher vouchers settle only up to `MAX_PUBLISHER_BUDGET`; beyond that the SW logs `MAX_PUBLISHER_BUDGET exceeded. projected=… cap=…` and dispatches no further publisher voucher. Confirm viewer rewards are unaffected and no FE console errors.
+
+---
+
 ### Session: 2026-06-14 (patch 10) — Fix: Reset click reward cooldown state, clear warning message, and improve channel opening status
 
 **Problem**:
@@ -1445,6 +1501,38 @@ Built-in snippets work because the publisher IS the viewer and sends their own P
 
 **Verification**: Reinstall MiniDapp + reload browser → viewers see campaigns in all nodes.
 
+---
 
+### Session: 2026-06-15 — Security N2-4: bind REWARD_REQUEST sender to channel opener (Option B)
 
+**Problem**: `handleRewardRequest` received `senderPk` (cryptographically-authenticated `msg.data.from`) but never bound it to the channel record. A third party could submit `REWARD_REQUEST` for someone else's channel, advancing the channel cumulative and combined with N2-2 (now fixed) could drain campaign budget for clicks nobody made.
 
+**Fix** (Option B — non-breaking, no wire changes):
+1. **DB schema** (`public/service-workers/db-init.js`, `dapp/app.js` `initFEChannelState`): added `OPENER_MX_PK VARCHAR(512) DEFAULT ''` migration to both runtimes after `LAST_CLICK_VOUCHER_AT`.
+2. **`core/channels.js`** `openChannel` / `_doMergeChannel`: added `openerMxPk` parameter (8th, before `cb`); included in `MERGE INTO CHANNEL_STATE` column list. Stores the authenticated Maxima PK of the node that opened the channel.
+3. **`channel.handler.js`** `handleChannelOpenRequest`: all 5 `openChannel()` call sites now pass `sndrPk` as `openerMxPk`. `_doGeneratePublisherVoucher` reopen path passes `pubChannel.OPENER_MX_PK || ''`.
+4. **`channel.handler.js`** `handleRewardRequest` → `_handleRewardRequestInner`: threaded `sndrPk` as new 7th parameter `senderPk`. Guard added after `getChannelState`: if `channel.OPENER_MX_PK` is non-empty AND `senderPk` is non-empty, rejects when they differ (`.toUpperCase()` both sides). Fails-open on empty `OPENER_MX_PK`.
+5. **`sdk/index.js`**: `openChannel` call updated to pass `''` for `openerMxPk` (viewer node — guard not applicable there).
+
+**Files modified**: `public/service-workers/db-init.js`, `dapp/app.js`, `core/channels.js`, `public/service-workers/handlers/channel.handler.js`, `sdk/index.js`, `docs/audit_report_2.md` (§10 tracker), `AGENTS.md §6`, `docs/HISTORY.md §17`.
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 10) moved to `docs/HISTORY.md §17`.
+
+**Verification**: On a two-node setup: (a) normal view + click reward still settles end-to-end; (b) a `REWARD_REQUEST` sent from a third node (different `msg.data.from`) for an existing channel is rejected with log `REWARD_REQUEST rejected: senderPk != OPENER_MX_PK`; (c) re-opened channels (publisher settle + reopen) continue to work. No FE console errors.
+
+---
+
+### Session: 2026-06-15 (patch 13) — Feature: Automatic settlement in the Service Worker
+
+**Problem**: The reward voucher transaction co-signed by the creator node was stored in `CHANNEL_STATE.LATEST_TX_HEX` upon receiving a `REWARD_VOUCHER` Maxima message, but there was no automatic mechanism to co-sign and submit it to the network. Settlement depended entirely on manual clicks on the "Settle" button on the earnings page.
+
+**Fix**:
+- **Service Worker** (`public/service-workers/handlers/channel.handler.js`):
+  - Implemented `_swAutoSettleVoucher(campaignId, viewerKey, role, txHex)` which loads the viewer's wallet signing key `VIEWER_WALLET_PK_<campaignId>` (with fallback to Maxima PK), imports the transaction, co-signs it, and posts it.
+  - If write-protection is active (transaction signing or posting is pending), saves the context under keypair namespace `PENDING_CHANNEL_<pendinguid>` so the frontend's `handleFePending` can resume it when approved.
+  - Called `_swAutoSettleVoucher` automatically inside `_continueRewardVoucher` immediately after storing the voucher.
+- **MiniDapp Package**: Bumped version to `0.26.6.4` in `dapp.conf` and updated the packaged `MinimaAds.mds.zip`.
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`, `dapp.conf`, `MinimaAds.mds.zip`
+
+**AGENTS.md updated**: yes — §6 updated.

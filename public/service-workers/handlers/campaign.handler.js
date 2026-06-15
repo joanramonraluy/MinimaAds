@@ -568,6 +568,11 @@ function applyStatusChange(campaignId, status) {
       return;
     }
     MDS.log("[CAMPAIGN] status updated to " + status + ", id: " + campaignId);
+    if (status === 'finished') {
+      if (typeof autoSettleChannelsForCampaign === 'function') {
+        autoSettleChannelsForCampaign(campaignId);
+      }
+    }
     getCampaign(campaignId, function(err2, campaign) {
       var budget = (campaign && campaign.BUDGET_REMAINING !== undefined)
         ? parseFloat(campaign.BUDGET_REMAINING)

@@ -73,49 +73,145 @@ function _maxDelivered(res, label) {
   return delivered;
 }
 
-function sendMaxima(publicKey, mxAddress, payload, cb) {
-  // SECURITY (audit_report_2 N2-1): publicKey / mxAddress may originate from
-  // remote Maxima payloads (viewer_key, publisher_key, publisher_mx, etc.).
-  // Without validation a crafted value injects extra parameters into the
-  // "maxima action:send ..." command string — most dangerously poll:true, which
-  // freezes the SW event loop ~77s (KNOWN_ISSUES #5). isHexKey accepts both
-  // Maxima PKs and 0x wallet keys; isMaximaRoute accepts Mx... contacts and
-  // MAX#pk#mls routes (neither contains whitespace).
+function normalizePublicKey(pk) {
+  if (!pk || typeof pk !== "string") { return ""; }
+  var s = pk.trim();
+  if (s.length >= 2 && s.charAt(0) === '0' && (s.charAt(1) === 'x' || s.charAt(1) === 'X')) {
+    s = s.substring(2);
+  }
+  return "0x" + s.toUpperCase();
+}
+
+function _isNoContactError(res) {
+  if (!res || !res.response) { return false; }
+  var err = "";
+  if (res.response.error) { err = res.response.error; }
+  else if (res.response.message) { err = res.response.message; }
+  if (typeof err === "string") {
+    var lower = err.toLowerCase();
+    if (lower.indexOf("no contact found") !== -1 || lower.indexOf("unknown publickey") !== -1) {
+      return true;
+    }
+  }
+  return false;
+}
+
+var _maximaOutbox = [];
+
+function _queueMaximaMessage(publicKey, mxAddress, payload) {
+  if (publicKey) {
+    publicKey = normalizePublicKey(publicKey);
+  }
+  for (var i = 0; i < _maximaOutbox.length; i++) {
+    var item = _maximaOutbox[i];
+    if (item.publicKey === publicKey &&
+        item.mxAddress === mxAddress &&
+        item.payload && item.payload.type === payload.type) {
+      item.payload = payload;
+      item.timestamp = Date.now();
+      item.retries = 0;
+      MDS.log("[MINIMA] Outbox: updated duplicate pending message type=" + payload.type);
+      return;
+    }
+  }
+  _maximaOutbox.push({
+    publicKey: publicKey,
+    mxAddress: mxAddress,
+    payload: payload,
+    timestamp: Date.now(),
+    retries: 0
+  });
+  MDS.log("[MINIMA] Outbox: queued message type=" + payload.type + " (outbox size: " + _maximaOutbox.length + ")");
+}
+
+function processMaximaOutbox() {
+  if (_maximaOutbox.length === 0) { return; }
+  MDS.log("[MINIMA] Processing Maxima outbox queue (" + _maximaOutbox.length + " pending)");
+  var tempQueue = _maximaOutbox.slice(0);
+  _maximaOutbox = [];
+  
+  var processNext = function(idx) {
+    if (idx >= tempQueue.length) {
+      MDS.log("[MINIMA] Finished processing outbox. Remaining pending: " + _maximaOutbox.length);
+      return;
+    }
+    var item = tempQueue[idx];
+    var now = Date.now();
+    if (item.retries >= 15 || (now - item.timestamp > 24 * 60 * 60 * 1000)) {
+      MDS.log("[MINIMA] Outbox message discarded: too many retries (" + item.retries + ") or expired");
+      processNext(idx + 1);
+      return;
+    }
+    item.retries++;
+    MDS.log("[MINIMA] Retrying outbox message type=" + (item.payload && item.payload.type) + " to " + (item.publicKey ? item.publicKey.substring(0, 16) + "..." : "null") + " (attempt " + item.retries + ")");
+    _sendMaximaDirect(item.publicKey, item.mxAddress, item.payload, function(ok, res, isContactErr) {
+      if (ok) {
+        MDS.log("[MINIMA] Outbox message successfully sent!");
+      } else if (isContactErr) {
+        MDS.log("[MINIMA] Outbox message failed with contact error again, re-queuing...");
+        _maximaOutbox.push(item);
+      } else {
+        MDS.log("[MINIMA] Outbox message failed with other error, re-queuing...");
+        _maximaOutbox.push(item);
+      }
+      processNext(idx + 1);
+    });
+  };
+  processNext(0);
+}
+
+function _sendMaximaDirect(publicKey, mxAddress, payload, cb) {
   if (publicKey && !isHexKey(publicKey)) {
-    MDS.log("[MINIMA] sendMaxima rejected: malformed publicKey");
+    MDS.log("[MINIMA] _sendMaximaDirect rejected: malformed publicKey");
     if (cb) { cb(false); }
     return;
   }
   if (mxAddress && !isMaximaRoute(mxAddress)) {
-    MDS.log("[MINIMA] sendMaxima rejected: malformed mxAddress");
+    MDS.log("[MINIMA] _sendMaximaDirect rejected: malformed mxAddress");
     if (cb) { cb(false); }
     return;
   }
-  MDS.log("[MINIMA] sendMaxima called: publicKey=" + (publicKey ? publicKey.substring(0, 16) + "..." : "null") + " mxAddress=" + (mxAddress ? mxAddress.substring(0, 20) + "..." : "null") + " payloadType=" + (payload && payload.type));
+  if (publicKey) {
+    publicKey = normalizePublicKey(publicKey);
+  }
   var hex = "0x" + utf8ToHex(JSON.stringify(payload)).toUpperCase();
   if (publicKey && mxAddress) {
-    // Per PLATFORM_NOTES §4.2: try publickey: first (requires contact),
-    // fall back to to:Mx... on failure (works without contact via MLS relay).
     MDS.cmd("maxima action:send publickey:" + publicKey + " application:" + APP_NAME + " data:" + hex + " poll:false", function(res) {
       if (_maxDelivered(res, "publickey")) {
-        cb(true);
+        if (cb) { cb(true, res, false); }
         return;
       }
+      var isContactErr = _isNoContactError(res);
       MDS.cmd("maxima action:send to:" + mxAddress + " application:" + APP_NAME + " data:" + hex + " poll:false", function(res2) {
-        cb(_maxDelivered(res2, "to"));
+        var ok = _maxDelivered(res2, "to");
+        if (cb) { cb(ok, res2, isContactErr && _isNoContactError(res2)); }
       });
     });
   } else if (publicKey) {
     MDS.cmd("maxima action:send publickey:" + publicKey + " application:" + APP_NAME + " data:" + hex + " poll:false", function(res) {
-      cb(_maxDelivered(res, "publickey"));
+      var ok = _maxDelivered(res, "publickey");
+      if (cb) { cb(ok, res, _isNoContactError(res)); }
     });
   } else if (mxAddress) {
     MDS.cmd("maxima action:send to:" + mxAddress + " application:" + APP_NAME + " data:" + hex + " poll:false", function(res) {
-      cb(_maxDelivered(res, "to"));
+      var ok = _maxDelivered(res, "to");
+      if (cb) { cb(ok, res, _isNoContactError(res)); }
     });
   } else {
-    cb(false);
+    if (cb) { cb(false, null, false); }
   }
+}
+
+function sendMaxima(publicKey, mxAddress, payload, cb) {
+  _sendMaximaDirect(publicKey, mxAddress, payload, function(ok, res, isContactError) {
+    if (!ok && isContactError) {
+      MDS.log("[MINIMA] sendMaxima: no contact found, queuing message in outbox...");
+      _queueMaximaMessage(publicKey, mxAddress, payload);
+      if (cb) { cb(false); }
+    } else {
+      if (cb) { cb(ok); }
+    }
+  });
 }
 
 // Helper: Get current node's Maxima info (publickey, staticmls status, mls address, contact).
@@ -148,7 +244,7 @@ function parseMaximaRoute(route) {
   if (pk.indexOf("Mx") === 0 || pk.indexOf("mx") === 0 || pk.indexOf("MX") === 0) {
     return null;
   }
-  return { publickey: pk, mls: parts[2] };
+  return { publickey: normalizePublicKey(pk), mls: parts[2] };
 }
 
 // Helper: Build and store the creator permanent route MAX#<pk>#<mls>.
@@ -160,9 +256,9 @@ function setCreatorMaximaRoute(cb) {
     if (!mls) { return cb(new Error("Node does not have static MLS configured")); }
     var maximaPk = resp.response.publickey || "";
     if (!maximaPk) { return cb(new Error("Node does not have a Maxima public key")); }
-    var permanentRoute = "MAX#" + maximaPk + "#" + mls;
+    var permanentRoute = "MAX#" + normalizePublicKey(maximaPk) + "#" + mls;
     MDS.keypair.set("USER_PERMANENT_ROUTE", permanentRoute, function() {
-      if (maximaPk.toUpperCase() === MINIMAADS_CREATOR_PK.toUpperCase()) {
+      if (normalizePublicKey(maximaPk) === normalizePublicKey(MINIMAADS_CREATOR_PK)) {
         MDS.keypair.set("MINIMAADS_CREATOR_ROUTE", permanentRoute, function() {
           cb(null, permanentRoute);
         });
@@ -183,8 +279,8 @@ function getCreatorMaximaRoute(cb) {
       MDS.log("[MINIMA] Outdated permanent route format detected (" + route + "), clearing from keypairs");
       MDS.keypair.set("USER_PERMANENT_ROUTE", "", function() {
         MDS.cmd("maxima action:info", function(infoRes) {
-          var pk = (infoRes && infoRes.status && infoRes.response && infoRes.response.publickey) ? infoRes.response.publickey.toUpperCase() : "";
-          if (pk && pk === MINIMAADS_CREATOR_PK.toUpperCase()) {
+          var pk = (infoRes && infoRes.status && infoRes.response && infoRes.response.publickey) ? infoRes.response.publickey : "";
+          if (pk && normalizePublicKey(pk) === normalizePublicKey(MINIMAADS_CREATOR_PK)) {
             MDS.keypair.set("MINIMAADS_CREATOR_ROUTE", "", function() {
               cb(null);
             });

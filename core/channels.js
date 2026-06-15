@@ -44,7 +44,8 @@ function _doMergeChannel(campaignId, viewerKey, creatorMx, maxAmount, r, fid, wA
 function activateChannel(campaignId, viewerKey, role, channelCoinId, cb) {
   var r = role || 'viewer';
   var sql = "UPDATE CHANNEL_STATE SET STATUS = 'open', " +
-    "CHANNEL_COINID = '" + escapeSql(channelCoinId) + "' " +
+    "CHANNEL_COINID = '" + escapeSql(channelCoinId) + "', " +
+    "CREATED_AT = " + Date.now() + " " +
     "WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') " +
     "AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(viewerKey) + "') " +
     "AND UPPER(ROLE) = UPPER('" + escapeSql(r) + "')";
@@ -116,6 +117,11 @@ function settleChannel(campaignId, viewerKey, role, cb) {
       if (err) { cb(err); return; }
       if (selErr || !selRows || selRows.length === 0) { cb(null, true); return; }
       var ch = selRows[0];
+      if (parseFloat(ch.CUMULATIVE_EARNED) <= 0) {
+        MDS.log("[CHANNELS] settleChannel: cumulative earned is zero, skipping CHANNEL_HISTORY write. campaign: " + campaignId);
+        cb(null, true);
+        return;
+      }
       var histSql = "MERGE INTO CHANNEL_HISTORY" +
         " (CAMPAIGN_ID, VIEWER_KEY, ROLE, CREATOR_MX, CHANNEL_COINID, MAX_AMOUNT," +
         " CUMULATIVE_EARNED, STATUS, CREATED_AT, VIEWER_WALLET_ADDR)" +

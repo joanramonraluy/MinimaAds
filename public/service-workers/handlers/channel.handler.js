@@ -387,11 +387,19 @@ function handleChannelOpen(payload) {
       getChannelState(campaignId, viewerKey, role, function(gsErr, existing) {
         if (!gsErr && existing && (existing.STATUS === 'open' || existing.STATUS === 'pending') &&
             existing.CHANNEL_COINID !== channelCoinId) {
-          MDS.log("[CHANNEL] CHANNEL_OPEN: archiving existing " + existing.STATUS + " channel before new open. campaign: " + campaignId + " old coin: " + existing.CHANNEL_COINID);
-          settleChannel(campaignId, viewerKey, role, function(archErr) {
-            if (archErr) { MDS.log("[CHANNEL] CHANNEL_OPEN: archive old channel failed (non-fatal): " + archErr); }
+          if (parseFloat(existing.CUMULATIVE_EARNED) > 0) {
+            MDS.log("[CHANNEL] CHANNEL_OPEN: archiving and settling existing " + existing.STATUS + " channel before new open. campaign: " + campaignId + " old coin: " + existing.CHANNEL_COINID);
+            if (existing.LATEST_TX_HEX) {
+              _swAutoSettleVoucher(campaignId, viewerKey, role, existing.LATEST_TX_HEX);
+            }
+            settleChannel(campaignId, viewerKey, role, function(archErr) {
+              if (archErr) { MDS.log("[CHANNEL] CHANNEL_OPEN: archive old channel failed (non-fatal): " + archErr); }
+              _doChannelOpenUpsert(campaignId, viewerKey, role, channelCoinId, maxAmount, now, creatorMx, viewerWalletAddr, frameId);
+            });
+          } else {
+            MDS.log("[CHANNEL] CHANNEL_OPEN: overwriting existing " + existing.STATUS + " channel with zero balance without archiving. campaign: " + campaignId + " old coin: " + existing.CHANNEL_COINID);
             _doChannelOpenUpsert(campaignId, viewerKey, role, channelCoinId, maxAmount, now, creatorMx, viewerWalletAddr, frameId);
-          });
+          }
         } else {
           _doChannelOpenUpsert(campaignId, viewerKey, role, channelCoinId, maxAmount, now, creatorMx, viewerWalletAddr, frameId);
         }
@@ -702,6 +710,20 @@ function _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHe
         MDS.log("[CHANNEL] REWARD_VOUCHER: DEDUP_LOG insert failed: " + dedupErr);
       }
       MDS.log("[CHANNEL] REWARD_VOUCHER: voucher stored. campaign: " + campaignId + " cumulative: " + cumulative + " role: " + role);
+      getChannelState(campaignId, viewerKey, role, function(gsErr, channel) {
+        if (gsErr || !channel) {
+          MDS.log("[CHANNEL] REWARD_VOUCHER: getChannelState failed or not found: " + gsErr);
+          return;
+        }
+        var maxAmount = parseFloat(channel.MAX_AMOUNT) || 0;
+        var currentCumulative = parseFloat(cumulative) || 0;
+        if (currentCumulative >= maxAmount) {
+          MDS.log("[CHANNEL] Channel full (" + currentCumulative + " >= " + maxAmount + "), triggering auto-settlement. campaign: " + campaignId);
+          _swAutoSettleVoucher(campaignId, viewerKey, role, txHex);
+        } else {
+          MDS.log("[CHANNEL] Channel accumulated (" + currentCumulative + " < " + maxAmount + "), skipping auto-settlement until full/finished. campaign: " + campaignId);
+        }
+      });
       if (role === 'publisher') {
         if (!frameId) {
           MDS.log("[CHANNEL] REWARD_VOUCHER (publisher): no frame_id — cannot create reward event. campaign: " + campaignId);
@@ -1613,6 +1635,20 @@ function _doGeneratePublisherVoucher(campaignId, frameId, eventId, pubChannel) {
           }
         }
         if (!_coinFound) {
+          var _now = Date.now();
+          var _createdAt = parseInt(pubChannel.CREATED_AT || 0, 10);
+          var _age = _now - _createdAt;
+          if (_age < 60000) {
+            MDS.log("[CHANNEL] _doGeneratePublisherVoucher: publisher coin not found but channel is new (age=" + _age + "ms) — grace period, deferring reward. campaign: " + campaignId);
+            var _now2 = Date.now();
+            sqlQuery(
+              "MERGE INTO DEFERRED_PUB_REWARDS (ID, CAMPAIGN_ID, FRAME_ID, VIEWER_EVENT_ID, AMOUNT, CREATED_AT) KEY (ID) VALUES ('" +
+              escapeSql(pubEventId) + "','" + escapeSql(campaignId) + "','" + escapeSql(frameId) + "','" +
+              escapeSql(eventId) + "'," + pubReward + "," + _now2 + ")",
+              function() {}
+            );
+            return;
+          }
           MDS.log("[CHANNEL] _doGeneratePublisherVoucher: publisher coin spent — reopening channel. campaign: " + campaignId);
           var _pubViewerKey  = pubChannel.VIEWER_KEY        || '';
           var _pubViewerMx   = pubChannel.CREATOR_MX        || '';
@@ -1621,11 +1657,11 @@ function _doGeneratePublisherVoucher(campaignId, frameId, eventId, pubChannel) {
           var _pubWalletPK   = pubChannel.VIEWER_WALLET_PK  || '';
           settleChannel(campaignId, _pubViewerKey, 'publisher', function(settleErr) {
             if (settleErr) { MDS.log("[CHANNEL] _doGeneratePublisherVoucher: settleChannel failed: " + settleErr); }
-            var _now2 = Date.now();
+            var _now3 = Date.now();
             sqlQuery(
               "MERGE INTO DEFERRED_PUB_REWARDS (ID, CAMPAIGN_ID, FRAME_ID, VIEWER_EVENT_ID, AMOUNT, CREATED_AT) KEY (ID) VALUES ('" +
               escapeSql(pubEventId) + "','" + escapeSql(campaignId) + "','" + escapeSql(frameId) + "','" +
-              escapeSql(eventId) + "'," + pubReward + "," + _now2 + ")",
+              escapeSql(eventId) + "'," + pubReward + "," + _now3 + ")",
               function() {
                 openChannel(campaignId, _pubViewerKey, _pubViewerMx, _pubMaxAmount, 'publisher', frameId, _pubWalletAddr, pubChannel.OPENER_MX_PK || '', function(openErr) {
                   if (openErr) {
@@ -2330,3 +2366,87 @@ function _processSettledChannels(rows, coins) {
     }
   }
 }
+
+function autoSettleChannelsForCampaign(campaignId) {
+  var sql = "SELECT VIEWER_KEY, ROLE, LATEST_TX_HEX FROM CHANNEL_STATE " +
+    "WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') " +
+    "AND STATUS = 'open' " +
+    "AND LATEST_TX_HEX != ''";
+  sqlQuery(sql, function(err, rows) {
+    if (err) {
+      MDS.log("[CHANNEL] autoSettleChannelsForCampaign SELECT failed: " + err);
+      return;
+    }
+    if (!rows || rows.length === 0) { return; }
+    MDS.log("[CHANNEL] autoSettleChannelsForCampaign found " + rows.length + " open channels to settle for campaign: " + campaignId);
+    for (var i = 0; i < rows.length; i++) {
+      _swAutoSettleVoucher(campaignId, rows[i].VIEWER_KEY, rows[i].ROLE, rows[i].LATEST_TX_HEX);
+    }
+  });
+}
+
+function _swAutoSettleVoucher(campaignId, viewerKey, role, txHex) {
+  var settleId = "sw_stl_" + Date.now().toString(16);
+  MDS.log("[CHANNEL] SW Auto-settlement started. campaignId: " + campaignId + " role: " + role + " settleId: " + settleId);
+
+  var onError = function(msg) {
+    MDS.log("[CHANNEL] SW Auto-settlement failed: " + msg + " campaign: " + campaignId);
+    MDS.cmd("txndelete id:" + settleId, function() {});
+  };
+
+  MDS.keypair.get("VIEWER_WALLET_PK_" + campaignId, function(pkRes) {
+    var signKey = (pkRes && pkRes.status && pkRes.value) ? pkRes.value : viewerKey;
+    MDS.log("[CHANNEL] SW Auto-settlement signKey: " + (signKey !== viewerKey ? "wallet-pk" : "viewer-key (fallback)"));
+
+    MDS.cmd("txnimport id:" + settleId + " data:" + txHex, function(r1) {
+      if (!r1 || !r1.status) {
+        onError((r1 && r1.error) || "txnimport failed");
+        return;
+      }
+
+      MDS.cmd("txnsign id:" + settleId + " publickey:" + signKey, function(r2) {
+        if (r2 && r2.pending) {
+          var ctx = {
+            kind:       "settlement",
+            settleId:   settleId,
+            campaignId: campaignId,
+            viewerKey:  viewerKey,
+            role:       role,
+            signKey:    signKey
+          };
+          MDS.keypair.set("PENDING_CHANNEL_" + r2.pendinguid, JSON.stringify(ctx), function() {
+            MDS.log("[CHANNEL] SW Auto-settlement txnsign pending, uid: " + r2.pendinguid);
+          });
+          return;
+        }
+        if (!r2 || !r2.status) {
+          onError((r2 && r2.error) || "txnsign failed");
+          return;
+        }
+
+        MDS.cmd("txnpost id:" + settleId + " mine:true", function(r3) {
+          if (r3 && r3.pending) {
+            MDS.cmd("txndelete id:" + settleId, function() {});
+            var ctx2 = {
+              kind:       "settlement_post",
+              campaignId: campaignId,
+              viewerKey:  viewerKey,
+              role:       role
+            };
+            MDS.keypair.set("PENDING_CHANNEL_" + r3.pendinguid, JSON.stringify(ctx2), function() {
+              MDS.log("[CHANNEL] SW Auto-settlement txnpost pending, uid: " + r3.pendinguid);
+            });
+            return;
+          }
+          MDS.cmd("txndelete id:" + settleId, function() {});
+          if (!r3 || !r3.status) {
+            MDS.log("[CHANNEL] SW Auto-settlement txnpost failed: " + ((r3 && r3.error) || "txnpost failed"));
+            return;
+          }
+          MDS.log("[CHANNEL] SW Auto-settlement tx posted successfully. Awaiting L1 confirmation. campaign: " + campaignId);
+        });
+      });
+    });
+  });
+}
+

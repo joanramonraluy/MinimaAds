@@ -176,59 +176,64 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
-### Session: 2026-06-15 — Security N2-4: bind REWARD_REQUEST sender to channel opener (Option B)
+### Session: 2026-06-15 (patch 16) — Fix: Implement Maxima Outbox Queue & Case-Insensitive Normalization
 
-**Problem**: `handleRewardRequest` received `senderPk` (cryptographically-authenticated `msg.data.from`) but never bound it to the channel record. A third party could submit `REWARD_REQUEST` for someone else's channel, advancing the channel cumulative and combined with N2-2 (now fixed) could drain campaign budget for clicks nobody made.
-
-**Fix** (Option B — non-breaking, no wire changes):
-1. **DB schema** (`public/service-workers/db-init.js`, `dapp/app.js` `initFEChannelState`): added `OPENER_MX_PK VARCHAR(512) DEFAULT ''` migration to both runtimes after `LAST_CLICK_VOUCHER_AT`.
-2. **`core/channels.js`** `openChannel` / `_doMergeChannel`: added `openerMxPk` parameter (8th, before `cb`); included in `MERGE INTO CHANNEL_STATE` column list. Stores the authenticated Maxima PK of the node that opened the channel.
-3. **`channel.handler.js`** `handleChannelOpenRequest`: all 5 `openChannel()` call sites now pass `sndrPk` as `openerMxPk`. `_doGeneratePublisherVoucher` reopen path passes `pubChannel.OPENER_MX_PK || ''`.
-4. **`channel.handler.js`** `handleRewardRequest` → `_handleRewardRequestInner`: threaded `sndrPk` as new 7th parameter `senderPk`. Guard added after `getChannelState`: if `channel.OPENER_MX_PK` is non-empty AND `senderPk` is non-empty, rejects when they differ (`.toUpperCase()` both sides). Fails-open on empty `OPENER_MX_PK`.
-5. **`sdk/index.js`**: `openChannel` call updated to pass `''` for `openerMxPk` (viewer node — guard not applicable there).
-
-**Files modified**: `public/service-workers/db-init.js`, `dapp/app.js`, `core/channels.js`, `public/service-workers/handlers/channel.handler.js`, `sdk/index.js`, `docs/audit_report_2.md` (§10 tracker), `AGENTS.md §6`, `docs/HISTORY.md §17`.
-
-**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 10) moved to `docs/HISTORY.md §17`.
-
-**Verification**: On a two-node setup: (a) normal view + click reward still settles end-to-end; (b) a `REWARD_REQUEST` sent from a third node (different `msg.data.from`) for an existing channel is rejected with log `REWARD_REQUEST rejected: senderPk != OPENER_MX_PK`; (c) re-opened channels (publisher settle + reopen) continue to work. No FE console errors.
-
----
-
-### Session: 2026-06-15 (patch 11) — Fix: viewer campaigns list stuck rendering
-
-**Problem**:
-If the campaigns list in `dapp/views/viewer.js` initially loaded 0 campaigns (before any campaigns were discovered or synced) or encountered an H2 SQL query error or missing element, the lock variable `_viewerState.listRendering` was left set to `true`. This blocked any subsequent updates or refreshes to the list (e.g. from `NEW_CAMPAIGN` / `CAMPAIGN_UPDATED` SW signals or block events), leaving the UI stuck on "No ads available right now." or "Loading campaigns..." forever.
+**Problem**: Maxima signaling messages (e.g. campaign discovery, reward requests, vouchers) failed with "No Contact found" errors due to strict key case sensitivity checks in the platform's contact manager (e.g. `0X` vs `0x` prefixes) and race conditions where signals are sent before target contacts are fully established on-chain/in-network.
 
 **Fix**:
-- **Viewer UI** (`dapp/views/viewer.js`): Added proper cleanup resets to ensure `_viewerState.listRendering = false` is executed on all return and exit paths (error handler, list element missing check, empty campaign list branch) inside the `_loadAndRenderList` SQL query callback.
-- **MiniDapp Package**: Bumped version to `0.26.6.2` in `dapp.conf` and re-zipped the repository files into `MinimaAds.mds.zip`.
+- **Core** (`core/minima.js`):
+  - Added `normalizePublicKey(pk)` to enforce standard lowercase `0x` prefix and uppercase key hex format.
+  - Implemented a memory-resident `_maximaOutbox` queue and `processMaximaOutbox()` helper.
+  - Refactored `sendMaxima()` to route through `_sendMaximaDirect()`, catch contact routing failures ("No contact found"), and automatically queue them in the outbox.
+- **Service Worker** (`service.js`):
+  - Normalized all public key variables and configuration key checks on initialization.
+  - Added event listeners for `MAXIMACONTACTS` and `MAXIMAHOSTS` events to trigger outbox flushes.
+  - Added outbox flushing inside the `NEWBLOCK` event handler.
+- **MiniDapp Package**: Bumped version to `0.26.6.7` in `dapp.conf` and updated the packaged `MinimaAds.mds.zip`.
 
-**Files modified**: `dapp/views/viewer.js`, `dapp.conf`, `MinimaAds.mds.zip`
+**Files modified**: `core/minima.js`, `service.js`, `dapp.conf`, `MinimaAds.mds.zip`
 
-**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 9) moved to `docs/HISTORY.md §17`.
+**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 13) moved to `docs/HISTORY.md §17`.
 
-**Verification**: Reload the viewer page. Verify that list refreshes are not blocked and that newly discovered or modified campaigns appear dynamically on the View Ads list.
-
----
-
-### Session: 2026-06-15 — Security N2-3: enforce `MAX_PUBLISHER_BUDGET` at voucher time
-
-**Problem**: `MAX_PUBLISHER_BUDGET` was enforced only at publisher channel-open (via `SUM(CUMULATIVE_EARNED)`), never at voucher/payout time. Concurrent publishers can each open a channel while `SUM=0`, then collectively over-pay and spend into the viewer reward pool, violating the documented `MAX_PUBLISHER_BUDGET ⊆ BUDGET_TOTAL` invariant.
-
-**Fix** (`public/service-workers/handlers/channel.handler.js`, 3 sites): before dispatching each publisher voucher, sum `CUMULATIVE_EARNED` across all `ROLE='publisher'` channels for the campaign and reject when `earnedAll − thisChannelOldCumulative + newCumulative > MAX_PUBLISHER_BUDGET + 1e-6`.
-1. `_doGeneratePublisherVoucher` — added the SUM query after the per-channel `MAX_AMOUNT` check; remainder of the function moved into a hoisted `_continuePublisherVoucher()` inner function called from the callback.
-2. `_replayDeferredPublisherRewardsNow` — same check before the deferred-replay `isDuplicate`/dispatch, wrapped in `_continueReplayPublisherVoucher()`.
-3. Publisher branch of `_handleRewardRequestInner` — same check wrapping the `_swDispatchVoucher('publisher')` call.
-
-All additions are Rhino-safe (`var`, `function()`, string concat, no trailing commas, `MDS.log`, `escapeSql`, UPPERCASE H2 row keys). SW-only — no FE mirror of this logic exists.
-
-**Files modified**: `public/service-workers/handlers/channel.handler.js`, `docs/audit_report_2.md` (§10 tracker).
-
-**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 8) moved to `docs/HISTORY.md §17`.
-
-**Verification**: On a two-node setup, configure a campaign with a small `MAX_PUBLISHER_BUDGET` (e.g. enough for ~2 publisher views) and open 3+ publisher channels concurrently (multiple frames/nodes) before any earnings record. Generate enough publisher views to push the aggregate past the cap. Expect: publisher vouchers settle only up to `MAX_PUBLISHER_BUDGET`; beyond that the SW logs `MAX_PUBLISHER_BUDGET exceeded. projected=… cap=…` and dispatches no further publisher voucher. Confirm viewer rewards are unaffected and no FE console errors.
+**Verification**: Deploy and verify that when a message is sent to a peer not yet in the contact list, the node logs the queued outbox status. Verify that once the contact is added, the outbox flushes automatically and successfully delivers the message.
 
 ---
 
-> Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, Auto-Sync Platform Creator Route, Unify MLS DevTools, Fix Viewer and Publisher Reward Delivery, Fix Publisher Budget (Multi-Publisher Support), Fix Stale-Pending Publisher Channel Deadlock, Minima Foundation Fee (3%) + V4 Escrow Script Fixes, 2026-06-10 settlement fixes, Security audit T7/T9, and all earlier) are archived in `docs/HISTORY.md §17`.
+### Session: 2026-06-15 (patch 15) — Fix: Prevent premature channel settlement by updating CREATED_AT on activation
+
+**Problem**: When a channel open request is received, the creator node inserts the channel row in `CHANNEL_STATE` with status `'pending'` and `CREATED_AT = now`. Because L1 block mining (Tx1 split + Tx2 channel open) takes time, the channel often remains in `pending` for over 60 seconds. Once the channel is finally activated (`activateChannel` updates status to `'open'`), the old `CREATED_AT` is kept. Consequently, `checkOpenChannelsSettled` running in the same block calculates an age > 60s, bypassing the grace period. Because of internal Minima indexing latency, the newly created coin is not yet found, causing the node to immediately settle the channel with 0 tokens.
+
+**Fix**:
+- **Core** (`core/channels.js`): In `activateChannel`, update the `CREATED_AT` timestamp to the current time (`Date.now()`). This resets the channel's age starting from the exact moment it transitions to `'open'`, ensuring the 60-second indexing grace period correctly protects it against premature settlement.
+- **MiniDapp Package**: Bumped version to `0.26.6.6` in `dapp.conf` and updated the packaged `MinimaAds.mds.zip`.
+
+**Files modified**: `core/channels.js`, `dapp.conf`, `MinimaAds.mds.zip`
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 12) moved to `docs/HISTORY.md §17`.
+
+**Verification**: Deploy and verify that the creator node logs show the grace period correctly skipping settlement of newly activated viewer and publisher channels during indexation lag, allowing them to remain open.
+
+---
+
+### Session: 2026-06-15 (patch 14) — Fix: Optimize Service Worker auto-settlement triggers
+
+**Problem**: The Service Worker previously auto-settled every reward voucher as soon as it arrived. This spent the channel coin prematurely and invalidated all subsequent vouchers for the same channel, causing double-spend transaction submission errors and leading to loss of potential rewards.
+
+**Fix**:
+- **Service Worker** (`public/service-workers/handlers/channel.handler.js`):
+  - Modified `_continueRewardVoucher` to only trigger `_swAutoSettleVoucher` when the channel reaches its reward cap (`cumulative >= MAX_AMOUNT`).
+  - Added `autoSettleChannelsForCampaign(campaignId)` which selects all open channels for that campaign and triggers auto-settlement for each of them.
+  - Updated `handleChannelOpen` to automatically call `_swAutoSettleVoucher` when archiving a positive-balance active channel before replacing/overwriting it with a new channel coin.
+- **Service Worker** (`public/service-workers/handlers/campaign.handler.js`):
+  - In `applyStatusChange`, when a campaign status transitions to `'finished'`, call `autoSettleChannelsForCampaign(campaignId)` to automatically settle any open channels for that campaign.
+- **MiniDapp Package**: Bumped version to `0.26.6.5` in `dapp.conf` and updated the packaged `MinimaAds.mds.zip`.
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`, `public/service-workers/handlers/campaign.handler.js`, `dapp.conf`, `MinimaAds.mds.zip`
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (Security N2-4) moved to `docs/HISTORY.md §17`.
+
+**Verification**: Deploy and trigger view/click rewards. Verify that rewards accumulate off-chain without triggering a transaction on the first reward. Once the channel is full, the campaign finishes, or the channel is replaced, confirm that the SW auto-settles the channel.
+
+---
+
+> Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, Auto-Sync Platform Creator Route, Unify MLS DevTools, Fix Viewer and Publisher Reward Delivery, Fix Publisher Budget (Multi-Publisher Support), Fix Stale-Pending Publisher Channel Deadlock, Minima Foundation Fee (3%) + V4 Escrow Script Fixes, 2026-06-10 settlement fixes, Security audit T7/T9, Security N2-4: bind REWARD_REQUEST sender, and all earlier) are archived in `docs/HISTORY.md §17`.

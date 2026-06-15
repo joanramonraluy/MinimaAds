@@ -158,7 +158,7 @@ function onInited() {
           if (creatorRoute) {
             var routeParts = creatorRoute.split("#");
             if (routeParts.length === 3 && routeParts[0] === "MAX") {
-              MINIMAADS_CREATOR_PK = routeParts[1].toUpperCase();
+              MINIMAADS_CREATOR_PK = normalizePublicKey(routeParts[1]);
             }
           }
           MDS.keypair.get("USER_PERMANENT_ROUTE", function(permRes) {
@@ -194,12 +194,12 @@ function _initAfterDb() {
       MDS.log("[ADS] maxima action:info failed: " + (resp.error || "no response") + " — retrying in 10s");
       return;
     }
-    MY_MAXIMA_PK  = resp.response.publickey ? resp.response.publickey.toUpperCase() : "";
+    MY_MAXIMA_PK  = resp.response.publickey ? normalizePublicKey(resp.response.publickey) : "";
     MY_MX_ADDRESS = resp.response.contact || "";
     MDS.log("[ADS] Maxima PK: " + MY_MAXIMA_PK + " contact: " + MY_MX_ADDRESS);
 
     // Auto-sync Platform Creator Route on boot if this node is the Platform Creator
-    if (MY_MAXIMA_PK && MY_MAXIMA_PK === MINIMAADS_CREATOR_PK.toUpperCase()) {
+    if (MY_MAXIMA_PK && normalizePublicKey(MY_MAXIMA_PK) === normalizePublicKey(MINIMAADS_CREATOR_PK)) {
       MDS.keypair.get("USER_PERMANENT_ROUTE", function(permRes) {
         var permRoute = (permRes && permRes.status && permRes.value) ? permRes.value : "";
         if (permRoute) {
@@ -382,9 +382,12 @@ MDS.init(function(msg) {
   if (msg.event === "MAXIMA")   { onMaxima(msg); }
   if (msg.event === "NEWBLOCK") {
     scanEscrowCoins(); checkPendingChannelOpens(); checkExpiredCampaigns(); _checkChannelCoinsOnBlock();
+    processMaximaOutbox();
     _livenessCheckBlock++;
     if (_livenessCheckBlock % 20 === 0) { checkCampaignStatuses(); }
   }
   if (msg.event === "MDS_PENDING")         { onPending(msg); }
   if (msg.event === "MDSCOMMS")            { onComms(msg); }
+  if (msg.event === "MAXIMACONTACTS")      { processMaximaOutbox(); }
+  if (msg.event === "MAXIMAHOSTS")         { processMaximaOutbox(); }
 });

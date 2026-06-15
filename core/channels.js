@@ -4,18 +4,19 @@
 // Rhino-compatible: var only, no arrow functions, no template literals, no trailing commas.
 // All DB access via sqlQuery() from core/minima.js.
 
-function openChannel(campaignId, viewerKey, creatorMx, maxAmount, role, frameId, walletAddr, cb) {
+function openChannel(campaignId, viewerKey, creatorMx, maxAmount, role, frameId, walletAddr, openerMxPk, cb) {
   var now   = Date.now();
   var r     = role || 'viewer';
   var fid   = frameId || '';
   var wAddr = walletAddr || '';
-  _doMergeChannel(campaignId, viewerKey, creatorMx, maxAmount, r, fid, wAddr, now, cb);
+  var omxPk = openerMxPk || '';
+  _doMergeChannel(campaignId, viewerKey, creatorMx, maxAmount, r, fid, wAddr, omxPk, now, cb);
 }
 
-function _doMergeChannel(campaignId, viewerKey, creatorMx, maxAmount, r, fid, wAddr, now, cb) {
+function _doMergeChannel(campaignId, viewerKey, creatorMx, maxAmount, r, fid, wAddr, omxPk, now, cb) {
   var sql = "MERGE INTO CHANNEL_STATE " +
     "(CAMPAIGN_ID, VIEWER_KEY, ROLE, FRAME_ID, CREATOR_MX, CHANNEL_COINID, MAX_AMOUNT, " +
-    "CUMULATIVE_EARNED, LATEST_TX_HEX, STATUS, CREATED_AT, VIEWER_WALLET_ADDR) " +
+    "CUMULATIVE_EARNED, LATEST_TX_HEX, STATUS, CREATED_AT, VIEWER_WALLET_ADDR, OPENER_MX_PK) " +
     "KEY (CAMPAIGN_ID, VIEWER_KEY, ROLE) VALUES (" +
     "'" + escapeSql(campaignId) + "'," +
     "'" + escapeSql(viewerKey) + "'," +
@@ -28,7 +29,8 @@ function _doMergeChannel(campaignId, viewerKey, creatorMx, maxAmount, r, fid, wA
     "''," +
     "'pending'," +
     now + "," +
-    "'" + escapeSql(wAddr) + "'" +
+    "'" + escapeSql(wAddr) + "'," +
+    "'" + escapeSql(omxPk) + "'" +
     ")";
   sqlQuery(sql, function(err) {
     if (err) { cb(err); return; }

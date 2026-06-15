@@ -46,6 +46,28 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-14 (patch 10) — Fix: Reset click reward cooldown state, clear warning message, and improve channel opening status
+
+**Problem**:
+1. Once a viewer was in click cooldown, any subsequent click on the CTA button showed a red warning message. However, after the cooldown expired:
+   - The red warning message did not disappear and was instead replaced by a green success message (from the previous reward), which was confusing to the user.
+   - The `rewardAllowed` state was never reset back to `true` on confirmed click rewards, meaning the viewer could not earn any subsequent click rewards in the same details page session.
+2. The initial channel opening status message was not descriptive enough regarding the L1 blockchain transaction mining wait.
+
+**Fix**:
+- **Viewer UI** (`dapp/views/viewer.js`):
+  1. Updated `onRewardValidation` click timers (both for confirmed rewards and cooldown rejections) to set `statusEl.textContent = ''` (clearing the message entirely) when the cooldown expires.
+  2. Correctly set `_viewerState.rewardAllowed = true` when the confirmed click reward cooldown timer expires.
+  3. Reset `statusEl.style.color = ''` to prevent the red warning color from leaking into the "Processing reward…" and "Reward confirmed…" status messages.
+  4. Conditionalized the channel opening status message in `onRewardValidation` to show a detailed message when a new channel needs L1 block confirmation (`Opening secure channel (first time requires L1 block confirmation, ~60s). Once established, subsequent rewards will be near-instant!`) and a faster one for open channels (`Sending payment voucher…`).
+  5. Implemented `onChannelOpened(parsed)` hook to dynamically update the session campaign channel status state to `'open'` when mined.
+
+**Files modified**: `dapp/views/viewer.js`, `MinimaAds.mds.zip`
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 7) moved to `docs/HISTORY.md §17`.
+
+---
+
 ### Session: 2026-06-14 (patch 9) — Fix: click success amount typo and build package zip
 
 **Problem**:

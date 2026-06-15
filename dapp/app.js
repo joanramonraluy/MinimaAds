@@ -1922,7 +1922,9 @@ function initFEChannelState(cb) {
     sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS VIEWER_WALLET_PK VARCHAR(512) DEFAULT ''", function() {
     sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS LAST_VOUCHER_AT BIGINT DEFAULT 0", function() {
     sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS LAST_CLICK_VOUCHER_AT BIGINT DEFAULT 0", function() {
+    sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS OPENER_MX_PK VARCHAR(512) DEFAULT ''", function() {
       if (cb) { cb(); }
+    }); // end OPENER_MX_PK migration
     }); // end LAST_CLICK_VOUCHER_AT migration
     }); // end LAST_VOUCHER_AT migration
     }); // end VIEWER_WALLET_PK migration

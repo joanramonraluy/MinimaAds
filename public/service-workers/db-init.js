@@ -185,6 +185,8 @@ function initDB(cb) {
                     sqlQuery("ALTER TABLE CAMPAIGNS ADD COLUMN IF NOT EXISTS PUBLISHER_BUDGET_EARNED DECIMAL(20,6) NOT NULL DEFAULT 0", function() {
                     sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS LAST_VOUCHER_AT BIGINT DEFAULT 0", function() {
                     sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS LAST_CLICK_VOUCHER_AT BIGINT DEFAULT 0", function() {
+                    sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS OPENER_MX_PK VARCHAR(512) DEFAULT ''", function() {
+                    }); // end OPENER_MX_PK migration
                     }); // end LAST_CLICK_VOUCHER_AT migration
                     }); // end LAST_VOUCHER_AT migration
                     }); // end PUBLISHER_BUDGET_EARNED migration

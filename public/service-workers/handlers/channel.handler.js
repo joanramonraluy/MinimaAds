@@ -149,7 +149,7 @@ function handleChannelOpenRequest(payload, senderPk) {
           MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): stale pending, no split coin — archiving stale record and opening fresh. campaign: " + campaignId);
           settleChannel(campaignId, viewerKey, 'publisher', function(staleSettleErr) {
             if (staleSettleErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): archive stale pending failed: " + staleSettleErr); }
-            openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'publisher', frameId, viewerWalletAddr, function(openErr) {
+            openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'publisher', frameId, viewerWalletAddr, sndrPk, function(openErr) {
               if (openErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): openChannel (after stale archive) failed: " + openErr); return; }
               sqlQuery(
                 "UPDATE CHANNEL_STATE SET VIEWER_WALLET_PK = '" + escapeSql(viewerWalletPK) + "'" +
@@ -173,7 +173,7 @@ function handleChannelOpenRequest(payload, senderPk) {
           return;
         }
 
-        openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'publisher', frameId, viewerWalletAddr, function(openErr) {
+        openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'publisher', frameId, viewerWalletAddr, sndrPk, function(openErr) {
           if (openErr) {
             MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): openChannel failed: " + openErr);
             return;
@@ -281,7 +281,7 @@ function handleChannelOpenRequest(payload, senderPk) {
               MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: coin spent — settling and opening new channel. campaign: " + campaignId);
               settleChannel(campaignId, viewerKey, 'viewer', function(settleErr) {
                 if (settleErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: settleChannel failed: " + settleErr); }
-                openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', frameId, viewerWalletAddr, function(openErr) {
+                openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', frameId, viewerWalletAddr, sndrPk, function(openErr) {
                   if (openErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: openChannel failed: " + openErr); return; }
                   _signalCampaignUpdated(campaignId);
                   MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: building channel TX in SW. campaign: " + campaignId + " viewer_mx: " + viewerMx);
@@ -322,7 +322,7 @@ function handleChannelOpenRequest(payload, senderPk) {
           MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: stale pending, no split coin — archiving stale record and opening fresh. campaign: " + campaignId);
           settleChannel(campaignId, viewerKey, 'viewer', function(staleSettleErr) {
             if (staleSettleErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: archive stale pending failed: " + staleSettleErr); }
-            openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', frameId, viewerWalletAddr, function(openErr) {
+            openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', frameId, viewerWalletAddr, sndrPk, function(openErr) {
               if (openErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: openChannel (after stale archive) failed: " + openErr); return; }
               _signalCampaignUpdated(campaignId);
               MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: building channel TX after stale archive. campaign: " + campaignId);
@@ -332,7 +332,7 @@ function handleChannelOpenRequest(payload, senderPk) {
           return;
         }
 
-        openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', frameId, viewerWalletAddr, function(openErr) {
+        openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', frameId, viewerWalletAddr, sndrPk, function(openErr) {
           if (openErr) {
             MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: openChannel failed: " + openErr);
             return;
@@ -500,7 +500,7 @@ function handleRewardRequest(payload, senderPk) {
       }
       return;
     }
-    _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumulative, campaign);
+    _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumulative, campaign, sndrPk);
   });
 }
 
@@ -548,7 +548,7 @@ function handleRewardRejected(payload) {
   });
 }
 
-function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumulative, campaign) {
+function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumulative, campaign, senderPk) {
   var role         = payload.role || 'viewer';
   var frameId      = payload.frame_id || '';
   var publisherKey = payload.publisher_key || '';
@@ -566,6 +566,14 @@ function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumu
     }
     if (cumulative > parseFloat(channel.MAX_AMOUNT)) {
       MDS.log("[CHANNEL] REWARD_REQUEST: cumulative exceeds MAX_AMOUNT. cumulative: " + cumulative + " max: " + channel.MAX_AMOUNT);
+      return;
+    }
+
+    // N2-4: bind REWARD_REQUEST to the node that opened the channel.
+    // Fails-open when OPENER_MX_PK is empty (channels opened before this guard).
+    var _openerPk = channel.OPENER_MX_PK || '';
+    if (_openerPk && senderPk && _openerPk.toUpperCase() !== senderPk.toUpperCase()) {
+      MDS.log("[CHANNEL] REWARD_REQUEST rejected: senderPk != OPENER_MX_PK. campaign: " + campaignId);
       return;
     }
 
@@ -1619,7 +1627,7 @@ function _doGeneratePublisherVoucher(campaignId, frameId, eventId, pubChannel) {
               escapeSql(pubEventId) + "','" + escapeSql(campaignId) + "','" + escapeSql(frameId) + "','" +
               escapeSql(eventId) + "'," + pubReward + "," + _now2 + ")",
               function() {
-                openChannel(campaignId, _pubViewerKey, _pubViewerMx, _pubMaxAmount, 'publisher', frameId, _pubWalletAddr, function(openErr) {
+                openChannel(campaignId, _pubViewerKey, _pubViewerMx, _pubMaxAmount, 'publisher', frameId, _pubWalletAddr, pubChannel.OPENER_MX_PK || '', function(openErr) {
                   if (openErr) {
                     MDS.log("[CHANNEL] _doGeneratePublisherVoucher: openChannel (publisher) failed: " + openErr);
                     return;

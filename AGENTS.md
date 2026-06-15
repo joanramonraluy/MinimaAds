@@ -176,6 +176,25 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
+### Session: 2026-06-15 — Security N2-4: bind REWARD_REQUEST sender to channel opener (Option B)
+
+**Problem**: `handleRewardRequest` received `senderPk` (cryptographically-authenticated `msg.data.from`) but never bound it to the channel record. A third party could submit `REWARD_REQUEST` for someone else's channel, advancing the channel cumulative and combined with N2-2 (now fixed) could drain campaign budget for clicks nobody made.
+
+**Fix** (Option B — non-breaking, no wire changes):
+1. **DB schema** (`public/service-workers/db-init.js`, `dapp/app.js` `initFEChannelState`): added `OPENER_MX_PK VARCHAR(512) DEFAULT ''` migration to both runtimes after `LAST_CLICK_VOUCHER_AT`.
+2. **`core/channels.js`** `openChannel` / `_doMergeChannel`: added `openerMxPk` parameter (8th, before `cb`); included in `MERGE INTO CHANNEL_STATE` column list. Stores the authenticated Maxima PK of the node that opened the channel.
+3. **`channel.handler.js`** `handleChannelOpenRequest`: all 5 `openChannel()` call sites now pass `sndrPk` as `openerMxPk`. `_doGeneratePublisherVoucher` reopen path passes `pubChannel.OPENER_MX_PK || ''`.
+4. **`channel.handler.js`** `handleRewardRequest` → `_handleRewardRequestInner`: threaded `sndrPk` as new 7th parameter `senderPk`. Guard added after `getChannelState`: if `channel.OPENER_MX_PK` is non-empty AND `senderPk` is non-empty, rejects when they differ (`.toUpperCase()` both sides). Fails-open on empty `OPENER_MX_PK`.
+5. **`sdk/index.js`**: `openChannel` call updated to pass `''` for `openerMxPk` (viewer node — guard not applicable there).
+
+**Files modified**: `public/service-workers/db-init.js`, `dapp/app.js`, `core/channels.js`, `public/service-workers/handlers/channel.handler.js`, `sdk/index.js`, `docs/audit_report_2.md` (§10 tracker), `AGENTS.md §6`, `docs/HISTORY.md §17`.
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 10) moved to `docs/HISTORY.md §17`.
+
+**Verification**: On a two-node setup: (a) normal view + click reward still settles end-to-end; (b) a `REWARD_REQUEST` sent from a third node (different `msg.data.from`) for an existing channel is rejected with log `REWARD_REQUEST rejected: senderPk != OPENER_MX_PK`; (c) re-opened channels (publisher settle + reopen) continue to work. No FE console errors.
+
+---
+
 ### Session: 2026-06-15 (patch 11) — Fix: viewer campaigns list stuck rendering
 
 **Problem**:
@@ -209,30 +228,6 @@ All additions are Rhino-safe (`var`, `function()`, string concat, no trailing co
 **AGENTS.md updated**: yes — §6 updated, oldest entry (patch 8) moved to `docs/HISTORY.md §17`.
 
 **Verification**: On a two-node setup, configure a campaign with a small `MAX_PUBLISHER_BUDGET` (e.g. enough for ~2 publisher views) and open 3+ publisher channels concurrently (multiple frames/nodes) before any earnings record. Generate enough publisher views to push the aggregate past the cap. Expect: publisher vouchers settle only up to `MAX_PUBLISHER_BUDGET`; beyond that the SW logs `MAX_PUBLISHER_BUDGET exceeded. projected=… cap=…` and dispatches no further publisher voucher. Confirm viewer rewards are unaffected and no FE console errors.
-
----
-
-### Session: 2026-06-14 (patch 10) — Fix: Reset click reward cooldown state, clear warning message, and improve channel opening status
-
-**Problem**: 
-1. Once a viewer was in click cooldown, any subsequent click on the CTA button showed a red warning message. However, after the cooldown expired:
-   - The red warning message did not disappear and was instead replaced by a green success message (from the previous reward), which was confusing to the user.
-   - The `rewardAllowed` state was never reset back to `true` on confirmed click rewards, meaning the viewer could not earn any subsequent click rewards in the same details page session.
-2. The initial channel opening status message was not descriptive enough regarding the L1 blockchain transaction mining wait.
-
-**Fix**:
-- **Viewer UI** (`dapp/views/viewer.js`):
-  1. Updated `onRewardValidation` click timers (both for confirmed rewards and cooldown rejections) to set `statusEl.textContent = ''` (clearing the message entirely) when the cooldown expires.
-  2. Correctly set `_viewerState.rewardAllowed = true` when the confirmed click reward cooldown timer expires.
-  3. Reset `statusEl.style.color = ''` to prevent the red warning color from leaking into the "Processing reward…" and "Reward confirmed…" status messages.
-  4. Conditionalized the channel opening status message in `onRewardValidation` to show a detailed message when a new channel needs L1 block confirmation (`Opening secure channel (first time requires L1 block confirmation, ~60s). Once established, subsequent rewards will be near-instant!`) and a faster one for open channels (`Sending payment voucher…`).
-  5. Implemented `onChannelOpened(parsed)` hook to dynamically update the session campaign channel status state to `'open'` when mined.
-
-**Files modified**: `dapp/views/viewer.js`, `MinimaAds.mds.zip`
-
-**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 7) moved to `docs/HISTORY.md §17`.
-
-**Verification**: Trigger a click reward and let it confirm. Stay on the details page. Verify that once the cooldown expires, the reward status message completely disappears and subsequent CTA clicks are correctly allowed. Verify that the first channel open warns about the L1 wait while subsequent ones show a direct voucher payment status.
 
 ---
 

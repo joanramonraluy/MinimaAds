@@ -632,7 +632,7 @@
 
         _resolveCreatorRoute(campaign, function(creatorRoute) {
           console.log('[SDK] opening new channel campaign:' + campaign.ID + ' viewerKey:' + viewerKey + ' maxAmount:' + maxAmount + ' walletAddr:' + viewerWalletAddr + ' route:' + creatorRoute.substring(0, 8) + '...');
-          openChannel(campaign.ID, viewerKey, creatorRoute, maxAmount, 'viewer', '', viewerWalletAddr, function(err) {
+          openChannel(campaign.ID, viewerKey, creatorRoute, maxAmount, 'viewer', '', viewerWalletAddr, '', function(err) {
             if (err) {
               console.log('[SDK] openChannel error:', err);
               if (cb) { cb(); }

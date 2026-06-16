@@ -176,6 +176,22 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
+### Session: 2026-06-16 (patch 20) — Fix: updateBudget _numI regression truncates decimal budgets
+
+**Problem**: `updateBudget()` in `core/campaigns.js` used `_numI(remaining, 0)` (parseInt) to coerce the remaining budget before SQL interpolation. `parseInt` truncates decimals: `parseInt(0.5) = 0`, causing campaigns with sub-1 M remaining budgets to be incorrectly marked as `'finished'` after any reward deduction.
+
+**Root cause**: Introduced in commit `52e9519` (B-1 hardening). The intent was SQL-safety coercion, but `_numI` is the wrong helper for money values — `_numF` (parseFloat) must be used for float precision.
+
+**Fix**: Replaced `_numI(remaining, 0)` with `_numF(remaining, 0)` in `updateBudget()`. Added inline comment explaining why `_numF` is mandatory here.
+
+**Files modified**: `core/campaigns.js`, `dapp.conf` (version → 0.26.6.5), `MinimaAds.mds.zip`
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry moved to `docs/HISTORY.md §17`.
+
+**Also investigated** (no code change needed): The "1 active publisher channel" visible on the creator UI is created by user2 (a legitimate publisher node with a custom frame), NOT by the creator node itself. The self-exclusion guard from patch 19 is working correctly. The correlation with B-1 was coincidental.
+
+---
+
 ### Session: 2026-06-16 (patch 19) — Fix: Creator node auto-creating publisher channel on own campaigns
 
 **Problem**: When a creator published a campaign (or when `persistCampaign()` ran on any campaign arrival), `_tryOpenPublisherChannelForAllFrames()` was unconditionally called. If the creator node had custom frames, this triggered `MA_OPEN_PUBLISHER_CHANNELS` → `_tryOpenPublisherChannel`, opening a publisher channel from the creator to their own campaign. This is semantically wrong (a creator cannot be a publisher of their own campaign) and caused a spurious "1 active channel (0.5000 M locked)" to appear in campaign stats for the creator.
@@ -237,36 +253,5 @@ For verification procedures, see `docs/VERIFICATION.md`.
 1. Navigate to the "View Ads" list and verify that newly discovered campaigns are rendered dynamically in the list.
 2. Open a campaign's detail page, trigger a view, and verify that the status changes to `'open'` upon receiving the channel opening event.
 
----
+> Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, Auto-Sync Platform Creator Route, Unify MLS DevTools, Fix Viewer and Publisher Reward Delivery, Fix Publisher Budget (Multi-Publisher Support), Fix Stale-Pending Publisher Channel Deadlock, Minima Foundation Fee (3%) + V4 Escrow Script Fixes, 2026-06-10 settlement fixes, Security audit T7/T9, Security N2-4, N2-5/N2-6, patch 16, patch 17, and all earlier) are archived in `docs/HISTORY.md §17`.
 
-### Session: 2026-06-15 (patch 17) — Fix: Implement payment channel synchronization and accrual recovery
-
-**Problem**: When a viewer loses local state and a creator reopens a channel, the viewer's CUMULATIVE_EARNED resets to 0 while the creator expects it to continue from the previous balance, causing persistent "accrual delta invalid" errors. Additionally, pending rewards accumulated while the channel was inactive could be discarded.
-
-**Fix**:
-- **Service Worker** (`public/service-workers/handlers/channel.handler.js`):
-  - Modified `handleChannelOpen()` to extract `cumulative_earned` and `latest_tx_hex` from CHANNEL_OPEN payload
-  - Updated `_doChannelOpenUpsert()` to initialize CHANNEL_STATE with these values instead of hardcoded 0 and ''
-  - Enhanced CHANNEL_OPEN resending in all three paths (publisher, viewer, VOUCHER_SYNC_REQUEST) to include cumulative_earned and latest_tx_hex from the existing channel state
-  - Added voucher recovery logic: if accrual delta validation fails with delta <= 0, resend the latest stored voucher to recover the viewer state
-  - Enhanced logging to include current CUMULATIVE_EARNED value for debugging
-- **SDK** (`sdk/index.js`):
-  - Enhanced `_handleChannelOpenPayload()` to extract and persist cumulative_earned and latest_tx_hex via `updateChannelVoucher()`
-  - Fixed `_flushPending()` to replay ALL accumulated REWARD_REQUESTs instead of discarding them, using stored cumulative values
-- **Documentation** (`MinimaAds.md §8.9`): Updated CHANNEL_OPEN schema documentation
-
-**Files modified**: `public/service-workers/handlers/channel.handler.js`, `sdk/index.js`, `MinimaAds.md`
-
-**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 14) moved to `docs/HISTORY.md §17`.
-
-**Verification**:
-1. Simulate viewer state loss by clearing CHANNEL_STATE row for a campaign while keeping creator's record
-2. Trigger a view reward and verify creator resends CHANNEL_OPEN with correct cumulative_earned
-3. Verify viewer receives it, initializes correctly, and no accrual delta invalid errors occur
-4. Verify _flushPending replays all accumulated REWARD_REQUESTs
-
----
-
-
-
-> Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, Auto-Sync Platform Creator Route, Unify MLS DevTools, Fix Viewer and Publisher Reward Delivery, Fix Publisher Budget (Multi-Publisher Support), Fix Stale-Pending Publisher Channel Deadlock, Minima Foundation Fee (3%) + V4 Escrow Script Fixes, 2026-06-10 settlement fixes, Security audit T7/T9, Security N2-4, N2-5/N2-6, patch 16, and all earlier) are archived in `docs/HISTORY.md §17`.

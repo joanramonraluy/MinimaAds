@@ -29,12 +29,12 @@ function _numI(v, dflt) { var n = parseInt(v, 10); return isFinite(n) ? n : dflt
 
 function saveCampaign(campaign, ad, cb) {
   var mvr = campaign.max_viewer_reward !== undefined ? campaign.max_viewer_reward : campaign.MAX_VIEWER_REWARD;
-  var prv = (campaign.publisher_reward_view !== null && campaign.publisher_reward_view !== undefined) ? parseFloat(campaign.publisher_reward_view) : 0;
-  var mpb = (campaign.max_publisher_budget !== null && campaign.max_publisher_budget !== undefined) ? parseFloat(campaign.max_publisher_budget) : 0;
-  var pbs = (campaign.publisher_budget_spent !== null && campaign.publisher_budget_spent !== undefined) ? parseFloat(campaign.publisher_budget_spent) : 0;
-  var mdv = (campaign.max_daily_views !== null && campaign.max_daily_views !== undefined) ? parseInt(campaign.max_daily_views, 10) : LIMITS.MAX_VIEWS_PER_CAMPAIGN_PER_DAY;
-  var mdc = (campaign.max_daily_clicks !== null && campaign.max_daily_clicks !== undefined) ? parseInt(campaign.max_daily_clicks, 10) : LIMITS.MAX_CLICKS_PER_CAMPAIGN_PER_DAY;
-  var cms = (campaign.cooldown_ms !== null && campaign.cooldown_ms !== undefined) ? parseInt(campaign.cooldown_ms, 10) : LIMITS.COOLDOWN_BETWEEN_REWARDS_MS;
+  var prv = _numF((campaign.publisher_reward_view !== null && campaign.publisher_reward_view !== undefined) ? campaign.publisher_reward_view : 0, 0);
+  var mpb = _numF((campaign.max_publisher_budget !== null && campaign.max_publisher_budget !== undefined) ? campaign.max_publisher_budget : 0, 0);
+  var pbs = _numF((campaign.publisher_budget_spent !== null && campaign.publisher_budget_spent !== undefined) ? campaign.publisher_budget_spent : 0, 0);
+  var mdv = _numI((campaign.max_daily_views !== null && campaign.max_daily_views !== undefined) ? campaign.max_daily_views : LIMITS.MAX_VIEWS_PER_CAMPAIGN_PER_DAY, LIMITS.MAX_VIEWS_PER_CAMPAIGN_PER_DAY);
+  var mdc = _numI((campaign.max_daily_clicks !== null && campaign.max_daily_clicks !== undefined) ? campaign.max_daily_clicks : LIMITS.MAX_CLICKS_PER_CAMPAIGN_PER_DAY, LIMITS.MAX_CLICKS_PER_CAMPAIGN_PER_DAY);
+  var cms = _numI((campaign.cooldown_ms !== null && campaign.cooldown_ms !== undefined) ? campaign.cooldown_ms : LIMITS.COOLDOWN_BETWEEN_REWARDS_MS, LIMITS.COOLDOWN_BETWEEN_REWARDS_MS);
 
   // B-1: Coerce the six numeric money/time fields before SQL interpolation.
   // These arrive from remote CAMPAIGN_ANNOUNCE / CAMPAIGN_DATA_RESPONSE payloads
@@ -112,8 +112,9 @@ function updateBudget(campaignId, deductAmount, cb) {
     if (!campaign) { cb("Campaign not found: " + campaignId); return; }
 
     var remaining = parseFloat(campaign.BUDGET_REMAINING) - deductAmount;
-    var newStatus = remaining <= 0 ? "finished" : campaign.STATUS;
     if (remaining < 0) { remaining = 0; }
+    remaining = _numI(remaining, 0);
+    var newStatus = remaining <= 0 ? "finished" : campaign.STATUS;
 
     // B-1 (defence in depth): values read from the DB row are already numbers, but
     // coerce them anyway so a poisoned row written before this fix cannot re-inject.

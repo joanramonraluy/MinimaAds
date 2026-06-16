@@ -46,6 +46,26 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-15 (patch 18) — Fix: Campaigns discovery UI refresh & channel open collision resolution
+
+**Problem**: The campaign discovery list did not automatically refresh when new campaigns were discovered. Additionally, both `viewer.js` and `earnings.js` defined a global `onChannelOpened` handler, causing the latter to override the former.
+
+**Fix**: `dapp/app.js`: added `currentRoute() === 'campaigns'` check in `NEW_CAMPAIGN` branch; added explicit `viewerOnChannelOpened(parsed)` call in `CHANNEL_OPENED` branch. `dapp/views/viewer.js`: renamed global `onChannelOpened` → `viewerOnChannelOpened`.
+
+**Files modified**: `dapp/app.js`, `dapp/views/viewer.js`, `dapp.conf` (→ 0.26.6.8), `MinimaAds.mds.zip`
+
+---
+
+### Session: 2026-06-16 — Security: Audit 2 Verification + B-1 SQL Injection Remediation
+
+**Part A**: All 10 fixes from audit_report_2 (N2-1 through I-2) verified correct. No regressions detected.
+
+**Part B**: Fresh audit found B-1 (HIGH): SQL injection in campaign ingestion via numeric field interpolation in `saveCampaign()`. Fix: added `_numF()`/`_numI()` helpers in `core/campaigns.js`; early numeric validation in `campaign.handler.js handleCampaignAnnounce()`.
+
+**Files modified**: `core/campaigns.js`, `public/service-workers/handlers/campaign.handler.js`, `docs/audit_report_2.md`, `docs/audit_report_3.md`, `docs/KNOWN_ISSUES.md`, `dapp.conf` (→ 0.26.6.3)
+
+---
+
 ### Session: 2026-06-15 — Security cleanups I-2/N-3/N-6 (cosmetic)
 
 **N-3**: Removed tautological guard in `_doGeneratePublisherVoucher` (`channel.handler.js`): `pubReward = parseFloat(PUBLISHER_REWARD_VIEW)` so `pubReward > pubReward + epsilon` was always false. Dead code removed.

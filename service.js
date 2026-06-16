@@ -327,8 +327,6 @@ function onComms(msg) {
     handleTrackView(payload);
   } else if (payload.type === "MA_TRACK_CLICK") {
     handleTrackClick(payload);
-  } else if (payload.type === "MA_OPEN_PUBLISHER_CHANNELS") {
-    handleOpenPublisherChannels(payload);
   } else if (payload.type === "MA_LOCAL_STATUS") {
     handleLocalStatusChange(payload);
   } else if (payload.type === "DO_REGISTER_PERMANENT") {

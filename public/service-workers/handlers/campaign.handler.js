@@ -122,9 +122,6 @@ function persistCampaign(payload, campaignId) {
     }
     MDS.log("[CAMPAIGN] ANNOUNCE persisted, id: " + campaignId);
     signalFE("NEW_CAMPAIGN", { campaign_id: campaignId });
-    if (typeof _tryOpenPublisherChannelForAllFrames === 'function') {
-      _tryOpenPublisherChannelForAllFrames(campaignId);
-    }
     _replayPendingPublisherNotify(campaignId);
   });
 }

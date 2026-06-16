@@ -176,6 +176,35 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
+### Session: 2026-06-16 (patch 21) — Fix: Custom publisher opens channels proactively without any view
+
+**Problem**: When a publisher created a custom frame (snippet), the FE immediately sent `MA_OPEN_PUBLISHER_CHANNELS` to the SW, which opened publisher L2 channels for ALL known campaigns — before any viewer had seen an ad through that frame. Simultaneously, every `CAMPAIGN_ANNOUNCE` received on a publisher node triggered `_tryOpenPublisherChannelForAllFrames`, opening channels for all local custom frames without any actual view event. This caused escrow funds to be locked and "active channels" to appear on the creator's campaign stats with no real activity.
+
+**Root cause**: Two proactive channel-opening paths existed that bypassed the requirement for a real view event. The correct trigger is `PUBLISHER_REWARD_NOTIFY` (sent by the creator only after a real view), which already works correctly for the built-in publisher (user4 flow).
+
+**Fix**: Removed both proactive paths entirely:
+- `comms.handler.js`: deleted `handleOpenPublisherChannels()`, `_tryOpenPublisherChannel()`, and `_tryOpenPublisherChannelForAllFrames()`.
+- `campaign.handler.js`: removed the `_tryOpenPublisherChannelForAllFrames(campaignId)` call from `persistCampaign()`.
+- `service.js`: removed the `MA_OPEN_PUBLISHER_CHANNELS` dispatch case.
+- `dapp/views/frames.js`: removed `_openPublisherChannelsForExistingFrames()` call from view init, removed its function definition, and removed the `MA_OPEN_PUBLISHER_CHANNELS` broadcast from `_doSaveFrame()`.
+
+Publisher channels now open exclusively via `PUBLISHER_REWARD_NOTIFY` (in `channel.handler.js`), which is only sent after a confirmed view event.
+
+**Files modified**: `public/service-workers/handlers/comms.handler.js`, `public/service-workers/handlers/campaign.handler.js`, `service.js`, `dapp/views/frames.js`
+
+**AGENTS.md updated**: yes — §6 updated, patch 18 and Security audit entries moved to `docs/HISTORY.md §17`.
+
+**Verification**:
+1. Create a custom snippet on a publisher node (user2).
+2. Verify SW logs do NOT show `MA_OPEN_PUBLISHER_CHANNELS` or any `CHANNEL_OPEN_REQUEST (publisher)`.
+3. Verify Campaign1 budget stats remain unchanged after snippet creation.
+4. Create a new campaign on the creator node.
+5. Verify publisher node does NOT open a channel automatically on ANNOUNCE.
+6. Now trigger an actual view through user2's embedded snippet (from another dapp).
+7. Verify that ONLY after that view does a `CHANNEL_OPEN_REQUEST (publisher)` appear, triggered by `PUBLISHER_REWARD_NOTIFY`.
+
+---
+
 ### Session: 2026-06-16 (patch 20) — Fix: updateBudget _numI regression truncates decimal budgets
 
 **Problem**: `updateBudget()` in `core/campaigns.js` used `_numI(remaining, 0)` (parseInt) to coerce the remaining budget before SQL interpolation. `parseInt` truncates decimals: `parseInt(0.5) = 0`, causing campaigns with sub-1 M remaining budgets to be incorrectly marked as `'finished'` after any reward deduction.
@@ -212,46 +241,5 @@ For verification procedures, see `docs/VERIFICATION.md`.
 3. Verify campaign stats show 0 publisher channels, not 1.
 4. On a separate publisher node with the same frames, verify publisher channels still open correctly.
 
----
-
-### Session: 2026-06-16 — Security: Audit 2 Verification + B-1 SQL Injection Remediation
-
-**Part A (Verification)**: All 10 fixes from audit_report_2 (N2-1 through I-2) verified correct. No regressions detected. Fixes verified against runtime logs (user1-5 nodes), Rhino/H2/Maxima constraints confirmed.
-
-**Part B (Independent Audit)**: Fresh codebase review found B-1 (HIGH): SQL injection in campaign ingestion via numeric field interpolation in `saveCampaign()`. Attacker-controlled CAMPAIGN_ANNOUNCE/RESPONSE payloads could inject SQL by sending string values (e.g., `"0'); DROP TABLE CAMPAIGNS; --"`) in budget_total, budget_remaining, reward_view, reward_click, created_at, expires_at fields.
-
-**Fix**: 
-- **core/campaigns.js**: Added `_numF()` and `_numI()` helpers (parseFloat/parseInt + isFinite guards). Applied to all 6 vulnerable fields in `saveCampaign()`. Added defence-in-depth coercion to `updateBudget()`.
-- **campaign.handler.js**: Added early validation in `handleCampaignAnnounce()` to drop announces with non-numeric money/time fields before reaching `saveCampaign()`.
-- **Re-audit**: Sonnet verified the fix is mathematically robust. All test vectors (injection strings, Infinity, NaN, hex, octal) neutralized. Two residual hardening gaps (low urgency) documented in KNOWN_ISSUES.md items 19–20 for follow-up.
-
-**Files modified**: `core/campaigns.js`, `public/service-workers/handlers/campaign.handler.js`, `docs/audit_report_2.md`, `docs/audit_report_3.md`, `docs/KNOWN_ISSUES.md`, `dapp.conf` (version → 0.26.6.3)
-
-**AGENTS.md updated**: yes — §6 updated, patch 17 (2026-06-15) moved to HISTORY.md §17.
-
-**Verification**: All 5 nodes passed normal campaign creation/synchronization flow. Zero SQL errors. Numeric validation passes silently. Ready for production (conditional safe per Sonnet).
-
----
-
-### Session: 2026-06-15 (patch 18) — Fix: Campaigns discovery UI refresh & channel open collision resolution
-
-**Problem**: The campaign discovery list did not automatically refresh when new campaigns were discovered. The routing structure uses the `#campaigns` route in viewer/creator/publisher modes (rendered by `campaigns.js`), but the message handler in `app.js` only checked `currentRoute() === 'viewer'` before calling `onCampaignsChanged()`, leaving the `#campaigns` page unrefreshed. Additionally, both `viewer.js` and `earnings.js` defined a global `onChannelOpened` handler, causing the latter to override the former and leaving the viewer's detail view without status update events when secure channels successfully open.
-
-**Fix**:
-- **App** (`dapp/app.js`):
-  - In `handleMdsComms` (`NEW_CAMPAIGN` / `CAMPAIGN_UPDATED` branch), added a check for `currentRoute() === 'campaigns'` and triggered `_loadCampaigns()` to refresh the active campaigns list.
-  - In the `CHANNEL_OPENED` branch, added an explicit call to `viewerOnChannelOpened(parsed)` alongside `onChannelOpened(parsed)`.
-- **Viewer** (`dapp/views/viewer.js`):
-  - Renamed the global `onChannelOpened` handler to `viewerOnChannelOpened` to avoid namespace collisions with `earnings.js`.
-- **MiniDapp Package**: Bumped version to `0.26.6.8` in `dapp.conf` and updated the packaged `MinimaAds.mds.zip`.
-
-**Files modified**: `dapp/app.js`, `dapp/views/viewer.js`, `dapp.conf`, `MinimaAds.mds.zip`
-
-**AGENTS.md updated**: yes — §6 updated, oldest entry (patch 15) moved to `docs/HISTORY.md §17`.
-
-**Verification**:
-1. Navigate to the "View Ads" list and verify that newly discovered campaigns are rendered dynamically in the list.
-2. Open a campaign's detail page, trigger a view, and verify that the status changes to `'open'` upon receiving the channel opening event.
-
-> Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, Auto-Sync Platform Creator Route, Unify MLS DevTools, Fix Viewer and Publisher Reward Delivery, Fix Publisher Budget (Multi-Publisher Support), Fix Stale-Pending Publisher Channel Deadlock, Minima Foundation Fee (3%) + V4 Escrow Script Fixes, 2026-06-10 settlement fixes, Security audit T7/T9, Security N2-4, N2-5/N2-6, patch 16, patch 17, and all earlier) are archived in `docs/HISTORY.md §17`.
+> Previous handoff notes (patches 15–18, Security Audit 2, and all earlier) are archived in `docs/HISTORY.md §17`.
 

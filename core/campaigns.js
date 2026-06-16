@@ -20,6 +20,13 @@ function getCampaign(id, cb) {
   );
 }
 
+// B-1 fix: coerce a value to a finite float, returning dflt if NaN/Infinity/non-numeric.
+// Used for money and timestamp fields interpolated directly into SQL numerics.
+function _numF(v, dflt) { var n = parseFloat(v); return isFinite(n) ? n : dflt; }
+
+// B-1 fix: coerce to a finite integer, returning dflt if NaN/Infinity/non-numeric.
+function _numI(v, dflt) { var n = parseInt(v, 10); return isFinite(n) ? n : dflt; }
+
 function saveCampaign(campaign, ad, cb) {
   var mvr = campaign.max_viewer_reward !== undefined ? campaign.max_viewer_reward : campaign.MAX_VIEWER_REWARD;
   var prv = (campaign.publisher_reward_view !== null && campaign.publisher_reward_view !== undefined) ? parseFloat(campaign.publisher_reward_view) : 0;
@@ -29,6 +36,20 @@ function saveCampaign(campaign, ad, cb) {
   var mdc = (campaign.max_daily_clicks !== null && campaign.max_daily_clicks !== undefined) ? parseInt(campaign.max_daily_clicks, 10) : LIMITS.MAX_CLICKS_PER_CAMPAIGN_PER_DAY;
   var cms = (campaign.cooldown_ms !== null && campaign.cooldown_ms !== undefined) ? parseInt(campaign.cooldown_ms, 10) : LIMITS.COOLDOWN_BETWEEN_REWARDS_MS;
 
+  // B-1: Coerce the six numeric money/time fields before SQL interpolation.
+  // These arrive from remote CAMPAIGN_ANNOUNCE / CAMPAIGN_DATA_RESPONSE payloads
+  // (attacker-controlled). Without coercion an attacker can inject arbitrary SQL
+  // by supplying a string value such as "0,0,'hack',0,0,NULL,'') ; DROP TABLE …".
+  // parseFloat/parseInt reduce any input to a JS number; isFinite() rejects NaN
+  // and Infinity so only a safe numeric literal reaches the query string.
+  var budgetTotal     = _numF(campaign.budget_total, 0);
+  var budgetRemaining = _numF(campaign.budget_remaining, 0);
+  var rewardView      = _numF(campaign.reward_view, 0);
+  var rewardClick     = _numF(campaign.reward_click, 0);
+  var createdAt       = _numI(campaign.created_at, Date.now());
+  var expiresAt       = (campaign.expires_at !== null && campaign.expires_at !== undefined)
+                          ? _numI(campaign.expires_at, null) : null;
+
   var cSql = "MERGE INTO CAMPAIGNS " +
     "(ID, CREATOR_ADDRESS, TITLE, BUDGET_TOTAL, BUDGET_REMAINING, " +
     "REWARD_VIEW, REWARD_CLICK, STATUS, CREATED_AT, EXPIRES_AT, " +
@@ -37,13 +58,13 @@ function saveCampaign(campaign, ad, cb) {
     "'" + escapeSql(campaign.id) + "'," +
     "'" + escapeSql(campaign.creator_address) + "'," +
     "'" + escapeSql(campaign.title) + "'," +
-    campaign.budget_total + "," +
-    campaign.budget_remaining + "," +
-    campaign.reward_view + "," +
-    campaign.reward_click + "," +
+    budgetTotal + "," +
+    budgetRemaining + "," +
+    rewardView + "," +
+    rewardClick + "," +
     "'" + escapeSql(campaign.status) + "'," +
-    campaign.created_at + "," +
-    (campaign.expires_at !== null && campaign.expires_at !== undefined ? campaign.expires_at : "NULL") + "," +
+    createdAt + "," +
+    (expiresAt !== null ? expiresAt : "NULL") + "," +
     "'" + escapeSql(campaign.escrow_coinid || '') + "'," +
     "'" + escapeSql(campaign.escrow_wallet_pk || '') + "'," +
     (mvr !== null && mvr !== undefined ? parseFloat(mvr) : "NULL") + "," +
@@ -94,6 +115,8 @@ function updateBudget(campaignId, deductAmount, cb) {
     var newStatus = remaining <= 0 ? "finished" : campaign.STATUS;
     if (remaining < 0) { remaining = 0; }
 
+    // B-1 (defence in depth): values read from the DB row are already numbers, but
+    // coerce them anyway so a poisoned row written before this fix cannot re-inject.
     var sql = "MERGE INTO CAMPAIGNS " +
       "(ID, CREATOR_ADDRESS, TITLE, BUDGET_TOTAL, BUDGET_REMAINING, " +
       "REWARD_VIEW, REWARD_CLICK, STATUS, CREATED_AT, EXPIRES_AT, " +
@@ -102,13 +125,13 @@ function updateBudget(campaignId, deductAmount, cb) {
       "'" + escapeSql(campaign.ID) + "'," +
       "'" + escapeSql(campaign.CREATOR_ADDRESS) + "'," +
       "'" + escapeSql(campaign.TITLE) + "'," +
-      campaign.BUDGET_TOTAL + "," +
+      _numF(campaign.BUDGET_TOTAL, 0) + "," +
       remaining + "," +
-      campaign.REWARD_VIEW + "," +
-      campaign.REWARD_CLICK + "," +
+      _numF(campaign.REWARD_VIEW, 0) + "," +
+      _numF(campaign.REWARD_CLICK, 0) + "," +
       "'" + escapeSql(newStatus) + "'," +
-      campaign.CREATED_AT + "," +
-      (campaign.EXPIRES_AT !== null && campaign.EXPIRES_AT !== undefined ? campaign.EXPIRES_AT : "NULL") + "," +
+      _numI(campaign.CREATED_AT, 0) + "," +
+      (campaign.EXPIRES_AT !== null && campaign.EXPIRES_AT !== undefined ? _numI(campaign.EXPIRES_AT, 0) : "NULL") + "," +
       "'" + escapeSql(campaign.ESCROW_COINID || '') + "'," +
       "'" + escapeSql(campaign.ESCROW_WALLET_PK || '') + "'," +
       (campaign.MAX_VIEWER_REWARD !== null && campaign.MAX_VIEWER_REWARD !== undefined ? parseFloat(campaign.MAX_VIEWER_REWARD) : "NULL") + "," +

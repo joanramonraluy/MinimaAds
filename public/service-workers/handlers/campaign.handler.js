@@ -11,6 +11,27 @@ function handleCampaignAnnounce(payload) {
     MDS.log("[CAMPAIGN] ANNOUNCE missing campaign or ad");
     return;
   }
+
+  // B-1: Drop announces whose money/time fields are not numeric.
+  // These fields are interpolated directly into SQL as numeric literals in saveCampaign.
+  // An attacker sending a string such as "0,0,'x',…') ; DROP TABLE …" would break out
+  // of the VALUES clause. Reject the message here so malformed payloads never reach
+  // saveCampaign, and let saveCampaign's own _numF/_numI coercion be the final guard.
+  var c = payload.campaign;
+  if (!isFinite(parseFloat(c.budget_total)) ||
+      !isFinite(parseFloat(c.budget_remaining)) ||
+      !isFinite(parseFloat(c.reward_view)) ||
+      !isFinite(parseFloat(c.reward_click)) ||
+      !isFinite(parseInt(c.created_at, 10))) {
+    MDS.log("[CAMPAIGN] ANNOUNCE dropped: non-numeric money/time field in campaign " + c.id);
+    return;
+  }
+  // expires_at is optional (may be null/undefined) — only validate when present.
+  if (c.expires_at !== null && c.expires_at !== undefined && !isFinite(parseInt(c.expires_at, 10))) {
+    MDS.log("[CAMPAIGN] ANNOUNCE dropped: non-numeric expires_at in campaign " + c.id);
+    return;
+  }
+
   var maxViewerReward = (payload.max_viewer_reward !== undefined && payload.max_viewer_reward !== null)
     ? parseFloat(payload.max_viewer_reward) : null;
   payload.campaign.max_viewer_reward = maxViewerReward;

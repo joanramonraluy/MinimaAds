@@ -306,6 +306,13 @@ function handleOpenPublisherChannels(payload) {
       MDS.log("[COMMS] MA_OPEN_PUBLISHER_CHANNELS: frame found. opening publisher channels for " + campaigns.length + " campaigns. frame: " + frameId);
       for (var i = 0; i < campaigns.length; i++) {
         var c = campaigns[i];
+        // Creator self-exclusion: never open a publisher channel for a campaign
+        // that this node created. A node cannot be both creator and publisher.
+        if (MY_MAXIMA_PK && c.CREATOR_ADDRESS &&
+            MY_MAXIMA_PK.toUpperCase() === c.CREATOR_ADDRESS.toUpperCase()) {
+          MDS.log("[COMMS] MA_OPEN_PUBLISHER_CHANNELS: skipping own campaign: " + c.ID);
+          continue;
+        }
         if (c.STATUS === 'active' && parseFloat(c.PUBLISHER_REWARD_VIEW) > 0) {
           _tryOpenPublisherChannel(c, frameId);
         }
@@ -347,11 +354,20 @@ function _tryOpenPublisherChannel(campaign, frameId) {
 // Called by campaign.handler.js after a campaign is persisted (ANNOUNCE or DATA_RESPONSE).
 // Iterates all local frames and tries to open a publisher channel for the new campaign,
 // covering the race where MA_OPEN_PUBLISHER_CHANNELS fired before campaigns arrived.
+// Guard: skip if this node is the campaign creator — a creator cannot be a publisher
+// of their own campaign. Without this guard, saving the creator's own CAMPAIGN_ANNOUNCE
+// immediately triggers a publisher-channel open, creating a spurious active channel.
 function _tryOpenPublisherChannelForAllFrames(campaignId) {
   getCampaign(campaignId, function(err, campaign) {
     if (err || !campaign) { return; }
     if (campaign.STATUS !== 'active') { return; }
     if (!(parseFloat(campaign.PUBLISHER_REWARD_VIEW) > 0)) { return; }
+    // Creator self-exclusion: do not open publisher channels on the creator's own node.
+    if (MY_MAXIMA_PK && campaign.CREATOR_ADDRESS &&
+        MY_MAXIMA_PK.toUpperCase() === campaign.CREATOR_ADDRESS.toUpperCase()) {
+      MDS.log("[COMMS] _tryOpenPublisherChannelForAllFrames: skipping — this node is the creator. campaign: " + campaignId);
+      return;
+    }
     listFrames(function(fErr, frames) {
       if (fErr || !frames || frames.length === 0) { return; }
       var customCount = 0;

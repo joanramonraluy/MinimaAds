@@ -176,6 +176,28 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
+### Session: 2026-06-16 (patch 19) — Fix: Creator node auto-creating publisher channel on own campaigns
+
+**Problem**: When a creator published a campaign (or when `persistCampaign()` ran on any campaign arrival), `_tryOpenPublisherChannelForAllFrames()` was unconditionally called. If the creator node had custom frames, this triggered `MA_OPEN_PUBLISHER_CHANNELS` → `_tryOpenPublisherChannel`, opening a publisher channel from the creator to their own campaign. This is semantically wrong (a creator cannot be a publisher of their own campaign) and caused a spurious "1 active channel (0.5000 M locked)" to appear in campaign stats for the creator.
+
+**Root cause**: No creator self-exclusion guard existed in either of the two publisher-channel-opening paths.
+
+**Fix**:
+- **`comms.handler.js` — `_tryOpenPublisherChannelForAllFrames()`**: Added guard: if `MY_MAXIMA_PK === campaign.CREATOR_ADDRESS` (case-insensitive), log and return immediately.
+- **`comms.handler.js` — `handleOpenPublisherChannels()`**: Added per-campaign guard inside the loop: skip any campaign whose `CREATOR_ADDRESS` matches `MY_MAXIMA_PK`. This blocks the path triggered by `renderFrames()` → `_openPublisherChannelsForExistingFrames()` on the creator's FE.
+
+**Files modified**: `public/service-workers/handlers/comms.handler.js`, `dapp.conf` (version → 0.26.6.4), `MinimaAds.mds.zip`
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry (Security cleanups I-2/N-3/N-6) moved to `docs/HISTORY.md §17`.
+
+**Verification**:
+1. Create a new campaign on a creator node that also has custom frames.
+2. Verify SW logs show `_tryOpenPublisherChannelForAllFrames: skipping — this node is the creator` and no `CHANNEL_OPEN_REQUEST` is sent.
+3. Verify campaign stats show 0 publisher channels, not 1.
+4. On a separate publisher node with the same frames, verify publisher channels still open correctly.
+
+---
+
 ### Session: 2026-06-16 — Security: Audit 2 Verification + B-1 SQL Injection Remediation
 
 **Part A (Verification)**: All 10 fixes from audit_report_2 (N2-1 through I-2) verified correct. No regressions detected. Fixes verified against runtime logs (user1-5 nodes), Rhino/H2/Maxima constraints confirmed.
@@ -245,18 +267,6 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 ---
 
-### Session: 2026-06-15 — Security cleanups I-2/N-3/N-6 (cosmetic)
 
-**N-3**: Removed tautological guard in `_doGeneratePublisherVoucher` (`channel.handler.js`): `pubReward = parseFloat(PUBLISHER_REWARD_VIEW)` so `pubReward > pubReward + epsilon` was always false. Dead code removed.
-
-**N-6**: Aligned `COOLDOWN_MS DEFAULT 30000` in `db-init.js` CREATE TABLE and ALTER TABLE migration to match `LIMITS.COOLDOWN_BETWEEN_REWARDS_MS = 30000`. Was `300000` (10× too large).
-
-**I-2**: Capped viewer `maxAmount` at `LIMITS.MAX_CHANNEL_RESERVATION` in `comms.handler.js` `_doSendChannelOpenRequest` and `sdk/index.js` `_computeMaxAmount`. Viewer's local `MAX_AMOUNT` now matches what the creator enforces server-side.
-
-**Files modified**: `public/service-workers/handlers/channel.handler.js`, `public/service-workers/db-init.js`, `public/service-workers/handlers/comms.handler.js`, `sdk/index.js`, `docs/audit_report_2.md`, `AGENTS.md §6`, `docs/HISTORY.md §17`.
-
-**AGENTS.md updated**: yes — §6 updated, oldest entry (N2-5/N2-6) moved to `docs/HISTORY.md §17`.
-
----
 
 > Previous handoff notes (T-SC1–T-SC7, VW-1–VW-3, UI sessions 2–13, Remove Section 1.3, Auto-Sync Platform Creator Route, Unify MLS DevTools, Fix Viewer and Publisher Reward Delivery, Fix Publisher Budget (Multi-Publisher Support), Fix Stale-Pending Publisher Channel Deadlock, Minima Foundation Fee (3%) + V4 Escrow Script Fixes, 2026-06-10 settlement fixes, Security audit T7/T9, Security N2-4, N2-5/N2-6, patch 16, and all earlier) are archived in `docs/HISTORY.md §17`.

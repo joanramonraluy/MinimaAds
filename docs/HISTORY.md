@@ -46,6 +46,18 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-15 — Security cleanups I-2/N-3/N-6 (cosmetic)
+
+**N-3**: Removed tautological guard in `_doGeneratePublisherVoucher` (`channel.handler.js`): `pubReward = parseFloat(PUBLISHER_REWARD_VIEW)` so `pubReward > pubReward + epsilon` was always false. Dead code removed.
+
+**N-6**: Aligned `COOLDOWN_MS DEFAULT 30000` in `db-init.js` CREATE TABLE and ALTER TABLE migration to match `LIMITS.COOLDOWN_BETWEEN_REWARDS_MS = 30000`. Was `300000` (10× too large).
+
+**I-2**: Capped viewer `maxAmount` at `LIMITS.MAX_CHANNEL_RESERVATION` in `comms.handler.js` `_doSendChannelOpenRequest` and `sdk/index.js` `_computeMaxAmount`. Viewer's local `MAX_AMOUNT` now matches what the creator enforces server-side.
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`, `public/service-workers/db-init.js`, `public/service-workers/handlers/comms.handler.js`, `sdk/index.js`, `docs/audit_report_2.md`, `AGENTS.md §6`, `docs/HISTORY.md §17`.
+
+---
+
 ### Session: 2026-06-15 (patch 17) — Fix: Implement payment channel synchronization and accrual recovery
 
 **Problem**: When a viewer loses local state and a creator reopens a channel, the viewer's CUMULATIVE_EARNED resets to 0 while the creator expects it to continue from the previous balance, causing persistent "accrual delta invalid" errors. Additionally, pending rewards accumulated while the channel was inactive could be discarded.

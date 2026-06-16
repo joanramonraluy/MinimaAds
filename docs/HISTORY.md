@@ -46,6 +46,28 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-15 (patch 17) — Fix: Implement payment channel synchronization and accrual recovery
+
+**Problem**: When a viewer loses local state and a creator reopens a channel, the viewer's CUMULATIVE_EARNED resets to 0 while the creator expects it to continue from the previous balance, causing persistent "accrual delta invalid" errors. Additionally, pending rewards accumulated while the channel was inactive could be discarded.
+
+**Fix**:
+- **Service Worker** (`public/service-workers/handlers/channel.handler.js`):
+  - Modified `handleChannelOpen()` to extract `cumulative_earned` and `latest_tx_hex` from CHANNEL_OPEN payload
+  - Updated `_doChannelOpenUpsert()` to initialize CHANNEL_STATE with these values instead of hardcoded 0 and ''
+  - Enhanced CHANNEL_OPEN resending in all three paths (publisher, viewer, VOUCHER_SYNC_REQUEST) to include cumulative_earned and latest_tx_hex from the existing channel state
+  - Added voucher recovery logic: if accrual delta validation fails with delta <= 0, resend the latest stored voucher to recover the viewer state
+  - Enhanced logging to include current CUMULATIVE_EARNED value for debugging
+- **SDK** (`sdk/index.js`):
+  - Enhanced `_handleChannelOpenPayload()` to extract and persist cumulative_earned and latest_tx_hex via `updateChannelVoucher()`
+  - Fixed `_flushPending()` to replay ALL accumulated REWARD_REQUESTs instead of discarding them, using stored cumulative values
+- **Documentation** (`MinimaAds.md §8.9`): Updated CHANNEL_OPEN schema documentation
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`, `sdk/index.js`, `MinimaAds.md`
+
+**Verification**: Simulate viewer state loss by clearing CHANNEL_STATE row for a campaign while keeping creator's record. Trigger a view reward and verify creator resends CHANNEL_OPEN with correct cumulative_earned. Verify viewer receives it, initializes correctly, and no accrual delta invalid errors occur.
+
+---
+
 ### Session: 2026-06-15 — Security N2-5 + N2-6: prune DEDUP_LOG & restrict ESCROW_INFO_REQUEST
 
 **N2-5**: Added `pruneDedupLog()` to `campaign.handler.js`, throttled to once per 6 hours, deletes DEDUP_LOG rows older than 7 days. Called on NEWBLOCK from `service.js`.

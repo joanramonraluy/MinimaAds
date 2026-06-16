@@ -176,6 +176,25 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
+### Session: 2026-06-16 — Security: Audit 2 Verification + B-1 SQL Injection Remediation
+
+**Part A (Verification)**: All 10 fixes from audit_report_2 (N2-1 through I-2) verified correct. No regressions detected. Fixes verified against runtime logs (user1-5 nodes), Rhino/H2/Maxima constraints confirmed.
+
+**Part B (Independent Audit)**: Fresh codebase review found B-1 (HIGH): SQL injection in campaign ingestion via numeric field interpolation in `saveCampaign()`. Attacker-controlled CAMPAIGN_ANNOUNCE/RESPONSE payloads could inject SQL by sending string values (e.g., `"0'); DROP TABLE CAMPAIGNS; --"`) in budget_total, budget_remaining, reward_view, reward_click, created_at, expires_at fields.
+
+**Fix**: 
+- **core/campaigns.js**: Added `_numF()` and `_numI()` helpers (parseFloat/parseInt + isFinite guards). Applied to all 6 vulnerable fields in `saveCampaign()`. Added defence-in-depth coercion to `updateBudget()`.
+- **campaign.handler.js**: Added early validation in `handleCampaignAnnounce()` to drop announces with non-numeric money/time fields before reaching `saveCampaign()`.
+- **Re-audit**: Sonnet verified the fix is mathematically robust. All test vectors (injection strings, Infinity, NaN, hex, octal) neutralized. Two residual hardening gaps (low urgency) documented in KNOWN_ISSUES.md items 19–20 for follow-up.
+
+**Files modified**: `core/campaigns.js`, `public/service-workers/handlers/campaign.handler.js`, `docs/audit_report_2.md`, `docs/audit_report_3.md`, `docs/KNOWN_ISSUES.md`, `dapp.conf` (version → 0.26.6.3)
+
+**AGENTS.md updated**: yes — §6 updated, patch 17 (2026-06-15) moved to HISTORY.md §17.
+
+**Verification**: All 5 nodes passed normal campaign creation/synchronization flow. Zero SQL errors. Numeric validation passes silently. Ready for production (conditional safe per Sonnet).
+
+---
+
 ### Session: 2026-06-15 (patch 18) — Fix: Campaigns discovery UI refresh & channel open collision resolution
 
 **Problem**: The campaign discovery list did not automatically refresh when new campaigns were discovered. The routing structure uses the `#campaigns` route in viewer/creator/publisher modes (rendered by `campaigns.js`), but the message handler in `app.js` only checked `currentRoute() === 'viewer'` before calling `onCampaignsChanged()`, leaving the `#campaigns` page unrefreshed. Additionally, both `viewer.js` and `earnings.js` defined a global `onChannelOpened` handler, causing the latter to override the former and leaving the viewer's detail view without status update events when secure channels successfully open.

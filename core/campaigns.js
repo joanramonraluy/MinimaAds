@@ -113,7 +113,10 @@ function updateBudget(campaignId, deductAmount, cb) {
 
     var remaining = parseFloat(campaign.BUDGET_REMAINING) - deductAmount;
     if (remaining < 0) { remaining = 0; }
-    remaining = _numI(remaining, 0);
+    // B-1 hardening: coerce to a safe float for SQL interpolation.
+    // Must use _numF (not _numI) — parseInt would truncate small decimals to 0
+    // (e.g. remaining=0.5 → parseInt=0) and wrongly mark the campaign 'finished'.
+    remaining = _numF(remaining, 0);
     var newStatus = remaining <= 0 ? "finished" : campaign.STATUS;
 
     // B-1 (defence in depth): values read from the DB row are already numbers, but

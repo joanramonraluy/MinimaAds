@@ -391,11 +391,11 @@ Update:
 | **T-PUB8** | **SW + FE** | `channel.handler.js`, `core/channels.js`, `dapp/app.js` | Done ✅ |
 | **T-SC1** | **Spec** | `MinimaAds.md`, `AGENTS.md` | Done ✅ |
 | **T-SC2** | **SW** | `service.js` | Done ✅ |
-| **T-SC3** | **FE** | `dapp/views/creator.js`, `dapp/app.js` | Pending ⬜ |
-| **T-SC4** | **SW** | `public/service-workers/handlers/campaign.handler.js` | Pending ⬜ |
-| **T-SC5** | **Core** | `core/campaigns.js` | Pending ⬜ |
-| **T-SC6** | **FE** | `dapp/app.js`, `dapp/views/mycampaigns.js` | Pending ⬜ |
-| **T-SC7** | **Docs** | `docs/KNOWN_ISSUES.md`, `docs/VERIFICATION.md`, `AGENTS.md` | Pending ⬜ |
+| **T-SC3** | **FE** | `dapp/views/creator.js`, `dapp/app.js` | Done ✅ |
+| **T-SC4** | **SW** | `public/service-workers/handlers/campaign.handler.js` | Done ✅ |
+| **T-SC5** | **Core** | `core/campaigns.js` | Done ✅ |
+| **T-SC6** | **FE** | `dapp/app.js`, `dapp/views/mycampaigns.js` | Done ✅ |
+| **T-SC7** | **Docs** | `docs/KNOWN_ISSUES.md`, `docs/VERIFICATION.md`, `AGENTS.md` | Done ✅ |
 
 ---
 

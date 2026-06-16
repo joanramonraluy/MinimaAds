@@ -1744,7 +1744,7 @@ MDS.keypair.get("ESCROW_ADDRESS", function(addrRes) {
   var escrowAddress = addrRes.response.value;
   MDS.cmd("keys action:new", function(keysRes) {
     // Per-campaign key — isolates this campaign on-chain from other campaigns and the main wallet
-    var walletPK = keysRes.response.key.publickey;
+    var walletPK = keysRes.response.publickey; // shape verified: no .key wrapper (keys.java KeyRow.toJSON)
     MDS.cmd("block", function(blockRes) {
       var expiryBlock = parseInt(blockRes.response.block) + CAMPAIGN_DURATION_BLOCKS;
       var campaignIdHex = "0x" + utf8ToHex(campaignId).toUpperCase();
@@ -1771,10 +1771,10 @@ When a viewer requests a channel (`CHANNEL_OPEN_REQUEST`), the creator spends th
 ```
 txncreate id:<txnid>
 txninput  id:<txnid> coinid:<ESCROW_COINID> scriptmmr:true
-txnoutput id:<txnid> storestate:false amount:<max_per_viewer> address:<CHANNEL_SCRIPT_ADDRESS>
+txnoutput id:<txnid> storestate:true  amount:<max_per_viewer> address:<CHANNEL_SCRIPT_ADDRESS>
 txnoutput id:<txnid> storestate:true  amount:<remaining>     address:<ESCROW_ADDRESS>
 txnstate  id:<txnid> port:1  value:<creator_wallet_pk>
-txnstate  id:<txnid> port:2  value:<expiry_block>
+txnstate  id:<txnid> port:2  value:<viewer_wallet_pk>
 txnstate  id:<txnid> port:3  value:<campaign_id_hex>
 txnstate  id:<txnid> port:4  value:<creator_mx_address>
 txnstate  id:<txnid> port:5  value:<platform_key_or_0x00>

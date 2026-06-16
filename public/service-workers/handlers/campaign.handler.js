@@ -426,11 +426,22 @@ function handleRequestCampaignData(payload) {
   var campaignId   = payload.campaign_id;
   var requesterMx  = payload.requester_mx;
 
+  var rateKey = campaignId + '|' + requesterMx;
+
   getCampaign(campaignId, function(err, campaign) {
     if (err || !campaign) {
       MDS.log("[CAMPAIGN] REQUEST for unknown campaign: " + campaignId);
       return;
     }
+    var cooldown = (campaign.COOLDOWN_MS !== null && campaign.COOLDOWN_MS !== undefined)
+      ? parseInt(campaign.COOLDOWN_MS, 10) : LIMITS.COOLDOWN_BETWEEN_REWARDS_MS;
+    var now = Date.now();
+    var lastSent = _responseSentAt[rateKey] || 0;
+    if (now - lastSent < cooldown) {
+      MDS.log("[CAMPAIGN] RESPONSE rate-limited for: " + campaignId + " requester: " + requesterMx.substring(0, 20) + "...");
+      return;
+    }
+    _responseSentAt[rateKey] = now;
     sqlQuery(
       "SELECT * FROM ADS WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') LIMIT 1",
       function(err2, rows) {
@@ -740,6 +751,13 @@ function checkExpiredCampaigns() {
     }
   );
 }
+
+// Server-side rate-limit for CAMPAIGN_DATA_RESPONSE (bug #14).
+// Key: campaignId + '|' + requesterMx. Value: timestamp of last response sent.
+// Cooldown uses campaign.COOLDOWN_MS (creator-defined), fallback LIMITS.COOLDOWN_BETWEEN_REWARDS_MS.
+// Prevents a malicious peer from flooding the creator with unauthenticated
+// REQUEST_CAMPAIGN_DATA messages to trigger repeated ADS queries + Maxima sends.
+var _responseSentAt = {};
 
 // N2-5: Throttled prune of DEDUP_LOG — at most once every 6 hours per SW session.
 // Deletes rows older than 7 days. Prevents unbounded table growth without affecting

@@ -238,12 +238,6 @@ function handleChannelOpenRequest(payload, senderPk) {
         MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST rejected: malformed viewer_mx");
         return;
       }
-      MDS.cmd("maxcontacts action:add contact:" + viewerMx, function(addRes) {
-        // Optional/informational: contact may already exist; either way routing via
-        // to: still works, so a non-true status here is NOT a failure.
-        MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: maxcontacts add viewer status=" + (addRes ? addRes.status : 'null'));
-      });
-
       getChannelState(campaignId, viewerKey, 'viewer', function(chErr, existing) {
         if (!chErr && existing && existing.STATUS === 'open') {
           var _csAddr = CHANNEL_SCRIPT_ADDRESS || '';

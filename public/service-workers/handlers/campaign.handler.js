@@ -205,18 +205,9 @@ function getStateVar(states, port) {
 // then dispatches via PK routing (creatorPk) or direct contact (creatorMx).
 // creatorPk = hex public key string or null; creatorMx = Mx... address or null.
 function _sendRequestCampaignData(campaignId, creatorPk, creatorMx, cb) {
-  // Add creator as a direct Maxima contact using the full MAX#pk#mls route.
-  // maxcontacts resolves MAX# via MLS to the creator's actual P2P address and
-  // establishes bidirectional peering — this is the same mechanism that the
-  // startup maxcontacts add for MINIMAADS_CREATOR_ROUTE uses successfully.
-  // Using only creatorMx (Mx...@MLS_host) would add the MLS server itself as
-  // a contact, not the creator node — which is why publickey: routing fails.
   if (creatorPk && creatorMx) {
-    var creatorFullRoute = (creatorMx.indexOf("MAX#") === 0) ? creatorMx : ("MAX#" + creatorPk + "#" + creatorMx);
-    MDS.cmd("maxcontacts action:add contact:" + creatorFullRoute, function() {});
-    // Ensure creatorMx is also set to the full permanent route string so
-    // that the sendMaxima fallback uses the correct to:MAX#... address.
-    creatorMx = creatorFullRoute;
+    // Normalise creatorMx to full MAX#pk#mls route so sendMaxima uses the correct to: address.
+    creatorMx = (creatorMx.indexOf("MAX#") === 0) ? creatorMx : ("MAX#" + creatorPk + "#" + creatorMx);
   }
   MDS.keypair.get("USER_PERMANENT_ROUTE", function(kpRes) {
     var myRoute = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : "";

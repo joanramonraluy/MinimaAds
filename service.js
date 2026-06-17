@@ -176,11 +176,6 @@ function onInited() {
               MDS.log("[CONFIG] USER_PERMANENT_ROUTE:     " + (permRoute || "(not set)"));
               MDS.log("[CONFIG] MLS_SERVER_ADDRESS:       " + (mlsAddr || "(not set)"));
               MDS.log("[CONFIG] =============================================");
-              if (creatorRoute && creatorRoute.indexOf("MAX#") === 0) {
-                MDS.cmd("maxcontacts action:add contact:" + creatorRoute, function(acRes) {
-                  MDS.log("[CONFIG] maxcontacts add for MINIMAADS_CREATOR_ROUTE: " + (acRes && acRes.status ? "ok" : "failed"));
-                });
-              }
               _initAfterDb();
             });
           });

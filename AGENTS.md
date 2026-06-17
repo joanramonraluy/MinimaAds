@@ -176,6 +176,26 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
+### Session: 2026-06-17 (patch 22) — Fix: Settlement tx rejected due to duplicate CoinID proofs
+
+**Problem**: Settlement transactions posted via `txnpost mine:true auto:true` (FE) or `txnpost mine:true` (SW) were being rejected with `non unique CoinIDs`. The tx had already been fully constructed and imported via `txnimport` (with `scriptmmr:true`), which includes all necessary MMR proofs in the witness. `auto:true` calls `setMMRandScripts` → `addCoinProof` (no dedup), adding the same coin proof a second time. `mine:true` similarly re-adds wallet-coin MMR proofs already present.
+
+**Root cause**: `txnpost` flags were redundant and harmful for imported transactions — all proofs are already embedded by `txnimport scriptmmr:true`.
+
+**Fix**: Removed all `mine:true auto:true` / `mine:true` flags from the two `txnpost` calls in the settlement path. Both now post bare: `txnpost id:<settleId>`.
+
+**Files modified**: `dapp/views/earnings.js` (line 555), `public/service-workers/handlers/channel.handler.js` (line 2489)
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry moved to `docs/HISTORY.md §17`.
+
+**Verification**:
+1. Publisher node: trigger settlement of a completed voucher channel.
+2. Check SW logs — `txnpost` should succeed (no `non unique CoinIDs` error).
+3. Viewer node: manually settle a voucher via Earnings view → "Settle" button.
+4. Confirm tx posts successfully and balance updates.
+
+---
+
 ### Session: 2026-06-16 (patch 21) — Fix: Custom publisher opens channels proactively without any view
 
 **Problem**: When a publisher created a custom frame (snippet), the FE immediately sent `MA_OPEN_PUBLISHER_CHANNELS` to the SW, which opened publisher L2 channels for ALL known campaigns — before any viewer had seen an ad through that frame. Simultaneously, every `CAMPAIGN_ANNOUNCE` received on a publisher node triggered `_tryOpenPublisherChannelForAllFrames`, opening channels for all local custom frames without any actual view event. This caused escrow funds to be locked and "active channels" to appear on the creator's campaign stats with no real activity.
@@ -221,25 +241,5 @@ Publisher channels now open exclusively via `PUBLISHER_REWARD_NOTIFY` (in `chann
 
 ---
 
-### Session: 2026-06-16 (patch 19) — Fix: Creator node auto-creating publisher channel on own campaigns
-
-**Problem**: When a creator published a campaign (or when `persistCampaign()` ran on any campaign arrival), `_tryOpenPublisherChannelForAllFrames()` was unconditionally called. If the creator node had custom frames, this triggered `MA_OPEN_PUBLISHER_CHANNELS` → `_tryOpenPublisherChannel`, opening a publisher channel from the creator to their own campaign. This is semantically wrong (a creator cannot be a publisher of their own campaign) and caused a spurious "1 active channel (0.5000 M locked)" to appear in campaign stats for the creator.
-
-**Root cause**: No creator self-exclusion guard existed in either of the two publisher-channel-opening paths.
-
-**Fix**:
-- **`comms.handler.js` — `_tryOpenPublisherChannelForAllFrames()`**: Added guard: if `MY_MAXIMA_PK === campaign.CREATOR_ADDRESS` (case-insensitive), log and return immediately.
-- **`comms.handler.js` — `handleOpenPublisherChannels()`**: Added per-campaign guard inside the loop: skip any campaign whose `CREATOR_ADDRESS` matches `MY_MAXIMA_PK`. This blocks the path triggered by `renderFrames()` → `_openPublisherChannelsForExistingFrames()` on the creator's FE.
-
-**Files modified**: `public/service-workers/handlers/comms.handler.js`, `dapp.conf` (version → 0.26.6.4), `MinimaAds.mds.zip`
-
-**AGENTS.md updated**: yes — §6 updated, oldest entry (Security cleanups I-2/N-3/N-6) moved to `docs/HISTORY.md §17`.
-
-**Verification**:
-1. Create a new campaign on a creator node that also has custom frames.
-2. Verify SW logs show `_tryOpenPublisherChannelForAllFrames: skipping — this node is the creator` and no `CHANNEL_OPEN_REQUEST` is sent.
-3. Verify campaign stats show 0 publisher channels, not 1.
-4. On a separate publisher node with the same frames, verify publisher channels still open correctly.
-
-> Previous handoff notes (patches 15–18, Security Audit 2, and all earlier) are archived in `docs/HISTORY.md §17`.
+> Previous handoff notes (patches 15–19, Security Audit 2, and all earlier) are archived in `docs/HISTORY.md §17`.
 

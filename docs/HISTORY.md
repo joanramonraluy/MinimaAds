@@ -46,6 +46,20 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-16 (patch 19) — Fix: Creator node auto-creating publisher channel on own campaigns
+
+**Problem**: When a creator published a campaign (or when `persistCampaign()` ran on any campaign arrival), `_tryOpenPublisherChannelForAllFrames()` was unconditionally called. If the creator node had custom frames, this triggered `MA_OPEN_PUBLISHER_CHANNELS` → `_tryOpenPublisherChannel`, opening a publisher channel from the creator to their own campaign.
+
+**Root cause**: No creator self-exclusion guard existed in either of the two publisher-channel-opening paths.
+
+**Fix**:
+- `comms.handler.js — _tryOpenPublisherChannelForAllFrames()`: guard if `MY_MAXIMA_PK === campaign.CREATOR_ADDRESS`.
+- `comms.handler.js — handleOpenPublisherChannels()`: per-campaign guard inside the loop.
+
+**Files modified**: `public/service-workers/handlers/comms.handler.js`, `dapp.conf` (→ 0.26.6.4), `MinimaAds.mds.zip`
+
+---
+
 ### Session: 2026-06-15 (patch 18) — Fix: Campaigns discovery UI refresh & channel open collision resolution
 
 **Problem**: The campaign discovery list did not automatically refresh when new campaigns were discovered. Additionally, both `viewer.js` and `earnings.js` defined a global `onChannelOpened` handler, causing the latter to override the former.

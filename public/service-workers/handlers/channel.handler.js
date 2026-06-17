@@ -2486,7 +2486,7 @@ function _swAutoSettleVoucherInner(campaignId, viewerKey, role, txHex, settleId,
           return;
         }
 
-        MDS.cmd("txnpost id:" + settleId + " mine:true", function(r3) {
+        MDS.cmd("txnpost id:" + settleId, function(r3) {
           if (r3 && r3.pending) {
             MDS.cmd("txndelete id:" + settleId, function() {});
             var ctx2 = {

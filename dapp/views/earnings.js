@@ -552,7 +552,7 @@ function _postSettleTx(settleId, campaignId, viewerKey, role, btnEl) {
     'campaign:', campaignId,
     'viewerKey:', viewerKey ? viewerKey.substring(0, 12) + '...' : '(none)',
     'role:', role);
-  MDS.cmd('txnpost id:' + settleId + ' mine:true auto:true', function(r3) {
+  MDS.cmd('txnpost id:' + settleId, function(r3) {
     console.log('[EARNINGS] txnpost result — status:', r3 && r3.status,
       'pending:', r3 && r3.pending,
       'pendinguid:', r3 && r3.pendinguid,

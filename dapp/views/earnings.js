@@ -487,6 +487,28 @@ function _runSettlement(campaignId, viewerKey, role, txHex, btnEl, cumulative) {
   console.log('[EARNINGS] _runSettlement start campaign:', campaignId,
     'settleId:', settleId, 'cumulative:', cumulative !== undefined ? cumulative : '?');
 
+  // Guard: abort if the channel is already being settled (SW auto-settle may have locked it)
+  sqlQuery(
+    "SELECT STATUS FROM CHANNEL_STATE" +
+    " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
+    " AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(viewerKey) + "')" +
+    " AND UPPER(ROLE) = UPPER('" + escapeSql(role) + "')",
+    function(stErr, stRows) {
+      var status = (!stErr && stRows && stRows.length > 0) ? (stRows[0].STATUS || '') : '';
+      if (status !== 'open') {
+        console.log('[EARNINGS] _runSettlement aborted — channel status:', status, 'campaign:', campaignId);
+        if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Settle'; }
+        var stEl = document.getElementById('ma-channel-settle-status');
+        if (stEl) { stEl.textContent = status === 'settling' ? 'Settlement already in progress…' : 'Channel already settled.'; }
+        _refreshChannelRewards();
+        return;
+      }
+      _runSettlementInner(campaignId, viewerKey, role, txHex, btnEl, settleId);
+    }
+  );
+}
+
+function _runSettlementInner(campaignId, viewerKey, role, txHex, btnEl, settleId) {
   function onError(msg) {
     console.error('[EARNINGS] _runSettlement error:', msg, 'campaign:', campaignId);
     if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Settle'; }
@@ -519,18 +541,18 @@ function _runSettlement(campaignId, viewerKey, role, txHex, btnEl, cumulative) {
         }
         if (!r2 || !r2.status) { onError((r2 && r2.error) || 'txnsign failed'); return; }
 
-        _postSettleTx(settleId, campaignId, viewerKey, role);
+        _postSettleTx(settleId, campaignId, viewerKey, role, btnEl);
       });
     });
   });
 }
 
-function _postSettleTx(settleId, campaignId, viewerKey, role) {
+function _postSettleTx(settleId, campaignId, viewerKey, role, btnEl) {
   console.log('[EARNINGS] _postSettleTx enter settleId:', settleId,
     'campaign:', campaignId,
     'viewerKey:', viewerKey ? viewerKey.substring(0, 12) + '...' : '(none)',
     'role:', role);
-  MDS.cmd('txnpost id:' + settleId + ' mine:true', function(r3) {
+  MDS.cmd('txnpost id:' + settleId + ' mine:true auto:true', function(r3) {
     console.log('[EARNINGS] txnpost result — status:', r3 && r3.status,
       'pending:', r3 && r3.pending,
       'pendinguid:', r3 && r3.pendinguid,
@@ -558,6 +580,7 @@ function _postSettleTx(settleId, campaignId, viewerKey, role) {
       console.error('[EARNINGS] txnpost failed — error:', r3 && r3.error, 'campaign:', campaignId, 'role:', role);
       var statusEl = document.getElementById('ma-channel-settle-status');
       if (statusEl) { statusEl.textContent = 'Settlement failed: ' + ((r3 && r3.error) || 'txnpost failed'); }
+      if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Settle'; }
       _refreshChannelRewards();
       return;
     }

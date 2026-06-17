@@ -2326,7 +2326,7 @@ function swBuildAndPostChannelOpenTx(ctx) {
 // channelCoins: pre-fetched coin array from _checkChannelCoinsOnBlock (Change #1).
 // When provided, skips the individual coins address scan.
 function checkOpenChannelsSettled(channelCoins) {
-  var sql = "SELECT CAMPAIGN_ID, VIEWER_KEY, ROLE, CHANNEL_COINID, CREATED_AT, CUMULATIVE_EARNED FROM CHANNEL_STATE WHERE STATUS = 'open'";
+  var sql = "SELECT CAMPAIGN_ID, VIEWER_KEY, ROLE, CHANNEL_COINID, CREATED_AT, CUMULATIVE_EARNED FROM CHANNEL_STATE WHERE STATUS = 'open' OR STATUS = 'settling'";
   sqlQuery(sql, function(err, rows) {
     if (err || !rows || rows.length === 0) { return; }
 
@@ -2412,8 +2412,50 @@ function _swAutoSettleVoucher(campaignId, viewerKey, role, txHex) {
   var onError = function(msg) {
     MDS.log("[CHANNEL] SW Auto-settlement failed: " + msg + " campaign: " + campaignId);
     MDS.cmd("txndelete id:" + settleId, function() {});
+    // Restore to 'open' so manual settlement can retry
+    sqlQuery(
+      "UPDATE CHANNEL_STATE SET STATUS = 'open'" +
+      " WHERE STATUS = 'settling'" +
+      " AND UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
+      " AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(viewerKey) + "')" +
+      " AND UPPER(ROLE) = UPPER('" + escapeSql(role) + "')",
+      function() {}
+    );
   };
 
+  // Acquire settlement lock: transition STATUS open → settling.
+  // Prevents concurrent FE manual settlement from racing with this auto-settle.
+  sqlQuery(
+    "UPDATE CHANNEL_STATE SET STATUS = 'settling'" +
+    " WHERE STATUS = 'open'" +
+    " AND UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
+    " AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(viewerKey) + "')" +
+    " AND UPPER(ROLE) = UPPER('" + escapeSql(role) + "')",
+    function(lockErr) {
+      if (lockErr) {
+        MDS.log("[CHANNEL] SW Auto-settlement: lock failed. campaign: " + campaignId);
+        return;
+      }
+      // Verify lock was acquired (confirm STATUS is now 'settling')
+      sqlQuery(
+        "SELECT STATUS FROM CHANNEL_STATE" +
+        " WHERE STATUS = 'settling'" +
+        " AND UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
+        " AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(viewerKey) + "')" +
+        " AND UPPER(ROLE) = UPPER('" + escapeSql(role) + "')",
+        function(chkErr, chkRows) {
+          if (chkErr || !chkRows || chkRows.length === 0) {
+            MDS.log("[CHANNEL] SW Auto-settlement: lock not acquired — concurrent settlement in progress. campaign: " + campaignId);
+            return;
+          }
+          _swAutoSettleVoucherInner(campaignId, viewerKey, role, txHex, settleId, onError);
+        }
+      );
+    }
+  );
+}
+
+function _swAutoSettleVoucherInner(campaignId, viewerKey, role, txHex, settleId, onError) {
   MDS.keypair.get("VIEWER_WALLET_PK_" + campaignId, function(pkRes) {
     var signKey = (pkRes && pkRes.status && pkRes.value) ? pkRes.value : viewerKey;
     MDS.log("[CHANNEL] SW Auto-settlement signKey: " + (signKey !== viewerKey ? "wallet-pk" : "viewer-key (fallback)"));
@@ -2460,7 +2502,7 @@ function _swAutoSettleVoucher(campaignId, viewerKey, role, txHex) {
           }
           MDS.cmd("txndelete id:" + settleId, function() {});
           if (!r3 || !r3.status) {
-            MDS.log("[CHANNEL] SW Auto-settlement txnpost failed: " + ((r3 && r3.error) || "txnpost failed"));
+            onError((r3 && r3.error) || "txnpost failed");
             return;
           }
           MDS.log("[CHANNEL] SW Auto-settlement tx posted successfully. Awaiting L1 confirmation. campaign: " + campaignId);

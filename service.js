@@ -54,6 +54,9 @@ var _escrowScanned  = {};
 // Maps campaignId -> timestamp of last send. Retries at most once every 30 s.
 var _pendingCampaignRequests = {};
 
+// Prevents overlapping scanEscrowCoins calls (startup vs NEWBLOCK) that cause duplicate REQUEST_CAMPAIGN_DATA.
+var _scanInFlight = false;
+
 var ESCROW_SCRIPT = 'LET creatorkey=PREVSTATE(1) ASSERT SIGNEDBY(creatorkey) LET payout=STATE(10) LET change=@AMOUNT-payout IF change GT 0 THEN ASSERT VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE) ENDIF RETURN TRUE';
 
 var ESCROW_SCRIPT_V3 =
@@ -271,13 +274,33 @@ function registerEscrowScript() {
 }
 
 function scanEscrowCoins() {
+  if (_scanInFlight) { return; }
+  _scanInFlight = true;
+
+  var pending = 0;
+
+  function onScanDone() {
+    pending--;
+    if (pending === 0) {
+      _scanInFlight = false;
+    }
+  }
+
   // V4 is the current active version — always scan.
-  _scanAddress(ESCROW_ADDRESS_V4);
+  pending++;
+  _scanAddress(ESCROW_ADDRESS_V4, onScanDone);
+
   // Legacy addresses: scan until confirmed empty for this session, then skip.
   // _escrowScanned[addr]=true means at least one scan completed. If coins were
   // never found there, no need to keep scanning (new campaigns always use V4).
-  if (ESCROW_ADDRESS    && (!_escrowScanned[ESCROW_ADDRESS]    || _escrowHasCoins[ESCROW_ADDRESS]))    { _scanAddress(ESCROW_ADDRESS); }
-  if (ESCROW_ADDRESS_V3 && (!_escrowScanned[ESCROW_ADDRESS_V3] || _escrowHasCoins[ESCROW_ADDRESS_V3])) { _scanAddress(ESCROW_ADDRESS_V3); }
+  if (ESCROW_ADDRESS    && (!_escrowScanned[ESCROW_ADDRESS]    || _escrowHasCoins[ESCROW_ADDRESS])) {
+    pending++;
+    _scanAddress(ESCROW_ADDRESS, onScanDone);
+  }
+  if (ESCROW_ADDRESS_V3 && (!_escrowScanned[ESCROW_ADDRESS_V3] || _escrowHasCoins[ESCROW_ADDRESS_V3])) {
+    pending++;
+    _scanAddress(ESCROW_ADDRESS_V3, onScanDone);
+  }
 }
 
 // _checkChannelCoinsOnBlock — performs ONE coins address:CHANNEL_SCRIPT_ADDRESS
@@ -297,10 +320,10 @@ function _checkChannelCoinsOnBlock() {
   });
 }
 
-function _scanAddress(addr) {
-  if (!addr) { return; }
+function _scanAddress(addr, onDone) {
+  if (!addr) { if (onDone) { onDone(); } return; }
   MDS.cmd("coins address:" + addr, function(res) {
-    if (!res.status || !res.response) { _escrowScanned[addr] = true; return; }
+    if (!res.status || !res.response) { _escrowScanned[addr] = true; if (onDone) { onDone(); } return; }
     var coins = res.response;
     _escrowScanned[addr] = true;
     if (coins.length > 0) {
@@ -310,6 +333,7 @@ function _scanAddress(addr) {
         processEscrowCoin(coins[i]);
       }
     }
+    if (onDone) { onDone(); }
   });
 }
 

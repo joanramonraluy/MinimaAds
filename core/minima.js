@@ -175,18 +175,36 @@ function _sendMaximaDirect(publicKey, mxAddress, payload, cb) {
     publicKey = normalizePublicKey(publicKey);
   }
   var hex = "0x" + utf8ToHex(JSON.stringify(payload)).toUpperCase();
+  var isPermanentRoute = parseMaximaRoute(mxAddress) !== null;
+
   if (publicKey && mxAddress) {
-    MDS.cmd("maxima action:send publickey:" + publicKey + " application:" + APP_NAME + " data:" + hex + " poll:false", function(res) {
-      if (_maxDelivered(res, "publickey")) {
-        if (cb) { cb(true, res, false); }
-        return;
-      }
-      var isContactErr = _isNoContactError(res);
-      MDS.cmd("maxima action:send to:" + mxAddress + " application:" + APP_NAME + " data:" + hex + " poll:false", function(res2) {
-        var ok = _maxDelivered(res2, "to");
-        if (cb) { cb(ok, res2, isContactErr && _isNoContactError(res2)); }
+    // For permanent routes (creators/publishers), try Maxima route FIRST, then publickey fallback.
+    // For viewer direct contacts (bare Mx...), try publickey first (original order).
+    if (isPermanentRoute) {
+      MDS.cmd("maxima action:send to:" + mxAddress + " application:" + APP_NAME + " data:" + hex + " poll:false", function(res) {
+        if (_maxDelivered(res, "to")) {
+          if (cb) { cb(true, res, false); }
+          return;
+        }
+        var isContactErr = _isNoContactError(res);
+        MDS.cmd("maxima action:send publickey:" + publicKey + " application:" + APP_NAME + " data:" + hex + " poll:false", function(res2) {
+          var ok = _maxDelivered(res2, "publickey");
+          if (cb) { cb(ok, res2, isContactErr && _isNoContactError(res2)); }
+        });
       });
-    });
+    } else {
+      MDS.cmd("maxima action:send publickey:" + publicKey + " application:" + APP_NAME + " data:" + hex + " poll:false", function(res) {
+        if (_maxDelivered(res, "publickey")) {
+          if (cb) { cb(true, res, false); }
+          return;
+        }
+        var isContactErr = _isNoContactError(res);
+        MDS.cmd("maxima action:send to:" + mxAddress + " application:" + APP_NAME + " data:" + hex + " poll:false", function(res2) {
+          var ok = _maxDelivered(res2, "to");
+          if (cb) { cb(ok, res2, isContactErr && _isNoContactError(res2)); }
+        });
+      });
+    }
   } else if (publicKey) {
     MDS.cmd("maxima action:send publickey:" + publicKey + " application:" + APP_NAME + " data:" + hex + " poll:false", function(res) {
       var ok = _maxDelivered(res, "publickey");

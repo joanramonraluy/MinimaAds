@@ -1269,14 +1269,16 @@ function _appendCampaignActions(container, c) {
       var warn = document.createElement('small');
       warn.style.cssText = 'display:block;color:var(--pico-muted-color,#6c757d);font-size:.8rem;line-height:1.4;margin:0 0 .5rem 0;';
       warn.textContent = '⚠️ All open channels will be closed.';
+      var btnContainer = document.createElement('div');
+      btnContainer.style.cssText = 'display:flex;gap:.35rem;flex-wrap:wrap;';
       var confirmBtn = document.createElement('button');
       confirmBtn.textContent = 'Yes, finish';
       confirmBtn.className = 'secondary';
-      confirmBtn.style.cssText = 'width:auto;margin:0 .35rem 0 0;padding:.2rem .55rem;font-size:.78rem;';
+      confirmBtn.style.cssText = 'padding:.2rem .55rem;font-size:.78rem;flex:1;min-width:120px;';
       var cancelBtn = document.createElement('button');
       cancelBtn.textContent = 'Cancel';
       cancelBtn.className = 'outline';
-      cancelBtn.style.cssText = 'width:auto;margin:0;padding:.2rem .55rem;font-size:.78rem;';
+      cancelBtn.style.cssText = 'padding:.2rem .55rem;font-size:.78rem;flex:1;min-width:100px;';
       confirmBtn.addEventListener('click', function() {
         confirmBtn.disabled = true;
         cancelBtn.disabled = true;
@@ -1292,9 +1294,10 @@ function _appendCampaignActions(container, c) {
         container.innerHTML = '';
         _appendCampaignActions(container, c);
       });
+      btnContainer.appendChild(confirmBtn);
+      btnContainer.appendChild(cancelBtn);
       container.appendChild(warn);
-      container.appendChild(confirmBtn);
-      container.appendChild(cancelBtn);
+      container.appendChild(btnContainer);
     }));
   }
 }

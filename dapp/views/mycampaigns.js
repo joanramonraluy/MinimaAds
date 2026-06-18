@@ -1276,8 +1276,8 @@ function _appendCampaignActions(container, c, warningsDiv) {
 
   if (c.STATUS === 'active' || c.STATUS === 'paused') {
     container.appendChild(_makeBtn('Finish', 'secondary', function() {
-      // Show warning below the card
-      warningsDiv.innerHTML = '';
+      // Replace action buttons with inline confirmation
+      container.innerHTML = '';
       var warn = document.createElement('small');
       warn.style.cssText = 'display:block;color:var(--pico-muted-color,#6c757d);font-size:.8rem;line-height:1.4;margin:0 0 .5rem 0;';
       warn.textContent = '⚠️ All open channels will be closed.';
@@ -1300,16 +1300,17 @@ function _appendCampaignActions(container, c, warningsDiv) {
         progress.setAttribute('data-campaign-id', c.ID);
         progress.style.cssText = 'display:block;color:var(--pico-muted-color,#6c757d);font-size:.72rem;margin-top:.4rem;';
         progress.textContent = 'Closing channels...';
-        warningsDiv.appendChild(progress);
+        container.appendChild(progress);
         _applyStatusChange(c.ID, 'finished');
       });
       cancelBtn.addEventListener('click', function() {
-        warningsDiv.innerHTML = '';
+        container.innerHTML = '';
+        _appendCampaignActions(container, c, warningsDiv);
       });
       btnContainer.appendChild(confirmBtn);
       btnContainer.appendChild(cancelBtn);
-      warningsDiv.appendChild(warn);
-      warningsDiv.appendChild(btnContainer);
+      container.appendChild(warn);
+      container.appendChild(btnContainer);
     }));
   }
 }

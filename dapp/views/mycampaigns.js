@@ -162,7 +162,7 @@ function _buildCampaignCard(c, openDetails) {
   var warningsDiv = document.createElement('div');
   warningsDiv.id = 'ma-warnings-' + c.ID;
   warningsDiv.className = 'ma-campaign-warnings';
-  warningsDiv.style.cssText = 'margin-top:.5rem;';
+  warningsDiv.style.cssText = 'margin-top:.5rem;margin-bottom:1.5rem;';
   card.setAttribute('data-campaign-id', c.ID);
   card.style.cssText = 'margin-bottom:1.5rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:var(--pico-card-background-color);box-shadow:var(--pico-card-box-shadow,0 1px 3px rgba(0,0,0,0.05));overflow:hidden;';
 

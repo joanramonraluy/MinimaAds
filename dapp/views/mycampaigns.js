@@ -1266,11 +1266,8 @@ function _appendCampaignActions(container, c) {
     container.appendChild(_makeBtn('Finish', 'secondary', function() {
       // Replace action buttons with inline confirmation
       container.innerHTML = '';
-      var msg = document.createElement('small');
-      msg.style.cssText = 'color:var(--pico-muted-color,#6c757d);margin-right:.5rem;';
-      msg.textContent = 'Finish "' + c.TITLE + '"?';
       var warn = document.createElement('small');
-      warn.style.cssText = 'display:block;color:var(--pico-muted-color,#6c757d);font-size:.8rem;line-height:1.4;margin:.35rem 0 .5rem 0;';
+      warn.style.cssText = 'display:block;color:var(--pico-muted-color,#6c757d);font-size:.8rem;line-height:1.4;margin:0 0 .5rem 0;';
       warn.textContent = '⚠️ All open channels will be closed.';
       var confirmBtn = document.createElement('button');
       confirmBtn.textContent = 'Yes, finish';
@@ -1295,7 +1292,6 @@ function _appendCampaignActions(container, c) {
         container.innerHTML = '';
         _appendCampaignActions(container, c);
       });
-      container.appendChild(msg);
       container.appendChild(warn);
       container.appendChild(confirmBtn);
       container.appendChild(cancelBtn);

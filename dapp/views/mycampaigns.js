@@ -1250,7 +1250,7 @@ function _appendCampaignActions(container, c, warningsDiv) {
     var btn = document.createElement('button');
     btn.textContent = label;
     btn.className = cls || '';
-    btn.style.cssText = 'width:auto;margin:0;padding:.2rem .55rem;font-size:.78rem;';
+    btn.style.cssText = 'width:auto;margin:0;padding:.2rem .55rem;font-size:.78rem;flex-shrink:0;';
     btn.addEventListener('click', onClick);
     return btn;
   }
@@ -1276,43 +1276,67 @@ function _appendCampaignActions(container, c, warningsDiv) {
 
   if (c.STATUS === 'active' || c.STATUS === 'paused') {
     container.appendChild(_makeBtn('Finish', 'secondary', function() {
-      // Replace action buttons with inline confirmation
-      container.innerHTML = '';
-      var warn = document.createElement('small');
-      warn.style.cssText = 'display:block;color:var(--pico-muted-color,#6c757d);font-size:.8rem;line-height:1.4;margin:0 0 .5rem 0;';
-      warn.textContent = '⚠️ All open channels will be closed.';
-      var btnContainer = document.createElement('div');
-      var isMobile = window.innerWidth < 768;
-      btnContainer.style.cssText = 'display:flex;' + (isMobile ? 'flex-direction:column;' : '') + 'gap:' + (isMobile ? '.3rem' : '.35rem') + ';';
-      var confirmBtn = document.createElement('button');
-      confirmBtn.textContent = 'Yes, finish';
-      confirmBtn.className = 'secondary';
-      confirmBtn.style.cssText = 'padding:.2rem .55rem;font-size:.78rem;' + (isMobile ? 'width:100%;' : '');
-      var cancelBtn = document.createElement('button');
-      cancelBtn.textContent = 'Cancel';
-      cancelBtn.className = 'outline';
-      cancelBtn.style.cssText = 'padding:.2rem .55rem;font-size:.78rem;' + (isMobile ? 'width:100%;' : '');
-      confirmBtn.addEventListener('click', function() {
-        confirmBtn.disabled = true;
-        cancelBtn.disabled = true;
-        var progress = document.createElement('small');
-        progress.className = 'ma-settling-progress';
-        progress.setAttribute('data-campaign-id', c.ID);
-        progress.style.cssText = 'display:block;color:var(--pico-muted-color,#6c757d);font-size:.72rem;margin-top:.4rem;';
-        progress.textContent = 'Closing channels...';
-        container.appendChild(progress);
-        _applyStatusChange(c.ID, 'finished');
-      });
-      cancelBtn.addEventListener('click', function() {
-        container.innerHTML = '';
-        _appendCampaignActions(container, c, warningsDiv);
-      });
-      btnContainer.appendChild(confirmBtn);
-      btnContainer.appendChild(cancelBtn);
-      container.appendChild(warn);
-      container.appendChild(btnContainer);
+      _showFinishConfirmation(c, warningsDiv);
     }));
   }
+}
+
+function _showFinishConfirmation(c, warningsDiv) {
+  warningsDiv.innerHTML = '';
+  var isMobile = window.innerWidth < 768;
+
+  var header = document.createElement('div');
+  header.style.cssText = 'display:flex;align-items:center;gap:.5rem;margin-bottom:.75rem;';
+  var icon = document.createElement('span');
+  icon.textContent = '⚠️';
+  icon.style.cssText = 'font-size:1.2rem;flex-shrink:0;';
+  var text = document.createElement('strong');
+  text.textContent = 'Close Campaign';
+  text.style.cssText = 'color:var(--pico-form-element-valid-border-color,#d97706);';
+  header.appendChild(icon);
+  header.appendChild(text);
+  warningsDiv.appendChild(header);
+
+  var msg = document.createElement('small');
+  msg.style.cssText = 'display:block;color:var(--pico-muted-color,#6c757d);font-size:.8rem;line-height:1.5;margin-bottom:.75rem;';
+  msg.textContent = 'All open channels will be closed and settled. This action cannot be undone.';
+  warningsDiv.appendChild(msg);
+
+  var btnContainer = document.createElement('div');
+  btnContainer.style.cssText = 'display:flex;flex-wrap:wrap;gap:.35rem;align-items:center;';
+
+  var confirmBtn = document.createElement('button');
+  confirmBtn.textContent = 'Yes, close campaign';
+  confirmBtn.className = 'secondary';
+  confirmBtn.style.cssText = 'padding:.3rem .7rem;font-size:.8rem;margin:0;min-width:10rem;flex:' + (isMobile ? '1 1 100%' : '0 0 auto') + ';';
+
+  var cancelBtn = document.createElement('button');
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.className = 'outline';
+  cancelBtn.style.cssText = 'padding:.3rem .7rem;font-size:.8rem;margin:0;flex:' + (isMobile ? '1 1 calc(50% - .175rem)' : '0 0 auto') + ';';
+
+  confirmBtn.addEventListener('click', function() {
+    confirmBtn.disabled = true;
+    cancelBtn.disabled = true;
+    var progress = document.createElement('div');
+    progress.style.cssText = 'margin-top:.75rem;padding:.5rem;background-color:rgba(0,0,0,0.02);border-radius:var(--pico-border-radius);border-left:3px solid var(--pico-form-element-valid-border-color,#d97706);';
+    var progressText = document.createElement('small');
+    progressText.className = 'ma-settling-progress';
+    progressText.setAttribute('data-campaign-id', c.ID);
+    progressText.style.cssText = 'display:block;color:var(--pico-muted-color,#6c757d);font-size:.75rem;font-weight:500;';
+    progressText.textContent = '⏳ Closing channels...';
+    progress.appendChild(progressText);
+    warningsDiv.appendChild(progress);
+    _applyStatusChange(c.ID, 'finished');
+  });
+
+  cancelBtn.addEventListener('click', function() {
+    warningsDiv.innerHTML = '';
+  });
+
+  btnContainer.appendChild(confirmBtn);
+  btnContainer.appendChild(cancelBtn);
+  warningsDiv.appendChild(btnContainer);
 }
 
 // Local fast-path broadcast + on-chain status-update tx (T-SC6).

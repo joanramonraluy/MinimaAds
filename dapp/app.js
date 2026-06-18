@@ -295,7 +295,7 @@ function handleMdsComms(parsed) {
     if (parsed.type === 'CAMPAIGN_UPDATED' && parsed.status === 'finished' && parsed.campaign_id) {
       _autoSettleOpenChannels(parsed.campaign_id);
     }
-    if (currentRoute() === 'viewer' && typeof onCampaignsChanged === 'function') {
+    if ((currentRoute() === 'viewer' || currentRoute() === 'campaign-detail') && typeof onCampaignsChanged === 'function') {
       onCampaignsChanged();
     }
     if (currentRoute() === 'campaigns' && typeof _loadCampaigns === 'function') {
@@ -1496,7 +1496,7 @@ function buildAndPostStatusUpdateTx(campaignId, newStatus, onResult) {
             done({ ok: true, skipped: true });
             return;
           }
-        if (!(coinAmount > 0)) {
+          if (!(coinAmount > 0)) {
           done({ ok: false, error: 'escrow coin amount is zero or invalid' });
           return;
         }
@@ -1609,6 +1609,7 @@ function buildAndPostStatusUpdateTx(campaignId, newStatus, onResult) {
               });
             });
           });
+        });
         });
       });
     });

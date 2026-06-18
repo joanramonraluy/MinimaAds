@@ -1270,15 +1270,16 @@ function _appendCampaignActions(container, c) {
       warn.style.cssText = 'display:block;color:var(--pico-muted-color,#6c757d);font-size:.8rem;line-height:1.4;margin:0 0 .5rem 0;';
       warn.textContent = '⚠️ All open channels will be closed.';
       var btnContainer = document.createElement('div');
-      btnContainer.style.cssText = 'display:flex;flex-direction:column;gap:.3rem;';
+      var isMobile = window.innerWidth < 768;
+      btnContainer.style.cssText = 'display:flex;' + (isMobile ? 'flex-direction:column;' : '') + 'gap:' + (isMobile ? '.3rem' : '.35rem') + ';';
       var confirmBtn = document.createElement('button');
       confirmBtn.textContent = 'Yes, finish';
       confirmBtn.className = 'secondary';
-      confirmBtn.style.cssText = 'padding:.2rem .55rem;font-size:.78rem;width:100%;';
+      confirmBtn.style.cssText = 'padding:.2rem .55rem;font-size:.78rem;' + (isMobile ? 'width:100%;' : '');
       var cancelBtn = document.createElement('button');
       cancelBtn.textContent = 'Cancel';
       cancelBtn.className = 'outline';
-      cancelBtn.style.cssText = 'padding:.2rem .55rem;font-size:.78rem;width:100%;';
+      cancelBtn.style.cssText = 'padding:.2rem .55rem;font-size:.78rem;' + (isMobile ? 'width:100%;' : '');
       confirmBtn.addEventListener('click', function() {
         confirmBtn.disabled = true;
         cancelBtn.disabled = true;

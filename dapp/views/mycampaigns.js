@@ -118,9 +118,12 @@ function loadMyCampaigns(isAutoRefresh) {
 }
 
 function _buildCampaignCard(c, openDetails) {
+  var wrapper = document.createElement('div');
+  wrapper.className = 'ma-campaign-wrapper';
+
   var budgetTotal          = parseFloat(c.BUDGET_TOTAL || 0);
   var budgetRemaining      = parseFloat(c.BUDGET_REMAINING || 0);
-  
+
   var viewerLocked         = parseFloat(c.VIEWER_LOCKED || 0);
   var viewerUnsettled      = parseFloat(c.VIEWER_UNSETTLED || 0);
   var viewerSettled        = parseFloat(c.VIEWER_SETTLED || 0);
@@ -154,6 +157,12 @@ function _buildCampaignCard(c, openDetails) {
   // Main campaign details block
   var card = document.createElement('details');
   card.className = 'ma-campaign-card-details';
+
+  // Warnings div (below card, shown only when needed)
+  var warningsDiv = document.createElement('div');
+  warningsDiv.id = 'ma-warnings-' + c.ID;
+  warningsDiv.className = 'ma-campaign-warnings';
+  warningsDiv.style.cssText = 'margin-top:.5rem;';
   card.setAttribute('data-campaign-id', c.ID);
   card.style.cssText = 'margin-bottom:1.5rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:var(--pico-card-background-color);box-shadow:var(--pico-card-box-shadow,0 1px 3px rgba(0,0,0,0.05));overflow:hidden;';
 
@@ -185,7 +194,7 @@ function _buildCampaignCard(c, openDetails) {
   actionsDiv.addEventListener('click', function(e) {
     e.stopPropagation();
   });
-  _appendCampaignActions(actionsDiv, c);
+  _appendCampaignActions(actionsDiv, c, warningsDiv);
   cardSummary.appendChild(actionsDiv);
 
   card.appendChild(cardSummary);
@@ -590,7 +599,10 @@ function _buildCampaignCard(c, openDetails) {
     card.open = true;
   }
 
-  return card;
+  wrapper.appendChild(card);
+  wrapper.appendChild(warningsDiv);
+
+  return wrapper;
 }
 
 // ---------------------------------------------------------------------------
@@ -1233,7 +1245,7 @@ function _nodeTd(value) {
 // Campaign action buttons (Pause / Resume / Finish)
 // ---------------------------------------------------------------------------
 
-function _appendCampaignActions(container, c) {
+function _appendCampaignActions(container, c, warningsDiv) {
   function _makeBtn(label, cls, onClick) {
     var btn = document.createElement('button');
     btn.textContent = label;
@@ -1264,8 +1276,8 @@ function _appendCampaignActions(container, c) {
 
   if (c.STATUS === 'active' || c.STATUS === 'paused') {
     container.appendChild(_makeBtn('Finish', 'secondary', function() {
-      // Replace action buttons with inline confirmation
-      container.innerHTML = '';
+      // Show warning below the card
+      warningsDiv.innerHTML = '';
       var warn = document.createElement('small');
       warn.style.cssText = 'display:block;color:var(--pico-muted-color,#6c757d);font-size:.8rem;line-height:1.4;margin:0 0 .5rem 0;';
       warn.textContent = '⚠️ All open channels will be closed.';
@@ -1288,17 +1300,16 @@ function _appendCampaignActions(container, c) {
         progress.setAttribute('data-campaign-id', c.ID);
         progress.style.cssText = 'display:block;color:var(--pico-muted-color,#6c757d);font-size:.72rem;margin-top:.4rem;';
         progress.textContent = 'Closing channels...';
-        container.appendChild(progress);
+        warningsDiv.appendChild(progress);
         _applyStatusChange(c.ID, 'finished');
       });
       cancelBtn.addEventListener('click', function() {
-        container.innerHTML = '';
-        _appendCampaignActions(container, c);
+        warningsDiv.innerHTML = '';
       });
       btnContainer.appendChild(confirmBtn);
       btnContainer.appendChild(cancelBtn);
-      container.appendChild(warn);
-      container.appendChild(btnContainer);
+      warningsDiv.appendChild(warn);
+      warningsDiv.appendChild(btnContainer);
     }));
   }
 }

@@ -588,7 +588,7 @@ function applyStatusChange(campaignId, status) {
       return;
     }
     MDS.log("[CAMPAIGN] status updated to " + status + ", id: " + campaignId);
-    if (status === 'finished') {
+    if (status === 'finished' || status === 'paused') {
       if (typeof autoSettleChannelsForCampaign === 'function') {
         autoSettleChannelsForCampaign(campaignId);
       }

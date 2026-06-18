@@ -372,6 +372,18 @@ function handleMdsComms(parsed) {
     }
     return;
   }
+  if (parsed.type === 'CAMPAIGN_SETTLING') {
+    if (typeof window.onCampaignSettling === 'function') {
+      window.onCampaignSettling(parsed);
+    }
+    return;
+  }
+  if (parsed.type === 'CAMPAIGN_CLOSED') {
+    if (typeof window.onCampaignClosed === 'function') {
+      window.onCampaignClosed(parsed);
+    }
+    return;
+  }
   if (parsed.type === 'CREATOR_LIVENESS_PONG') {
     if (typeof window.onCreatorLivenessPong === 'function') {
       window.onCreatorLivenessPong(parsed.campaign_id || '', parsed.status || '');

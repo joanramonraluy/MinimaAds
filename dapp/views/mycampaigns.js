@@ -1269,6 +1269,9 @@ function _appendCampaignActions(container, c) {
       var msg = document.createElement('small');
       msg.style.cssText = 'color:var(--pico-muted-color,#6c757d);margin-right:.5rem;';
       msg.textContent = 'Finish "' + c.TITLE + '"?';
+      var warn = document.createElement('small');
+      warn.style.cssText = 'display:block;color:var(--pico-muted-color,#6c757d);font-size:.72rem;margin:.25rem 0 .4rem 0;';
+      warn.textContent = '⚠️ Finishing this campaign will automatically close all open channels and settle pending rewards.';
       var confirmBtn = document.createElement('button');
       confirmBtn.textContent = 'Yes, finish';
       confirmBtn.className = 'secondary';
@@ -1278,7 +1281,14 @@ function _appendCampaignActions(container, c) {
       cancelBtn.className = 'outline';
       cancelBtn.style.cssText = 'width:auto;margin:0;padding:.2rem .55rem;font-size:.78rem;';
       confirmBtn.addEventListener('click', function() {
-        container.innerHTML = '';
+        confirmBtn.disabled = true;
+        cancelBtn.disabled = true;
+        var progress = document.createElement('small');
+        progress.className = 'ma-settling-progress';
+        progress.setAttribute('data-campaign-id', c.ID);
+        progress.style.cssText = 'display:block;color:var(--pico-muted-color,#6c757d);font-size:.72rem;margin-top:.4rem;';
+        progress.textContent = 'Closing channels...';
+        container.appendChild(progress);
         _applyStatusChange(c.ID, 'finished');
       });
       cancelBtn.addEventListener('click', function() {
@@ -1286,6 +1296,7 @@ function _appendCampaignActions(container, c) {
         _appendCampaignActions(container, c);
       });
       container.appendChild(msg);
+      container.appendChild(warn);
       container.appendChild(confirmBtn);
       container.appendChild(cancelBtn);
     }));
@@ -1356,3 +1367,36 @@ function _renderPendingLabel(campaignId, status) {
 }
 
 window.onStatusTxPending = onStatusTxPending;
+
+// ---------------------------------------------------------------------------
+// CAMPAIGN_SETTLING / CAMPAIGN_CLOSED — progress feedback while the SW
+// auto-settles all open channels after a Finish action.
+// ---------------------------------------------------------------------------
+
+function _findSettlingProgress(campaignId) {
+  return document.querySelector('.ma-settling-progress[data-campaign-id="' + campaignId + '"]');
+}
+
+function onCampaignSettling(parsed) {
+  if (!parsed || !parsed.campaign_id) { return; }
+  var el = _findSettlingProgress(parsed.campaign_id);
+  if (!el) { return; }
+  var total = (typeof parsed.total === 'number') ? parsed.total : 0;
+  var settled = (typeof parsed.settled === 'number') ? parsed.settled : 0;
+  el.textContent = 'Closing channels... (' + settled + '/' + total + ' closed)';
+}
+
+function onCampaignClosed(parsed) {
+  if (!parsed || !parsed.campaign_id) { return; }
+  var el = _findSettlingProgress(parsed.campaign_id);
+  if (el) {
+    el.textContent = 'Campaign closed — all channels settled.';
+  }
+  // Refresh the list so the card reflects the finished status and final state.
+  if (typeof loadMyCampaigns === 'function') {
+    loadMyCampaigns(false);
+  }
+}
+
+window.onCampaignSettling = onCampaignSettling;
+window.onCampaignClosed = onCampaignClosed;

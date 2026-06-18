@@ -46,6 +46,18 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-16 (patch 20) — Fix: updateBudget _numI regression truncates decimal budgets
+
+**Problem**: `updateBudget()` in `core/campaigns.js` used `_numI(remaining, 0)` (parseInt) to coerce the remaining budget before SQL interpolation. `parseInt` truncates decimals: `parseInt(0.5) = 0`, causing campaigns with sub-1 M remaining budgets to be incorrectly marked as `'finished'` after any reward deduction.
+
+**Root cause**: Introduced in commit `52e9519` (B-1 hardening). The intent was SQL-safety coercion, but `_numI` is the wrong helper for money values — `_numF` (parseFloat) must be used for float precision.
+
+**Fix**: Replaced `_numI(remaining, 0)` with `_numF(remaining, 0)` in `updateBudget()`. Added inline comment explaining why `_numF` is mandatory here.
+
+**Files modified**: `core/campaigns.js`, `dapp.conf` (version → 0.26.6.5), `MinimaAds.mds.zip`
+
+---
+
 ### Session: 2026-06-16 (patch 19) — Fix: Creator node auto-creating publisher channel on own campaigns
 
 **Problem**: When a creator published a campaign (or when `persistCampaign()` ran on any campaign arrival), `_tryOpenPublisherChannelForAllFrames()` was unconditionally called. If the creator node had custom frames, this triggered `MA_OPEN_PUBLISHER_CHANNELS` → `_tryOpenPublisherChannel`, opening a publisher channel from the creator to their own campaign.

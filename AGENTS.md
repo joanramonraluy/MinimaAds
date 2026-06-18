@@ -176,6 +176,43 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
+### Session: 2026-06-18 (patch 23) — Fix: Campaign finish — on-chain settlement, viewer state refresh, warnings UI
+
+**Changes (3 interconnected fixes):**
+
+**Issue 1 — On-Chain Settlement:**
+- `channel.handler.js` `autoSettleChannelsForCampaign()`: no longer calls `settleChannel()` directly (DB-only). Instead marks channels `'settling'` in DB, builds channel list with `LATEST_TX_HEX`/`VIEWER_WALLET_PK`, emits `CAMPAIGN_AUTOSETTLE_REQUEST` signal.
+- `dapp/app.js`: added `_handleAutoSettleRequest()` (NOOP on creator node — viewer co-sign required), `_autoSettleOpenChannels()` (queries viewer's local open channels, calls `_runSettlement()` per channel), and a hook in `CAMPAIGN_UPDATED` handler to trigger auto-settle on viewer's node when `status='finished'`.
+- L1 finalization: `checkOpenChannelsSettled()` on NEWBLOCK detects spent coins and calls `settleChannel()` — unchanged.
+
+**Issue 3 — Viewer State Refresh:**
+- `campaign.handler.js` `checkCampaignStatuses()`: removed `NOT EXISTS (open viewer channel)` clause. Viewers with open channels now send liveness pings, receive `'finished'` PONG, sync status locally, and trigger `CAMPAIGN_UPDATED` → viewer list refreshes + auto-settle fires.
+
+**Issue 2 — UI Warnings Panel:**
+- `dapp/views/mycampaigns.js`: `onCampaignSettling` and `onCampaignClosed` now write to `#ma-warnings-<id>` (via `_ensureWarningRow`) in addition to the inline `.ma-settling-progress` element, so progress persists after buttons are removed.
+- Added `onMyCampaignsSettleConfirmed()` — appends a green "Channel settled: X MINIMA" row to `#ma-warnings-<id>` on each `SETTLE_CONFIRMED` signal.
+- `dapp/app.js`: `SETTLE_CONFIRMED` handler now also calls `window.onMyCampaignsSettleConfirmed`.
+
+**Files modified**:
+- `public/service-workers/handlers/channel.handler.js`
+- `public/service-workers/handlers/campaign.handler.js`
+- `dapp/app.js`
+- `dapp/views/mycampaigns.js`
+
+**AGENTS.md updated**: yes — §6 updated, patch 20 moved to `docs/HISTORY.md §17`.
+
+**Verification**:
+1. Creator node: finish an active campaign (click Finish → confirm). Check SW logs for `CAMPAIGN_AUTOSETTLE_REQUEST` (not old `settleChannel` calls). Channel STATUS should change to `'settling'` in DB.
+2. Viewer node: wait for next liveness ping cycle (~1 block). SW should log `PONG received ... status: finished`. Viewer's campaign list should refresh and show `finished`.
+3. Viewer node: if viewer had an open channel with a voucher, earnings.js `_runSettlement` should auto-fire. Check browser console for `[AUTOSETTLE] viewer auto-settle: 1 channel(s)`. Settlement tx should post to L1.
+4. On next NEWBLOCK after L1 confirm: `checkOpenChannelsSettled` should log `coin confirmed spent on-chain` and call `settleChannel`. `SETTLE_CONFIRMED` signal should appear.
+5. Creator's mycampaigns view: `#ma-warnings-<id>` div should show "Closing channels..." progress, then "Campaign closed — all channels settled." No console errors.
+6. After settlement confirmed: `#ma-warnings-<id>` should show green "Channel settled: X MINIMA" row.
+
+**Open issues**: None discovered in scope.
+
+---
+
 ### Session: 2026-06-17 (patch 22) — Fix: Settlement tx rejected due to duplicate CoinID proofs
 
 **Problem**: Settlement transactions posted via `txnpost mine:true auto:true` (FE) or `txnpost mine:true` (SW) were being rejected with `non unique CoinIDs`. The tx had already been fully constructed and imported via `txnimport` (with `scriptmmr:true`), which includes all necessary MMR proofs in the witness. `auto:true` calls `setMMRandScripts` → `addCoinProof` (no dedup), adding the same coin proof a second time. `mine:true` similarly re-adds wallet-coin MMR proofs already present.
@@ -225,21 +262,5 @@ Publisher channels now open exclusively via `PUBLISHER_REWARD_NOTIFY` (in `chann
 
 ---
 
-### Session: 2026-06-16 (patch 20) — Fix: updateBudget _numI regression truncates decimal budgets
-
-**Problem**: `updateBudget()` in `core/campaigns.js` used `_numI(remaining, 0)` (parseInt) to coerce the remaining budget before SQL interpolation. `parseInt` truncates decimals: `parseInt(0.5) = 0`, causing campaigns with sub-1 M remaining budgets to be incorrectly marked as `'finished'` after any reward deduction.
-
-**Root cause**: Introduced in commit `52e9519` (B-1 hardening). The intent was SQL-safety coercion, but `_numI` is the wrong helper for money values — `_numF` (parseFloat) must be used for float precision.
-
-**Fix**: Replaced `_numI(remaining, 0)` with `_numF(remaining, 0)` in `updateBudget()`. Added inline comment explaining why `_numF` is mandatory here.
-
-**Files modified**: `core/campaigns.js`, `dapp.conf` (version → 0.26.6.5), `MinimaAds.mds.zip`
-
-**AGENTS.md updated**: yes — §6 updated, oldest entry moved to `docs/HISTORY.md §17`.
-
-**Also investigated** (no code change needed): The "1 active publisher channel" visible on the creator UI is created by user2 (a legitimate publisher node with a custom frame), NOT by the creator node itself. The self-exclusion guard from patch 19 is working correctly. The correlation with B-1 was coincidental.
-
----
-
-> Previous handoff notes (patches 15–19, Security Audit 2, and all earlier) are archived in `docs/HISTORY.md §17`.
+> Previous handoff notes (patches 15–20, Security Audit 2, and all earlier) are archived in `docs/HISTORY.md §17`.
 

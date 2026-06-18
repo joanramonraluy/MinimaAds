@@ -2380,8 +2380,16 @@ function _processSettledChannels(rows, coins) {
   }
 }
 
+// autoSettleChannelsForCampaign — called when a creator finishes a campaign.
+// Instead of settling locally (DB-only), we:
+//   1. Mark each open channel as 'settling' in DB so it is not double-processed.
+//   2. Emit CAMPAIGN_AUTOSETTLE_REQUEST with all channel data so the FE can
+//      build and post the L1 settlement tx for each channel.
+//   3. checkOpenChannelsSettled() on NEWBLOCK detects spent coins and calls
+//      settleChannel() to finalise the DB record once the tx is confirmed.
+// Rhino-safe: var, function(), string concat, MDS.log, no trailing commas.
 function autoSettleChannelsForCampaign(campaignId) {
-  var sql = "SELECT VIEWER_KEY, ROLE FROM CHANNEL_STATE " +
+  var sql = "SELECT VIEWER_KEY, ROLE, LATEST_TX_HEX, CUMULATIVE_EARNED, CHANNEL_COINID, VIEWER_WALLET_PK FROM CHANNEL_STATE " +
     "WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') " +
     "AND STATUS = 'open'";
   sqlQuery(sql, function(err, rows) {
@@ -2391,26 +2399,39 @@ function autoSettleChannelsForCampaign(campaignId) {
     }
     if (!rows || rows.length === 0) {
       MDS.log("[CHANNEL] autoSettleChannelsForCampaign: no open channels for campaign: " + campaignId);
+      signalFE("CAMPAIGN_CLOSED", { campaign_id: campaignId, total_settled: 0 });
       return;
     }
     var total = rows.length;
     MDS.log("[CHANNEL] autoSettleChannelsForCampaign found " + total + " open channels for campaign: " + campaignId);
-    signalFE("CAMPAIGN_SETTLING", { campaign_id: campaignId, total: total, settled: 0 });
-    var done = 0;
+
+    // Build channel list for FE signal
+    var channels = [];
     for (var i = 0; i < rows.length; i++) {
-      settleChannel(campaignId, rows[i].VIEWER_KEY, rows[i].ROLE, function(settleErr) {
-        if (settleErr) {
-          MDS.log("[CHANNEL] autoSettleChannelsForCampaign: settleChannel failed: " + settleErr);
-        } else {
-          MDS.log("[CHANNEL] autoSettleChannelsForCampaign: channel settled. campaign: " + campaignId);
-        }
-        done = done + 1;
-        signalFE("CAMPAIGN_SETTLING", { campaign_id: campaignId, total: total, settled: done });
-        if (done === total) {
-          signalFE("CAMPAIGN_CLOSED", { campaign_id: campaignId, total_settled: done });
-        }
+      var r = rows[i];
+      channels.push({
+        viewer_key:       r.VIEWER_KEY,
+        role:             r.ROLE || "viewer",
+        tx_hex:           r.LATEST_TX_HEX || "",
+        cumulative:       parseFloat(r.CUMULATIVE_EARNED || 0),
+        channel_coinid:   r.CHANNEL_COINID || "",
+        viewer_wallet_pk: r.VIEWER_WALLET_PK || ""
       });
     }
+
+    // Mark all channels as 'settling' so manual settle and double-fire are blocked
+    var markSql = "UPDATE CHANNEL_STATE SET STATUS = 'settling'" +
+      " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
+      " AND STATUS = 'open'";
+    sqlQuery(markSql, function(markErr) {
+      if (markErr) {
+        MDS.log("[CHANNEL] autoSettleChannelsForCampaign: mark settling failed: " + markErr);
+      }
+      // Emit progress signal then hand off to FE for L1 tx posting
+      signalFE("CAMPAIGN_SETTLING", { campaign_id: campaignId, total: total, settled: 0 });
+      signalFE("CAMPAIGN_AUTOSETTLE_REQUEST", { campaign_id: campaignId, channels: channels });
+      MDS.log("[CHANNEL] autoSettleChannelsForCampaign: emitted CAMPAIGN_AUTOSETTLE_REQUEST for " + total + " channels");
+    });
   });
 }
 

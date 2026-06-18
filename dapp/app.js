@@ -289,6 +289,12 @@ function handleMdsComms(parsed) {
     if (parsed.type === 'CAMPAIGN_UPDATED' && typeof window.onCampaignUpdated === 'function') {
       window.onCampaignUpdated(parsed);
     }
+    // Issue 1: viewer auto-settle — when a campaign finishes, check if this node
+    // has open channels for it and post the settlement tx. Runs on viewer's node
+    // where the local VIEWER_WALLET_PK_<campaignId> keypair is available to sign.
+    if (parsed.type === 'CAMPAIGN_UPDATED' && parsed.status === 'finished' && parsed.campaign_id) {
+      _autoSettleOpenChannels(parsed.campaign_id);
+    }
     if (currentRoute() === 'viewer' && typeof onCampaignsChanged === 'function') {
       onCampaignsChanged();
     }
@@ -296,7 +302,11 @@ function handleMdsComms(parsed) {
       _loadCampaigns();
     }
     if (currentRoute() === 'mycampaigns' && typeof loadMyCampaigns === 'function') {
-      loadMyCampaigns(true);
+      // If the SW is still settling channels (settling:true), skip the re-render here.
+      // onCampaignClosed will trigger loadMyCampaigns once all channels are done.
+      if (!parsed.settling) {
+        loadMyCampaigns(true);
+      }
     }
     if (parsed.type === 'NEW_CAMPAIGN' && currentRoute() === 'creator') {
       var msgEl2 = document.getElementById('ma-creator-msg');
@@ -349,6 +359,10 @@ function handleMdsComms(parsed) {
   }
   if (parsed.type === 'SETTLE_CONFIRMED') {
     if (typeof onSettleConfirmed === 'function') { onSettleConfirmed(parsed); }
+    // Also update the warnings panel on the mycampaigns view (Issue 2)
+    if (typeof window.onMyCampaignsSettleConfirmed === 'function') {
+      window.onMyCampaignsSettleConfirmed(parsed);
+    }
     return;
   }
   if (parsed.type === 'FRAME_READY' || parsed.type === 'FRAME_CREATED') {
@@ -384,6 +398,10 @@ function handleMdsComms(parsed) {
     }
     return;
   }
+  if (parsed.type === 'CAMPAIGN_AUTOSETTLE_REQUEST') {
+    _handleAutoSettleRequest(parsed);
+    return;
+  }
   if (parsed.type === 'CREATOR_LIVENESS_PONG') {
     if (typeof window.onCreatorLivenessPong === 'function') {
       window.onCreatorLivenessPong(parsed.campaign_id || '', parsed.status || '');
@@ -402,6 +420,66 @@ function handleMdsComms(parsed) {
     if (typeof onRewardValidation === 'function') { onRewardValidation(parsed); }
     return;
   }
+}
+
+// ---------------------------------------------------------------------------
+// CAMPAIGN_AUTOSETTLE_REQUEST — FE handler (Issue 1)
+// ---------------------------------------------------------------------------
+// Called on the creator's node when the SW emits CAMPAIGN_AUTOSETTLE_REQUEST
+// after a creator finishes a campaign. The SW has already marked channels
+// 'settling' in DB. On the creator's node the channel coins were opened with
+// viewer keys — the viewer must co-sign to settle (MULTISIG). Creator cannot
+// post these txs; checkOpenChannelsSettled() will confirm them once the viewer
+// posts their side.
+//
+// On the VIEWER's node, auto-settle is triggered separately by _autoSettleOpenChannels()
+// called from the CAMPAIGN_UPDATED handler when status='finished'.
+function _handleAutoSettleRequest(parsed) {
+  var campaignId = parsed && parsed.campaign_id;
+  var channels   = (parsed && Array.isArray(parsed.channels)) ? parsed.channels : [];
+  if (!campaignId) { return; }
+  console.log('[AUTOSETTLE] CAMPAIGN_AUTOSETTLE_REQUEST received campaign:', campaignId,
+    'channels:', channels.length, '(creator node: L1 txs require viewer co-sign, skipping post)');
+  // UI progress is already driven by CAMPAIGN_SETTLING / CAMPAIGN_CLOSED signals
+  // emitted by the SW. No L1 tx posting needed here on the creator's node.
+}
+
+// Auto-settle open channels for a campaign on the VIEWER's node.
+// Called when CAMPAIGN_UPDATED arrives with status='finished'.
+// Queries local CHANNEL_STATE for open channels with a tx_hex (creator-signed
+// voucher), then calls _runSettlement() (earnings.js) which:
+//   1. Checks the local channel status — passes through if still 'open'
+//   2. Signs with the viewer's VIEWER_WALLET_PK_<campaignId> keypair
+//   3. Posts the settlement tx to L1
+// checkOpenChannelsSettled() on NEWBLOCK then detects the spent coin and
+// calls settleChannel() to finalize the DB record.
+function _autoSettleOpenChannels(campaignId) {
+  if (!campaignId) { return; }
+  if (typeof sqlQuery !== 'function' || typeof _runSettlement !== 'function') { return; }
+  sqlQuery(
+    "SELECT VIEWER_KEY, ROLE, LATEST_TX_HEX, CUMULATIVE_EARNED" +
+    " FROM CHANNEL_STATE" +
+    " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
+    " AND STATUS = 'open'" +
+    " AND LATEST_TX_HEX != ''",
+    function(err, rows) {
+      if (err || !rows || rows.length === 0) { return; }
+      console.log('[AUTOSETTLE] viewer auto-settle:', rows.length, 'channel(s) for campaign:', campaignId);
+      for (var i = 0; i < rows.length; i++) {
+        (function(row) {
+          var viewerKey  = row.VIEWER_KEY  || '';
+          var role       = row.ROLE        || 'viewer';
+          var txHex      = row.LATEST_TX_HEX || '';
+          var cumulative = parseFloat(row.CUMULATIVE_EARNED || 0);
+          if (!viewerKey || !txHex) { return; }
+          // _runSettlement: checks channel status (passes if 'open'), gets
+          // VIEWER_WALLET_PK_<campaignId> from local keypairs, then imports,
+          // signs, and posts the settlement tx.
+          _runSettlement(campaignId, viewerKey, role, txHex, null, cumulative);
+        })(rows[i]);
+      }
+    }
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1386,29 +1464,38 @@ function buildAndPostStatusUpdateTx(campaignId, newStatus, onResult) {
       return;
     }
 
-    MDS.keypair.get('ESCROW_ADDRESS_V3', function(esRes) {
-      var escrowAddrV3 = esRes && esRes.status ? (esRes.value || '') : '';
-      if (!escrowAddrV3) {
-        done({ ok: false, error: 'V3 address not found' });
-        return;
-      }
-
-      MDS.cmd('coins coinid:' + escrowCoinId, function(cRes) {
-        if (!cRes || !cRes.status || !cRes.response || cRes.response.length === 0) {
-          done({ ok: false, error: 'escrow coin not found on-chain: ' + escrowCoinId });
+    MDS.keypair.get('ESCROW_ADDRESS_V3', function(esResV3) {
+      var escrowAddrV3 = esResV3 && esResV3.status ? (esResV3.value || '') : '';
+      MDS.keypair.get('ESCROW_ADDRESS_V4', function(esResV4) {
+        var escrowAddrV4 = esResV4 && esResV4.status ? (esResV4.value || '') : '';
+        if (!escrowAddrV3 && !escrowAddrV4) {
+          done({ ok: false, error: 'no escrow address found (V3 or V4)' });
           return;
         }
-        var coin       = cRes.response[0];
-        var coinAddr   = coin.address || '';
-        var coinAmount = parseFloat(coin.amount || 0);
-        var coinStateArr = coin.state || [];
 
-        if (!coinAddr || coinAddr.toUpperCase() !== escrowAddrV3.toUpperCase()) {
-          console.warn('[STATUS-TX] skip: campaign escrow coin is not at ESCROW_ADDRESS_V3 (legacy V1/V2 coin). campaign:', campaignId,
-            'coinAddr:', coinAddr, 'V3:', escrowAddrV3);
-          done({ ok: true, skipped: true });
-          return;
-        }
+        MDS.cmd('coins coinid:' + escrowCoinId, function(cRes) {
+          if (!cRes || !cRes.status || !cRes.response || cRes.response.length === 0) {
+            done({ ok: false, error: 'escrow coin not found on-chain: ' + escrowCoinId });
+            return;
+          }
+          var coin       = cRes.response[0];
+          var coinAddr   = coin.address || '';
+          var coinAmount = parseFloat(coin.amount || 0);
+          var coinStateArr = coin.state || [];
+
+          var addrMatch = false;
+          if (escrowAddrV3 && coinAddr.toUpperCase() === escrowAddrV3.toUpperCase()) {
+            addrMatch = true;
+          } else if (escrowAddrV4 && coinAddr.toUpperCase() === escrowAddrV4.toUpperCase()) {
+            addrMatch = true;
+          }
+
+          if (!addrMatch || !coinAddr) {
+            console.warn('[STATUS-TX] skip: campaign escrow coin is not at ESCROW_ADDRESS_V3/V4 (legacy coin). campaign:', campaignId,
+              'coinAddr:', coinAddr, 'V3:', escrowAddrV3, 'V4:', escrowAddrV4);
+            done({ ok: true, skipped: true });
+            return;
+          }
         if (!(coinAmount > 0)) {
           done({ ok: false, error: 'escrow coin amount is zero or invalid' });
           return;
@@ -1437,6 +1524,7 @@ function buildAndPostStatusUpdateTx(campaignId, newStatus, onResult) {
 
         var ports = buildStatusUpdateStatePorts(currentEscrow, newStatusHex, coinAmount);
         var txId  = 'st_' + generateUID();
+        var escrowAddrToUse = coinAddr.toUpperCase() === (escrowAddrV4 || '').toUpperCase() ? escrowAddrV4 : escrowAddrV3;
 
         function buildCtx(extra) {
           var base = {
@@ -1445,6 +1533,8 @@ function buildAndPostStatusUpdateTx(campaignId, newStatus, onResult) {
             newStatus:     newStatus,
             walletPK:      walletPK,
             escrowAddrV3:  escrowAddrV3,
+            escrowAddrV4:  escrowAddrV4,
+            escrowAddrToUse: escrowAddrToUse,
             escrowCoinId:  escrowCoinId,
             coinAmount:    coinAmount
           };
@@ -1471,7 +1561,7 @@ function buildAndPostStatusUpdateTx(campaignId, newStatus, onResult) {
             MDS.cmd('txnoutput id:' + txId
                   + ' storestate:true'
                   + ' amount:' + coinAmount
-                  + ' address:' + escrowAddrV3, function(r3) {
+                  + ' address:' + escrowAddrToUse, function(r3) {
               if (!r3.status) { fail('txnoutput', r3); return; }
 
               var stateCmds = [];
@@ -1550,14 +1640,15 @@ function finalizeStatusUpdate(txpowResponse, ctx, done) {
     return;
   }
   var newCoinId = '';
+  var escrowAddrToFind = ctx.escrowAddrToUse || ctx.escrowAddrV3;
   for (var i = 0; i < outputs.length; i++) {
-    if (outputs[i].address && outputs[i].address.toUpperCase() === ctx.escrowAddrV3.toUpperCase()) {
+    if (outputs[i].address && outputs[i].address.toUpperCase() === escrowAddrToFind.toUpperCase()) {
       newCoinId = outputs[i].coinid;
       break;
     }
   }
   if (!newCoinId) {
-    console.error('[STATUS-TX] could not locate change output at ESCROW_ADDRESS_V3');
+    console.error('[STATUS-TX] could not locate change output at escrow address (V3/V4)', escrowAddrToFind);
     if (typeof done === 'function') { done({ ok: false, error: 'change output not found' }); }
     return;
   }

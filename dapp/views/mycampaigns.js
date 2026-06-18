@@ -1381,34 +1381,73 @@ function _renderPendingLabel(campaignId, status) {
 window.onStatusTxPending = onStatusTxPending;
 
 // ---------------------------------------------------------------------------
-// CAMPAIGN_SETTLING / CAMPAIGN_CLOSED — progress feedback while the SW
-// auto-settles all open channels after a Finish action.
+// CAMPAIGN_SETTLING / CAMPAIGN_CLOSED / SETTLE_CONFIRMED — progress feedback
+// while the SW auto-settles open channels after a Finish action.
+// Issue 2: route signals to #ma-warnings-<id> instead of the inline action
+// container so progress persists after the buttons are removed.
 // ---------------------------------------------------------------------------
+
+function _getWarningsDiv(campaignId) {
+  return document.getElementById('ma-warnings-' + campaignId);
+}
 
 function _findSettlingProgress(campaignId) {
   return document.querySelector('.ma-settling-progress[data-campaign-id="' + campaignId + '"]');
 }
 
+function _ensureWarningRow(campaignId, className) {
+  var warningsDiv = _getWarningsDiv(campaignId);
+  if (!warningsDiv) { return null; }
+  var existing = warningsDiv.querySelector('.' + className);
+  if (existing) { return existing; }
+  var row = document.createElement('small');
+  row.className = className;
+  row.setAttribute('data-campaign-id', campaignId);
+  row.style.cssText = 'display:block;color:var(--pico-muted-color,#6c757d);font-size:.78rem;margin-top:.25rem;';
+  warningsDiv.appendChild(row);
+  return row;
+}
+
 function onCampaignSettling(parsed) {
   if (!parsed || !parsed.campaign_id) { return; }
-  var el = _findSettlingProgress(parsed.campaign_id);
-  if (!el) { return; }
-  var total = (typeof parsed.total === 'number') ? parsed.total : 0;
+  var total   = (typeof parsed.total   === 'number') ? parsed.total   : 0;
   var settled = (typeof parsed.settled === 'number') ? parsed.settled : 0;
-  el.textContent = 'Closing channels... (' + settled + '/' + total + ' closed)';
+  var msg = 'Closing channels… (' + settled + '/' + total + ' closed)';
+  // Update warnings div (primary target)
+  var row = _ensureWarningRow(parsed.campaign_id, 'ma-settling-progress');
+  if (row) { row.textContent = msg; }
+  // Also update inline progress element if present (created by confirm button)
+  var inlineEl = _findSettlingProgress(parsed.campaign_id);
+  if (inlineEl && inlineEl !== row) { inlineEl.textContent = msg; }
 }
 
 function onCampaignClosed(parsed) {
   if (!parsed || !parsed.campaign_id) { return; }
-  var el = _findSettlingProgress(parsed.campaign_id);
-  if (el) {
-    el.textContent = 'Campaign closed — all channels settled.';
-  }
+  var row = _ensureWarningRow(parsed.campaign_id, 'ma-settling-progress');
+  if (row) { row.textContent = 'Campaign closed — all channels settled.'; }
+  var inlineEl = _findSettlingProgress(parsed.campaign_id);
+  if (inlineEl && inlineEl !== row) { inlineEl.textContent = 'Campaign closed — all channels settled.'; }
   // Refresh the list so the card reflects the finished status and final state.
   if (typeof loadMyCampaigns === 'function') {
     loadMyCampaigns(false);
   }
 }
 
+function onMyCampaignsSettleConfirmed(parsed) {
+  if (!parsed || !parsed.campaign_id) { return; }
+  var amount = (parsed.amount) ? fmtAmt(parseFloat(parsed.amount), 6) : '';
+  var msg = amount
+    ? 'Channel settled: ' + amount + ' MINIMA'
+    : 'Channel settled.';
+  var warningsDiv = _getWarningsDiv(parsed.campaign_id);
+  if (!warningsDiv) { return; }
+  var row = document.createElement('small');
+  row.className = 'ma-settle-confirmed-row';
+  row.style.cssText = 'display:block;color:var(--pico-ins-color,#0ea15c);font-size:.78rem;margin-top:.2rem;';
+  row.textContent = msg;
+  warningsDiv.appendChild(row);
+}
+
 window.onCampaignSettling = onCampaignSettling;
 window.onCampaignClosed = onCampaignClosed;
+window.onMyCampaignsSettleConfirmed = onMyCampaignsSettleConfirmed;

@@ -588,7 +588,8 @@ function applyStatusChange(campaignId, status) {
       return;
     }
     MDS.log("[CAMPAIGN] status updated to " + status + ", id: " + campaignId);
-    if (status === 'finished' || status === 'paused') {
+    var isSettling = (status === 'finished' || status === 'paused');
+    if (isSettling) {
       if (typeof autoSettleChannelsForCampaign === 'function') {
         autoSettleChannelsForCampaign(campaignId);
       }
@@ -597,11 +598,15 @@ function applyStatusChange(campaignId, status) {
       var budget = (campaign && campaign.BUDGET_REMAINING !== undefined)
         ? parseFloat(campaign.BUDGET_REMAINING)
         : 0;
-      signalFE("CAMPAIGN_UPDATED", {
+      var updatePayload = {
         campaign_id: campaignId,
         status: status,
         budget_remaining: budget
-      });
+      };
+      if (isSettling) {
+        updatePayload.settling = true;
+      }
+      signalFE("CAMPAIGN_UPDATED", updatePayload);
     });
   });
 }
@@ -654,14 +659,13 @@ function handleCreatorLivenessPing(payload, senderPk) {
 // Rhino-safe: var, function(), string concat, MDS.log, no trailing commas.
 // ---------------------------------------------------------------------------
 function checkCampaignStatuses() {
+  // Issue 3 fix: removed the NOT EXISTS (open viewer channel) exclusion.
+  // Viewers with open channels are exactly the ones that need to ping the creator
+  // to detect 'finished' status. After the creator finishes and auto-settle posts
+  // L1 txs, the viewer's channel transitions to 'settling'; the ping delivers the
+  // 'finished' PONG which triggers CAMPAIGN_UPDATED so the UI refreshes.
   var sql = "SELECT DISTINCT c.ID, c.CREATOR_ADDRESS FROM CAMPAIGNS c" +
-    " WHERE c.STATUS = 'active'" +
-    " AND NOT EXISTS (" +
-    "   SELECT 1 FROM CHANNEL_STATE cs" +
-    "   WHERE UPPER(cs.CAMPAIGN_ID) = UPPER(c.ID)" +
-    "   AND cs.STATUS = 'open'" +
-    "   AND cs.ROLE = 'viewer'" +
-    " )";
+    " WHERE c.STATUS = 'active'";
   sqlQuery(sql, function(err, rows) {
     if (err || !rows || rows.length === 0) { return; }
     for (var i = 0; i < rows.length; i++) {

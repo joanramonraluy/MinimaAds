@@ -1270,8 +1270,8 @@ function _appendCampaignActions(container, c) {
       msg.style.cssText = 'color:var(--pico-muted-color,#6c757d);margin-right:.5rem;';
       msg.textContent = 'Finish "' + c.TITLE + '"?';
       var warn = document.createElement('small');
-      warn.style.cssText = 'display:block;color:var(--pico-muted-color,#6c757d);font-size:.72rem;margin:.25rem 0 .4rem 0;';
-      warn.textContent = '⚠️ Finishing this campaign will automatically close all open channels and settle pending rewards.';
+      warn.style.cssText = 'display:block;color:var(--pico-muted-color,#6c757d);font-size:.8rem;line-height:1.4;margin:.35rem 0 .5rem 0;';
+      warn.textContent = '⚠️ All open channels will be closed.';
       var confirmBtn = document.createElement('button');
       confirmBtn.textContent = 'Yes, finish';
       confirmBtn.className = 'secondary';

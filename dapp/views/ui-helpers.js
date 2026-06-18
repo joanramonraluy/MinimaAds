@@ -14,12 +14,13 @@ function mkStatusBadge(status) {
     active: 'Active', paused: 'Paused', finished: 'Finished',
     pending: 'Pending', settled: 'Settled', completed: 'Limit Reached'
   };
-  var c = palette[status] || { bg: '#95a5a6', fg: '#fff' };
+  var normalized = (status || '').toLowerCase();
+  var c = palette[normalized] || { bg: '#95a5a6', fg: '#fff' };
   var el = document.createElement('mark');
   el.style.cssText = 'background:' + c.bg + ';color:' + c.fg
     + ';padding:.15rem .5rem;border-radius:.25rem;font-size:.75rem;'
     + 'font-weight:600;white-space:nowrap;vertical-align:middle;';
-  el.textContent = labels[status] || status;
+  el.textContent = labels[normalized] || status;
   return el;
 }
 

@@ -193,7 +193,9 @@ function renderHelp(root) {
   var cStatusDesc = document.createElement('p');
   cStatusDesc.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;';
   cStatusDesc.innerHTML = 'In <strong>My Campaigns</strong>, you can track views/clicks in real time and manage status (Pause, Resume, or Finish). ' +
-    'Status changes on campaigns funded with the current escrow version generate an on-chain update transaction, storing the status directly in the escrow coin. Other nodes discover the change on their next block scan — even if you go offline. Note: older campaigns created before this feature may still require you to be online for status changes to propagate.';
+    'To change status, you must be online to sign and post the transaction. Your device will create an on-chain update transaction that stores the new status directly in the escrow coin. ' +
+    'Once confirmed, every other node — including those offline during the change — discovers the update on their next block scan. The status change is permanent and on-chain, so viewers see the updated status even if you go offline afterwards. ' +
+    'Note: campaigns created with older escrow versions may use different status propagation methods.';
   cStatusCard.appendChild(cStatusDesc);
   creatorPanel.appendChild(cStatusCard);
 

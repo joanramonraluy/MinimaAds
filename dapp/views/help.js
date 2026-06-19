@@ -287,7 +287,7 @@ function renderHelp(root) {
 
   var aFooter = document.createElement('p');
   aFooter.style.cssText = 'text-align:center;margin-top:2rem;font-size:0.8rem;color:var(--pico-muted-color);';
-  aFooter.textContent = 'MinimaAds v0.26.6.1 • Decentralized Ad Infrastructure';
+  aFooter.textContent = 'MinimaAds v0.26.6.3 • Decentralized Ad Infrastructure';
   aboutPanel.appendChild(aFooter);
 
   root.appendChild(aboutPanel);

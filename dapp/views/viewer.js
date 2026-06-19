@@ -178,7 +178,7 @@ function _buildCampaignRow(campaign, contact) {
     + 'font-weight:700;font-size:1.1rem;color:#fff;'
     + 'background:hsl(' + hue + ',52%,46%);';
 
-  if (contact && contact.icon) {
+  if (contact && contact.icon && /^data:image\/(jpeg|png|gif|webp);base64,/.test(contact.icon)) {
     var img = document.createElement('img');
     img.src = contact.icon;
     img.alt = '';
@@ -578,7 +578,7 @@ function _applyProfileToRow(pk, profile) {
   var row = document.querySelector('[data-creator-pk="' + pk + '"]');
   if (!row) { return; }
 
-  if (profile.icon) {
+  if (profile.icon && /^data:image\/(jpeg|png|gif|webp);base64,/.test(profile.icon)) {
     var avatarEl = row.querySelector('.ma-row-avatar');
     if (avatarEl) {
       var existingImg = avatarEl.querySelector('img');

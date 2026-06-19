@@ -359,6 +359,10 @@ function handleRegisterPermanent(payload) {
     return;
   }
   var pubkey = payload.publickey;
+  if (!isHexKey(pubkey)) {
+    MDS.log("[SW] DO_REGISTER_PERMANENT rejected: malformed publickey");
+    return;
+  }
   var requesterContact = payload.requester_contact || '';
   MDS.log("[SW] DO_REGISTER_PERMANENT received for key: " + pubkey.substring(0, 20) + "... requester: " + (requesterContact ? requesterContact.substring(0, 30) + "..." : "unknown"));
 

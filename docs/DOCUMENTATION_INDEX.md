@@ -15,6 +15,7 @@
 | **MinimaAds.md** | Technical spec: data models, API contracts, system flows, limits, schema |
 | **docs/UI_GUIDE.md** | UI-only tasks: views, CSS, copy, helpers, conventions |
 | **docs/KNOWN_ISSUES.md** | Fragility points, open bugs, known gotchas |
+| **docs/HISTORY.md** | Archived handoff notes, long-term project history, implementation details from past sessions |
 | **docs/VERIFICATION.md** | Test procedures, verification workflows |
 | **docs/PLATFORM_NOTES.md** | Minima platform details: H2, Rhino, MDS, Maxima, constraints |
 | **docs/PROJECT_NOTES.md** (topology, schema) + **docs/PROJECT_NOTES_REFERENCE.md** (protocol detail) | Project topology, DB schema, protocol matrix, signals, handlers |

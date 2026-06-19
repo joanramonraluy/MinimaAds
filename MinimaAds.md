@@ -3,7 +3,7 @@
 > **Status**: MVP — Implementation-ready
 > **Platform**: Minima MiniDapp (MDS)
 > **Frontend**: Vanilla JavaScript (ES Modules) — no frameworks
-> **Last updated**: 2026-04-19
+> **Last updated**: 2026-06-19 (patch 24: settlement txnpost bare, §8.15 CAMPAIGN_AUTOSETTLE_REQUEST signal)
 
 ---
 
@@ -1273,7 +1273,8 @@ Sent by the viewer's FE when building the campaign list and the campaign creator
 | `NEW_CAMPAIGN` | `{ campaign_id }` | `campaign.handler.js` (SW) | CAMPAIGN_ANNOUNCE received and persisted |
 | `CHANNEL_OPENED` | `{ campaign_id, channel_coinid, max_amount }` | `channel.handler.js` (SW) | Channel coin confirmed on-chain, viewer can earn |
 | `VOUCHER_RECEIVED` | `{ campaign_id, cumulative }` | `channel.handler.js` (SW) | New REWARD_VOUCHER stored; viewer balance updated |
-| `AUTO_SETTLE` | `{ campaign_id, viewer_key, tx_hex }` | `channel.handler.js` (SW) | Campaign finished — viewer should post settlement tx |
+| `AUTO_SETTLE` | `{ campaign_id, viewer_key, role, tx_hex, cumulative }` | `channel.handler.js` (SW) | Campaign finished — viewer should post settlement tx |
+| `CAMPAIGN_AUTOSETTLE_REQUEST` | `{ campaign_id, channels: [{ viewer_key, role, tx_hex, cumulative }…] }` | `channel.handler.js` (SW) | Creator campaign finished — mark channels settling and request creator to post settlement txs |
 | `SETTLE_CONFIRMED` | `{ campaign_id, amount }` | `channel.handler.js` (FE) | Settlement tx posted successfully |
 | `DO_CHANNEL_OPEN` | `{ campaign_id, viewer_key, viewer_mx, max_amount }` | `channel.handler.js` (SW) | Creator FE creates channel coin on-chain |
 | `DO_REWARD_VOUCHER` | `{ campaign_id, viewer_key, viewer_mx, event_id, cumulative }` | `channel.handler.js` (SW) | Creator FE builds partial tx and sends REWARD_VOUCHER |
@@ -1783,7 +1784,7 @@ txnstate  id:<txnid> port:7  value:<current_status_hex>
 txnstate  id:<txnid> port:10 value:<max_per_viewer>
 txnstate  id:<txnid> port:11 value:0
 txnsign   id:<txnid> publickey:<creator_wallet_pk>
-txnpost   id:<txnid> mine:true auto:true
+txnpost   id:<txnid> mine:true
 txndelete id:<txnid>
 ```
 
@@ -1810,7 +1811,7 @@ txnstate  id:<txnid> port:7  value:<new_status_hex>
 txnstate  id:<txnid> port:10 value:0
 txnstate  id:<txnid> port:11 value:0
 txnsign   id:<txnid> publickey:<creator_wallet_pk>
-txnpost   id:<txnid> mine:true auto:true
+txnpost   id:<txnid> mine:true auto:false
 txndelete id:<txnid>
 ```
 
@@ -1831,7 +1832,7 @@ txninput  id:<txnid> coinid:<ESCROW_COINID> scriptmmr:true
 txnoutput id:<txnid> storestate:false amount:<remaining> address:<creator_wallet_address>
 txnstate  id:<txnid> port:10 value:<remaining>
 txnsign   id:<txnid> publickey:<wallet_pubkey>
-txnpost   id:<txnid> mine:true auto:true
+txnpost   id:<txnid> mine:true
 txndelete id:<txnid>
 ```
 
@@ -1907,7 +1908,7 @@ Viewer settles:
 ```
 txnimport data:<hexTx>
 txnsign   id:<txnid> publickey:<viewer_wallet_pk>
-txnpost   id:<txnid> mine:true auto:true
+txnpost   id:<txnid>
 txndelete id:<txnid>
 ```
 

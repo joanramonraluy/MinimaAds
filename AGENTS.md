@@ -93,13 +93,13 @@ Implementation order:
 
 ---
 
-## 3) Contracts, Forbidden Actions, Platform Rules
+## 3.5) Contracts, Forbidden Actions, Platform Rules
 
 These are defined in `CLAUDE.md` (always loaded). Do not repeat them here.
 
-- **Stable Core API signatures** → `CLAUDE.md §4`
-- **Forbidden actions** → `CLAUDE.md §5`
-- **Rhino / H2 / MDS / Maxima runtime constraints** → `CLAUDE.md §6`
+- **Stable Core API signatures** → `CLAUDE.md §5`
+- **Forbidden actions** → `CLAUDE.md §6`
+- **Rhino / H2 / MDS / Maxima runtime constraints** → `CLAUDE.md §7`
 - **Full platform detail** → `docs/PLATFORM_NOTES.md`
 
 Additional constraints not in CLAUDE.md:

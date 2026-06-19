@@ -221,6 +221,14 @@ campaigns.js : getCampaigns(cb)
                updateBudget(campaignId, deductAmount, cb)
                setCampaignStatus(campaignId, status, cb)
 
+channels.js  : openChannel(campaignId, viewerKey, maxAmount, cb)
+               updateChannelVoucher(campaignId, viewerKey, cumulative, txHex, cb)
+               settleChannel(campaignId, viewerKey, cb)
+
+frames.js    : getFrame(frameId, cb)
+               createFrame(label, publisherWallet, cb)
+               incrementFrameEarnings(frameId, amount, cb)
+
 selection.js : selectAd(userAddress, userInterests, campaigns)  ← synchronous
 
 validation.js: validateView(campaignId, userAddress, cb)

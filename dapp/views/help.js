@@ -199,6 +199,20 @@ function renderHelp(root) {
   cStatusCard.appendChild(cStatusDesc);
   creatorPanel.appendChild(cStatusCard);
 
+  // Campaign Finalization card
+  var cFinishCard = createContentCard('#e74c3c', 'When Your Campaign Finishes');
+  var cFinishDesc = document.createElement('p');
+  cFinishDesc.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;';
+  cFinishDesc.innerHTML = 'A campaign finishes either automatically after <strong>90 days</strong> or when you manually click <strong>Finish</strong>. Once finished: ' +
+    '<ul style="margin:.35rem 0 0;padding-left:1.5rem;font-size:0.9rem;">' +
+    '<li style="margin-bottom:.3rem;">Viewers can no longer earn <strong>new rewards</strong> from your campaign.</li>' +
+    '<li style="margin-bottom:.3rem;">Viewers have a <strong>7-day settlement window</strong> to claim their accumulated rewards.</li>' +
+    '<li style="margin-bottom:.3rem;">The system automatically attempts to settle all open viewer and publisher channels (auto-settlement).</li>' +
+    '<li style="margin-bottom:.3rem;">Any unspent budget returns to your wallet after settlements complete and the 7-day grace period expires.</li>' +
+    '</ul>';
+  cFinishCard.appendChild(cFinishDesc);
+  creatorPanel.appendChild(cFinishCard);
+
   // Budget Allocation card
   var cBudgetCard = createContentCard('#f39c12', 'Budget Allocation & Performance');
   var cBudgetDesc = document.createElement('p');

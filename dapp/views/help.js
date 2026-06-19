@@ -287,8 +287,7 @@ function renderHelp(root) {
   pPrereqDesc.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;';
   pPrereqDesc.innerHTML = 'Before integrating the MinimaAds SDK, your node must have a <strong>static Maxima Location Server (MLS)</strong> configured. ' +
     'The MLS is a permanent network address that allows creators and the platform to discover and reach you for reward settlement. ' +
-    'Without a static MLS, you will not be able to receive publisher rewards or be discoverable by creators. ' +
-    'You will need to have Maxima enabled on your Minima node — configure your static MLS through your node\'s settings.';
+    'Without a static MLS, you will not be able to receive publisher rewards or be discoverable by creators.';
   pPrereqCard.appendChild(pPrereqDesc);
   publisherPanel.appendChild(pPrereqCard);
 

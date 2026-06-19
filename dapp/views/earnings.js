@@ -5,6 +5,22 @@
 // handlers (onChannelOpened, onVoucherReceived, onAutoSettle, onSettleConfirmed)
 // live here as globals so app.js can call them regardless of active route.
 
+// Helper: Format time remaining (e.g., "23d 5h", "12h", "EXPIRED")
+function formatTimeRemaining(expiresAtMs) {
+  if (!expiresAtMs) { return '—'; }
+  var now = Date.now();
+  var msLeft = parseInt(expiresAtMs) - now;
+  if (msLeft <= 0) { return 'EXPIRED'; }
+
+  var daysLeft = Math.floor(msLeft / (1000 * 60 * 60 * 24));
+  var hoursLeft = Math.floor((msLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+
+  if (daysLeft > 0) {
+    return daysLeft + 'd ' + hoursLeft + 'h';
+  }
+  return hoursLeft + 'h';
+}
+
 function renderEarnings(root) {
   root.innerHTML = '';
 
@@ -390,7 +406,7 @@ function _refreshChannelRewards() {
       + " AND (UPPER(c.CREATOR_ADDRESS) != UPPER('" + escapeSql(MY_ADDRESS) + "')"
       + " OR c.CREATOR_ADDRESS IS NULL)";
   }
-  var sql = "SELECT cs.CAMPAIGN_ID, cs.VIEWER_KEY, cs.ROLE, cs.CUMULATIVE_EARNED, cs.LATEST_TX_HEX, c.TITLE"
+  var sql = "SELECT cs.CAMPAIGN_ID, cs.VIEWER_KEY, cs.ROLE, cs.CUMULATIVE_EARNED, cs.LATEST_TX_HEX, c.TITLE, c.EXPIRES_AT"
           + " FROM CHANNEL_STATE cs"
           + " LEFT JOIN CAMPAIGNS c ON UPPER(cs.CAMPAIGN_ID) = UPPER(c.ID)"
           + " WHERE cs.STATUS = 'open' AND cs.LATEST_TX_HEX != ''"
@@ -415,7 +431,7 @@ function _renderChannelRewardRows(rows, container) {
   table.style.cssText = 'width:100%;margin:0;font-size:.9rem;';
   var thead = document.createElement('thead');
   var headerRow = document.createElement('tr');
-  var headers = ['Type', 'Campaign', 'Amount', 'Action'];
+  var headers = ['Type', 'Campaign', 'Amount', 'Time Left', 'Action'];
   for (var h = 0; h < headers.length; h++) {
     var th = document.createElement('th');
     th.textContent = headers[h];
@@ -443,6 +459,27 @@ function _renderChannelRewardRows(rows, container) {
       tr.appendChild(earningsTd(campName));
       tr.appendChild(earningsTd(fmtAmt(amount, 6) + ' MINIMA'));
 
+      // Time Left column
+      var timeTd = document.createElement('td');
+      var timeText = formatTimeRemaining(row.EXPIRES_AT);
+      timeTd.textContent = timeText;
+      var msLeft = parseInt(row.EXPIRES_AT || 0) - Date.now();
+      var timeColor = '#27ae60';  // green (normal)
+      var textDecoration = 'none';
+      if (msLeft <= 0) {
+        timeColor = '#8b0000';  // dark red (expired)
+        textDecoration = 'line-through';
+      } else {
+        var daysLeft = msLeft / (1000 * 60 * 60 * 24);
+        if (daysLeft <= 1) {
+          timeColor = '#c0392b';  // red (urgent, <1 day)
+        } else if (daysLeft <= 7) {
+          timeColor = '#e67e22';  // orange (warning, 1-7 days)
+        }
+      }
+      timeTd.style.cssText = 'font-weight:500;color:' + timeColor + ';text-decoration:' + textDecoration + ';';
+      tr.appendChild(timeTd);
+
       var actionTd = document.createElement('td');
       var btn = document.createElement('button');
       btn.textContent = 'Settle';
@@ -460,7 +497,7 @@ function _renderChannelRewardRows(rows, container) {
       detailTr.style.display = 'none';
       var detailTd = document.createElement('td');
       detailTd.className = 'ma-nested-detail';
-      detailTd.setAttribute('colspan', '4');
+      detailTd.setAttribute('colspan', '5');
       detailTd.style.cssText = 'padding:.5rem 1rem;';
       detailTr.appendChild(detailTd);
       tbody.appendChild(detailTr);

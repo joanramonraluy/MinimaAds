@@ -8,6 +8,23 @@
 
 var _expandedCharts   = {};   // campaignId → Chart instance
 
+// Helper: Format campaign time remaining for display
+function _formatCampaignTimeRemaining(expiresAtMs, createdAtMs) {
+  if (!expiresAtMs) { return 'No expiration'; }
+  var now = Date.now();
+  var msLeft = parseInt(expiresAtMs) - now;
+  if (msLeft <= 0) { return 'EXPIRED'; }
+
+  var daysElapsed = createdAtMs ? Math.floor((now - parseInt(createdAtMs)) / (1000 * 60 * 60 * 24)) : 0;
+  var daysLeft = Math.floor(msLeft / (1000 * 60 * 60 * 24));
+  var hoursLeft = Math.floor((msLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+
+  if (daysLeft > 0) {
+    return 'Day ' + daysElapsed + '/90 (' + daysLeft + ' days left)';
+  }
+  return hoursLeft + ' hours left';
+}
+
 function renderMyCampaigns(root) {
   _destroyAllCharts();
 
@@ -408,6 +425,7 @@ function _buildCampaignCard(c, openDetails) {
         { label: 'Campaign ID', value: c.ID },
         { label: 'Created At', value: new Date(parseInt(c.CREATED_AT)).toLocaleString() },
         { label: 'Expires At', value: c.EXPIRES_AT ? new Date(parseInt(c.EXPIRES_AT)).toLocaleString() : 'Never' },
+        { label: 'Time Remaining', value: _formatCampaignTimeRemaining(c.EXPIRES_AT, c.CREATED_AT) },
         { label: 'Initial Escrow Budget', value: fmtAmt(parseFloat(c.BUDGET_TOTAL), 4) + ' M' },
         { label: 'Escrow Coin ID', value: c.ESCROW_COINID || 'N/A' },
         { label: 'Creator Maxima PK', value: c.CREATOR_MX || 'N/A' },
@@ -459,16 +477,40 @@ function _buildCampaignCard(c, openDetails) {
     for (var k = 0; k < sec.params.length; k++) {
       var item = document.createElement('div');
       item.style.cssText = 'display:flex;flex-direction:column;min-width:0;';
-      
+
       var labelSpan = document.createElement('span');
       labelSpan.textContent = sec.params[k].label;
       labelSpan.style.cssText = 'font-size:.7rem;color:var(--pico-muted-color,#6c757d);font-weight:bold;text-transform:uppercase;';
-      
+
       var valSpan = document.createElement('span');
       valSpan.textContent = sec.params[k].value;
-      valSpan.style.cssText = 'font-size:.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+
+      // Apply color to Time Remaining field
+      var valStyle = 'font-size:.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+      if (sec.params[k].label === 'Time Remaining') {
+        var valText = String(sec.params[k].value);
+        var timeColor = '#27ae60';  // green (normal)
+        if (valText === 'EXPIRED') {
+          timeColor = '#8b0000';  // dark red
+          valStyle += 'text-decoration:line-through;';
+        } else if (valText.indexOf('hours') !== -1) {
+          timeColor = '#c0392b';  // red (urgent, <1 day)
+        } else if (valText.indexOf('Day') !== -1 && valText.indexOf('days left') !== -1) {
+          var daysMatch = valText.match(/\((\d+)\s+days\s+left\)/);
+          if (daysMatch && daysMatch[1]) {
+            var daysLeft = parseInt(daysMatch[1]);
+            if (daysLeft <= 1) {
+              timeColor = '#c0392b';  // red
+            } else if (daysLeft <= 7) {
+              timeColor = '#e67e22';  // orange
+            }
+          }
+        }
+        valStyle += 'color:' + timeColor + ';font-weight:500;';
+      }
+      valSpan.style.cssText = valStyle;
       valSpan.title = sec.params[k].value;
-      
+
       item.appendChild(labelSpan);
       item.appendChild(valSpan);
       detailsGrid.appendChild(item);

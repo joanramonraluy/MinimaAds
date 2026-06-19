@@ -412,7 +412,7 @@ function renderHelp(root) {
   var faq7 = createContentCard('#e74c3c', 'Will I lose my rewards if I don\'t claim them?');
   var faq7p1 = document.createElement('p');
   faq7p1.style.cssText = 'font-size:0.9rem;margin:.35rem 0 .5rem;';
-  faq7p1.innerHTML = '<strong>Yes, if you wait too long.</strong> Once a campaign ends, creator channels have a <strong>~40-day safety window</strong> before the creator can reclaim unspent coins. ' +
+  faq7p1.innerHTML = '<strong>Yes, if you wait too long.</strong> Once a campaign ends, creator channels have a <strong>~7-day safety window</strong> before the creator can reclaim unspent coins. ' +
     'After this window closes, any rewards you have not yet settled are returned to the creator — they are lost to you. This is a blockchain-enforced timeout, not a bug.';
   faq7.appendChild(faq7p1);
   var faq7p2 = document.createElement('p');
@@ -444,7 +444,7 @@ function renderHelp(root) {
   var faq9List = document.createElement('ul');
   faq9List.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;padding-left:1.5rem;';
   faq9List.innerHTML = '<li style="margin-bottom:.3rem;"><strong>Minima Hub not approved:</strong> The Hub must be open and you must approve the transaction. If you decline or close the Hub, settlement fails silently.</li>' +
-    '<li style="margin-bottom:.3rem;"><strong>Channel already reclaimed:</strong> The 40-day timelock has expired and the creator reclaimed the coin. The channel is now closed and cannot be settled. Contact the creator for a refund (out of band).</li>' +
+    '<li style="margin-bottom:.3rem;"><strong>Channel already reclaimed:</strong> The 7-day grace period after campaign end has expired and the creator reclaimed the coin. The channel is now closed and cannot be settled. Contact the creator for a refund (out of band).</li>' +
     '<li style="margin-bottom:.3rem;"><strong>Already settled:</strong> You may have already settled this channel in a previous session. Check your wallet to confirm the balance arrived.</li>' +
     '<li>Network issues: Ensure your node is synced and connected. Try again after waiting a moment for block sync.</li>';
   faq9.appendChild(faq9List);

@@ -18,7 +18,10 @@ var LIMITS = {
   MIN_PUBLISHER_REWARD_VIEW:       0.001,
   // Maximum Minima a viewer channel may reserve in a single CHANNEL_OPEN_REQUEST.
   // Prevents a single attacker channel from pre-reserving the entire campaign budget.
-  MAX_CHANNEL_RESERVATION:         10
+  MAX_CHANNEL_RESERVATION:         10,
+  // Grace period after campaign ends before creator can unilaterally reclaim channel coins.
+  // Guarantees viewers have this many days to settle after campaign finishes.
+  SETTLEMENT_GRACE_DAYS:           7
 };
 
 // Node identity — set once in onInited after maxima action:info
@@ -35,7 +38,14 @@ var ESCROW_ADDRESS_V3 = '';
 var ESCROW_ADDRESS_V4 = '';
 
 // Channel script: time-locked creator-only exit OR 2-of-2 MULTISIG(creator, viewer/publisher)
-var CHANNEL_SCRIPT         = 'IF @COINAGE GT (40*1728) AND SIGNEDBY(PREVSTATE(1)) THEN RETURN TRUE ENDIF RETURN MULTISIG(2 PREVSTATE(1) PREVSTATE(2))';
+// Timelock: (MAX_CAMPAIGN_DAYS + SETTLEMENT_GRACE_DAYS) * 1728 blocks ≈ 97 days
+// Ensures viewers have SETTLEMENT_GRACE_DAYS after campaign ends to settle before creator can unilaterally reclaim.
+function buildChannelScript() {
+  var timelockBlocks = (LIMITS.MAX_CAMPAIGN_DAYS + LIMITS.SETTLEMENT_GRACE_DAYS) * 1728;
+  return 'IF @COINAGE GT (' + timelockBlocks + ') AND SIGNEDBY(PREVSTATE(1)) THEN RETURN TRUE ENDIF RETURN MULTISIG(2 PREVSTATE(1) PREVSTATE(2))';
+}
+
+var CHANNEL_SCRIPT         = buildChannelScript();
 var CHANNEL_SCRIPT_ADDRESS = '';
 
 // Tracks escrow coinIds whose campaign is already in the local DB (no further action needed).

@@ -155,6 +155,8 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 | REW-2 | `channel.handler.js` `checkPendingVouchers` | **Pending vouchers lost for prematurely settled channels.** Query also includes `STATUS='settled'` for 5-min safety net. Fixed 2026-06-06. | ✅ Resolved |
 | REW-3 | `channel.handler.js`, `comms.handler.js` | **Publisher `publisher_mx` sent as empty string from viewer nodes.** Cache fallback to keypair. Fixed 2026-06-06. | ✅ Resolved |
 | UI-1 | `dapp/views/earnings.js` | **Earnings page groups incorrectly.** VIEWER_KEY vs MY_ADDRESS mismatch; fixed with CREATOR_ADDRESS filter. GROUP BY settlement cycles. Resolved 2026-05-29. | ✅ Resolved |
+| XSS-1 | `dapp/views/viewer.js` | **Profile icon tracking-pixel vector.** Creator can send arbitrary URL (http/https) as `contact.icon` or `profile.icon` → browser fetches beacon → IP leak. Fixed by validating URLs against regex `/^data:image\/(jpeg\|png\|gif\|webp);base64,/` before `img.src` assignment. Non-exploitable RCE (goes to `img.src`, not `innerHTML`). Severity: LOW (privacy). Fixed 2026-06-19. | ✅ Resolved |
+| SWV-1 | `service.js` `handleRegisterPermanent` | **Missing hex key validation (defense-in-depth).** `payload.publickey` interpolated into `maxextra` command without `isHexKey()` check, unlike the remote handler (`maxima.handler.js:82`). Non-exploitable in practice (local-only, same-origin FE). Added check for consistency with remote path. Severity: LOW. Fixed 2026-06-19. | ✅ Resolved |
 
 ---
 

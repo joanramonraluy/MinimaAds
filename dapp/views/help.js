@@ -285,9 +285,10 @@ function renderHelp(root) {
   var pPrereqCard = createContentCard('#e74c3c', 'Before You Start — Static MLS Required');
   var pPrereqDesc = document.createElement('p');
   pPrereqDesc.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;';
-  pPrereqDesc.innerHTML = 'Before integrating the MinimaAds SDK, your node must have a <strong>static Maxima Location Server (MLS)</strong> configured. ' +
+  pPrereqDesc.innerHTML = 'Your node must have a <strong>static Maxima Location Server (MLS)</strong> configured. ' +
     'The MLS is a permanent network address that allows creators and the platform to discover and reach you for reward settlement. ' +
-    'Without a static MLS, you will not be able to receive publisher rewards or be discoverable by creators.';
+    'Without a static MLS, you will not be able to receive publisher rewards or be discoverable by creators. ' +
+    'You can configure your static MLS in the <strong>Settings</strong> tab. If not configured, the app will automatically redirect you to Settings when you create your first Frame.';
   pPrereqCard.appendChild(pPrereqDesc);
   publisherPanel.appendChild(pPrereqCard);
 

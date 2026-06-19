@@ -412,12 +412,12 @@ function renderHelp(root) {
   var faq7 = createContentCard('#e74c3c', 'Will I lose my rewards if I don\'t claim them?');
   var faq7p1 = document.createElement('p');
   faq7p1.style.cssText = 'font-size:0.9rem;margin:.35rem 0 .5rem;';
-  faq7p1.innerHTML = '<strong>Yes, if you wait too long.</strong> Once a campaign ends, creator channels have a <strong>~7-day safety window</strong> before the creator can reclaim unspent coins. ' +
-    'After this window closes, any rewards you have not yet settled are returned to the creator — they are lost to you. This is a blockchain-enforced timeout, not a bug.';
+  faq7p1.innerHTML = '<strong>Yes, if you wait too long.</strong> When a campaign ends, your channel will <strong>auto-settle automatically</strong> on the blockchain. However, you have a <strong>~7-day safety window</strong> to verify and manually settle if auto-settlement fails. ' +
+    'After this window closes, any rewards you have not settled are returned to the creator — they are lost to you. This is a blockchain-enforced timeout, not a bug.';
   faq7.appendChild(faq7p1);
   var faq7p2 = document.createElement('p');
   faq7p2.style.cssText = 'font-size:0.9rem;margin:0;';
-  faq7p2.innerHTML = '<strong>What to do:</strong> When you finish earning from a campaign, go to the <strong>Earnings</strong> tab and settle your channel <strong>immediately</strong>. Do not wait. Settlement is instant and sends your rewards directly to your Minima wallet.';
+  faq7p2.innerHTML = '<strong>What to do:</strong> Check the <strong>Earnings</strong> tab after a campaign ends to verify your channel settled successfully. If it shows "EXPIRED" or settlement failed, go to Earnings and click <strong>Settle</strong> manually within the 7-day grace period. Settlement is instant and sends your rewards directly to your Minima wallet.';
   faq7.appendChild(faq7p2);
   faqPanel.appendChild(faq7);
 
@@ -450,7 +450,7 @@ function renderHelp(root) {
   faq9.appendChild(faq9List);
   var faq9p2 = document.createElement('p');
   faq9p2.style.cssText = 'font-size:0.85rem;color:var(--pico-muted-color);margin:.5rem 0 0;';
-  faq9p2.innerHTML = '<strong>Best practice:</strong> settle your earnings frequently, especially when a campaign is ending or finishing. Do not wait until the last moment.';
+  faq9p2.innerHTML = '<strong>Best practice:</strong> Let campaigns auto-settle when they end. Only settle manually if the automatic settlement fails or if you want to claim rewards early. Check the Earnings tab regularly to verify settlements completed successfully within the 7-day grace period.';
   faq9.appendChild(faq9p2);
   faqPanel.appendChild(faq9);
 

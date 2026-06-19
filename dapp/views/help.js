@@ -150,6 +150,18 @@ function renderHelp(root) {
     '<li style="margin-bottom:.5rem;"><strong>Limit Feedback & Badges:</strong> If you open a campaign while under cooldown, having reached your daily limit, or if you have completed the reward limit for that campaign, an immediate red status message will inform you and block reward processing. A red <strong>Limit Reached</strong> badge will also be displayed next to the campaign name in your list once you have received all the rewards allowed for that campaign channel.</li>';
   vLimitsCard.appendChild(vLimitsList);
   viewerPanel.appendChild(vLimitsCard);
+
+  // Reward Settlement card
+  var vSettleCard = createContentCard('#2ecc71', 'Reward Settlement');
+  var vSettleDesc = document.createElement('p');
+  vSettleDesc.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;';
+  vSettleDesc.innerHTML = 'Your rewards accumulate in Layer 2 payment channels (off-chain) as you earn from campaigns. To claim your rewards and transfer them to your Minima wallet, settle your channels in the <strong>Earnings</strong> tab when campaigns end. Settlement is instant and posts your balance to the blockchain. ' +
+    '<strong>Settlement Frequency:</strong> You don\'t need to settle frequently — rewards are safe in the channel until you decide to claim them. Settle when a campaign finishes or when you have accumulated substantial rewards. ' +
+    'Each channel remains open for ~7 days after a campaign ends. If you don\'t settle within this window, unclaimed rewards are returned to the creator via the timelock mechanism. ' +
+    'Check your <strong>Time Left</strong> countdown in the Earnings tab to know your deadline.';
+  vSettleCard.appendChild(vSettleDesc);
+  viewerPanel.appendChild(vSettleCard);
+
   root.appendChild(viewerPanel);
 
   // --- 2. CREATOR PANEL ---
@@ -360,6 +372,18 @@ function renderHelp(root) {
   pRewardsNote.innerHTML = '<strong>Note:</strong> Publishers always earn a minimum reward per validated view. The built-in viewer (View Ads section) also generates publisher-side rewards, but those go to the MinimaAds platform, not to your custom frame.';
   pRewardsCard.appendChild(pRewardsNote);
   publisherPanel.appendChild(pRewardsCard);
+
+  // Reward Settlement card
+  var pSettleCard = createContentCard('#2ecc71', 'Reward Settlement');
+  var pSettleDesc = document.createElement('p');
+  pSettleDesc.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;';
+  pSettleDesc.innerHTML = 'Your publisher rewards accumulate in Layer 2 payment channels (off-chain) as creators run campaigns with publisher rewards enabled. To claim your accumulated rewards and transfer them to your Minima wallet, settle your channels in the <strong>Earnings</strong> tab. Settlement is instant and posts your balance to the blockchain. ' +
+    '<strong>Settlement Frequency:</strong> You don\'t need to settle frequently — rewards are safe in the channel until you decide to claim them. Settle when campaigns finish or when you have accumulated substantial rewards. ' +
+    'Each channel remains open for ~7 days after a campaign ends. If you don\'t settle within this window, unclaimed rewards are returned to the creator via the timelock mechanism. ' +
+    'Check your <strong>Time Left</strong> countdown in the Earnings tab to know your deadline.';
+  pSettleCard.appendChild(pSettleDesc);
+  publisherPanel.appendChild(pSettleCard);
+
   root.appendChild(publisherPanel);
 
   // --- 4. FAQ PANEL ---

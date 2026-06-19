@@ -1276,12 +1276,15 @@ function _appendCampaignActions(container, c, warningsDiv) {
 
   if (c.STATUS === 'active' || c.STATUS === 'paused') {
     container.appendChild(_makeBtn('Finish', 'secondary', function() {
-      _showFinishConfirmation(c, warningsDiv);
+      _showFinishConfirmation(c, warningsDiv, container);
     }));
   }
 }
 
-function _showFinishConfirmation(c, warningsDiv) {
+function _showFinishConfirmation(c, warningsDiv, actionsContainer) {
+  if (actionsContainer) {
+    actionsContainer.style.display = 'none';
+  }
   warningsDiv.innerHTML = '';
   var isMobile = window.innerWidth < 768;
 
@@ -1308,12 +1311,12 @@ function _showFinishConfirmation(c, warningsDiv) {
   var confirmBtn = document.createElement('button');
   confirmBtn.textContent = 'Yes, close campaign';
   confirmBtn.className = 'secondary';
-  confirmBtn.style.cssText = 'padding:.3rem .7rem;font-size:.8rem;margin:0;min-width:10rem;flex:' + (isMobile ? '1 1 100%' : '0 0 auto') + ';';
+  confirmBtn.style.cssText = 'padding:.3rem .7rem;font-size:.8rem;margin:0;min-width:10rem;width:auto;flex:' + (isMobile ? '1 1 calc(50% - .175rem)' : '0 0 auto') + ';';
 
   var cancelBtn = document.createElement('button');
   cancelBtn.textContent = 'Cancel';
   cancelBtn.className = 'outline';
-  cancelBtn.style.cssText = 'padding:.3rem .7rem;font-size:.8rem;margin:0;flex:' + (isMobile ? '1 1 calc(50% - .175rem)' : '0 0 auto') + ';';
+  cancelBtn.style.cssText = 'padding:.3rem .7rem;font-size:.8rem;margin:0;width:auto;flex:' + (isMobile ? '1 1 calc(50% - .175rem)' : '0 0 auto') + ';';
 
   confirmBtn.addEventListener('click', function() {
     confirmBtn.disabled = true;
@@ -1332,6 +1335,9 @@ function _showFinishConfirmation(c, warningsDiv) {
 
   cancelBtn.addEventListener('click', function() {
     warningsDiv.innerHTML = '';
+    if (actionsContainer) {
+      actionsContainer.style.display = 'flex';
+    }
   });
 
   btnContainer.appendChild(confirmBtn);

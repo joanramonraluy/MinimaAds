@@ -176,6 +176,28 @@ For verification procedures, see `docs/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
+### Session: 2026-06-19 (patch 24) — Fix: Campaign close confirmation buttons layout overflow
+
+**Problem**: When finishing a campaign on desktop or mobile, the confirmation buttons inside the warnings box would sometimes overflow the screen on the right or wrap asymmetrically. This was caused by PicoCSS applying `width: 100%` by default to `<button>` elements, conflicting with the flex wrap layout in `_showFinishConfirmation`.
+
+**Fix**:
+- **Sizing & Flex**: Added explicit `width: auto;` to override PicoCSS's default `width: 100%` on both `confirmBtn` and `cancelBtn`.
+- **Responsive Symmetry**: Changed the mobile flex property for both buttons to `flex: 1 1 calc(50% - .175rem)` so they render symmetrically side-by-side on mobile, automatically wrapping and stacking cleanly only when the container width drops below their minimum combined width (e.g. on narrow screens).
+- **Action Buttons Visibility**: Passed the actions container to `_showFinishConfirmation` to hide the primary action buttons ('Pause' and 'Finish') in the header when the confirmation dialog is displayed, preventing button duplication. Restored their visibility (`display: flex`) if the action is cancelled.
+- **dapp.conf**: Bumped version to `0.26.6.6`.
+
+**Files modified**: `dapp/views/mycampaigns.js`, `dapp.conf`
+
+**AGENTS.md updated**: yes — §6 updated, patch 21 moved to `docs/HISTORY.md §17`.
+
+**Verification**:
+1. Open the Creator dashboard and select "Finish" on a campaign.
+2. Verify the "Yes, close campaign" and "Cancel" buttons render correctly side-by-side on desktop without any overflow.
+3. Resize the browser to mobile viewport width: verify that the buttons scale symmetrically to take up 50% width each (minus gap) and stack onto separate lines cleanly only if the screen gets narrower than the minimum size, without overflowing the layout boundaries.
+4. Run `node -c dapp/views/mycampaigns.js` to ensure syntax is clean.
+
+---
+
 ### Session: 2026-06-18 (patch 23) — Fix: Campaign finish — on-chain settlement, viewer state refresh, warnings UI
 
 **Changes (3 interconnected fixes):**
@@ -230,35 +252,6 @@ For verification procedures, see `docs/VERIFICATION.md`.
 2. Check SW logs — `txnpost` should succeed (no `non unique CoinIDs` error).
 3. Viewer node: manually settle a voucher via Earnings view → "Settle" button.
 4. Confirm tx posts successfully and balance updates.
-
----
-
-### Session: 2026-06-16 (patch 21) — Fix: Custom publisher opens channels proactively without any view
-
-**Problem**: When a publisher created a custom frame (snippet), the FE immediately sent `MA_OPEN_PUBLISHER_CHANNELS` to the SW, which opened publisher L2 channels for ALL known campaigns — before any viewer had seen an ad through that frame. Simultaneously, every `CAMPAIGN_ANNOUNCE` received on a publisher node triggered `_tryOpenPublisherChannelForAllFrames`, opening channels for all local custom frames without any actual view event. This caused escrow funds to be locked and "active channels" to appear on the creator's campaign stats with no real activity.
-
-**Root cause**: Two proactive channel-opening paths existed that bypassed the requirement for a real view event. The correct trigger is `PUBLISHER_REWARD_NOTIFY` (sent by the creator only after a real view), which already works correctly for the built-in publisher (user4 flow).
-
-**Fix**: Removed both proactive paths entirely:
-- `comms.handler.js`: deleted `handleOpenPublisherChannels()`, `_tryOpenPublisherChannel()`, and `_tryOpenPublisherChannelForAllFrames()`.
-- `campaign.handler.js`: removed the `_tryOpenPublisherChannelForAllFrames(campaignId)` call from `persistCampaign()`.
-- `service.js`: removed the `MA_OPEN_PUBLISHER_CHANNELS` dispatch case.
-- `dapp/views/frames.js`: removed `_openPublisherChannelsForExistingFrames()` call from view init, removed its function definition, and removed the `MA_OPEN_PUBLISHER_CHANNELS` broadcast from `_doSaveFrame()`.
-
-Publisher channels now open exclusively via `PUBLISHER_REWARD_NOTIFY` (in `channel.handler.js`), which is only sent after a confirmed view event.
-
-**Files modified**: `public/service-workers/handlers/comms.handler.js`, `public/service-workers/handlers/campaign.handler.js`, `service.js`, `dapp/views/frames.js`
-
-**AGENTS.md updated**: yes — §6 updated, patch 18 and Security audit entries moved to `docs/HISTORY.md §17`.
-
-**Verification**:
-1. Create a custom snippet on a publisher node (user2).
-2. Verify SW logs do NOT show `MA_OPEN_PUBLISHER_CHANNELS` or any `CHANNEL_OPEN_REQUEST (publisher)`.
-3. Verify Campaign1 budget stats remain unchanged after snippet creation.
-4. Create a new campaign on the creator node.
-5. Verify publisher node does NOT open a channel automatically on ANNOUNCE.
-6. Now trigger an actual view through user2's embedded snippet (from another dapp).
-7. Verify that ONLY after that view does a `CHANNEL_OPEN_REQUEST (publisher)` appear, triggered by `PUBLISHER_REWARD_NOTIFY`.
 
 ---
 

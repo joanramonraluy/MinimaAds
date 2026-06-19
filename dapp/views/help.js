@@ -321,7 +321,9 @@ function renderHelp(root) {
     'Like '));
   var viewerLink2 = createTabLink('viewer', 'viewers');
   pRewardsDesc.appendChild(viewerLink2);
-  pRewardsDesc.appendChild(document.createTextNode(', publisher rewards are accrued in L2 payment channels. You can monitor and settle these pending amounts in the <strong>Earnings</strong> tab under your Publisher dashboard.'));
+  var finalSpan = document.createElement('span');
+  finalSpan.innerHTML = ', publisher rewards are accrued in L2 payment channels. You can monitor and settle these pending amounts in the <strong>Earnings</strong> tab under your Publisher dashboard.';
+  pRewardsDesc.appendChild(finalSpan);
   pRewardsCard.appendChild(pRewardsDesc);
   var pRewardsNote = document.createElement('p');
   pRewardsNote.style.cssText = 'font-size:0.85rem;color:var(--pico-muted-color);margin:0;';

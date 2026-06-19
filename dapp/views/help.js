@@ -378,6 +378,7 @@ function renderHelp(root) {
   var pSettleDesc = document.createElement('p');
   pSettleDesc.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;';
   pSettleDesc.innerHTML = 'Your publisher rewards accumulate in Layer 2 payment channels (off-chain) as creators run campaigns with publisher rewards enabled. To claim your accumulated rewards and transfer them to your Minima wallet, settle your channels in the <strong>Earnings</strong> tab. Settlement is instant and posts your balance to the blockchain. ' +
+    '<strong>Auto-Settlement:</strong> When a campaign finishes, the system automatically attempts to settle all open publisher channels. You should verify in the <strong>Earnings</strong> tab that settlement completed successfully. If it fails, you can manually settle within the 7-day grace period. ' +
     '<strong>Settlement Frequency:</strong> You don\'t need to settle frequently — rewards are safe in the channel until you decide to claim them. Settle when campaigns finish or when you have accumulated substantial rewards. ' +
     'Each channel remains open for ~7 days after a campaign ends. If you don\'t settle within this window, unclaimed rewards are returned to the creator via the timelock mechanism. ' +
     'Check your <strong>Time Left</strong> countdown in the Earnings tab to know your deadline.';

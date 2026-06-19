@@ -142,9 +142,11 @@ function renderHelp(root) {
   var vLimitsList = document.createElement('ul');
   vLimitsList.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;padding-left:1.5rem;';
   vLimitsList.innerHTML =
-    '<li style="margin-bottom:.5rem;"><strong>Cooldown:</strong> There is a cooldown period (default 5 minutes) between rewards for the same campaign to prevent spamming.</li>' +
-    '<li style="margin-bottom:.5rem;"><strong>Daily cap:</strong> Each campaign has a maximum daily limit of views and clicks per user (default 100).</li>' +
+    '<li style="margin-bottom:.5rem;"><strong>Cooldown:</strong> There is a cooldown period between rewards for the same campaign to prevent spamming. By default this is 30 seconds (global floor), though individual campaigns may configure a longer cooldown.</li>' +
+    '<li style="margin-bottom:.5rem;"><strong>Daily cap:</strong> Each campaign has a maximum of 100 views and 100 clicks per user per day (tracked independently) to prevent abuse.</li>' +
+    '<li style="margin-bottom:.5rem;"><strong>Session campaign cap:</strong> You can earn from up to 10 different campaigns per app session. Restarting the app resets this counter.</li>' +
     '<li style="margin-bottom:.5rem;"><strong>Self-rewards:</strong> You cannot earn rewards from campaigns you created yourself.</li>' +
+    '<li style="margin-bottom:.5rem;"><strong>Paused campaigns:</strong> If a creator pauses their campaign, you won\'t earn new rewards while paused. Your accumulated channel balance is safe and you can still settle it anytime. If the creator resumes, earning resumes.</li>' +
     '<li style="margin-bottom:.5rem;"><strong>Limit Feedback & Badges:</strong> If you open a campaign while under cooldown, having reached your daily limit, or if you have completed the reward limit for that campaign, an immediate red status message will inform you and block reward processing. A red <strong>Limit Reached</strong> badge will also be displayed next to the campaign name in your list once you have received all the rewards allowed for that campaign channel.</li>';
   vLimitsCard.appendChild(vLimitsList);
   viewerPanel.appendChild(vLimitsCard);
@@ -159,6 +161,17 @@ function renderHelp(root) {
   cIntro.style.cssText = 'margin-bottom:1.5rem;';
   creatorPanel.appendChild(cIntro);
 
+  // Before You Start card
+  var cPrereqCard = createContentCard('#e74c3c', 'Before You Start — Static MLS Required');
+  var cPrereqDesc = document.createElement('p');
+  cPrereqDesc.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;';
+  cPrereqDesc.innerHTML = 'Before creating your first campaign, your node must have a <strong>static Maxima Location Server (MLS)</strong> configured. ' +
+    'The MLS is a permanent network address that allows other nodes to discover and reach you for campaign delivery and reward settlement. ' +
+    'Without a static MLS, your campaigns will be network-invisible and no one will be able to view your ads or earn rewards. ' +
+    'The app will guide you through MLS registration the first time you create a campaign — you will need to have Maxima enabled on your Minima node.';
+  cPrereqCard.appendChild(cPrereqDesc);
+  creatorPanel.appendChild(cPrereqCard);
+
   // Creating a Campaign card
   var cStepsCard = createContentCard('#2ecc71', 'Creating a Campaign');
   var cStepsList = document.createElement('ol');
@@ -167,7 +180,7 @@ function renderHelp(root) {
     '<li style="margin-bottom:.5rem;">Set your role to <strong>Creator</strong> in the side menu.</li>' +
     '<li style="margin-bottom:.5rem;">Click <strong>Create Campaign</strong>. Fill in the content (title, description, CTA, interests, and optional banner image).</li>' +
     '<li style="margin-bottom:.5rem;">Define your total campaign budget and the reward rates (amount paid per view and per click).</li>' +
-    '<li style="margin-bottom:.5rem;">Platform fees of <strong>6%</strong> (protocol) and <strong>3%</strong> (Minima Foundation) are automatically calculated and added to the escrow funding amount.</li>' +
+    '<li style="margin-bottom:.5rem;">A <strong>6%</strong> platform fee is automatically calculated and added to your total funding. Your final payment will be: budget × 1.06.</li>' +
     '<li style="margin-bottom:.5rem;">Confirm and approve the transaction. Your funds are locked securely in a smart contract on the Minima blockchain.</li>';
   cStepsCard.appendChild(cStepsList);
   creatorPanel.appendChild(cStepsCard);
@@ -177,7 +190,7 @@ function renderHelp(root) {
   var cStatusDesc = document.createElement('p');
   cStatusDesc.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;';
   cStatusDesc.innerHTML = 'In <strong>My Campaigns</strong>, you can track views/clicks in real time and manage status (Pause, Resume, or Finish). ' +
-    'Status changes generate an on-chain update transaction. This updates the status state stored directly in the campaign\'s escrow coin, propagating the changes across the peer-to-peer network even if you go offline.';
+    'Status changes on campaigns funded with the current escrow version generate an on-chain update transaction, storing the status directly in the escrow coin. Other nodes discover the change on their next block scan — even if you go offline. Note: older campaigns created before this feature may still require you to be online for status changes to propagate.';
   cStatusCard.appendChild(cStatusDesc);
   creatorPanel.appendChild(cStatusCard);
 
@@ -235,12 +248,25 @@ function renderHelp(root) {
   cBudgetCard.appendChild(metricsInfo);
   creatorPanel.appendChild(cBudgetCard);
 
+  // Campaign Limits card
+  var cLimitsCard = createContentCard('#f39c12', 'Campaign Limits & Minimums');
+  var cLimitsList = document.createElement('ul');
+  cLimitsList.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;padding-left:1.5rem;';
+  cLimitsList.innerHTML =
+    '<li style="margin-bottom:.3rem;"><strong>Minimum budget:</strong> 100 MINIMA. Cannot create campaigns with less.</li>' +
+    '<li style="margin-bottom:.3rem;"><strong>Minimum view reward:</strong> 0.001 MINIMA per view.</li>' +
+    '<li style="margin-bottom:.3rem;"><strong>Minimum click reward:</strong> 0.001 MINIMA per click (if click rewards are enabled).</li>' +
+    '<li style="margin-bottom:.3rem;"><strong>Maximum duration:</strong> 90 days. Campaigns automatically finish after 90 days on-chain.</li>' +
+    '<li>When a campaign expires, it transitions to <strong>Finished</strong> status automatically. Viewers can no longer earn new rewards but can settle existing channels.</li>';
+  cLimitsCard.appendChild(cLimitsList);
+  creatorPanel.appendChild(cLimitsCard);
+
   // Settlements card
   var cSettleCard = createContentCard('#9b59b6', 'Pending Settlements & Refunds');
   var cSettleDesc = document.createElement('p');
   cSettleDesc.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;';
   cSettleDesc.innerHTML = 'The <strong>Pending Settlement</strong> section shows open payment channels with active viewers and publishers. ' +
-    'When viewers settle their channels or you mark a campaign as finished, all remaining unspent balances are returned directly to your main wallet (not back to the escrow contract).';
+    'When viewers settle their channels, any unspent balance returns to you as change output. Unspent channel balances are also automatically returned to your wallet after the channel\'s lock period expires (timelock reclaim). Marking a campaign as finished notifies viewers to settle but does not immediately return funds from open channels.';
   cSettleCard.appendChild(cSettleDesc);
   creatorPanel.appendChild(cSettleCard);
 
@@ -251,7 +277,7 @@ function renderHelp(root) {
   publisherPanel.appendChild(mkSectionTitle('Publisher Guide'));
 
   var pIntro = document.createElement('p');
-  pIntro.innerHTML = 'As a <strong>Publisher</strong>, you can monetize your own MiniDapps or websites by integrating the MinimaAds SDK to show ads.';
+  pIntro.innerHTML = 'As a <strong>Publisher</strong>, you can monetize your own MiniDapps by integrating the MinimaAds SDK to display ads. Publishers hosting the SDK inside another MiniDapp must use the <code>mdsAlreadyInitialized</code> option to avoid conflicting with the host MDS event loop.';
   pIntro.style.cssText = 'margin-bottom:1.5rem;';
   publisherPanel.appendChild(pIntro);
 
@@ -263,24 +289,44 @@ function renderHelp(root) {
     '<li style="margin-bottom:.5rem;">Go to the <strong>Frames</strong> section under the Publisher role.</li>' +
     '<li style="margin-bottom:.5rem;">Create a new <strong>Frame</strong> (a named ad slot identifier).</li>' +
     '<li style="margin-bottom:.5rem;">Copy the generated integration snippet.</li>' +
-    '<li style="margin-bottom:.5rem;">Include the MinimaAds SDK script in your dApp and call <code>MinimaAds.init({ frameId: "your-frame-id" })</code>.</li>' +
+    '<li style="margin-bottom:.5rem;">Include the MinimaAds SDK script in your dApp and call <code>MinimaAds.init({ wallet: "0x...", frameId: "your-frame-id" }, callback)</code> with your wallet address.</li>' +
     '<li style="margin-bottom:.5rem;">Place the <code>&lt;div id="minima-ad-slot"&gt;&lt;/div&gt;</code> container where you want the ad banner to render.</li>';
   pStepsCard.appendChild(pStepsList);
   publisherPanel.appendChild(pStepsCard);
 
+  // Embedding in Existing MiniDapp card
+  var pEmbedCard = createContentCard('#f39c12', 'Embedding in an Existing MiniDapp');
+  var pEmbedDesc = document.createElement('p');
+  pEmbedDesc.style.cssText = 'font-size:0.9rem;margin:.35rem 0 .5rem;';
+  pEmbedDesc.innerHTML = 'If your dApp already owns <code>MDS.init()</code> and calls it during startup, you must pass an additional option to the SDK to avoid conflicting initializations:';
+  pEmbedCard.appendChild(pEmbedDesc);
+  var pEmbedCode = document.createElement('code');
+  pEmbedCode.style.cssText = 'display:block;background:rgba(0,0,0,0.05);padding:.5rem;border-radius:0.25rem;font-size:0.85rem;margin:.35rem 0 .5rem;';
+  pEmbedCode.innerHTML = 'MinimaAds.init({ wallet: "0x...", frameId: "your-frame-id", mdsAlreadyInitialized: true }, callback)';
+  pEmbedCard.appendChild(pEmbedCode);
+  var pEmbedP2 = document.createElement('p');
+  pEmbedP2.style.cssText = 'font-size:0.9rem;margin:0;';
+  pEmbedP2.innerHTML = 'Then, forward every MDS callback message to the SDK: <code>MinimaAds.handleMdsEvent(msg)</code> inside your <code>MDS.init</code> callback. This ensures the SDK receives all blockchain events it needs to function.';
+  pEmbedCard.appendChild(pEmbedP2);
+  publisherPanel.appendChild(pEmbedCard);
+
   // Publisher Rewards card
   var pRewardsCard = createContentCard('#3498db', 'Publisher Rewards');
   var pRewardsDesc = document.createElement('p');
-  pRewardsDesc.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;';
+  pRewardsDesc.style.cssText = 'font-size:0.9rem;margin:.35rem 0 .5rem;';
   pRewardsDesc.textContent = 'When a ';
   var creatorLink = createTabLink('creator', 'creator');
   pRewardsDesc.appendChild(creatorLink);
-  pRewardsDesc.appendChild(document.createTextNode(' runs an ad campaign, your frame automatically accumulates <strong>Publisher rewards per view</strong>. ' +
+  pRewardsDesc.appendChild(document.createTextNode(' runs an ad campaign with publisher rewards enabled, your custom frame automatically accumulates a fixed reward amount per validated view. ' +
     'Like '));
   var viewerLink2 = createTabLink('viewer', 'viewers');
   pRewardsDesc.appendChild(viewerLink2);
   pRewardsDesc.appendChild(document.createTextNode(', publisher rewards are accrued in L2 payment channels. You can monitor and settle these pending amounts in the <strong>Earnings</strong> tab under your Publisher dashboard.'));
   pRewardsCard.appendChild(pRewardsDesc);
+  var pRewardsNote = document.createElement('p');
+  pRewardsNote.style.cssText = 'font-size:0.85rem;color:var(--pico-muted-color);margin:0;';
+  pRewardsNote.innerHTML = '<strong>Note:</strong> Publisher rewards are only paid by campaigns that have explicitly enabled publisher rewards. Campaigns with Publisher Reward per View set to 0 do not generate publisher payouts. The built-in viewer (View Ads section) also generates publisher-side rewards, but those go to the MinimaAds platform, not to your custom frame.';
+  pRewardsCard.appendChild(pRewardsNote);
   publisherPanel.appendChild(pRewardsCard);
   root.appendChild(publisherPanel);
 
@@ -297,9 +343,9 @@ function renderHelp(root) {
   var faq1List = document.createElement('ul');
   faq1List.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;padding-left:1.5rem;';
   faq1List.innerHTML = '<li style="margin-bottom:.3rem;">Check that you\'ve set your role to <strong>Viewer</strong> in the side menu.</li>' +
-    '<li style="margin-bottom:.3rem;">Ensure your interests are set in <strong>Profile</strong> — campaigns match based on your interests.</li>' +
-    '<li style="margin-bottom:.3rem;">Wait a few moments for Maxima messages to propagate across the network.</li>' +
-    '<li style="margin-bottom:.3rem;">Check if there are any active campaigns by asking a creator to broadcast one.</li>';
+    '<li style="margin-bottom:.3rem;">Check your internet connection and ensure your node is synced. Campaigns are discovered automatically via the blockchain on each new block.</li>' +
+    '<li style="margin-bottom:.3rem;">Setting your interests in <strong>Profile</strong> helps prioritize campaigns that match your preferences, but you can browse all active campaigns regardless.</li>' +
+    '<li style="margin-bottom:.3rem;">Wait a few moments for your node to sync the latest blockchain state.</li>';
   faq1.appendChild(faq1List);
   faqPanel.appendChild(faq1);
 
@@ -327,11 +373,14 @@ function renderHelp(root) {
   // FAQ Item 4
   var faq4 = createContentCard('#f39c12', 'What happens if a creator goes offline?');
   var faq4p1 = document.createElement('p');
-  faq4p1.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;';
-  faq4p1.innerHTML = '<strong>For viewers:</strong> Your existing rewards remain safe in payment channels. ' +
-    'You can continue settling your channel anytime. However, new rewards cannot be earned until the creator comes back online. ' +
-    '<strong>For campaign status:</strong> If a campaign has a status update stored on-chain (V3 coins), the status change will propagate across the network even if the creator is offline.';
+  faq4p1.style.cssText = 'font-size:0.9rem;margin:.35rem 0 .5rem;';
+  faq4p1.innerHTML = '<strong>For viewers:</strong> Your existing rewards remain safe in payment channels. You can settle your accumulated rewards at any time — you do not need the creator to be online to post your settlement transaction.';
   faq4.appendChild(faq4p1);
+  var faq4p2 = document.createElement('p');
+  faq4p2.style.cssText = 'font-size:0.9rem;margin:0;';
+  faq4p2.innerHTML = '<strong>For new rewards:</strong> Viewers cannot earn new rewards until the creator is back online, as the creator must respond to reward requests and send vouchers. ' +
+    '<strong>For campaign status:</strong> For recently launched campaigns, pause or finish status changes are stored directly on the Minima blockchain and propagate automatically to all nodes — the creator does not need to be online for status changes to propagate.';
+  faq4.appendChild(faq4p2);
   faqPanel.appendChild(faq4);
 
   // FAQ Item 5
@@ -342,10 +391,9 @@ function renderHelp(root) {
   faq5.appendChild(faq5p1);
   var faq5List = document.createElement('ul');
   faq5List.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;padding-left:1.5rem;';
-  faq5List.innerHTML = '<li style="margin-bottom:.3rem;"><strong>6%</strong> Platform fee (protocol maintenance and infrastructure).</li>' +
-    '<li style="margin-bottom:.3rem;"><strong>3%</strong> Minima Foundation fee (ecosystem support).</li>' +
-    '<li style="margin-bottom:.3rem;">These are added to your campaign budget at creation time.</li>' +
-    '<li>Viewers and publishers earn the full reward amount — no fees deducted from their rewards.</li>';
+  faq5List.innerHTML = '<li style="margin-bottom:.3rem;"><strong>6%</strong> platform fee (protocol maintenance and infrastructure).</li>' +
+    '<li style="margin-bottom:.3rem;">This fee is added on top of your campaign budget. Your total funding = budget × 1.06.</li>' +
+    '<li>Viewers and publishers earn the full reward amount — no fees are deducted from their rewards.</li>';
   faq5.appendChild(faq5List);
   faqPanel.appendChild(faq5);
 
@@ -356,12 +404,58 @@ function renderHelp(root) {
   var link6a = createTabLink('publisher', 'Publisher Guide');
   faq6p1.appendChild(document.createTextNode('Publishers integrate the MinimaAds SDK into their dApps. See our '));
   faq6p1.appendChild(link6a);
-  faq6p1.appendChild(document.createTextNode(' to get started. You\'ll earn a share of every ad impression in your custom Frame.'));
+  faq6p1.appendChild(document.createTextNode(' to get started. You\'ll earn a fixed token amount per validated view in your custom Frame — but only from campaigns that have publisher rewards enabled. The reward rate is set by each creator.'));
   faq6.appendChild(faq6p1);
   faqPanel.appendChild(faq6);
 
   // FAQ Item 7
-  var faq7 = createContentCard('#2ecc71', 'What is the difference between Viewer and Publisher rewards?');
+  var faq7 = createContentCard('#e74c3c', 'Will I lose my rewards if I don\'t claim them?');
+  var faq7p1 = document.createElement('p');
+  faq7p1.style.cssText = 'font-size:0.9rem;margin:.35rem 0 .5rem;';
+  faq7p1.innerHTML = '<strong>Yes, if you wait too long.</strong> Once a campaign ends, creator channels have a <strong>~40-day safety window</strong> before the creator can reclaim unspent coins. ' +
+    'After this window closes, any rewards you have not yet settled are returned to the creator — they are lost to you. This is a blockchain-enforced timeout, not a bug.';
+  faq7.appendChild(faq7p1);
+  var faq7p2 = document.createElement('p');
+  faq7p2.style.cssText = 'font-size:0.9rem;margin:0;';
+  faq7p2.innerHTML = '<strong>What to do:</strong> When you finish earning from a campaign, go to the <strong>Earnings</strong> tab and settle your channel <strong>immediately</strong>. Do not wait. Settlement is instant and sends your rewards directly to your Minima wallet.';
+  faq7.appendChild(faq7p2);
+  faqPanel.appendChild(faq7);
+
+  // FAQ Item 8
+  var faq8 = createContentCard('#3498db', 'How do I claim my earnings?');
+  var faq8p1 = document.createElement('p');
+  faq8p1.style.cssText = 'font-size:0.9rem;margin:.35rem 0 .5rem;';
+  faq8p1.innerHTML = 'Go to the <strong>Earnings</strong> tab in the top menu. You will see all open reward channels from campaigns you have participated in. ' +
+    'For each channel with accumulated rewards, click the <strong>Settle</strong> button. This opens the Minima Hub transaction approval dialog.';
+  faq8.appendChild(faq8p1);
+  var faq8p2 = document.createElement('p');
+  faq8p2.style.cssText = 'font-size:0.9rem;margin:0;';
+  faq8p2.innerHTML = 'Approve the transaction in the Hub. Your rewards are posted to the Minima blockchain and arrive in your wallet immediately. ' +
+    'The settled amount is now yours permanently — no further steps needed.';
+  faq8.appendChild(faq8p2);
+  faqPanel.appendChild(faq8);
+
+  // FAQ Item 9
+  var faq9 = createContentCard('#f39c12', 'What if my settlement fails?');
+  var faq9p1 = document.createElement('p');
+  faq9p1.style.cssText = 'font-size:0.9rem;margin:.35rem 0 .5rem;';
+  faq9p1.innerHTML = 'Settlement is a blockchain operation and can fail. Common reasons:';
+  faq9.appendChild(faq9p1);
+  var faq9List = document.createElement('ul');
+  faq9List.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;padding-left:1.5rem;';
+  faq9List.innerHTML = '<li style="margin-bottom:.3rem;"><strong>Minima Hub not approved:</strong> The Hub must be open and you must approve the transaction. If you decline or close the Hub, settlement fails silently.</li>' +
+    '<li style="margin-bottom:.3rem;"><strong>Channel already reclaimed:</strong> The 40-day timelock has expired and the creator reclaimed the coin. The channel is now closed and cannot be settled. Contact the creator for a refund (out of band).</li>' +
+    '<li style="margin-bottom:.3rem;"><strong>Already settled:</strong> You may have already settled this channel in a previous session. Check your wallet to confirm the balance arrived.</li>' +
+    '<li>Network issues: Ensure your node is synced and connected. Try again after waiting a moment for block sync.</li>';
+  faq9.appendChild(faq9List);
+  var faq9p2 = document.createElement('p');
+  faq9p2.style.cssText = 'font-size:0.85rem;color:var(--pico-muted-color);margin:.5rem 0 0;';
+  faq9p2.innerHTML = '<strong>Best practice:</strong> settle your earnings frequently, especially when a campaign is ending or finishing. Do not wait until the last moment.';
+  faq9.appendChild(faq9p2);
+  faqPanel.appendChild(faq9);
+
+  // FAQ Item 10
+  var faq10 = createContentCard('#2ecc71', 'What is the difference between Viewer and Publisher rewards?');
   var faq7p1 = document.createElement('p');
   faq7p1.style.cssText = 'font-size:0.9rem;margin:.35rem 0 .5rem;';
   faq7p1.innerHTML = 'Creators allocate their budget into two pools:';
@@ -403,7 +497,7 @@ function renderHelp(root) {
   var aArchList = document.createElement('ul');
   aArchList.style.cssText = 'margin:.35rem 0 0;padding-left:1.5rem;';
   aArchList.innerHTML =
-    '<li style="margin-bottom:.5rem;"><strong>Service Worker:</strong> Runs background tasks, persistent data storage, and Maxima event processing. Creators and publishers must stay online to send campaigns and receive rewards; viewers earn passively and can settle rewards anytime.</li>' +
+    '<li style="margin-bottom:.5rem;"><strong>Service Worker:</strong> Runs background tasks, persistent data storage, and Maxima event processing. Campaign discovery and status changes propagate automatically via the blockchain even when creators are offline. However, creators must be online to open viewer channels and send reward vouchers. Viewers earn passively and can settle rewards at any time.</li>' +
     '<li style="margin-bottom:.5rem;"><strong>Layer 2 Channels:</strong> Unidirectional payment channels prevent blockchain congestion while ensuring instant settlement capability.</li>' +
     '<li style="margin-bottom:.5rem;"><strong>KissVM Contracts:</strong> All campaign budgets are locked in verifiable smart contracts on the Minima blockchain.</li>';
   aArchCard.appendChild(aArchList);

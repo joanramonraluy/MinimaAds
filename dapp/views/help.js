@@ -327,7 +327,7 @@ function renderHelp(root) {
   pRewardsCard.appendChild(pRewardsDesc);
   var pRewardsNote = document.createElement('p');
   pRewardsNote.style.cssText = 'font-size:0.85rem;color:var(--pico-muted-color);margin:0;';
-  pRewardsNote.innerHTML = '<strong>Note:</strong> Publisher rewards are only paid by campaigns that have explicitly enabled publisher rewards. Campaigns with Publisher Reward per View set to 0 do not generate publisher payouts. The built-in viewer (View Ads section) also generates publisher-side rewards, but those go to the MinimaAds platform, not to your custom frame.';
+  pRewardsNote.innerHTML = '<strong>Note:</strong> Publishers always earn a minimum reward per validated view. The built-in viewer (View Ads section) also generates publisher-side rewards, but those go to the MinimaAds platform, not to your custom frame.';
   pRewardsCard.appendChild(pRewardsNote);
   publisherPanel.appendChild(pRewardsCard);
   root.appendChild(publisherPanel);

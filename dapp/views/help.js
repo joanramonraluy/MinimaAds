@@ -23,6 +23,7 @@ function renderHelp(root) {
     { id: 'viewer', label: 'Viewer' },
     { id: 'creator', label: 'Creator' },
     { id: 'publisher', label: 'Publisher' },
+    { id: 'faq', label: 'FAQ' },
     { id: 'about', label: 'About MinimaAds' }
   ];
 
@@ -85,6 +86,22 @@ function renderHelp(root) {
     return card;
   }
 
+  // Helper to create a cross-section link that switches tabs
+  function createTabLink(tabId, label) {
+    var link = document.createElement('button');
+    link.type = 'button';
+    link.textContent = label;
+    link.style.cssText = 'background:none;border:none;color:var(--pico-form-element-valid-border-color,#2ecc71);cursor:pointer;padding:0;text-decoration:underline;font-weight:600;font-size:inherit;';
+    link.addEventListener('click', function(e) {
+      e.preventDefault();
+      _selectHelpTab('ma-help-panel-' + tabId);
+      // Scroll tab into view
+      var tab = document.getElementById('ma-help-tab-' + tabId);
+      if (tab) { tab.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+    });
+    return link;
+  }
+
   // --- 1. VIEWER PANEL ---
   var viewerPanel = createPanel('viewer', true);
   viewerPanel.appendChild(mkSectionTitle('Viewer Guide'));
@@ -113,7 +130,10 @@ function renderHelp(root) {
   vL2Desc.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;';
   vL2Desc.innerHTML = 'To prevent on-chain congestion, rewards accumulate off-chain in <strong>unidirectional payment channels</strong>. ' +
     'The first time you interact with a campaign, the system opens a secure Layer 2 channel funded by the creator\'s campaign escrow. ' +
-    'Once open, vouchers are sent directly to your node. You can settle these vouchers at any time under the <strong>Earnings</strong> tab to claim your funds directly to your Minima L1 wallet.';
+    'Once open, vouchers are sent directly to your node. You can settle these vouchers at any time under the <strong>Earnings</strong> tab to claim your funds directly to your Minima L1 wallet. ';
+  var faqLinkL2 = createTabLink('faq', 'Learn more about channels');
+  vL2Desc.appendChild(faqLinkL2);
+  vL2Desc.appendChild(document.createTextNode('.'));
   vL2Card.appendChild(vL2Desc);
   viewerPanel.appendChild(vL2Card);
 
@@ -165,7 +185,13 @@ function renderHelp(root) {
   var cBudgetCard = createContentCard('#f39c12', 'Budget Allocation & Performance');
   var cBudgetDesc = document.createElement('p');
   cBudgetDesc.style.cssText = 'font-size:0.9rem;margin:0 0 .75rem;';
-  cBudgetDesc.innerHTML = 'To give you complete transparency over campaign funding, your budget is split into two mandatory allocations: <strong>Viewer Rewards</strong> (for viewers who interact with your ads) and <strong>Publisher Rewards</strong> (for publishers who distribute your campaign).';
+  cBudgetDesc.textContent = 'To give you complete transparency over campaign funding, your budget is split into two mandatory allocations: ';
+  var viewerLink = createTabLink('viewer', 'Viewer Rewards');
+  cBudgetDesc.appendChild(viewerLink);
+  cBudgetDesc.appendChild(document.createTextNode(' (for viewers who interact with your ads) and '));
+  var pubLink = createTabLink('publisher', 'Publisher Rewards');
+  cBudgetDesc.appendChild(pubLink);
+  cBudgetDesc.appendChild(document.createTextNode(' (for publishers who distribute your campaign).'));
   cBudgetCard.appendChild(cBudgetDesc);
 
   // Viewer Budget sub-card
@@ -246,13 +272,111 @@ function renderHelp(root) {
   var pRewardsCard = createContentCard('#3498db', 'Publisher Rewards');
   var pRewardsDesc = document.createElement('p');
   pRewardsDesc.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;';
-  pRewardsDesc.innerHTML = 'When a creator runs an ad campaign, your frame automatically accumulates <strong>Publisher rewards per view</strong>. ' +
-    'Like viewers, publisher rewards are accrued in L2 payment channels. You can monitor and settle these pending amounts in the <strong>Earnings</strong> tab under your Publisher dashboard.';
+  pRewardsDesc.textContent = 'When a ';
+  var creatorLink = createTabLink('creator', 'creator');
+  pRewardsDesc.appendChild(creatorLink);
+  pRewardsDesc.appendChild(document.createTextNode(' runs an ad campaign, your frame automatically accumulates <strong>Publisher rewards per view</strong>. ' +
+    'Like '));
+  var viewerLink2 = createTabLink('viewer', 'viewers');
+  pRewardsDesc.appendChild(viewerLink2);
+  pRewardsDesc.appendChild(document.createTextNode(', publisher rewards are accrued in L2 payment channels. You can monitor and settle these pending amounts in the <strong>Earnings</strong> tab under your Publisher dashboard.'));
   pRewardsCard.appendChild(pRewardsDesc);
   publisherPanel.appendChild(pRewardsCard);
   root.appendChild(publisherPanel);
 
-  // --- 4. ABOUT PANEL ---
+  // --- 4. FAQ PANEL ---
+  var faqPanel = createPanel('faq', false);
+  faqPanel.appendChild(mkSectionTitle('Frequently Asked Questions'));
+
+  // FAQ Item 1
+  var faq1 = createContentCard('#3498db', 'Why can\'t I see any campaigns?');
+  var faq1p1 = document.createElement('p');
+  faq1p1.style.cssText = 'font-size:0.9rem;margin:.35rem 0 .5rem;';
+  faq1p1.innerHTML = 'Campaigns are discovered through Maxima peer-to-peer messaging. If no campaigns appear:';
+  faq1.appendChild(faq1p1);
+  var faq1List = document.createElement('ul');
+  faq1List.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;padding-left:1.5rem;';
+  faq1List.innerHTML = '<li style="margin-bottom:.3rem;">Check that you\'ve set your role to <strong>Viewer</strong> in the side menu.</li>' +
+    '<li style="margin-bottom:.3rem;">Ensure your interests are set in <strong>Profile</strong> — campaigns match based on your interests.</li>' +
+    '<li style="margin-bottom:.3rem;">Wait a few moments for Maxima messages to propagate across the network.</li>' +
+    '<li style="margin-bottom:.3rem;">Check if there are any active campaigns by asking a creator to broadcast one.</li>';
+  faq1.appendChild(faq1List);
+  faqPanel.appendChild(faq1);
+
+  // FAQ Item 2
+  var faq2 = createContentCard('#2ecc71', 'How do I set up and start earning as a creator?');
+  var faq2p1 = document.createElement('p');
+  faq2p1.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;';
+  var link2a = createTabLink('creator', 'Creator Guide');
+  faq2p1.appendChild(document.createTextNode('See our '));
+  faq2p1.appendChild(link2a);
+  faq2p1.appendChild(document.createTextNode(' for step-by-step instructions on creating a campaign and funding it with your budget.'));
+  faq2.appendChild(faq2p1);
+  faqPanel.appendChild(faq2);
+
+  // FAQ Item 3
+  var faq3 = createContentCard('#9b59b6', 'What are Layer 2 Channels and why do I need them?');
+  var faq3p1 = document.createElement('p');
+  faq3p1.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;';
+  faq3p1.innerHTML = 'Payment channels are a scaling technique that accumulates rewards off-chain to avoid blockchain congestion. ' +
+    'Instead of settling every single view or click on-chain (expensive), rewards accumulate in a secure L2 channel. ' +
+    'You can settle your channel to your L1 wallet anytime through the <strong>Earnings</strong> tab.';
+  faq3.appendChild(faq3p1);
+  faqPanel.appendChild(faq3);
+
+  // FAQ Item 4
+  var faq4 = createContentCard('#f39c12', 'What happens if a creator goes offline?');
+  var faq4p1 = document.createElement('p');
+  faq4p1.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;';
+  faq4p1.innerHTML = '<strong>For viewers:</strong> Your existing rewards remain safe in payment channels. ' +
+    'You can continue settling your channel anytime. However, new rewards cannot be earned until the creator comes back online. ' +
+    '<strong>For campaign status:</strong> If a campaign has a status update stored on-chain (V3 coins), the status change will propagate across the network even if the creator is offline.';
+  faq4.appendChild(faq4p1);
+  faqPanel.appendChild(faq4);
+
+  // FAQ Item 5
+  var faq5 = createContentCard('#e74c3c', 'What are the fees?');
+  var faq5p1 = document.createElement('p');
+  faq5p1.style.cssText = 'font-size:0.9rem;margin:.35rem 0 .5rem;';
+  faq5p1.innerHTML = 'Creators pay two mandatory fees when creating a campaign:';
+  faq5.appendChild(faq5p1);
+  var faq5List = document.createElement('ul');
+  faq5List.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;padding-left:1.5rem;';
+  faq5List.innerHTML = '<li style="margin-bottom:.3rem;"><strong>6%</strong> Platform fee (protocol maintenance and infrastructure).</li>' +
+    '<li style="margin-bottom:.3rem;"><strong>3%</strong> Minima Foundation fee (ecosystem support).</li>' +
+    '<li style="margin-bottom:.3rem;">These are added to your campaign budget at creation time.</li>' +
+    '<li>Viewers and publishers earn the full reward amount — no fees deducted from their rewards.</li>';
+  faq5.appendChild(faq5List);
+  faqPanel.appendChild(faq5);
+
+  // FAQ Item 6
+  var faq6 = createContentCard('#3498db', 'How do I become a publisher and earn rewards?');
+  var faq6p1 = document.createElement('p');
+  faq6p1.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;';
+  var link6a = createTabLink('publisher', 'Publisher Guide');
+  faq6p1.appendChild(document.createTextNode('Publishers integrate the MinimaAds SDK into their dApps. See our '));
+  faq6p1.appendChild(link6a);
+  faq6p1.appendChild(document.createTextNode(' to get started. You\'ll earn a share of every ad impression in your custom Frame.'));
+  faq6.appendChild(faq6p1);
+  faqPanel.appendChild(faq6);
+
+  // FAQ Item 7
+  var faq7 = createContentCard('#2ecc71', 'What is the difference between Viewer and Publisher rewards?');
+  var faq7p1 = document.createElement('p');
+  faq7p1.style.cssText = 'font-size:0.9rem;margin:.35rem 0 .5rem;';
+  faq7p1.innerHTML = 'Creators allocate their budget into two pools:';
+  faq7.appendChild(faq7p1);
+  var faq7List = document.createElement('ul');
+  faq7List.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;padding-left:1.5rem;';
+  faq7List.innerHTML = '<li style="margin-bottom:.3rem;"><strong>Viewer Rewards:</strong> Paid to users who view and click your ads.</li>' +
+    '<li style="margin-bottom:.3rem;"><strong>Publisher Rewards:</strong> Paid to publishers who distribute your campaign in their dApps.</li>' +
+    '<li>Both use the same Layer 2 channel infrastructure and are fully transparent in your campaign budget breakdown.</li>';
+  faq7.appendChild(faq7List);
+  faqPanel.appendChild(faq7);
+
+  root.appendChild(faqPanel);
+
+  // --- 5. ABOUT PANEL ---
   var aboutPanel = createPanel('about', false);
   aboutPanel.appendChild(mkSectionTitle('About MinimaAds'));
 

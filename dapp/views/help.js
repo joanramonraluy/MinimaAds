@@ -142,7 +142,7 @@ function renderHelp(root) {
   var vLimitsList = document.createElement('ul');
   vLimitsList.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;padding-left:1.5rem;';
   vLimitsList.innerHTML =
-    '<li style="margin-bottom:.5rem;"><strong>Cooldown:</strong> There is a cooldown period between rewards for the same campaign to prevent spamming. By default this is 30 seconds (global floor), though individual campaigns may configure a longer cooldown.</li>' +
+    '<li style="margin-bottom:.5rem;"><strong>Cooldown:</strong> There is a cooldown period between rewards for the same campaign to prevent reward farming. Each creator can configure their campaign\'s cooldown duration (default 5 minutes). You cannot earn from the same campaign faster than that campaign\'s cooldown period allows.</li>' +
     '<li style="margin-bottom:.5rem;"><strong>Daily cap:</strong> Each campaign has a maximum of 100 views and 100 clicks per user per day (tracked independently) to prevent abuse.</li>' +
     '<li style="margin-bottom:.5rem;"><strong>Session campaign cap:</strong> You can earn from up to 10 different campaigns per app session. Restarting the app resets this counter.</li>' +
     '<li style="margin-bottom:.5rem;"><strong>Self-rewards:</strong> You cannot earn rewards from campaigns you created yourself.</li>' +

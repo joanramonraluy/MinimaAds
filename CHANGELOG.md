@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.26.6.6] - 2026-06-19
+
+### 🎨 UI Polish
+
+**Campaign Finish Confirmation Layout**
+- Fixed button overflow on campaign close confirmation dialog
+- Buttons now render symmetrically side-by-side on desktop (width: auto override)
+- Mobile responsive: buttons scale to 50% width each, stack cleanly on narrow screens
+- Fixed button duplication by hiding action header during confirmation
+- Files: `dapp/views/mycampaigns.js`
+
+### 📖 Documentation
+
+**Comprehensive Documentation Audit & Refresh**
+- Rewrote README.md (320 lines, complete architecture + SDK API update)
+- CLAUDE.md: Added `channels.js` and `frames.js` to Stable Core API
+- KNOWN_ISSUES.md: Renumbered fragility points (1–50, eliminated duplicates)
+- MinimaAds.md: Updated timestamp, corrected Appendix B.5 `txnpost` templates (bare for imports), added `CAMPAIGN_AUTOSETTLE_REQUEST` signal
+- AGENTS.md: Fixed cross-references to CLAUDE.md section numbers (§4→§5, etc.), renumbered duplicate §3
+- DOCUMENTATION_INDEX.md: Added `docs/HISTORY.md` entry
+- TASKS.md: Compacted from 2037 to 150 lines (92% reduction)
+- Memory system: Added 3 critical patterns (`txnpost bare`, `STATE ports`, `getaddress`), consolidated 7 publisher routing files into 1 architectural memory
+
+### 🧹 Project Hygiene
+
+- Cleaned up documentation structure for future agent efficiency
+- Improved cross-reference consistency across docs
+- Documented critical patterns in memory system for preservation across sessions
+
+---
+
 ## [0.26.6.5] - 2026-06-19
 
 ### ✨ Major Features

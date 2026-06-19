@@ -102,3 +102,37 @@ Full per-handler verification (handleChannelOpenRequest, handleRewardRequest, ha
 
 ---
 
+## 18) Security Audit Fix Verification (Audit Report 2 Remediations)
+
+**Prerequisites**: All audit-2 fixes (N2-1 through I-2) deployed. Two nodes active.
+
+### Test 1 — Click-rate limiting (N2-2 LAST_CLICK_VOUCHER_AT)
+
+1. Node A: create campaign, Node B: open channel.
+2. Node B FE: send two `REWARD_REQUEST` events in rapid succession (click, then view) for the same channel.
+3. First click: `REWARD_VOUCHER` arrives. Second click (immediate): rejected with log `[CHANNEL] REWARD_REQUEST: click cooldown not met`.
+4. Expected: click→click paced by `LAST_CLICK_VOUCHER_AT` (30s); view→click immediate (different cooldown).
+
+### Test 2 — Global publisher budget cap (N2-3 MAX_PUBLISHER_BUDGET)
+
+1. Node A: set campaign `max_publisher_budget: 5`, Node B opens viewer AND publisher channels.
+2. Node B SDK: earn 3.0 as viewer, 3.0 as publisher (total 6.0 > 5.0 cap).
+3. Publisher REWARD_REQUEST for 2.5: rejected with log `[CHANNEL] REWARD_REQUEST: exceeds MAX_PUBLISHER_BUDGET cap`.
+4. Viewer REWARD_REQUEST for 2.5: accepted (viewer subset is uncapped, only global budget matters).
+
+### Test 3 — Publisher channel opener binding (N2-4 OPENER_MX_PK)
+
+1. Node A: create campaign. Node B (publisher) opens publisher channel. `CHANNEL_STATE.OPENER_MX_PK` must equal Node B's Maxima PK.
+2. Forge a `REWARD_REQUEST` from a different node C (spoofed Maxima PK).
+3. Expected: Node A rejects with log `[CHANNEL] REWARD_REQUEST: opener PK mismatch, rejecting`.
+4. Legitimate REWARD_REQUEST from Node B (correct PK): accepted.
+
+### Test 4 — Escrow info request gating (N2-6)
+
+1. Node A: campaign active. Node C (unknown peer): send `ESCROW_INFO_REQUEST`.
+2. Expected: Node A silently drops, no log (strangers not answered).
+3. Node B (known counterparty with open channel): send `ESCROW_INFO_REQUEST`.
+4. Expected: Node A responds with `ESCROW_INFO_RESPONSE`.
+
+---
+

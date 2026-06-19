@@ -14,9 +14,10 @@
 | **AGENTS.md** | Key architectural decisions, project rules, canonical identities |
 | **MinimaAds.md** | Technical spec: data models, API contracts, system flows, limits, schema |
 | **docs/UI_GUIDE.md** | UI-only tasks: views, CSS, copy, helpers, conventions |
-| **docs/KNOWN_ISSUES.md** | Fragility points, open bugs, known gotchas |
+| **docs/KNOWN_ISSUES.md** | Fragility points, platform gotchas, closed security findings |
 | **docs/HISTORY.md** | Archived handoff notes, long-term project history, implementation details from past sessions |
 | **docs/VERIFICATION.md** | Test procedures, verification workflows |
+| **docs/audit_report*.md** | Security audit reports (historical reference — all findings fixed) |
 | **docs/PLATFORM_NOTES.md** | Minima platform details: H2, Rhino, MDS, Maxima, constraints |
 | **docs/PROJECT_NOTES.md** (topology, schema) + **docs/PROJECT_NOTES_REFERENCE.md** (protocol detail) | Project topology, DB schema, protocol matrix, signals, handlers |
 | **PROJECT_INDEX.md** | Structure, folder map, key decisions log (optional, orientation only) |

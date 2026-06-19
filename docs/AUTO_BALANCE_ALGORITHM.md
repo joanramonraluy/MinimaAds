@@ -8,6 +8,9 @@
 - Viewers earn for views/clicks; publishers earn for views they serve
 - Daily limits (views/clicks per viewer) prevent abuse and optimize reach
 
+**Implementation Status**: 
+✅ **Fully implemented** as of patch 2026-06-03. Feature flag `auto_balance_enabled` present in `creator.js` (lines 25–74). Auto-balance calculation functions in use; creators can enable toggle at campaign creation. All formulas below are live in production.
+
 ---
 
 ## 1. Design Principles

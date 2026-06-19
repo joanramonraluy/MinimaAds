@@ -320,7 +320,7 @@ In MVP phase, creators' permanent Maxima routes are stored in local KeyPair stor
 
 Once registered, all future campaigns use `MAX#<pk>#<mls>` in escrow STATE(4), enabling discovery via Minima's native MLS resolution mechanism.
 
-**Future (post-MVP)**: Dynamic route refresh via `PEER_ROUTE_UPDATE` messages (see `docs/MAXIMA_ROUTE_DISCOVERY.md`).
+**Future (post-MVP)**: Dynamic route refresh via `PEER_ROUTE_UPDATE` messages (see `docs/archive/MAXIMA_ROUTE_DISCOVERY.md`).
 
 ---
 

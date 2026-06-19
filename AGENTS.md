@@ -36,13 +36,11 @@ Before implementing a feature, read the relevant sections of `MinimaAds.md` and 
 | Topic | Reference |
 |---|---|
 | Minima/MDS/H2/Rhino platform rules | `docs/PLATFORM_NOTES.md` |
-| Project topology, DB mirror, protocols, signals | `docs/PROJECT_NOTES.md` (and `PROJECT_NOTES_REFERENCE.md` if needed) |
+| Project topology, DB mirror, protocols, signals | `docs/PROJECT_NOTES_REFERENCE.md` |
 | Fragility points and open bugs | `docs/KNOWN_ISSUES.md` |
 | Active task list | `docs/TASKS.md` |
-| New session prompt template | `docs/PromptBase.md` |
-| Verification workflow | `docs/VERIFICATION.md` |
 | Long change history | `docs/HISTORY.md` |
-| UI-only tasks (views, CSS, copy) | `docs/UI_GUIDE.md` |
+| Archived docs (UI guides, roadmaps, old tasks) | `docs/archive/` |
 
 ---
 
@@ -168,7 +166,7 @@ Before final handoff:
 - New or changed SW signals are handled in FE.
 - `AGENTS.md` and relevant `docs/` files are updated.
 
-For verification procedures, see `docs/VERIFICATION.md`.
+For verification procedures, see `docs/archive/VERIFICATION.md`.
 
 ---
 

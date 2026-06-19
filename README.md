@@ -151,13 +151,11 @@ MinimaAds.init({
 /docs
   DOCUMENTATION_INDEX.md       Navigation guide for all documentation
   KNOWN_ISSUES.md              Fragility points, open bugs, known gotchas
-  VERIFICATION.md              Test procedures and verification checklist
   PLATFORM_NOTES.md            Minima platform constraints (H2, Rhino, MDS, Maxima)
-  PROJECT_NOTES.md             Project topology, DB schema, signal contracts
   PROJECT_NOTES_REFERENCE.md   Protocol matrix, Maxima message schemas, handler flow
-  UI_GUIDE.md                  UI conventions, CSS framework, ad rendering
   HISTORY.md                   Archived handoff notes from past sessions
   TASKS.md                     Implementation task list (all tasks completed, v0.26.6+)
+  /archive                     Historical documentation (UI guides, roadmaps, audit reports, old tasks)
 ```
 
 ---
@@ -174,7 +172,7 @@ MinimaAds.init({
 1. Clone this repository
 2. Read `CLAUDE.md` (agent workflow guide) and `docs/DOCUMENTATION_INDEX.md` (docs menu)
 3. For backend/protocol tasks: read `MinimaAds.md` (spec) and `AGENTS.md` (key decisions)
-4. For UI tasks: read `docs/UI_GUIDE.md` for conventions
+4. For UI tasks: see `docs/archive/UI_GUIDE.md` for conventions (historical)
 5. Open a task from `docs/TASKS.md` or create a new issue
 
 ---

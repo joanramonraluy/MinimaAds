@@ -1137,8 +1137,10 @@
       _persistCampaignPayload(payload);
     } else if (payload.type === 'CAMPAIGN_PAUSE') {
       setCampaignStatus(payload.campaign_id, 'paused', function() {});
+      _onCampaignUpdatedCore({ campaign_id: payload.campaign_id, status: 'paused' });
     } else if (payload.type === 'CAMPAIGN_FINISH') {
       setCampaignStatus(payload.campaign_id, 'finished', function() {});
+      _onCampaignUpdatedCore({ campaign_id: payload.campaign_id, status: 'finished' });
     } else if (payload.type === 'CHANNEL_OPEN') {
       _handleChannelOpenPayload(payload);
     } else if (payload.type === 'REWARD_VOUCHER') {

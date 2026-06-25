@@ -1705,3 +1705,23 @@ Built-in snippets work because the publisher IS the viewer and sends their own P
 **Files modified**: `public/service-workers/handlers/channel.handler.js`, `dapp.conf`, `MinimaAds.mds.zip`
 
 **AGENTS.md updated**: yes — §6 updated.
+
+---
+
+### Session: 2026-06-17 (patch 22) — Fix: Settlement tx rejected due to duplicate CoinID proofs
+
+**Problem**: Settlement transactions posted via `txnpost mine:true auto:true` (FE) or `txnpost mine:true` (SW) were being rejected with `non unique CoinIDs`. The tx had already been fully constructed and imported via `txnimport` (with `scriptmmr:true`), which includes all necessary MMR proofs in the witness. `auto:true` calls `setMMRandScripts` → `addCoinProof` (no dedup), adding the same coin proof a second time. `mine:true` similarly re-adds wallet-coin MMR proofs already present.
+
+**Root cause**: `txnpost` flags were redundant and harmful for imported transactions — all proofs are already embedded by `txnimport scriptmmr:true`.
+
+**Fix**: Removed all `mine:true auto:true` / `mine:true` flags from the two `txnpost` calls in the settlement path. Both now post bare: `txnpost id:<settleId>`.
+
+**Files modified**: `dapp/views/earnings.js` (line 555), `public/service-workers/handlers/channel.handler.js` (line 2489)
+
+**AGENTS.md updated**: yes — §6 updated, oldest entry moved to `docs/HISTORY.md §17`.
+
+**Verification**:
+1. Publisher node: trigger settlement of a completed voucher channel.
+2. Check SW logs — `txnpost` should succeed (no `non unique CoinIDs` error).
+3. Viewer node: manually settle a voucher via Earnings view → "Settle" button.
+4. Confirm tx posts successfully and balance updates.

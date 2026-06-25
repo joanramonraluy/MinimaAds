@@ -1460,7 +1460,8 @@ function buildAndPostStatusUpdateTx(campaignId, newStatus, onResult) {
     var escrowCoinId = campaign.ESCROW_COINID;
     var walletPK     = campaign.ESCROW_WALLET_PK;
     if (!escrowCoinId || !walletPK) {
-      done({ ok: false, error: 'campaign missing escrow data' });
+      console.log('[STATUS-TX] skip: campaign missing escrow data (legacy campaign). campaign:', campaignId);
+      done({ ok: true, skipped: true });
       return;
     }
 

@@ -174,6 +174,39 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
+### Session: 2026-09-01 (AUD-1) — Security: authenticate inbound channel Maxima in the SDK (FE mirror of a423873)
+
+**Source**: `docs/KNOWN_ISSUES.md §3.5 AUD-1`, the follow-up left open by commit `a423873` (audit Fix #1/#2/#11, SW side only).
+
+**Problem**: `sdk/index.js` duplicates the SW's inbound channel write path in the host MiniDapp FE. `handleMdsEvent` decoded `MAXIMA` and called `_handleChannelOpenPayload` / `_handleRewardVoucherPayload` with the payload only — `event.data.from` was discarded. On an SDK-hosted node any Maxima peer knowing a `(campaign_id, viewer_key)` pair could therefore still: overwrite `LATEST_TX_HEX` with a crafted `REWARD_VOUCHER` (destroying the only creator-signed settlement voucher), push a *lower* `cumulative`, replay a valid voucher to re-credit `FRAMES.EARNINGS` / `REWARD_EVENTS` via the publisher branch of `_onVoucherReceivedCore`, or MERGE over a healthy open channel with a crafted `CHANNEL_OPEN`.
+
+**Fix** (all in `sdk/index.js`, FE syntax — `var`, `function()`, `console.log`/`console.warn`; the SW's Rhino constraints do not apply here):
+- New `_assertCampaignCreatorSender(campaignId, senderPk, label, cb)` — direct mirror of the SW guard. Accepts `CAMPAIGNS.CREATOR_ADDRESS` (via `getCampaign`) or the pk parsed out of the on-chain permanent route cached in `CREATOR_MX_<campaignId>` (`parseMaximaRoute`; returns null for plain `Mx…` contact strings, which just falls through). Uppercases BOTH sides. Fails open only when the message has no sender or no creator identity is known locally.
+- `_handleChannelOpenPayload(payload, senderPk)` gates on that guard; original body extracted to `_doHandleChannelOpenPayload(payload)`.
+- `_handleRewardVoucherPayload(payload, senderPk)` gates on the guard, then reads the stored cumulative (`_storedCumulative` → `getChannelState`) and rejects `cumulative < stored` **before** `updateChannelVoucher` touches `LATEST_TX_HEX`. Equality allowed (VOUCHER_SYNC replays).
+- Dedup: `_isDuplicateEvent(payload.event_id)` is evaluated **before** the write path, because `_onVoucherReceivedCore` → `createRewardEvent` MERGEs into `DEDUP_LOG` (after which every id looks duplicate). On a duplicate the voucher is still stored but the reward is not re-credited.
+- `_onVoucherReceivedCore` now also receives `viewer_key`, `event_id` and `reward_type` from this path, so `createRewardEvent` uses the deterministic voucher event id (second dedup layer) instead of a fresh random one.
+- `handleMdsEvent` forwards `event.data.from` to both handlers.
+
+Public API unchanged (`MinimaAds.{init,getAd,render,trackView,trackClick,handleMdsEvent,…}`) — only private handler arities changed.
+
+**Files modified**: `sdk/index.js`
+
+**AGENTS.md updated**: yes — §6 updated, patch 24 moved to `docs/HISTORY.md §17`. `MinimaAds.md §13.2` gained a "Sender authentication (SDK path)" note. `docs/KNOWN_ISSUES.md §3.5` AUD-1 marked fixed; new AUD-2 logged (out-of-scope pre-existing bug: SDK's direct MAXIMA path never creates the viewer `REWARD_EVENTS` row because `amount` is computed after the cumulative write).
+
+**Verification** (needs a host MiniDapp embedding `sdk/index.js` with `mdsAlreadyInitialized:true`, node A = creator, node B = SDK host, node C = attacker):
+1. **Happy path unaffected**: on B watch an ad through the SDK slot. Browser console shows no `rejected:` line; `CHANNEL_STATE.LATEST_TX_HEX` becomes non-empty and `CUMULATIVE_EARNED` rises.
+2. **Spoofed voucher rejected**: from C send `maxima action:send publickey:<B_pk> application:minima-ads poll:false data:0x<hex of {"type":"REWARD_VOUCHER","campaign_id":"<id>","viewer_key":"<B_pk>","event_id":"x","cumulative":0,"tx_hex":"0xDEAD"}>`. B's console must show `[SDK] REWARD_VOUCHER rejected: sender is not the campaign creator`; `LATEST_TX_HEX` unchanged.
+3. **Spoofed CHANNEL_OPEN rejected**: same from C with `type:"CHANNEL_OPEN"` + `channel_coinid` → `[SDK] CHANNEL_OPEN rejected: …`; `CHANNEL_STATE` row untouched.
+4. **Non-monotonic rejected**: have A replay an older valid voucher (lower `cumulative`) → `[SDK] REWARD_VOUCHER rejected: non-monotonic cumulative (x < y)`; `LATEST_TX_HEX` unchanged.
+5. **Replay blocked**: have A re-send the same valid voucher (same `event_id`) → `[SDK] REWARD_VOUCHER duplicate event, voucher stored, reward not re-credited`; `FRAMES.EARNINGS` / `REWARD_EVENTS` unchanged on the second delivery.
+6. **Fail-open preserved**: on a campaign with no local `CAMPAIGNS` row and no `CREATOR_MX_<id>`, a `CHANNEL_OPEN` still logs `creator key unknown locally — accepting (fail-open)` and proceeds.
+7. `node --check sdk/index.js` clean; no console errors in the host dapp.
+
+**Open issues**: AUD-2 (see `docs/KNOWN_ISSUES.md §3.5`) — pre-existing, discovered while tracing this path, not fixed here.
+
+---
+
 ### Session: 2026-07-18 (audit fixes #1 + #2 + #11) — Security: authenticate inbound channel Maxima handlers
 
 **Source**: `docs/AUDIT_2026-07-18_FABLE.md` (CRITICAL + HIGH findings) and `docs/IMPLEMENTATION_PLAN_2026-07-18.md` (Phase 1, Fix #1 / #2 / #11).
@@ -234,27 +267,5 @@ All public key comparisons uppercase both sides. Rhino-safe throughout (`var`, `
 
 ---
 
-### Session: 2026-06-19 (patch 24) — Fix: Campaign close confirmation buttons layout overflow
-
-**Problem**: When finishing a campaign on desktop or mobile, the confirmation buttons inside the warnings box would sometimes overflow the screen on the right or wrap asymmetrically. This was caused by PicoCSS applying `width: 100%` by default to `<button>` elements, conflicting with the flex wrap layout in `_showFinishConfirmation`.
-
-**Fix**:
-- **Sizing & Flex**: Added explicit `width: auto;` to override PicoCSS's default `width: 100%` on both `confirmBtn` and `cancelBtn`.
-- **Responsive Symmetry**: Changed the mobile flex property for both buttons to `flex: 1 1 calc(50% - .175rem)` so they render symmetrically side-by-side on mobile, automatically wrapping and stacking cleanly only when the container width drops below their minimum combined width (e.g. on narrow screens).
-- **Action Buttons Visibility**: Passed the actions container to `_showFinishConfirmation` to hide the primary action buttons ('Pause' and 'Finish') in the header when the confirmation dialog is displayed, preventing button duplication. Restored their visibility (`display: flex`) if the action is cancelled.
-- **dapp.conf**: Bumped version to `0.26.6.6`.
-
-**Files modified**: `dapp/views/mycampaigns.js`, `dapp.conf`
-
-**AGENTS.md updated**: yes — §6 updated, patch 21 moved to `docs/HISTORY.md §17`.
-
-**Verification**:
-1. Open the Creator dashboard and select "Finish" on a campaign.
-2. Verify the "Yes, close campaign" and "Cancel" buttons render correctly side-by-side on desktop without any overflow.
-3. Resize the browser to mobile viewport width: verify that the buttons scale symmetrically to take up 50% width each (minus gap) and stack onto separate lines cleanly only if the screen gets narrower than the minimum size, without overflowing the layout boundaries.
-4. Run `node -c dapp/views/mycampaigns.js` to ensure syntax is clean.
-
----
-
-> Previous handoff notes (patches 15–23, Security Audit 2, and all earlier) are archived in `docs/HISTORY.md §17`.
+> Previous handoff notes (patches 15–24, Security Audit 2, and all earlier) are archived in `docs/HISTORY.md §17`.
 

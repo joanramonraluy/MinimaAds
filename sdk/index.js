@@ -1064,8 +1064,87 @@
     }
   }
 
-  function _handleChannelOpenPayload(payload) {
+  // -------------------------------------------------------------------------
+  // _assertCampaignCreatorSender — audit 2026-07-18 Fix #1, SDK mirror of the
+  // Service Worker guard in public/service-workers/handlers/channel.handler.js
+  // (closes AUD-1, docs/KNOWN_ISSUES.md §3.5).
+  //
+  // CHANNEL_OPEN and REWARD_VOUCHER are creator-authored messages. A host
+  // MiniDapp embedding this SDK decodes MAXIMA itself, so it must apply the
+  // same sender binding the SW applies: CAMPAIGNS.CREATOR_ADDRESS holds the
+  // creator's Maxima public key, which is exactly what Maxima reports (and
+  // cryptographically verifies) in event.data.from. The on-chain permanent
+  // route cached in CREATOR_MX_<campaignId> ("MAX#<pk>#<mls>") is accepted as
+  // an alternative creator identity so a route refreshed on-chain after the
+  // announce does not lock the host out. Note CREATOR_MX_<id> may instead hold
+  // an "Mx…" contact string — parseMaximaRoute returns null for those, which
+  // simply falls through to the CREATOR_ADDRESS verdict.
+  //
+  // Fails open only when no creator identity is known locally (campaigns
+  // predating the guard) or when the message carries no sender — same policy
+  // as the SW-side guard. Public key comparison uppercases BOTH sides.
+  // -------------------------------------------------------------------------
+  function _assertCampaignCreatorSender(campaignId, senderPk, label, cb) {
+    var sndrPk = senderPk || '';
+    if (!sndrPk) {
+      console.log('[SDK] ' + label + ': no sender pk on message — accepting (fail-open). campaign:' + campaignId);
+      cb(true);
+      return;
+    }
+    getCampaign(campaignId, function(err, campaign) {
+      var creatorPk = (!err && campaign && campaign.CREATOR_ADDRESS) ? campaign.CREATOR_ADDRESS : '';
+      if (creatorPk && creatorPk.toUpperCase() === sndrPk.toUpperCase()) {
+        cb(true);
+        return;
+      }
+      MDS.keypair.get('CREATOR_MX_' + campaignId, function(kpRes) {
+        var route = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : '';
+        var parsedRoute = (typeof parseMaximaRoute === 'function') ? parseMaximaRoute(route) : null;
+        var routePk = parsedRoute ? parsedRoute.publickey : '';
+        if (routePk && routePk.toUpperCase() === sndrPk.toUpperCase()) {
+          cb(true);
+          return;
+        }
+        if (!creatorPk && !routePk) {
+          console.log('[SDK] ' + label + ': creator key unknown locally — accepting (fail-open). campaign:' + campaignId);
+          cb(true);
+          return;
+        }
+        console.warn('[SDK] ' + label + ' rejected: sender is not the campaign creator. campaign:' + campaignId
+          + ' sender:' + sndrPk.substring(0, 18) + '...');
+        cb(false);
+      });
+    });
+  }
+
+  // Stored cumulative for the monotonicity guard below. Fails open (0) when
+  // core/channels.js is not loaded, which can only make the guard permissive.
+  function _storedCumulative(campaignId, viewerKey, role, cb) {
+    if (typeof getChannelState !== 'function') { cb(0); return; }
+    getChannelState(campaignId, viewerKey, role, function(err, chState) {
+      cb(chState ? (parseFloat(chState.CUMULATIVE_EARNED) || 0) : 0);
+    });
+  }
+
+  // Dedup verdict for the replay guard below. Fails open (false) when the
+  // message carries no event_id or core/validation.js is not loaded.
+  function _isDuplicateEvent(eventId, cb) {
+    if (!eventId || typeof isDuplicate !== 'function') { cb(false); return; }
+    isDuplicate(eventId, cb);
+  }
+
+  function _handleChannelOpenPayload(payload, senderPk) {
     if (!payload || !payload.campaign_id || !payload.viewer_key || !payload.channel_coinid) { return; }
+    // Fix #1: only the campaign creator may open or replace a channel on this
+    // node — otherwise any peer knowing (campaign_id, viewer_key) can MERGE
+    // over a healthy open channel.
+    _assertCampaignCreatorSender(payload.campaign_id, senderPk, 'CHANNEL_OPEN', function(allowed) {
+      if (!allowed) { return; }
+      _doHandleChannelOpenPayload(payload);
+    });
+  }
+
+  function _doHandleChannelOpenPayload(payload) {
     var role = payload.role || 'viewer';
     var cumulativeEarned = parseFloat(payload.cumulative_earned) || 0;
     var latestTxHex = payload.latest_tx_hex || '';
@@ -1099,22 +1178,58 @@
     });
   }
 
-  function _handleRewardVoucherPayload(payload) {
+  function _handleRewardVoucherPayload(payload, senderPk) {
     if (!payload || !payload.campaign_id || !payload.viewer_key || !payload.event_id || payload.cumulative === undefined || !payload.tx_hex) { return; }
     var role = payload.role || 'viewer';
     var cumulative = parseFloat(payload.cumulative);
-    updateChannelVoucher(payload.campaign_id, payload.viewer_key, role, cumulative, payload.tx_hex, function(err) {
-      if (err) {
-        console.log('[SDK] REWARD_VOUCHER update failed:', err);
-        return;
-      }
-      _onVoucherReceivedCore({
-        campaign_id: payload.campaign_id,
-        cumulative: cumulative,
-        role: role,
-        frame_id: payload.frame_id || ''
+
+    // Fix #1: a REWARD_VOUCHER is creator-authored. Reject anything else before
+    // any DB write — updateChannelVoucher overwrites LATEST_TX_HEX, which is the
+    // viewer's only creator-signed settlement voucher (real economic loss).
+    _assertCampaignCreatorSender(payload.campaign_id, senderPk, 'REWARD_VOUCHER', function(allowed) {
+      if (!allowed) { return; }
+      _storedCumulative(payload.campaign_id, payload.viewer_key, role, function(oldCumulative) {
+        // Fix #1: a voucher may never move the channel backwards. Equality is
+        // allowed — VOUCHER_SYNC_REQUEST replays the authoritative voucher at
+        // the same cumulative.
+        var newCum = parseFloat(cumulative) || 0;
+        var oldCum = parseFloat(oldCumulative) || 0;
+        if (newCum < oldCum) {
+          console.warn('[SDK] REWARD_VOUCHER rejected: non-monotonic cumulative (' + newCum + ' < ' + oldCum
+            + '). campaign:' + payload.campaign_id + ' role:' + role);
+          return;
+        }
+        // Fix #2: capture the dedup verdict BEFORE the write path below —
+        // _onVoucherReceivedCore reaches createRewardEvent, which MERGEs into
+        // DEDUP_LOG; after that write every event_id looks like a duplicate.
+        _isDuplicateEvent(payload.event_id, function(isDup) {
+          updateChannelVoucher(payload.campaign_id, payload.viewer_key, role, cumulative, payload.tx_hex, function(err) {
+            if (err) {
+              console.log('[SDK] REWARD_VOUCHER update failed:', err);
+              return;
+            }
+            // The voucher itself is always stored (sync replays must be able to
+            // restore LATEST_TX_HEX), but a replayed event_id must never credit
+            // a reward a second time: the publisher branch of
+            // _onVoucherReceivedCore calls incrementFrameEarnings and
+            // createRewardEvent unconditionally.
+            if (isDup) {
+              console.log('[SDK] REWARD_VOUCHER duplicate event, voucher stored, reward not re-credited: ' + payload.event_id);
+              return;
+            }
+            _onVoucherReceivedCore({
+              campaign_id: payload.campaign_id,
+              viewer_key: payload.viewer_key,
+              event_id: payload.event_id,
+              cumulative: cumulative,
+              role: role,
+              reward_type: payload.reward_type || 'view',
+              frame_id: payload.frame_id || ''
+            });
+          }, payload.reward_type);
+        });
       });
-    }, payload.reward_type);
+    });
   }
 
   function handleMdsEvent(event) {
@@ -1142,9 +1257,10 @@
       setCampaignStatus(payload.campaign_id, 'finished', function() {});
       _onCampaignUpdatedCore({ campaign_id: payload.campaign_id, status: 'finished' });
     } else if (payload.type === 'CHANNEL_OPEN') {
-      _handleChannelOpenPayload(payload);
+      // event.data.from is the Maxima-verified sender pk (audit Fix #1).
+      _handleChannelOpenPayload(payload, (event.data && event.data.from) ? event.data.from : '');
     } else if (payload.type === 'REWARD_VOUCHER') {
-      _handleRewardVoucherPayload(payload);
+      _handleRewardVoucherPayload(payload, (event.data && event.data.from) ? event.data.from : '');
     } else if (payload.type === 'PUBLISHER_REWARD_NOTIFY') {
       getCampaign(payload.campaign_id, function(err, campaign) {
         if (!err && campaign) {

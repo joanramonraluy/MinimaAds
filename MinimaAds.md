@@ -1584,7 +1584,12 @@ MinimaAds.trackClick(campaignId, userAddress, cb)
 MinimaAds.handleMdsEvent(msg)
 // Optional host bridge for React/Vite/TypeScript MiniDapps that already call
 // MDS.init. Handles MinimaAds MAXIMA messages and MDSCOMMS channel signals.
+// The host MUST forward the raw MDS event object (not just the decoded
+// payload): the SDK reads msg.data.from to authenticate inbound CHANNEL_OPEN
+// and REWARD_VOUCHER messages — see below.
 ```
+
+**Sender authentication (SDK path)**: `handleMdsEvent` applies the same guards as the Service Worker handlers (§8.9 / §8.11). `CHANNEL_OPEN` and `REWARD_VOUCHER` are accepted only when `msg.data.from` matches the campaign creator — `CAMPAIGNS.CREATOR_ADDRESS`, or the public key embedded in the on-chain permanent route cached in `CREATOR_MX_<campaign_id>` — failing open only when no creator identity is known locally or the message carries no sender. A `REWARD_VOUCHER` whose `cumulative` is lower than the stored `CHANNEL_STATE.CUMULATIVE_EARNED` is rejected before `LATEST_TX_HEX` is overwritten (equality accepted, for §8.12 sync replays), and a duplicate `event_id` stores the voucher but does not credit the reward a second time.
 
 ### 13.3 Publisher Responsibilities
 

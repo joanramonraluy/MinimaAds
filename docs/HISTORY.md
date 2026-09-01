@@ -46,6 +46,43 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-18 (patch 23) — Fix: Campaign finish — on-chain settlement, viewer state refresh, warnings UI
+
+**Changes (3 interconnected fixes):**
+
+**Issue 1 — On-Chain Settlement:**
+- `channel.handler.js` `autoSettleChannelsForCampaign()`: no longer calls `settleChannel()` directly (DB-only). Instead marks channels `'settling'` in DB, builds channel list with `LATEST_TX_HEX`/`VIEWER_WALLET_PK`, emits `CAMPAIGN_AUTOSETTLE_REQUEST` signal.
+- `dapp/app.js`: added `_handleAutoSettleRequest()` (NOOP on creator node — viewer co-sign required), `_autoSettleOpenChannels()` (queries viewer's local open channels, calls `_runSettlement()` per channel), and a hook in `CAMPAIGN_UPDATED` handler to trigger auto-settle on viewer's node when `status='finished'`.
+- L1 finalization: `checkOpenChannelsSettled()` on NEWBLOCK detects spent coins and calls `settleChannel()` — unchanged.
+
+**Issue 3 — Viewer State Refresh:**
+- `campaign.handler.js` `checkCampaignStatuses()`: removed `NOT EXISTS (open viewer channel)` clause. Viewers with open channels now send liveness pings, receive `'finished'` PONG, sync status locally, and trigger `CAMPAIGN_UPDATED` → viewer list refreshes + auto-settle fires.
+
+**Issue 2 — UI Warnings Panel:**
+- `dapp/views/mycampaigns.js`: `onCampaignSettling` and `onCampaignClosed` now write to `#ma-warnings-<id>` (via `_ensureWarningRow`) in addition to the inline `.ma-settling-progress` element, so progress persists after buttons are removed.
+- Added `onMyCampaignsSettleConfirmed()` — appends a green "Channel settled: X MINIMA" row to `#ma-warnings-<id>` on each `SETTLE_CONFIRMED` signal.
+- `dapp/app.js`: `SETTLE_CONFIRMED` handler now also calls `window.onMyCampaignsSettleConfirmed`.
+
+**Files modified**:
+- `public/service-workers/handlers/channel.handler.js`
+- `public/service-workers/handlers/campaign.handler.js`
+- `dapp/app.js`
+- `dapp/views/mycampaigns.js`
+
+**AGENTS.md updated**: yes — §6 updated, patch 20 moved to `docs/HISTORY.md §17`.
+
+**Verification**:
+1. Creator node: finish an active campaign (click Finish → confirm). Check SW logs for `CAMPAIGN_AUTOSETTLE_REQUEST` (not old `settleChannel` calls). Channel STATUS should change to `'settling'` in DB.
+2. Viewer node: wait for next liveness ping cycle (~1 block). SW should log `PONG received ... status: finished`. Viewer's campaign list should refresh and show `finished`.
+3. Viewer node: if viewer had an open channel with a voucher, earnings.js `_runSettlement` should auto-fire. Check browser console for `[AUTOSETTLE] viewer auto-settle: 1 channel(s)`. Settlement tx should post to L1.
+4. On next NEWBLOCK after L1 confirm: `checkOpenChannelsSettled` should log `coin confirmed spent on-chain` and call `settleChannel`. `SETTLE_CONFIRMED` signal should appear.
+5. Creator's mycampaigns view: `#ma-warnings-<id>` div should show "Closing channels..." progress, then "Campaign closed — all channels settled." No console errors.
+6. After settlement confirmed: `#ma-warnings-<id>` should show green "Channel settled: X MINIMA" row.
+
+**Open issues**: None discovered in scope.
+
+---
+
 ### Session: 2026-06-16 (patch 21) — Fix: Custom publisher opens channels proactively without any view
 
 **Problem**: When a publisher created a custom frame (snippet), the FE immediately sent `MA_OPEN_PUBLISHER_CHANNELS` to the SW, which opened publisher L2 channels for ALL known campaigns — before any viewer had seen an ad through that frame. Simultaneously, every `CAMPAIGN_ANNOUNCE` received on a publisher node triggered `_tryOpenPublisherChannelForAllFrames`, opening channels for all local custom frames without any actual view event. This caused escrow funds to be locked and "active channels" to appear on the creator's campaign stats with no real activity.

@@ -174,6 +174,41 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
+### Session: 2026-07-18 (audit fixes #1 + #2 + #11) — Security: authenticate inbound channel Maxima handlers
+
+**Source**: `docs/AUDIT_2026-07-18_FABLE.md` (CRITICAL + HIGH findings) and `docs/IMPLEMENTATION_PLAN_2026-07-18.md` (Phase 1, Fix #1 / #2 / #11).
+
+**Problem**: N2-4 hardened `handleRewardRequest` with an `OPENER_MX_PK` sender binding but left its three mirror handlers unauthenticated — the dispatcher did not even pass `msg.data.from` to them. Any Maxima peer knowing a `(campaign_id, viewer_key)` pair could:
+1. Send a crafted `REWARD_VOUCHER` → `updateChannelVoucher` overwrote `LATEST_TX_HEX`, destroying the viewer's only creator-signed settlement voucher (real economic loss). No monotonicity check existed, so a *lower* `cumulative` was accepted.
+2. Replay a valid `REWARD_VOUCHER` → the viewer branch bumped `USER_PROFILE.TOTAL_EARNED` unconditionally (`+ delta`) with no `isDuplicate` guard, inflating the displayed balance.
+3. Send a crafted `CHANNEL_OPEN` → MERGE overwrote a healthy open channel.
+4. Send `VOUCHER_SYNC_REQUEST` → free DoS amplification (forces tx lookups + Maxima sends on the creator).
+
+**Fix**:
+- `maxima.handler.js`: dispatcher now passes `msg.data.from || ''` to `handleChannelOpen`, `handleRewardVoucher` and `handleVoucherSyncRequest` (matching the existing call sites for `CHANNEL_OPEN_REQUEST` / `REWARD_REQUEST`).
+- `channel.handler.js`: new `_assertCampaignCreatorSender(campaignId, senderPk, label, cb)` — accepts only the campaign creator's Maxima PK (`CAMPAIGNS.CREATOR_ADDRESS`, or the pk embedded in the on-chain permanent route cached in `CREATOR_MX_<campaignId>`). Applied to `handleChannelOpen` (body extracted to `_doHandleChannelOpen`) and `handleRewardVoucher`. Fails open only when no creator identity is known locally or the message carries no sender — same policy as the N2-4 guard.
+- `channel.handler.js` `_continueRewardVoucher`: new `senderPk` param; rejects non-monotonic vouchers (`cumulative < oldCumulative`) **before** `updateChannelVoucher` touches `LATEST_TX_HEX`. Equality is still accepted so `VOUCHER_SYNC_REQUEST` recovery works. `handleRewardVoucher` now loads the stored cumulative for the publisher role too, so the guard covers publisher channels.
+- `channel.handler.js` `_continueRewardVoucher`: `isDuplicate(eventId)` is now evaluated **before** the `DEDUP_LOG` MERGE (after the MERGE every id looks duplicate); the viewer branch returns early on a duplicate without touching `REWARD_EVENTS` / `USER_PROFILE`.
+- `channel.handler.js` `handleVoucherSyncRequest`: rejects when `senderPk != channel.OPENER_MX_PK` (fail-open on empty).
+
+All public key comparisons uppercase both sides. Rhino-safe throughout (`var`, `function()`, string concat, `MDS.log`, no trailing commas).
+
+**Files modified**: `public/service-workers/handlers/maxima.handler.js`, `public/service-workers/handlers/channel.handler.js`
+
+**AGENTS.md updated**: yes — §6 updated, patch 23 moved to `docs/HISTORY.md §17`. `MinimaAds.md` §8.9/§8.11/§8.12 gained a "Sender authentication" note. `docs/KNOWN_ISSUES.md` gained new §3.5 with the SDK-path gap (AUD-1).
+
+**Verification** (needs a two-node setup — node A = creator, node B = viewer, plus node C as the attacker):
+1. **Happy path unaffected**: on B open `#viewer`, watch an ad. SW log on B must show `[CHANNEL] REWARD_VOUCHER: voucher stored`, `CHANNEL_STATE.LATEST_TX_HEX` non-empty, `USER_PROFILE.TOTAL_EARNED` increased once. `#earnings` settles normally.
+2. **Spoofed voucher rejected**: from node C run `maxima action:send publickey:<B_pk> application:minima-ads poll:false data:0x<hex of {"type":"REWARD_VOUCHER","campaign_id":"<id>","viewer_key":"<B_pk>","event_id":"x","cumulative":0,"tx_hex":"0xDEAD"}>`. B's SW log must show `REWARD_VOUCHER rejected: sender is not the campaign creator` and `LATEST_TX_HEX` must be unchanged.
+3. **Replay blocked**: have A re-send the same valid voucher (same `event_id`) twice. Second delivery logs `REWARD_VOUCHER duplicate event, skipping profile update` and `TOTAL_EARNED` increments exactly once.
+4. **Non-monotonic blocked**: replay a valid earlier voucher with a lower `cumulative` → `REWARD_VOUCHER rejected: non-monotonic cumulative`, `LATEST_TX_HEX` unchanged.
+5. **Sync auth**: on B clear `LATEST_TX_HEX` and restart → `VOUCHER_SYNC_REQUEST` still recovers the voucher (B's pk == `OPENER_MX_PK` on A). From C send the same request for B's channel → A logs `VOUCHER_SYNC_REQUEST rejected: senderPk != OPENER_MX_PK` and sends nothing.
+6. No `console.log` in SW output; no Rhino syntax errors on MiniDapp install.
+
+**Open issues**: `sdk/index.js` `_handleChannelOpenPayload` / `_handleRewardVoucherPayload` duplicate this write path in the FE with no sender or monotonicity check — see `docs/KNOWN_ISSUES.md §3.5 AUD-1` (out of scope: SDK is an external publisher contract).
+
+---
+
 ### Session: 2026-06-25 (patch 25) — Fix: Campaign pause/resume — liveness cache invalidation + legacy escrow handling
 
 **Problem**: Two interconnected bugs when pausing and resuming campaigns:
@@ -221,42 +256,5 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 
 ---
 
-### Session: 2026-06-18 (patch 23) — Fix: Campaign finish — on-chain settlement, viewer state refresh, warnings UI
-
-**Changes (3 interconnected fixes):**
-
-**Issue 1 — On-Chain Settlement:**
-- `channel.handler.js` `autoSettleChannelsForCampaign()`: no longer calls `settleChannel()` directly (DB-only). Instead marks channels `'settling'` in DB, builds channel list with `LATEST_TX_HEX`/`VIEWER_WALLET_PK`, emits `CAMPAIGN_AUTOSETTLE_REQUEST` signal.
-- `dapp/app.js`: added `_handleAutoSettleRequest()` (NOOP on creator node — viewer co-sign required), `_autoSettleOpenChannels()` (queries viewer's local open channels, calls `_runSettlement()` per channel), and a hook in `CAMPAIGN_UPDATED` handler to trigger auto-settle on viewer's node when `status='finished'`.
-- L1 finalization: `checkOpenChannelsSettled()` on NEWBLOCK detects spent coins and calls `settleChannel()` — unchanged.
-
-**Issue 3 — Viewer State Refresh:**
-- `campaign.handler.js` `checkCampaignStatuses()`: removed `NOT EXISTS (open viewer channel)` clause. Viewers with open channels now send liveness pings, receive `'finished'` PONG, sync status locally, and trigger `CAMPAIGN_UPDATED` → viewer list refreshes + auto-settle fires.
-
-**Issue 2 — UI Warnings Panel:**
-- `dapp/views/mycampaigns.js`: `onCampaignSettling` and `onCampaignClosed` now write to `#ma-warnings-<id>` (via `_ensureWarningRow`) in addition to the inline `.ma-settling-progress` element, so progress persists after buttons are removed.
-- Added `onMyCampaignsSettleConfirmed()` — appends a green "Channel settled: X MINIMA" row to `#ma-warnings-<id>` on each `SETTLE_CONFIRMED` signal.
-- `dapp/app.js`: `SETTLE_CONFIRMED` handler now also calls `window.onMyCampaignsSettleConfirmed`.
-
-**Files modified**:
-- `public/service-workers/handlers/channel.handler.js`
-- `public/service-workers/handlers/campaign.handler.js`
-- `dapp/app.js`
-- `dapp/views/mycampaigns.js`
-
-**AGENTS.md updated**: yes — §6 updated, patch 20 moved to `docs/HISTORY.md §17`.
-
-**Verification**:
-1. Creator node: finish an active campaign (click Finish → confirm). Check SW logs for `CAMPAIGN_AUTOSETTLE_REQUEST` (not old `settleChannel` calls). Channel STATUS should change to `'settling'` in DB.
-2. Viewer node: wait for next liveness ping cycle (~1 block). SW should log `PONG received ... status: finished`. Viewer's campaign list should refresh and show `finished`.
-3. Viewer node: if viewer had an open channel with a voucher, earnings.js `_runSettlement` should auto-fire. Check browser console for `[AUTOSETTLE] viewer auto-settle: 1 channel(s)`. Settlement tx should post to L1.
-4. On next NEWBLOCK after L1 confirm: `checkOpenChannelsSettled` should log `coin confirmed spent on-chain` and call `settleChannel`. `SETTLE_CONFIRMED` signal should appear.
-5. Creator's mycampaigns view: `#ma-warnings-<id>` div should show "Closing channels..." progress, then "Campaign closed — all channels settled." No console errors.
-6. After settlement confirmed: `#ma-warnings-<id>` should show green "Channel settled: X MINIMA" row.
-
-**Open issues**: None discovered in scope.
-
----
-
-> Previous handoff notes (patches 15–21, Security Audit 2, and all earlier) are archived in `docs/HISTORY.md §17`.
+> Previous handoff notes (patches 15–23, Security Audit 2, and all earlier) are archived in `docs/HISTORY.md §17`.
 

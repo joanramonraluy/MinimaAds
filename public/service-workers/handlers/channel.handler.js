@@ -358,7 +358,53 @@ function _signalCampaignUpdated(campaignId) {
   });
 }
 
-function handleChannelOpen(payload) {
+// ---------------------------------------------------------------------------
+// _assertCampaignCreatorSender — audit 2026-07-18 Fix #1.
+// CHANNEL_OPEN and REWARD_VOUCHER are creator-authored messages: the receiving
+// node (viewer or publisher) must only accept them from the campaign creator.
+// CAMPAIGNS.CREATOR_ADDRESS holds the creator's Maxima public key (AGENTS.md §4),
+// which is exactly what Maxima reports (and cryptographically verifies) in
+// msg.data.from. The on-chain permanent route stored in CREATOR_MX_<campaignId>
+// (STATE(4), "MAX#<pk>#<mls>") is accepted as an alternative creator identity so
+// a route refreshed on-chain after the announce does not lock the viewer out.
+// Fails open when no creator identity is known locally (legacy rows) or when the
+// message carries no sender, mirroring the N2-4 OPENER_MX_PK guard below.
+// Public key comparison uppercases BOTH sides (fragility #38).
+// ---------------------------------------------------------------------------
+function _assertCampaignCreatorSender(campaignId, senderPk, label, cb) {
+  var sndrPk = senderPk || '';
+  if (!sndrPk) {
+    MDS.log("[CHANNEL] " + label + ": no sender pk on message — accepting (fail-open). campaign: " + campaignId);
+    cb(true);
+    return;
+  }
+  getCampaign(campaignId, function(err, campaign) {
+    var creatorPk = (!err && campaign && campaign.CREATOR_ADDRESS) ? campaign.CREATOR_ADDRESS : '';
+    if (creatorPk && creatorPk.toUpperCase() === sndrPk.toUpperCase()) {
+      cb(true);
+      return;
+    }
+    MDS.keypair.get("CREATOR_MX_" + campaignId, function(kpRes) {
+      var route = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : '';
+      var parsed = parseMaximaRoute(route);
+      var routePk = parsed ? parsed.publickey : '';
+      if (routePk && routePk.toUpperCase() === sndrPk.toUpperCase()) {
+        cb(true);
+        return;
+      }
+      if (!creatorPk && !routePk) {
+        MDS.log("[CHANNEL] " + label + ": creator key unknown locally — accepting (fail-open). campaign: " + campaignId);
+        cb(true);
+        return;
+      }
+      MDS.log("[CHANNEL] " + label + " rejected: sender is not the campaign creator. campaign: " + campaignId
+        + " sender: " + sndrPk.substring(0, 18) + "...");
+      cb(false);
+    });
+  });
+}
+
+function handleChannelOpen(payload, senderPk) {
   if (!payload.campaign_id || !payload.viewer_key || !payload.channel_coinid) {
     MDS.log("[CHANNEL] CHANNEL_OPEN missing required fields");
     return;
@@ -377,6 +423,14 @@ function handleChannelOpen(payload) {
   }
   var now             = Date.now();
 
+  // Fix #1: only the campaign creator may open/replace a channel on this node.
+  _assertCampaignCreatorSender(campaignId, senderPk, "CHANNEL_OPEN", function(allowed) {
+    if (!allowed) { return; }
+    _doHandleChannelOpen(campaignId, viewerKey, channelCoinId, maxAmount, cumulativeEarned, latestTxHex, role, frameId, now);
+  });
+}
+
+function _doHandleChannelOpen(campaignId, viewerKey, channelCoinId, maxAmount, cumulativeEarned, latestTxHex, role, frameId, now) {
   MDS.keypair.get("CREATOR_MX_" + campaignId, function(kpRes) {
     var _cmxRaw = (kpRes && kpRes.status && kpRes.value) ? kpRes.value : null;
     var creatorMx = (_cmxRaw && (_cmxRaw.indexOf("Mx") === 0 || _cmxRaw.indexOf("MAX#") === 0)) ? _cmxRaw : '';
@@ -712,7 +766,19 @@ function _handleRewardRequestInner(payload, campaignId, viewerKey, eventId, cumu
   });
 }
 
-function _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHex, role, frameId, oldCumulative, viewerWalletAddr, rewardType) {
+function _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHex, role, frameId, oldCumulative, viewerWalletAddr, rewardType, senderPk) {
+  // Fix #1 (audit 2026-07-18): a voucher may never move the channel backwards.
+  // LATEST_TX_HEX is the viewer's only creator-signed settlement voucher, so a
+  // lower cumulative must never be allowed to overwrite it. Equality is allowed:
+  // VOUCHER_SYNC_REQUEST replays the authoritative voucher at the same cumulative.
+  var _newCum = parseFloat(cumulative) || 0;
+  var _oldCum = parseFloat(oldCumulative) || 0;
+  if (_newCum < _oldCum) {
+    MDS.log("[CHANNEL] REWARD_VOUCHER rejected: non-monotonic cumulative (" + _newCum + " < " + _oldCum
+      + "). campaign: " + campaignId + " role: " + role
+      + " sender: " + (senderPk ? senderPk.substring(0, 18) + "..." : "unknown"));
+    return;
+  }
   updateChannelVoucher(campaignId, viewerKey, role, cumulative, txHex, function(err) {
     if (err) {
       MDS.log("[CHANNEL] REWARD_VOUCHER: updateChannelVoucher failed: " + err);
@@ -720,6 +786,10 @@ function _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHe
     }
 
     var now = Date.now();
+    // Fix #2: capture the dedup verdict BEFORE the DEDUP_LOG merge below — after
+    // the merge every event_id looks like a duplicate. The viewer branch uses it
+    // to skip the USER_PROFILE.TOTAL_EARNED accrual on a replayed voucher.
+    isDuplicate(eventId, function(isDup) {
     var dedupSql = "MERGE INTO DEDUP_LOG (ID, LOGGED_AT) KEY (ID) VALUES ('" + escapeSql(eventId) + "'," + now + ")";
     sqlQuery(dedupSql, function(dedupErr) {
       if (dedupErr) {
@@ -794,6 +864,13 @@ function _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHe
           );
         });
       } else {
+        // Fix #2: REWARD_EVENTS is deduped by its MERGE KEY (ID), but the
+        // USER_PROFILE.TOTAL_EARNED accrual below is an unconditional "+ delta"
+        // UPDATE — replaying a voucher would inflate the displayed balance.
+        if (isDup) {
+          MDS.log("[CHANNEL] REWARD_VOUCHER duplicate event, skipping profile update: " + eventId);
+          return;
+        }
         var delta = cumulative - oldCumulative;
         var reType = rewardType || 'view';
         if (!(delta > 0)) {
@@ -859,10 +936,11 @@ function _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHe
         );
       }
     });
+    });
   }, rewardType);
 }
 
-function handleRewardVoucher(payload) {
+function handleRewardVoucher(payload, senderPk) {
   if (!payload.campaign_id || !payload.viewer_key || !payload.event_id || payload.cumulative === undefined || !payload.tx_hex) {
     MDS.log("[CHANNEL] REWARD_VOUCHER missing required fields");
     return;
@@ -877,18 +955,23 @@ function handleRewardVoucher(payload) {
   var frameId    = payload.frame_id || '';
   var rewardType = payload.reward_type || 'view';
 
-  if (role !== 'publisher') {
+  // Fix #1: a REWARD_VOUCHER is creator-authored. Reject anything else before any
+  // DB write — updateChannelVoucher overwrites LATEST_TX_HEX, the viewer's only
+  // creator-signed settlement voucher.
+  _assertCampaignCreatorSender(campaignId, senderPk, "REWARD_VOUCHER", function(allowed) {
+    if (!allowed) { return; }
+    // The stored cumulative is loaded for BOTH roles so the monotonicity guard in
+    // _continueRewardVoucher can reject a downward voucher on publisher channels
+    // too (the publisher branch itself does not use oldCumulative).
     getChannelState(campaignId, viewerKey, role, function(csErr, chState) {
       var oldCumulative = chState ? (parseFloat(chState.CUMULATIVE_EARNED) || 0) : 0;
       var viewerWalletAddr = chState ? (chState.VIEWER_WALLET_ADDR || '') : '';
-      _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHex, role, frameId, oldCumulative, viewerWalletAddr, rewardType);
+      _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHex, role, frameId, oldCumulative, viewerWalletAddr, rewardType, senderPk || '');
     });
-    return;
-  }
-  _continueRewardVoucher(campaignId, viewerKey, eventId, cumulative, txHex, role, frameId, 0, '', rewardType);
+  });
 }
 
-function handleVoucherSyncRequest(payload) {
+function handleVoucherSyncRequest(payload, senderPk) {
   if (!payload.campaign_id || !payload.viewer_key) {
     MDS.log("[CHANNEL] VOUCHER_SYNC_REQUEST missing required fields");
     return;
@@ -897,10 +980,21 @@ function handleVoucherSyncRequest(payload) {
   var campaignId = payload.campaign_id;
   var viewerKey  = payload.viewer_key;
   var role       = payload.role || 'viewer';
+  var sndrPk     = senderPk || '';
 
   getChannelState(campaignId, viewerKey, role, function(err, channel) {
     if (err || !channel) {
       MDS.log("[CHANNEL] VOUCHER_SYNC_REQUEST: channel not found. campaign: " + campaignId);
+      return;
+    }
+
+    // Fix #11 (audit 2026-07-18): only the node that opened this channel may ask
+    // for a voucher re-emission — otherwise any peer can force tx lookups and
+    // Maxima sends (DoS amplification). Fails open when OPENER_MX_PK is empty
+    // (channels opened before the N2-4 guard), same as REWARD_REQUEST below.
+    var _openerPk = channel.OPENER_MX_PK || '';
+    if (_openerPk && sndrPk && _openerPk.toUpperCase() !== sndrPk.toUpperCase()) {
+      MDS.log("[CHANNEL] VOUCHER_SYNC_REQUEST rejected: senderPk != OPENER_MX_PK. campaign: " + campaignId);
       return;
     }
 

@@ -40,15 +40,15 @@ function onMaxima(msg) {
   } else if (payload.type === "CHANNEL_OPEN_REQUEST") {
     handleChannelOpenRequest(payload, msg.data.from || '');
   } else if (payload.type === "CHANNEL_OPEN") {
-    handleChannelOpen(payload);
+    handleChannelOpen(payload, msg.data.from || '');
   } else if (payload.type === "REWARD_REQUEST") {
     handleRewardRequest(payload, msg.data.from || '');
   } else if (payload.type === "REWARD_REJECTED") {
     handleRewardRejected(payload);
   } else if (payload.type === "REWARD_VOUCHER") {
-    handleRewardVoucher(payload);
+    handleRewardVoucher(payload, msg.data.from || '');
   } else if (payload.type === "VOUCHER_SYNC_REQUEST") {
-    handleVoucherSyncRequest(payload);
+    handleVoucherSyncRequest(payload, msg.data.from || '');
   } else if (payload.type === "PUBLISHER_REWARD_NOTIFY") {
     handlePublisherRewardNotify(payload, msg.data.from || '');
   } else if (payload.type === "CREATOR_LIVENESS_PING") {

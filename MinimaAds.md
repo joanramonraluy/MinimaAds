@@ -1100,6 +1100,8 @@ Sent after the creator has successfully opened the channel coin on-chain. When r
 >
 > `latest_tx_hex` (optional, default '') — the creator's last stored partially-signed transaction. When present, the viewer stores it so the channel can be settled even if new vouchers are not immediately issued after reconnection.
 
+**Sender authentication**: the receiver accepts `CHANNEL_OPEN` only when the Maxima sender (`msg.data.from`) is the campaign creator — `CAMPAIGNS.CREATOR_ADDRESS`, or the public key embedded in the on-chain permanent route cached in `CREATOR_MX_<campaign_id>`. Fails open when no creator identity is known locally (campaigns predating the guard).
+
 ### 8.10 REWARD_REQUEST
 
 **Direction**: Viewer FE → Creator FE (unicast via `to:<creator_mx_address>`, `poll:true`)
@@ -1139,6 +1141,8 @@ Sent in response to a `REWARD_REQUEST`. Contains the partially-signed transactio
 }
 ```
 
+**Sender authentication**: the receiver accepts `REWARD_VOUCHER` only from the campaign creator (same rule as §8.9). In addition, a voucher whose `cumulative` is **lower** than the stored `CHANNEL_STATE.CUMULATIVE_EARNED` is rejected before `LATEST_TX_HEX` is overwritten — equality is accepted so §8.12 sync replays still work. A duplicate `event_id` still stores the voucher but does not accrue `USER_PROFILE.TOTAL_EARNED` a second time.
+
 ### 8.12 VOUCHER_SYNC_REQUEST
 
 **Direction**: Viewer FE → Creator FE (unicast via `to:<creator_mx_address>`, `poll:true`)
@@ -1154,6 +1158,8 @@ Sent on reconnection when the viewer has a channel open but is missing or unsure
 ```
 
 Creator responds with the latest `REWARD_VOUCHER` it has for this pair, or with `CHANNEL_OPEN` if no voucher has been issued yet.
+
+**Sender authentication**: the creator answers only when the Maxima sender matches `CHANNEL_STATE.OPENER_MX_PK` for that channel (the node that opened it). Fails open when `OPENER_MX_PK` is empty (channels opened before the N2-4 guard).
 
 ### 8.13 CREATOR_LIVENESS_PING
 

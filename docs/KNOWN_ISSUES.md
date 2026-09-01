@@ -160,6 +160,14 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ---
 
+## 3.5) Open Issues
+
+| ID | Component | Description | Status |
+|---|---|---|---|
+| AUD-1 | `sdk/index.js` `_handleChannelOpenPayload`, `_handleRewardVoucherPayload` | **SDK duplicates the inbound voucher write path with no sender authentication.** The SW handlers were hardened on 2026-07-18 (audit Fix #1/#2/#11: sender must be the campaign creator, monotonic `cumulative`, `isDuplicate` guard). The SDK, running in a host MiniDapp FE, decodes `MAXIMA` events itself and calls `activateChannel` / `updateChannelVoucher` directly from `CHANNEL_OPEN` and `REWARD_VOUCHER` payloads — no `event.data.from` check, no monotonicity check, no dedup. On an SDK-hosted node the CRITICAL vector of `docs/AUDIT_2026-07-18_FABLE.md` remains open against that dapp's own `CHANNEL_STATE`. Fix requires mirroring `_assertCampaignCreatorSender` in the SDK using `event.data.from`. **Out of scope for the SW session** — `sdk/index.js` is an external publisher contract (AGENTS.md §3.5), any change needs maintainer approval. | 🔴 Open |
+
+---
+
 ## 4) Development Workflow Rule
 
 **During development, never add `ALTER TABLE` migration statements** to `db-init.js`. The DB is reset with each MiniDapp reinstall. If a column type or size is wrong, fix the `CREATE TABLE` statement and reinstall — that is all that is needed. Migrations are a post-MVP concern for production upgrades.

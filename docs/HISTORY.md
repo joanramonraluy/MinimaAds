@@ -46,6 +46,31 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-06-25 (patch 25) — Fix: Campaign pause/resume — liveness cache invalidation + legacy escrow handling
+
+**Problem**: Two interconnected bugs when pausing and resuming campaigns:
+1. **Paused campaigns remain visible in viewer UI** — when a campaign was paused via fast-path Maxima CAMPAIGN_PAUSE broadcast, the SDK received the message, updated the DB, but failed to invalidate its internal `_livenessCache`. The SDK continued to serve the paused campaign to the viewer, making it appear in the campaign list even though the DB status was 'paused'.
+2. **Resume fails with "On-chain propagation failed" error** — when the creator tried to resume a campaign, `buildAndPostStatusUpdateTx` required both `ESCROW_COINID` and `ESCROW_WALLET_PK` to be present. Legacy campaigns (created before escrow tracking) or those that lost these fields would fail with a hard error instead of gracefully skipping on-chain propagation.
+
+**Root cause**:
+- **SDK cache**: `handleMdsEvent` in `sdk/index.js` (lines 1139–1142) handled `CAMPAIGN_PAUSE` and `CAMPAIGN_FINISH` by calling `setCampaignStatus()` but never called `_onCampaignUpdatedCore()` to invalidate the liveness cache. This fast-path optimization avoided an extra DB round-trip but broke the SDK's filtering.
+- **Legacy escrow**: `buildAndPostStatusUpdateTx` in `dapp/app.js` (line 1463) returned `{ ok: false, error: '...' }` for campaigns without ESCROW data, treating it as a fatal error instead of a graceful skip (which is already handled downstream by `mycampaigns.js` at line 1413).
+
+**Fix**:
+1. **sdk/index.js** (lines 1140, 1143): Added `_onCampaignUpdatedCore()` calls after `setCampaignStatus()` for both CAMPAIGN_PAUSE and CAMPAIGN_FINISH. This immediately invalidates the liveness cache so the next `getAd()` call stops serving the paused campaign.
+2. **dapp/app.js** (line 1463): Changed error response to graceful skip: return `{ ok: true, skipped: true }` instead of `{ ok: false, error: '...' }`. Legacy campaigns now skip on-chain propagation without alerting the user.
+
+**Files modified**: `sdk/index.js`, `dapp/app.js`
+
+**AGENTS.md updated**: yes — §6 updated, patch 24 moved to `docs/HISTORY.md §17`.
+
+**Verification**:
+1. **Pause visibility fix**: Create an active campaign. Open viewer in one browser tab. In another tab (creator), pause the campaign. In the viewer tab, the paused campaign should disappear from the list immediately (no refresh needed).
+2. **Resume error fix**: Create a campaign. Pause it. Resume it. No "On-chain propagation failed" error should appear (may see "skipped" log on console if legacy escrow, which is OK).
+3. **No console errors**: Open browser console; no JavaScript errors should appear during pause/resume actions.
+
+---
+
 ### Session: 2026-06-19 (patch 24) — Fix: Campaign close confirmation buttons layout overflow
 
 **Problem**: When finishing a campaign on desktop or mobile, the confirmation buttons inside the warnings box would sometimes overflow the screen on the right or wrap asymmetrically. This was caused by PicoCSS applying `width: 100%` by default to `<button>` elements, conflicting with the flex wrap layout in `_showFinishConfirmation`.

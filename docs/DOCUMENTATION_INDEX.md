@@ -17,6 +17,7 @@
 | **docs/HISTORY.md** | Archived handoff notes, long-term project history, implementation details from past sessions |
 | **docs/PLATFORM_NOTES.md** | Minima platform details: H2, Rhino, MDS, Maxima, constraints |
 | **docs/PROJECT_NOTES_REFERENCE.md** | Protocol matrix, signals, handlers, source-of-truth rules |
+| **docs/TESTING_SETUP.md** | How to spin up N real nodes + browser control (MinimaNodeManager + Playwright MCP) for live end-to-end testing |
 | **docs/archive/** | Historical docs: UI guides, audit reports, roadmaps, old task lists (see archive/README.md) |
 | **PROJECT_INDEX.md** | Structure, folder map, key decisions log (optional, orientation only) |
 
@@ -105,6 +106,10 @@ Then consult PROJECT_INDEX.md §5 (Key Decisions) to understand why the system i
 
 **"I don't know if I need plan mode"**
 → See CLAUDE.md §4 (Task Execution Workflow, Step 3). Use `/assess-task` skill if available.
+
+**"The maintainer wants me to run/test the dapp live, not just write code"**
+→ Read docs/TESTING_SETUP.md. It's the recipe for starting N real nodes and
+driving a real Chrome browser through MinimaNodeManager + Playwright MCP.
 
 ---
 

@@ -1022,7 +1022,21 @@ Reward processing (view and click events) is handled entirely within the FE runt
 - **CAMPAIGN_PAUSE / CAMPAIGN_FINISH**: optional fast-path. Creator FE may emit these alongside the on-chain status-update tx for snappier propagation to currently-online contacts. Receiving handlers call `setCampaignStatus`; the on-chain reconciliation pass is idempotent against this.
 - **CAMPAIGN_RESUME** — **DEPRECATED**. Do not emit. Resume is on-chain only, because the typical resume scenario is "creator's node was offline and now comes back" — in that case Maxima cannot deliver the message to viewers that are currently offline. Use the on-chain status-update tx (§6.10) instead. Existing inbound handlers are retained for backward-compat with older creator nodes.
 
-> Only the campaign creator should broadcast PAUSE/FINISH. There is no creator-identity check at the protocol level; enforcement relies on the creator being the one holding the UI controls and on the authoritative `PREVSTATE(7)` reconciliation that will overwrite any spoofed Maxima broadcast on the next `NEWBLOCK` scan.
+**Sender authentication (inbound)** — `campaign.handler.js` `_assertCreatorThen`. Only the campaign creator may change a campaign's status. The sender is `msg.data.from` (verified by the Maxima transport, not a payload field) and is checked against two identity sources, which carry **different levels of trust**:
+
+| Identity source | Trust | Where it comes from |
+|---|---|---|
+| Permanent route `MAX#<pk>#<mls>` — `CAMPAIGNS.CREATOR_MX`, or keypair `CREATOR_MX_<campaignId>` cached from escrow `STATE(4)` | **strong** | Set locally at campaign creation, or read from the on-chain escrow coin. Not settable by a Maxima payload. |
+| `CAMPAIGNS.CREATOR_ADDRESS` | **fallback** | For announce / `CAMPAIGN_DATA_RESPONSE`-discovered campaigns this is filled from `payload.campaign.creator_address`, i.e. from a message field. |
+
+A sender matching neither is rejected and no status change is applied.
+
+Resulting rule (audit 2026-07-18 Fix #3):
+
+- **Strong match** → full fast-path: status is updated and, for `finished`/`paused`, `autoSettleChannelsForCampaign` runs as before.
+- **Fallback match** → **local status change only**. The `CAMPAIGNS.STATUS` row is updated (recoverable, and overwritten by `PREVSTATE(7)` reconciliation on V3 escrows), but settlement is **not** forced: `autoSettleChannelsForCampaign` is skipped and the `CAMPAIGN_UPDATED` signal omits `settling:true`. The handler logs `[CAMPAIGN] FINISH via fallback creator check — deferring auto-settle to on-chain confirmation`. Settlement then falls back to the viewer-initiated path (`CAMPAIGN_AUTOSETTLE_REQUEST`).
+
+Rationale: a crafted `CAMPAIGN_FINISH` from a third party must not be able to force on-chain settlement of channels on a campaign it does not control. A spoofed *status* is recoverable; a spoofed *settlement* is an irreversible L1 transaction. V1/V2 campaigns cannot verify the sender on-chain (no `PREVSTATE(7)`), so the fast-path privilege is withheld from them unless the permanent route matches.
 
 ### 8.6 REQUEST_CAMPAIGN_DATA
 

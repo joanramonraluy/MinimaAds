@@ -131,7 +131,7 @@ function handleCampaignPause(payload, senderPk) {
     MDS.log("[CAMPAIGN] PAUSE missing campaign_id");
     return;
   }
-  _assertCreatorThen(payload.campaign_id, senderPk, function() {
+  _assertCreatorThen(payload.campaign_id, senderPk, function(strongSender) {
     applyStatusChange(payload.campaign_id, "paused");
   });
 }
@@ -141,7 +141,21 @@ function handleCampaignFinish(payload, senderPk) {
     MDS.log("[CAMPAIGN] FINISH missing campaign_id");
     return;
   }
-  _assertCreatorThen(payload.campaign_id, senderPk, function() {
+  _assertCreatorThen(payload.campaign_id, senderPk, function(strongSender) {
+    // Audit 2026-07-18 Fix #3: the FINISH fast-path may only force channel
+    // settlement when the sender was verified against a permanent route
+    // (MAX#<pk>#<mls>). A match on CAMPAIGNS.CREATOR_ADDRESS alone is a weak
+    // identity — for announce/response-discovered campaigns that value comes
+    // from a Maxima payload field — so a crafted FINISH must not be able to
+    // force autoSettleChannelsForCampaign on a campaign it does not control.
+    // The local status still flips to 'finished' (recoverable, and reconciled
+    // from PREVSTATE(7) on-chain for V3 escrows); only the settlement is
+    // withheld, falling back to viewer-initiated settlement.
+    if (!strongSender) {
+      MDS.log("[CAMPAIGN] FINISH via fallback creator check — deferring auto-settle to on-chain confirmation");
+      applyStatusChange(payload.campaign_id, "finished", true);
+      return;
+    }
     applyStatusChange(payload.campaign_id, "finished");
   });
 }
@@ -151,16 +165,31 @@ function handleCampaignResume(payload, senderPk) {
     MDS.log("[CAMPAIGN] RESUME missing campaign_id");
     return;
   }
-  _assertCreatorThen(payload.campaign_id, senderPk, function() {
+  _assertCreatorThen(payload.campaign_id, senderPk, function(strongSender) {
     applyStatusChange(payload.campaign_id, "active");
   });
 }
 
 // Verifies the Maxima sender PK matches the campaign creator before applying
-// any status change. Extracts the creator PK from CREATOR_MX (MAX#<pk>#<mls>
-// permanent route) or falls back to CREATOR_ADDRESS. Comparison is
-// case-insensitive — public keys may arrive in mixed hex case.
-// senderPk comes from msg.data.from (Maxima-layer, cryptographically verified).
+// any status change. Comparison is case-insensitive — public keys may arrive in
+// mixed hex case. senderPk comes from msg.data.from (Maxima-layer,
+// cryptographically verified).
+//
+// Audit 2026-07-18 Fix #3 — the callback receives a trust flag:
+//   ok(true)  "strong": the sender matched a permanent route MAX#<pk>#<mls>,
+//             either the one stored with the campaign (CAMPAIGNS.CREATOR_MX, set
+//             locally at creation on the creator's own node) or the on-chain one
+//             cached from the escrow coin STATE(4) in keypair
+//             CREATOR_MX_<campaignId>. Neither is settable by a Maxima payload.
+//   ok(false) "fallback": the sender only matched CAMPAIGNS.CREATOR_ADDRESS. For
+//             announce/CAMPAIGN_DATA_RESPONSE-discovered campaigns that column is
+//             filled from payload.campaign.creator_address, so it is a weak
+//             identity — good enough to flip a local status (recoverable, and
+//             overwritten by PREVSTATE(7) reconciliation on V3 escrows), not good
+//             enough to force channel settlement. See handleCampaignFinish.
+// Same two identity sources, same precedence, as channel.handler.js
+// _assertCampaignCreatorSender — but this guard fails CLOSED (no ok() call) when
+// no creator identity is known locally, which is the pre-existing behavior here.
 function _assertCreatorThen(campaignId, senderPk, ok) {
   if (!senderPk) {
     MDS.log("[CAMPAIGN] status change rejected: no sender PK. campaign=" + campaignId);
@@ -171,23 +200,29 @@ function _assertCreatorThen(campaignId, senderPk, ok) {
       MDS.log("[CAMPAIGN] status change rejected: campaign not found. campaign=" + campaignId);
       return;
     }
-    var creatorPk = '';
-    var route = (c.CREATOR_MX || '');
-    if (route.indexOf('MAX#') === 0) {
-      var parts = route.split('#');
-      if (parts.length === 3) { creatorPk = parts[1]; }
-    }
-    if (!creatorPk) {
-      // Fallback: CREATOR_ADDRESS is a Maxima PK for campaigns discovered via
-      // CAMPAIGN_ANNOUNCE (set from payload.campaign.creator_address).
-      creatorPk = c.CREATOR_ADDRESS || '';
-    }
-    if (creatorPk && creatorPk.toUpperCase() === senderPk.toUpperCase()) {
-      ok();
+    // parseMaximaRoute (core/minima.js) returns null for a legacy "MAX#Mx...#mls"
+    // contact route, so only a real hex public key ever reaches the strong branch.
+    var storedRoute = parseMaximaRoute(c.CREATOR_MX || '');
+    var storedPk = storedRoute ? storedRoute.publickey : '';
+    if (storedPk && storedPk.toUpperCase() === senderPk.toUpperCase()) {
+      ok(true);
       return;
     }
-    MDS.log("[CAMPAIGN] status change rejected: sender is not the creator. campaign=" + campaignId
-      + " sender=" + senderPk.substring(0, 16) + "...");
+    MDS.keypair.get("CREATOR_MX_" + campaignId, function(kpRes) {
+      var onChainRoute = parseMaximaRoute((kpRes && kpRes.status && kpRes.value) ? kpRes.value : '');
+      var onChainPk = onChainRoute ? onChainRoute.publickey : '';
+      if (onChainPk && onChainPk.toUpperCase() === senderPk.toUpperCase()) {
+        ok(true);
+        return;
+      }
+      var creatorPk = c.CREATOR_ADDRESS || '';
+      if (creatorPk && creatorPk.toUpperCase() === senderPk.toUpperCase()) {
+        ok(false);
+        return;
+      }
+      MDS.log("[CAMPAIGN] status change rejected: sender is not the creator. campaign=" + campaignId
+        + " sender=" + senderPk.substring(0, 16) + "...");
+    });
   });
 }
 
@@ -581,14 +616,21 @@ function onPending(msg) {
   });
 }
 
-function applyStatusChange(campaignId, status) {
+// skipAutoSettle (optional, default false) — update the local STATUS row and
+// signal the FE, but do NOT start channel settlement. Set by handleCampaignFinish
+// when the sender could only be verified through the weak CREATOR_ADDRESS
+// fallback (audit 2026-07-18 Fix #3). When settlement is skipped the
+// CAMPAIGN_UPDATED signal must not carry settling:true either — the FE uses that
+// flag to defer its re-render until onCampaignClosed arrives, and no settlement
+// events will follow here.
+function applyStatusChange(campaignId, status, skipAutoSettle) {
   setCampaignStatus(campaignId, status, function(err) {
     if (err) {
       MDS.log("[CAMPAIGN] setCampaignStatus(" + status + ") failed: " + err);
       return;
     }
     MDS.log("[CAMPAIGN] status updated to " + status + ", id: " + campaignId);
-    var isSettling = (status === 'finished' || status === 'paused');
+    var isSettling = (status === 'finished' || status === 'paused') && !skipAutoSettle;
     if (isSettling) {
       if (typeof autoSettleChannelsForCampaign === 'function') {
         autoSettleChannelsForCampaign(campaignId);

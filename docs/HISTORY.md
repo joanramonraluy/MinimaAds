@@ -46,6 +46,35 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-07-18 (audit fixes #1 + #2 + #11) — Security: authenticate inbound channel Maxima handlers
+
+**Source**: `docs/AUDIT_2026-07-18_FABLE.md` (CRITICAL + HIGH findings) and `docs/IMPLEMENTATION_PLAN_2026-07-18.md` (Phase 1, Fix #1 / #2 / #11).
+
+**Problem**: N2-4 hardened `handleRewardRequest` with an `OPENER_MX_PK` sender binding but left its three mirror handlers unauthenticated — the dispatcher did not even pass `msg.data.from` to them. Any Maxima peer knowing a `(campaign_id, viewer_key)` pair could:
+1. Send a crafted `REWARD_VOUCHER` → `updateChannelVoucher` overwrote `LATEST_TX_HEX`, destroying the viewer's only creator-signed settlement voucher (real economic loss). No monotonicity check existed, so a *lower* `cumulative` was accepted.
+2. Replay a valid `REWARD_VOUCHER` → the viewer branch bumped `USER_PROFILE.TOTAL_EARNED` unconditionally (`+ delta`) with no `isDuplicate` guard, inflating the displayed balance.
+3. Send a crafted `CHANNEL_OPEN` → MERGE overwrote a healthy open channel.
+4. Send `VOUCHER_SYNC_REQUEST` → free DoS amplification (forces tx lookups + Maxima sends on the creator).
+
+**Fix**:
+- `maxima.handler.js`: dispatcher now passes `msg.data.from || ''` to `handleChannelOpen`, `handleRewardVoucher` and `handleVoucherSyncRequest` (matching the existing call sites for `CHANNEL_OPEN_REQUEST` / `REWARD_REQUEST`).
+- `channel.handler.js`: new `_assertCampaignCreatorSender(campaignId, senderPk, label, cb)` — accepts only the campaign creator's Maxima PK (`CAMPAIGNS.CREATOR_ADDRESS`, or the pk embedded in the on-chain permanent route cached in `CREATOR_MX_<campaignId>`). Applied to `handleChannelOpen` (body extracted to `_doHandleChannelOpen`) and `handleRewardVoucher`. Fails open only when no creator identity is known locally or the message carries no sender — same policy as the N2-4 guard.
+- `channel.handler.js` `_continueRewardVoucher`: new `senderPk` param; rejects non-monotonic vouchers (`cumulative < oldCumulative`) **before** `updateChannelVoucher` touches `LATEST_TX_HEX`. Equality is still accepted so `VOUCHER_SYNC_REQUEST` recovery works. `handleRewardVoucher` now loads the stored cumulative for the publisher role too, so the guard covers publisher channels.
+- `channel.handler.js` `_continueRewardVoucher`: `isDuplicate(eventId)` is now evaluated **before** the `DEDUP_LOG` MERGE (after the MERGE every id looks duplicate); the viewer branch returns early on a duplicate without touching `REWARD_EVENTS` / `USER_PROFILE`.
+- `channel.handler.js` `handleVoucherSyncRequest`: rejects when `senderPk != channel.OPENER_MX_PK` (fail-open on empty).
+
+All public key comparisons uppercase both sides. Rhino-safe throughout (`var`, `function()`, string concat, `MDS.log`, no trailing commas).
+
+**Files modified**: `public/service-workers/handlers/maxima.handler.js`, `public/service-workers/handlers/channel.handler.js`
+
+**AGENTS.md updated**: yes — §6 updated, patch 23 moved to `docs/HISTORY.md §17`. `MinimaAds.md` §8.9/§8.11/§8.12 gained a "Sender authentication" note. `docs/KNOWN_ISSUES.md` gained new §3.5 with the SDK-path gap (AUD-1).
+
+**Verification**: written up at commit time as a five-point manual test plan (happy path, spoofed voucher, replay, non-monotonic, sync auth) — actually executed live on a real 6-node network on 2026-09-03; see that session's entry in `AGENTS.md §6` for the executed results (all five passed).
+
+**Open issues**: `sdk/index.js` `_handleChannelOpenPayload` / `_handleRewardVoucherPayload` duplicate this write path in the FE with no sender or monotonicity check — see `docs/KNOWN_ISSUES.md §3.5 AUD-1` (fixed 2026-09-01, see that session's entry above/in `AGENTS.md §6` history).
+
+---
+
 ### Session: 2026-06-25 (patch 25) — Fix: Campaign pause/resume — liveness cache invalidation + legacy escrow handling
 
 **Problem**: Two interconnected bugs when pausing and resuming campaigns:

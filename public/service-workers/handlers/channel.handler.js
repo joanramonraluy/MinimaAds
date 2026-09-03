@@ -94,6 +94,12 @@ function handleChannelOpenRequest(payload, senderPk) {
           var pubRemaining = pubMaxBudget - pubEarned;
           // Cap the channel max at remaining budget (publisher may request more than is left)
           var effectiveCap = Math.min(maxAmount, pubRemaining);
+          // Cap reservation so a single channel cannot pre-reserve the entire budget.
+          var reservationCap = LIMITS.MAX_CHANNEL_RESERVATION || 10;
+          if (effectiveCap > reservationCap) {
+            MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): capping reservation " + effectiveCap + " -> " + reservationCap + " campaign=" + campaignId);
+            effectiveCap = reservationCap;
+          }
           MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): budget — max=" + pubMaxBudget + " earned=" + pubEarned + " remaining=" + pubRemaining + " requestedCap=" + maxAmount + " effectiveCap=" + effectiveCap);
           // Reject only if remaining is less than one view's reward
           if (effectiveCap < pubView || effectiveCap <= 0) {

@@ -430,7 +430,10 @@ function processEscrowCoin(coin) {
               });
             } else {
               MDS.log("[DISCOVERY] MAX_PUBLISHER_BUDGET patched: " + campaignId + " = " + onChainPubBudget);
-              signalFE("CAMPAIGN_UPDATED", { campaign_id: campaignId });
+              // Fix #5: include status so the SDK's _livenessCache can refresh
+              // directly from this signal instead of falling back to a delete
+              // (see sdk/index.js _onCampaignUpdatedCore).
+              signalFE("CAMPAIGN_UPDATED", { campaign_id: campaignId, status: campaign.STATUS });
             }
           }
         );
@@ -451,7 +454,8 @@ function processEscrowCoin(coin) {
               MDS.log("[DISCOVERY] budget sync failed: " + syncErr);
             } else {
               MDS.log("[DISCOVERY] budget synced: " + campaignId + " remaining=" + onChainAmount);
-              signalFE("CAMPAIGN_UPDATED", { campaign_id: campaignId });
+              // Fix #5: include status (see note above).
+              signalFE("CAMPAIGN_UPDATED", { campaign_id: campaignId, status: campaign.STATUS });
             }
           }
         );

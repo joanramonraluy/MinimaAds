@@ -1199,6 +1199,8 @@ Sent either by the viewer SDK before opening a new payment channel, or periodica
 
 > SDK path: if no `CREATOR_LIVENESS_PONG` arrives within 3 s, the campaign is considered inaccessible and the result is cached for 2 min (`LIVENESS_CACHE_MS`). SW periodic path: PONG arrives asynchronously and syncs local status via `handleCreatorLivenessPong`.
 
+**`_livenessCache` key normalization and status-less invalidation (Fix #5, `sdk/index.js`)** — `_livenessCache` is keyed by `campaign_id`, but that value reaches the cache from two different sources (`campaign.ID` read from the local `CAMPAIGNS` row, and `parsed.campaign_id` from an inbound `CAMPAIGN_UPDATED` MDSCOMMS signal) that are not guaranteed to share casing. All reads/writes go through a `_livenessKey()` helper (`.toUpperCase()`) so a casing mismatch can never cause a stale cache entry to survive a lookup. Separately, `_onCampaignUpdatedCore` previously ignored a status-less `CAMPAIGN_UPDATED` (e.g. the budget-sync signals `processEscrowCoin` emits on every escrow-coin discovery, unrelated to a status change) — leaving a stale `alive:false` entry cached for up to `LIVENESS_CACHE_MS` even after the campaign came back online. It now **deletes** the cache entry instead, forcing the next `getAd()` to re-check liveness. As a complement, `processEscrowCoin`'s two budget-sync `signalFE("CAMPAIGN_UPDATED", ...)` calls (`campaign.handler.js`) now include the current `status` from the already-loaded campaign row, so the signal is self-sufficient and the cache can refresh directly instead of falling back to the delete.
+
 ### 8.14 CREATOR_LIVENESS_PONG
 
 **Direction**: Creator SW → Viewer SW (unicast via `publickey:<senderPk>` with `to:<viewer_mx>` fallback, **`poll:false`**)

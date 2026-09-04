@@ -40,6 +40,16 @@
   var LIVENESS_CACHE_MS = 30000;
   var LIVENESS_TIMEOUT_MS = 3000;
 
+  // Fix #5: _livenessCache is keyed by campaign_id, but that id reaches this
+  // cache from two different sources — campaign.ID (DB row) and
+  // parsed.campaign_id (Maxima CAMPAIGN_UPDATED signal) — which are not
+  // guaranteed to share casing. Route every read/write through this helper
+  // so a casing mismatch can never cause a stale cache miss (audit fragility
+  // #12 pattern, applied to this in-memory map).
+  function _livenessKey(campaignId) {
+    return String(campaignId || '').toUpperCase();
+  }
+
   function _completeInit(cb) {
     MDS.cmd('maxima action:info', function(mxRes) {
       if (mxRes && mxRes.status && mxRes.response) {
@@ -192,7 +202,7 @@
       // First-time calls (empty cache) pass all campaigns through.
       var now = Date.now();
       var visible = (campaigns || []).filter(function(c) {
-        var cached = _livenessCache[c.ID];
+        var cached = _livenessCache[_livenessKey(c.ID)];
         return !(cached && !cached.alive && (now - cached.ts) < LIVENESS_CACHE_MS);
       });
       _enrichWithAds(visible, function(err2, enriched) {
@@ -544,7 +554,7 @@
   function _checkCreatorLiveness(campaign, cb) {
     var campaignId = campaign.ID;
     var now = Date.now();
-    var cached = _livenessCache[campaignId];
+    var cached = _livenessCache[_livenessKey(campaignId)];
     if (cached && (now - cached.ts) < LIVENESS_CACHE_MS) {
       cb(cached.alive);
       return;
@@ -566,7 +576,7 @@
     var timer = setTimeout(function() {
       if (!_pendingPings[campaignId]) { return; }
       delete _pendingPings[campaignId];
-      _livenessCache[campaignId] = { alive: false, ts: Date.now() };
+      _livenessCache[_livenessKey(campaignId)] = { alive: false, ts: Date.now() };
       console.log('[SDK] liveness timeout — creator offline for campaign:', campaignId);
       for (var i = 0; i < cbs.length; i++) { cbs[i](false); }
     }, LIVENESS_TIMEOUT_MS);
@@ -586,13 +596,13 @@
     if (pending) {
       clearTimeout(pending.timer);
       delete _pendingPings[campaignId];
-      _livenessCache[campaignId] = { alive: alive, ts: Date.now() };
+      _livenessCache[_livenessKey(campaignId)] = { alive: alive, ts: Date.now() };
       console.log('[SDK] liveness PONG — campaign:', campaignId, 'status:', status || '(unknown)', 'alive:', alive);
       for (var i = 0; i < pending.cbs.length; i++) { pending.cbs[i](alive); }
     } else {
       // Unsolicited PONG (e.g. after cache expiry) — refresh cache if status present.
       if (status) {
-        _livenessCache[campaignId] = { alive: alive, ts: Date.now() };
+        _livenessCache[_livenessKey(campaignId)] = { alive: alive, ts: Date.now() };
       }
     }
   }
@@ -602,9 +612,19 @@
   // so getAd() stops serving a paused/finished campaign without waiting for the
   // DB round-trip on the next getCampaigns() call.
   function _onCampaignUpdatedCore(parsed) {
-    if (!parsed || !parsed.campaign_id || !parsed.status) { return; }
+    if (!parsed || !parsed.campaign_id) { return; }
+    var key = _livenessKey(parsed.campaign_id);
+    if (!parsed.status) {
+      // Fix #5: a status-less CAMPAIGN_UPDATED (e.g. budget-sync signals from
+      // processEscrowCoin) carries no liveness info. Previously this just
+      // returned, leaving a stale 'offline' cache entry in place until it
+      // expired on its own — silently hiding a campaign that came back online.
+      // Deleting instead forces the next getAd() to re-check liveness.
+      delete _livenessCache[key];
+      return;
+    }
     var alive = (parsed.status === 'active');
-    _livenessCache[parsed.campaign_id] = { alive: alive, ts: Date.now() };
+    _livenessCache[key] = { alive: alive, ts: Date.now() };
     console.log('[SDK] CAMPAIGN_UPDATED campaign:' + parsed.campaign_id + ' status:' + parsed.status + ' alive:' + alive);
   }
 

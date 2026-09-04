@@ -26,7 +26,7 @@ function onMaxima(msg) {
   }
 
   if (payload.type === "CAMPAIGN_ANNOUNCE") {
-    handleCampaignAnnounce(payload);
+    handleCampaignAnnounce(payload, msg.data.from || '');
   } else if (payload.type === "CAMPAIGN_PAUSE") {
     handleCampaignPause(payload, msg.data.from || '');
   } else if (payload.type === "CAMPAIGN_FINISH") {
@@ -36,7 +36,7 @@ function onMaxima(msg) {
   } else if (payload.type === "REQUEST_CAMPAIGN_DATA") {
     handleRequestCampaignData(payload);
   } else if (payload.type === "CAMPAIGN_DATA_RESPONSE") {
-    handleCampaignDataResponse(payload);
+    handleCampaignDataResponse(payload, msg.data.from || '');
   } else if (payload.type === "CHANNEL_OPEN_REQUEST") {
     handleChannelOpenRequest(payload, msg.data.from || '');
   } else if (payload.type === "CHANNEL_OPEN") {

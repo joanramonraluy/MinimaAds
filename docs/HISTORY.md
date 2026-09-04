@@ -46,6 +46,28 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-03 (Fix #4) — Security: cap publisher CHANNEL_OPEN_REQUEST to LIMITS.MAX_CHANNEL_RESERVATION
+
+**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 1, Fix #4 — the publisher branch of `handleChannelOpenRequest` capped a publisher's channel reservation only at `MAX_PUBLISHER_BUDGET` remaining, never at the same per-channel ceiling (`LIMITS.MAX_CHANNEL_RESERVATION`, value 10) already enforced on the viewer branch (`channel.handler.js:230–235`). A publisher (or a hand-crafted `CHANNEL_OPEN_REQUEST`) could pre-reserve up to the entire remaining publisher budget in one channel.
+
+**Fix**: `channel.handler.js:96–103` — after computing `effectiveCap = Math.min(maxAmount, pubRemaining)`, added the same clamp pattern the viewer branch already uses: `var reservationCap = LIMITS.MAX_CHANNEL_RESERVATION || 10; if (effectiveCap > reservationCap) { ...log...; effectiveCap = reservationCap; }`, placed *before* the existing budget log line so the log reflects the final capped value. No hardcoded `10` — reads `LIMITS.MAX_CHANNEL_RESERVATION` (`service.js:21`), matching CLAUDE.md §6. Sender side (`_doSendPublisherChannelOpenRequest:1319`) intentionally untouched — this is a receiver-side defense against hand-crafted requests, per the plan.
+
+**Verification — live, 6-node, adversarial** (not just code review): deployed via MinimaNodeManager "Zip & Install to Nodes" (maintainer clicked it; the Playwright-driven click was blocked twice by the harness's auto-mode permission classifier — flagging this for future sessions: that button needs either a manual click or an explicit Bash/browser permission rule, plain-text encouragement from the user does not override the classifier). Reused the existing test campaign `1a067a5e4a7-b3a50359` (Node 1 = creator). Its `MAX_PUBLISHER_BUDGET` was only 0.5 (would have masked the reservation cap behind the budget cap), so temporarily raised it to 50 via `DevTools §4` SQL Console (test data only, no code/schema change) to make the two caps distinguishable. Crafted a raw `CHANNEL_OPEN_REQUEST` (`role:"publisher"`, `max_amount:50`, `frame_id:"test-attack-frame-1"`, no `publisher_mx_key`) from Node 6 (attacker) via `maxima action:send` RPC in its MinimaNodeManager console, targeting Node 1's real Maxima publickey. Node 1's `[CHANNEL]` log confirmed: `CHANNEL_OPEN_REQUEST (publisher): capping reservation 50 -> 10 campaign=1a067a5e4a7-b3a50359` followed by `budget — max=50 earned=0 remaining=50 requestedCap=50 effectiveCap=10`. The channel actually opened on-chain; `SELECT ... FROM CHANNEL_STATE WHERE ROLE='publisher'` confirmed the persisted row: `STATUS:"open"`, `MAX_AMOUNT:"10.000000"` (not 50), real `CHANNEL_COINID`. `CAMPAIGNS.PUBLISHER_BUDGET_SPENT` incremented by exactly 10 (not 50), confirming the capped value — not the requested one — is what gets reserved end-to-end.
+
+**Operational findings worth keeping**:
+- Node 6 (the dedicated attacker node) had been stopped (`[Node 6] Stopping Node 6...` in MinimaNodeManager's global log, cause not established — possibly a side effect of an earlier Chrome/profile recovery in this session) and had to be restarted; it runs in **Clean Mode**, so every restart mints a fresh Maxima identity — any prior `maxcontacts` entries on it are lost and must be re-added (`maxcontacts action:add contact:<target's Mx contact string>`, see `project_maxima_send_needs_contact.md`) after every restart, not just once per session.
+- Two Playwright MCP server instances (from two concurrent Claude sessions) cannot share one Chrome profile — attempting `browser_tabs`/etc. from the second session fails with `"Browser is already in use"`. Resolved this session by having the other session `kill -TERM` its own Chrome process and clear the profile's `SingletonLock`/`SingletonCookie`/`SingletonSocket`; the existing MinimaAds tabs (with logins/write-mode intact) survived the relaunch since only the browser process was killed, not the profile directory.
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`
+
+**AGENTS.md updated**: yes — this entry; oldest entry (2026-09-02, testing-setup docs) moved to `docs/HISTORY.md §17`. `MinimaAds.md`: no change (no schema/API/protocol contract changed — same `LIMITS` constant, same handler signature).
+
+**Verification for maintainer to re-check if desired**: node1's `#mycampaigns` view for campaign `1a067a5e4a7-b3a50359` should still show `Escrow Left: 89,80 M` (was 99.80 before this session's test channel opened) — this is a **live/on-chain test-data side effect** of the verification, not a bug; the campaign's `MAX_PUBLISHER_BUDGET` also remains at the test value of 50 (was 0.5) — left as-is since it's dev/test-only state and no cleanup was requested, but flagged here so the next session (or the concurrent `minimaads-af` session sharing this environment) isn't confused by it.
+
+**Open issues**: none new. Suggested next step per the plan: Fix #3 (`campaign.handler.js`, HIGH — spoofable `CAMPAIGN_PAUSE`/`FINISH`) can proceed in parallel, different file, likely needs Opus per the plan's own recommendation.
+
+---
+
 ### Session: 2026-09-01 (AUD-1) — Security: authenticate inbound channel Maxima in the SDK (FE mirror of a423873)
 
 **Source**: `docs/KNOWN_ISSUES.md §3.5 AUD-1`, the follow-up left open by commit `a423873` (audit Fix #1/#2/#11, SW side only).

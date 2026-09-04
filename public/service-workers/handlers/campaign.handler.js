@@ -6,7 +6,30 @@
 // Payload schemas: MinimaAds.md §8.3 and §8.5.
 // FE signals: MinimaAds.md §8.6 (NEW_CAMPAIGN, CAMPAIGN_UPDATED).
 
-function handleCampaignAnnounce(payload) {
+// Audit 2026-07-18 AUD-4 — identity-field guard.
+//
+// saveCampaign MERGEs CREATOR_ADDRESS and CREATOR_MX straight from the payload,
+// so an unauthenticated CAMPAIGN_ANNOUNCE / CAMPAIGN_DATA_RESPONSE could re-point
+// an already-known campaign row at an attacker's public key. That poisoning step
+// is what made the Fix #3 vector reachable: overwrite CREATOR_ADDRESS, then send
+// a crafted CAMPAIGN_PAUSE / CAMPAIGN_FINISH that now passes the creator check.
+//
+// Rule: once a row has an *established strong identity* (a permanent route
+// MAX#<pk>#<mls>, from CAMPAIGNS.CREATOR_MX or from keypair CREATOR_MX_<id>
+// cached from the on-chain escrow STATE(4) — neither settable by a payload), only
+// that creator may rewrite the row's identity fields. Everybody else's message is
+// still processed normally — budget, status, ad content and all other columns
+// keep syncing exactly as before — but creator_address / creator_mx are pinned
+// back to the stored values before they reach saveCampaign.
+//
+// Deliberately unchanged (documented MVP trade-off, MinimaAds.md §8.5):
+//   - first discovery of a campaign_id → trust-on-first-use, payload wins;
+//   - a row with no strong identity yet → first-write-wins preserved, so legacy
+//     rows discovered before permanent routes existed keep syncing.
+//
+// senderPk is msg.data.from (verified by the Maxima transport, not a payload
+// field). Rhino-safe: var, function(), string concat, no template literals.
+function handleCampaignAnnounce(payload, senderPk) {
   if (!payload.campaign || !payload.ad || !payload.campaign.id) {
     MDS.log("[CAMPAIGN] ANNOUNCE missing campaign or ad");
     return;
@@ -32,6 +55,61 @@ function handleCampaignAnnounce(payload) {
     return;
   }
 
+  var campaignId = payload.campaign.id;
+
+  getCampaign(campaignId, function(err, existing) {
+    if (err || !existing) {
+      // No existing row — first discovery, trust-on-first-use (unchanged MVP behavior).
+      _continueCampaignAnnounce(payload, campaignId);
+      return;
+    }
+    _resolveStrongCreatorPk(existing, campaignId, function(strongPk) {
+      if (!strongPk) {
+        // Row has no established strong identity yet — preserve current
+        // first-write-wins behavior so legacy/pre-route rows keep syncing.
+        _continueCampaignAnnounce(payload, campaignId);
+        return;
+      }
+      if (senderPk && strongPk.toUpperCase() === senderPk.toUpperCase()) {
+        // Sender IS the strongly-verified creator — trust the payload's identity fields.
+        _continueCampaignAnnounce(payload, campaignId);
+        return;
+      }
+      // Sender not strongly verified — pin identity fields to the existing DB
+      // values so the rest of the row (budget, status, ad content, etc.) still
+      // syncs normally, but CREATOR_ADDRESS/CREATOR_MX cannot be overwritten.
+      payload.campaign.creator_address = existing.CREATOR_ADDRESS;
+      payload.campaign.creator_mx = existing.CREATOR_MX;
+      MDS.log("[CAMPAIGN] ANNOUNCE identity fields pinned (sender not strongly verified). campaign=" + campaignId);
+      _continueCampaignAnnounce(payload, campaignId);
+    });
+  });
+}
+
+// AUD-4 helper — resolves the campaign's *strong* creator public key, i.e. the
+// public key embedded in a permanent route MAX#<pk>#<mls>. Two sources, same
+// precedence as _assertCreatorThen below:
+//   1. CAMPAIGNS.CREATOR_MX  — set locally at creation on the creator's own node.
+//   2. keypair CREATOR_MX_<campaignId> — cached from the on-chain escrow STATE(4).
+// Neither is settable by a Maxima payload. parseMaximaRoute (core/minima.js)
+// returns null for a legacy "MAX#Mx...#mls" contact route, so only a real hex
+// public key is ever returned. cb('') when the row has no strong identity.
+function _resolveStrongCreatorPk(existing, campaignId, cb) {
+  var storedRoute = parseMaximaRoute(existing.CREATOR_MX || '');
+  if (storedRoute && storedRoute.publickey) {
+    cb(storedRoute.publickey);
+    return;
+  }
+  MDS.keypair.get("CREATOR_MX_" + campaignId, function(kpRes) {
+    var onChainRoute = parseMaximaRoute((kpRes && kpRes.status && kpRes.value) ? kpRes.value : '');
+    cb((onChainRoute && onChainRoute.publickey) ? onChainRoute.publickey : '');
+  });
+}
+
+// Body of handleCampaignAnnounce past the AUD-4 identity gate. Logic is
+// unchanged from before the gate existed — only *when* it runs, and whether
+// payload.campaign's identity fields were pinned first, is new.
+function _continueCampaignAnnounce(payload, campaignId) {
   var maxViewerReward = (payload.max_viewer_reward !== undefined && payload.max_viewer_reward !== null)
     ? parseFloat(payload.max_viewer_reward) : null;
   payload.campaign.max_viewer_reward = maxViewerReward;
@@ -44,7 +122,6 @@ function handleCampaignAnnounce(payload) {
   if (payload.cooldown_ms !== undefined && payload.cooldown_ms !== null) {
     payload.campaign.cooldown_ms = parseInt(payload.cooldown_ms, 10);
   }
-  var campaignId = payload.campaign.id;
 
   var localPlatformSet = !(typeof PLATFORM_KEY === 'undefined' || PLATFORM_KEY === null || PLATFORM_KEY === '');
   var localFoundationSet = !(typeof FOUNDATION_KEY === 'undefined' || FOUNDATION_KEY === null || FOUNDATION_KEY === '');
@@ -546,9 +623,11 @@ function handleRequestCampaignData(payload) {
 }
 
 // CAMPAIGN_DATA_RESPONSE has the same schema as CAMPAIGN_ANNOUNCE.
-// Reuse the same handler.
-function handleCampaignDataResponse(payload) {
-  handleCampaignAnnounce(payload);
+// Reuse the same handler. senderPk (msg.data.from) is threaded through so the
+// AUD-4 identity gate can tell a response from the real creator apart from a
+// crafted one sent by any peer that happens to know the campaign_id.
+function handleCampaignDataResponse(payload, senderPk) {
+  handleCampaignAnnounce(payload, senderPk);
 }
 
 // Called when the user approves or denies a pending send command from the creator flow.

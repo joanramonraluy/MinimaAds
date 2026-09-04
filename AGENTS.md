@@ -174,6 +174,24 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
+### Session: 2026-09-04 (Fix #20) — Removed dead `ALTER COLUMN` statements in db-init.js + FE VIEWER_KEY parity fix
+
+**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #20. Implemented directly by this (Sonnet) session, no delegation.
+
+**Fix** (`public/service-workers/db-init.js`): removed two `sqlQuery("ALTER TABLE ... ALTER COLUMN ...", ...)` calls (`REWARD_EVENTS.PUBLISHER_ID`, `CHANNEL_STATE.VIEWER_KEY`) whose target column defs were **already** present verbatim in the `CREATE TABLE IF NOT EXISTS` statements above them — both were dead leftovers from an earlier migration that had already been folded into the CREATE, so per the plan's step 1 there was nothing left to fold; just deleted the two calls and un-nested their callback bodies by one level each (matching `}); // end ... migration` closers removed too). Per `docs/KNOWN_ISSUES.md §4` (dev DBs reset on reinstall, CREATE is the source of truth) no belt-and-suspenders replacement was added — the audit's core complaint was that a raw `ALTER COLUMN` failure aborts the rest of `initDB`'s callback chain silently; removing the dead calls removes that specific risk outright.
+
+**Bonus finding, fixed in scope** (same column, same concern as this fix, CLAUDE.md's DB-parity checklist item): while confirming the SW's `CHANNEL_STATE.VIEWER_KEY VARCHAR(512)` was already correct, found the FE's own `initFEChannelState` (`dapp/app.js`) had never been updated to match — it still defined `VIEWER_KEY VARCHAR(66)`. `VIEWER_KEY` holds a full Maxima public key (200+ chars, e.g. the RSA-style keys seen throughout this session's testing), so this was a live truncation/data-loss risk on any FE-side write path. Widened to `VARCHAR(512)` to match the SW. Checked `SPLIT_COINID` (SW-only column, present in `CHANNEL_STATE` migrations but absent from the FE definition) — confirmed via grep it's never read/written from any FE file, purely internal SW bookkeeping for escrow split-coin retries, so its absence on the FE is not a parity bug and was left alone.
+
+**Verification — live**, after redeploying via "Zip & Install to Nodes" (6 nodes, all Success). `browser_evaluate` worked normally this time (no repeat of the silent-decline pattern from earlier fixes this session). On a freshly-booted node: `sqlQuery` round-trips against `CHANNEL_STATE`/`REWARD_EVENTS`/`CAMPAIGNS` all succeeded with no errors (confirms `initDB` completes cleanly post-removal, no regression from deleting the two `ALTER COLUMN` calls). Directly tested the `VIEWER_KEY` widening: inserted a 252-character `VIEWER_KEY` into `CHANNEL_STATE` (well over the old `VARCHAR(66)` limit) — stored and read back at the full 252 chars, no truncation, no error. Test row deleted afterward.
+
+**Files modified**: `public/service-workers/db-init.js`, `dapp/app.js`.
+
+**AGENTS.md updated**: yes — this entry; oldest entry (2026-09-04, Fix #5) moved to `docs/HISTORY.md §17`.
+
+**Open issues**: none new. Remaining Phase 3 items: Fix #8 (block-based expiry — flagged in the plan as the highest-risk Phase 3 item, needs dedicated clock-skew testing, candidate for its own planning session), Fix #9 (delete ~700 lines of dead `DO_*` FE builders), Fix #10 (wire `ESCROW_INFO` round-trip), Fix #14 (`PUBLISHER_MX` FE `FRAMES` schema parity — same category of bug as this session's bonus finding, worth doing together with a full FE/SW `FRAMES` diff).
+
+---
+
 ### Session: 2026-09-04 (Fix #7) — `comms.handler.js` view/click no longer double-debits budget (M-4)
 
 **Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #7. Implemented directly by this (Sonnet) session, no delegation.
@@ -203,30 +221,6 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 **AGENTS.md updated**: yes — this entry; oldest entry (2026-09-04, AUD-4) moved to `docs/HISTORY.md §17`.
 
 **Open issues**: none new. Next per the plan: remaining Phase 3 items (Fix #7 through #10, #14, #20).
-
----
-
-### Session: 2026-09-04 (Fix #5) — `_livenessCache` key normalization + status-less invalidation
-
-**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 2, Fix #5 — the last item blocking Phase 2 completion (Fix #12 landed earlier this session). Implemented directly by this (Sonnet) session, no delegation.
-
-**Fix** (`sdk/index.js`):
-- New `_livenessKey(campaignId)` helper (`.toUpperCase()`), routed through every read/write of `_livenessCache` (`getAd`'s filter, `_checkCreatorLiveness`, `_onCreatorLivenessPong`, `_onCampaignUpdatedCore`) — `campaign_id` reaches the cache from two sources (`campaign.ID` DB rows vs `parsed.campaign_id` from Maxima signals) with no guaranteed shared casing; without normalization a mismatch silently defeats the offline filter (fragility #12 pattern, applied to this in-memory map).
-- `_onCampaignUpdatedCore`: a status-less `CAMPAIGN_UPDATED` (the shape `processEscrowCoin`'s budget-sync signals use) previously just returned, leaving a stale cached entry in place until natural expiry (`LIVENESS_CACHE_MS`, 30s) even if the campaign had come back online. Now **deletes** the cache entry instead, forcing the next `getAd()` to re-check.
-- `campaign.handler.js`'s two budget-sync `signalFE("CAMPAIGN_UPDATED", ...)` calls in `processEscrowCoin` (step 3, preferred per the plan) now include `status: campaign.STATUS` from the already-loaded row, so the signal is self-sufficient and the SDK cache can refresh directly rather than falling back to the delete-and-recheck path.
-- `MinimaAds.md §8.14` gained a paragraph documenting both changes.
-
-**Verification — live**, after redeploying via "Zip & Install to Nodes" (all 5 nodes). Ran into the by-now-familiar `browser_evaluate` silent-decline issue from this session's own automated attempts (twice, no visible dialog) — rather than fighting it, handed the test script to the maintainer to paste directly into Node 3's MinimaAds tab DevTools console. Test monkey-patched the global `getCampaigns`/`selectAd` (both plain top-level functions, not SDK-internal) to observe exactly which campaign IDs reach ad selection, without needing any DB seeding:
-1. Baseline (empty cache): `["fix5-test-1"]` visible.
-2. `MinimaAds.onCreatorLivenessPong('FIX5-TEST-1', 'finished')` — deliberately uppercase, while the real ID is lowercase — then `getAd` again: `[]` (correctly filtered despite the casing mismatch, proving key normalization).
-3. `MinimaAds.onCampaignUpdated({campaign_id: 'fix5-test-1'})` (no `status`) then `getAd` again: `["fix5-test-1"]` (cache entry deleted, campaign visible again instead of stuck offline).
-All three matched expectations exactly. First attempt hit stale-session 500 errors on `megapoll`/`sql` (tab had been open since early in the session); confirmed Node 3 itself was healthy (`curl` 200 on `:9003`) and a full page reload of the MinimaAds tab fixed it — a fresh `uid` was all that was needed.
-
-**Files modified**: `sdk/index.js`, `public/service-workers/handlers/campaign.handler.js`, `MinimaAds.md`.
-
-**AGENTS.md updated**: yes — this entry; oldest entry (2026-09-04, AUD-3) moved to `docs/HISTORY.md §17`.
-
-**Open issues**: none new. Phase 2 of `docs/IMPLEMENTATION_PLAN_2026-07-18.md` (Fix #5 + Fix #12) is now complete. AUD-2 (`sdk/index.js` viewer `REWARD_EVENTS` row never created on SDK's direct MAXIMA path) remains the only open item in `docs/KNOWN_ISSUES.md §3.5`. Next per the plan: Phase 3 (MEDIUM platform/integration — Fix #6 through #10, #14, #20).
 
 ---
 

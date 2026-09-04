@@ -2039,7 +2039,7 @@ function initFEFrames(cb) {
 function initFEChannelState(cb) {
   var sql = "CREATE TABLE IF NOT EXISTS CHANNEL_STATE ("
     + "CAMPAIGN_ID        VARCHAR(256)  NOT NULL,"
-    + "VIEWER_KEY         VARCHAR(66)   NOT NULL,"
+    + "VIEWER_KEY         VARCHAR(512)  NOT NULL,"
     + "ROLE               VARCHAR(16)   NOT NULL DEFAULT 'viewer',"
     + "FRAME_ID           VARCHAR(512)  DEFAULT '',"
     + "CREATOR_MX         VARCHAR(1024) NOT NULL,"

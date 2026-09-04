@@ -46,6 +46,30 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-04 (Fix #5) — `_livenessCache` key normalization + status-less invalidation
+
+**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 2, Fix #5 — the last item blocking Phase 2 completion (Fix #12 landed earlier this session). Implemented directly by this (Sonnet) session, no delegation.
+
+**Fix** (`sdk/index.js`):
+- New `_livenessKey(campaignId)` helper (`.toUpperCase()`), routed through every read/write of `_livenessCache` (`getAd`'s filter, `_checkCreatorLiveness`, `_onCreatorLivenessPong`, `_onCampaignUpdatedCore`) — `campaign_id` reaches the cache from two sources (`campaign.ID` DB rows vs `parsed.campaign_id` from Maxima signals) with no guaranteed shared casing; without normalization a mismatch silently defeats the offline filter (fragility #12 pattern, applied to this in-memory map).
+- `_onCampaignUpdatedCore`: a status-less `CAMPAIGN_UPDATED` (the shape `processEscrowCoin`'s budget-sync signals use) previously just returned, leaving a stale cached entry in place until natural expiry (`LIVENESS_CACHE_MS`, 30s) even if the campaign had come back online. Now **deletes** the cache entry instead, forcing the next `getAd()` to re-check.
+- `campaign.handler.js`'s two budget-sync `signalFE("CAMPAIGN_UPDATED", ...)` calls in `processEscrowCoin` (step 3, preferred per the plan) now include `status: campaign.STATUS` from the already-loaded row, so the signal is self-sufficient and the SDK cache can refresh directly rather than falling back to the delete-and-recheck path.
+- `MinimaAds.md §8.14` gained a paragraph documenting both changes.
+
+**Verification — live**, after redeploying via "Zip & Install to Nodes" (all 5 nodes). Ran into the by-now-familiar `browser_evaluate` silent-decline issue from this session's own automated attempts (twice, no visible dialog) — rather than fighting it, handed the test script to the maintainer to paste directly into Node 3's MinimaAds tab DevTools console. Test monkey-patched the global `getCampaigns`/`selectAd` (both plain top-level functions, not SDK-internal) to observe exactly which campaign IDs reach ad selection, without needing any DB seeding:
+1. Baseline (empty cache): `["fix5-test-1"]` visible.
+2. `MinimaAds.onCreatorLivenessPong('FIX5-TEST-1', 'finished')` — deliberately uppercase, while the real ID is lowercase — then `getAd` again: `[]` (correctly filtered despite the casing mismatch, proving key normalization).
+3. `MinimaAds.onCampaignUpdated({campaign_id: 'fix5-test-1'})` (no `status`) then `getAd` again: `["fix5-test-1"]` (cache entry deleted, campaign visible again instead of stuck offline).
+All three matched expectations exactly. First attempt hit stale-session 500 errors on `megapoll`/`sql` (tab had been open since early in the session); confirmed Node 3 itself was healthy (`curl` 200 on `:9003`) and a full page reload of the MinimaAds tab fixed it — a fresh `uid` was all that was needed.
+
+**Files modified**: `sdk/index.js`, `public/service-workers/handlers/campaign.handler.js`, `MinimaAds.md`.
+
+**AGENTS.md updated**: yes — this entry (since rotated here); oldest entry (2026-09-04, AUD-3) moved to `docs/HISTORY.md §17`.
+
+**Open issues**: none new. Phase 2 of `docs/IMPLEMENTATION_PLAN_2026-07-18.md` (Fix #5 + Fix #12) is now complete. AUD-2 (`sdk/index.js` viewer `REWARD_EVENTS` row never created on SDK's direct MAXIMA path) remains the only open item in `docs/KNOWN_ISSUES.md §3.5`. Next per the plan: Phase 3 (MEDIUM platform/integration — Fix #6 through #10, #14, #20).
+
+---
+
 ### Session: 2026-09-04 (Fix #12 + AUD-5) — FE auto-settle: gate on `settling`, skip creator node and publisher channels
 
 **Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 2 Fix #12, combined with `docs/KNOWN_ISSUES.md §3.5` AUD-5 in one session because both live in the same file and function (`dapp/app.js`'s `_autoSettleOpenChannels`) — implemented directly by this (Sonnet) session, no delegation.

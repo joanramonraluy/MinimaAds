@@ -135,7 +135,6 @@ function initDB(cb) {
           MDS.log("[DB] initDB: failed to create REWARD_EVENTS — " + err3);
           return;
         }
-        sqlQuery("ALTER TABLE REWARD_EVENTS ALTER COLUMN PUBLISHER_ID VARCHAR(512) DEFAULT NULL", function() {
         sqlQuery(sql_user_profile, function(err4) {
           if (err4) {
             MDS.log("[DB] initDB: failed to create USER_PROFILE — " + err4);
@@ -156,8 +155,7 @@ function initDB(cb) {
                   MDS.log("[DB] initDB: failed to create CHANNEL_STATE — " + err7);
                   return;
                 }
-                sqlQuery("ALTER TABLE CHANNEL_STATE ALTER COLUMN VIEWER_KEY VARCHAR(512) NOT NULL", function() {
-                  sqlQuery("ALTER TABLE FRAMES ADD COLUMN IF NOT EXISTS PUBLISHER_MX VARCHAR(512) DEFAULT ''", function() {
+                sqlQuery("ALTER TABLE FRAMES ADD COLUMN IF NOT EXISTS PUBLISHER_MX VARCHAR(512) DEFAULT ''", function() {
                     sqlQuery("ALTER TABLE CAMPAIGNS ADD COLUMN IF NOT EXISTS PUBLISHER_REWARD_VIEW DECIMAL(20,6) NOT NULL DEFAULT 0", function() {
                     sqlQuery("ALTER TABLE CAMPAIGNS ADD COLUMN IF NOT EXISTS MAX_PUBLISHER_BUDGET DECIMAL(20,6) NOT NULL DEFAULT 0", function() {
                     sqlQuery("ALTER TABLE CAMPAIGNS ADD COLUMN IF NOT EXISTS PUBLISHER_BUDGET_SPENT DECIMAL(20,6) NOT NULL DEFAULT 0", function() {
@@ -220,12 +218,10 @@ function initDB(cb) {
                     }); // end MAX_PUBLISHER_BUDGET migration
                     }); // end PUBLISHER_REWARD_VIEW migration
                   }); // end PUBLISHER_MX migration
-                }); // end VIEWER_KEY migration
               });
             });
           });
         });
-        }); // end ALTER TABLE migration callback
       });
     });
   });

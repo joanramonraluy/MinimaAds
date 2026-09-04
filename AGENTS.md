@@ -174,6 +174,22 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
+### Session: 2026-09-04 (Fix #14) — `PUBLISHER_MX` missing from FE `FRAMES` schema
+
+**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #14 — natural follow-up to this session's Fix #20, which found and fixed the same category of FE/SW schema drift on `CHANNEL_STATE`. Implemented directly by this (Sonnet) session, no delegation.
+
+**Fix** (`dapp/app.js` `initFEFrames`): added `PUBLISHER_MX VARCHAR(512) DEFAULT ''` to the FE `CREATE TABLE IF NOT EXISTS FRAMES (...)`, copied verbatim from the SW's already-correct definition (`db-init.js` `sql_frames`), plus the matching `ALTER TABLE FRAMES ADD COLUMN IF NOT EXISTS PUBLISHER_MX VARCHAR(512) DEFAULT ''` migration for already-installed FE tables (mirrors `db-init.js:158`). This was a real, exploitable bug, not just a latent one: `dapp/views/frames.js:246` directly runs `SELECT PUBLISHER_KEY, PUBLISHER_MX FROM FRAMES` against the FE's own local table — with the column missing, that query would throw a "column not found" SQL error. Diffed both `FRAMES` definitions column-for-column per the plan's step 3 — after this fix they match exactly, no further drift found.
+
+**Verification — live**, after redeploying via "Zip & Install to Nodes" (6 nodes, all Success). On Node 1's MinimaAds tab (`browser_evaluate` worked normally): inserted a `FRAMES` row with a `PUBLISHER_MX` value via the FE's own `sqlQuery`, read it back — round-tripped correctly, no error. Confirmed against an **already-initialized** table (1 pre-existing frame, the built-in one from boot), not just a fresh CREATE, proving the `ADD COLUMN IF NOT EXISTS` migration path works on existing installs too. Test row deleted afterward.
+
+**Files modified**: `dapp/app.js`.
+
+**AGENTS.md updated**: yes — this entry; oldest entry (2026-09-04, Fix #6) moved to `docs/HISTORY.md §17`.
+
+**Open issues**: none new. Remaining Phase 3 items: Fix #8 (block-based expiry — highest-risk item, needs dedicated planning/clock-skew testing), Fix #9 (delete ~700 lines of dead `DO_*` FE builders), Fix #10 (wire `ESCROW_INFO` round-trip).
+
+---
+
 ### Session: 2026-09-04 (Fix #20) — Removed dead `ALTER COLUMN` statements in db-init.js + FE VIEWER_KEY parity fix
 
 **Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #20. Implemented directly by this (Sonnet) session, no delegation.
@@ -205,22 +221,6 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 **AGENTS.md updated**: yes — this entry; oldest entry (2026-09-04, Fix #12 + AUD-5) moved to `docs/HISTORY.md §17`.
 
 **Open issues**: logged `DOC-1` in `docs/KNOWN_ISSUES.md §3.5` (new row, not security) — `MinimaAds.md §6.1`/`§6.2`'s SDK view/click flow diagrams still describe the pre-M-4 `updateBudget` call, stale relative to `core/rewards.js`'s already-fixed behavior; discovered while implementing this fix but out of scope (different file/flow section, predates this session). Not fixed inline per CLAUDE.md multi-agent safety rules.
-
----
-
-### Session: 2026-09-04 (Fix #6) — `relevant:false` bypassed PREVSTATE(5) fee validation
-
-**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #6 — first Phase 3 item, LOW complexity. Delegated to a Haiku subagent (hit the monthly spend limit mid-task after completing the code fix and half the housekeeping; parent Sonnet session verified the completed work and finished the remaining housekeeping — no code loss).
-
-**Fix**: `campaign.handler.js`'s `_continueCampaignAnnounce` — `MDS.cmd("coins coinid:" + coinId + " relevant:false", ...)` → `MDS.cmd("coins coinid:" + coinId, ...)`. Per fragility #28 (AGENTS.md §3.5): Minima's `coins` RPC treats `relevant:` as a boolean *presence* check, not a value check, so `relevant:false` was being read as `relevant=true` and using `getRelevantCoins()` (wallet-filtered) instead of the intended `getAllCoins()` (full UTXO scan) — a remote creator's escrow coin was never found, so PREVSTATE(5) fee validation always silently fell through to the "coin not found, accepting" branch. Omitting `relevant:` entirely is the correct way to get `relevant=false` behavior. The "not found, accepting" fallback branch itself is untouched — it now just actually runs only when the coin is genuinely absent from the full UTXO scan, not on every call.
-
-**Verification**: code-reading + `node --check public/service-workers/handlers/campaign.handler.js` (LOW complexity, 15-min estimate in the plan — no live node test performed, matching the plan's own effort sizing; the plan's suggested live test — announce from node A, receive on node B, confirm the PREVSTATE(5) log line executes — remains available for a future session if desired).
-
-**Files modified**: `public/service-workers/handlers/campaign.handler.js`.
-
-**AGENTS.md updated**: yes — this entry; oldest entry (2026-09-04, AUD-4) moved to `docs/HISTORY.md §17`.
-
-**Open issues**: none new. Next per the plan: remaining Phase 3 items (Fix #7 through #10, #14, #20).
 
 ---
 

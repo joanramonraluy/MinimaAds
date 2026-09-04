@@ -46,6 +46,22 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-04 (Fix #6) — `relevant:false` bypassed PREVSTATE(5) fee validation
+
+**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #6 — first Phase 3 item, LOW complexity. Delegated to a Haiku subagent (hit the monthly spend limit mid-task after completing the code fix and half the housekeeping; parent Sonnet session verified the completed work and finished the remaining housekeeping — no code loss).
+
+**Fix**: `campaign.handler.js`'s `_continueCampaignAnnounce` — `MDS.cmd("coins coinid:" + coinId + " relevant:false", ...)` → `MDS.cmd("coins coinid:" + coinId, ...)`. Per fragility #28 (AGENTS.md §3.5): Minima's `coins` RPC treats `relevant:` as a boolean *presence* check, not a value check, so `relevant:false` was being read as `relevant=true` and using `getRelevantCoins()` (wallet-filtered) instead of the intended `getAllCoins()` (full UTXO scan) — a remote creator's escrow coin was never found, so PREVSTATE(5) fee validation always silently fell through to the "coin not found, accepting" branch. Omitting `relevant:` entirely is the correct way to get `relevant=false` behavior. The "not found, accepting" fallback branch itself is untouched — it now just actually runs only when the coin is genuinely absent from the full UTXO scan, not on every call.
+
+**Verification**: code-reading + `node --check public/service-workers/handlers/campaign.handler.js` (LOW complexity, 15-min estimate in the plan — no live node test performed, matching the plan's own effort sizing; the plan's suggested live test — announce from node A, receive on node B, confirm the PREVSTATE(5) log line executes — remains available for a future session if desired).
+
+**Files modified**: `public/service-workers/handlers/campaign.handler.js`.
+
+**AGENTS.md updated**: yes — this entry (since rotated here); oldest entry (2026-09-04, AUD-4) moved to `docs/HISTORY.md §17`.
+
+**Open issues**: none new. Next per the plan: remaining Phase 3 items (Fix #7 through #10, #14, #20).
+
+---
+
 ### Session: 2026-09-04 (Fix #5) — `_livenessCache` key normalization + status-less invalidation
 
 **Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 2, Fix #5 — the last item blocking Phase 2 completion (Fix #12 landed earlier this session). Implemented directly by this (Sonnet) session, no delegation.

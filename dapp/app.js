@@ -2028,12 +2028,17 @@ function initFEFrames(cb) {
     + "FRAME_ID         VARCHAR(512)  PRIMARY KEY,"
     + "PUBLISHER_KEY    VARCHAR(512)  NOT NULL,"
     + "PUBLISHER_WALLET VARCHAR(512)  DEFAULT '',"
+    + "PUBLISHER_MX     VARCHAR(512)  DEFAULT '',"
     + "LABEL            VARCHAR(256)  DEFAULT '',"
     + "IS_BUILTIN       BOOLEAN       NOT NULL DEFAULT FALSE,"
     + "CREATED_AT       BIGINT        NOT NULL,"
     + "TOTAL_EARNED     DECIMAL(20,6) NOT NULL DEFAULT 0"
     + ")";
-  sqlQuery(sql, function() { if (cb) { cb(); } });
+  sqlQuery(sql, function() {
+    sqlQuery("ALTER TABLE FRAMES ADD COLUMN IF NOT EXISTS PUBLISHER_MX VARCHAR(512) DEFAULT ''", function() {
+      if (cb) { cb(); }
+    });
+  });
 }
 
 function initFEChannelState(cb) {

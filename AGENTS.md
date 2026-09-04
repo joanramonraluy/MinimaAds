@@ -174,6 +174,22 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
+### Session: 2026-09-04 (Fix #7) — `comms.handler.js` view/click no longer double-debits budget (M-4)
+
+**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #7. Implemented directly by this (Sonnet) session, no delegation.
+
+**Fix**: `handleTrackView`/`handleTrackClick` (`comms.handler.js`) — removed the direct `updateBudget(campaignId, amount, cb)` call and its `budErr` branch from both; the confirm broadcast/`signalFE`/`_triggerChannelPayment` call sequence is otherwise unchanged, just no longer nested inside the `updateBudget` callback. Added the M-4 comment from the plan so a future agent doesn't "fix" it back. This was a genuine double-accounting bug: `core/rewards.js`'s `createRewardEvent` already skips `updateBudget` for `type === 'view'\|'click'` (pre-existing M-4 fix — `BUDGET_REMAINING` is on-chain-synced via `processEscrowCoin` instead), but `comms.handler.js`'s separate `MA_TRACK_VIEW`/`MA_TRACK_CLICK` path (same-device `MDS.comms.solo`/`broadcast`, used by external host MiniDapps embedding the SDK — not the dapp's own direct `createRewardEvent` call) was still debiting locally on every call, risking a campaign flipping to `'finished'` prematurely from cross-dapp view/click traffic alone.
+
+**Verification — live**, after redeploying via "Zip & Install to Nodes" (6 nodes, all Success). `browser_evaluate` was silently declined again this session (see Fix #5's entry in `docs/HISTORY.md §17` for the established pattern) — handed the test script to the maintainer to paste into a MinimaAds tab's DevTools console instead. Script seeded a `CAMPAIGNS` row (`BUDGET_REMAINING=5`), called `MDS.comms.solo(JSON.stringify({type:'MA_TRACK_VIEW', campaignId, userAddress, ...}))` (the exact same-device path `handleTrackView` listens on), waited, then re-read `BUDGET_REMAINING`. Result: `budgetAfter: "5.000000"` — unchanged from `budgetBefore: 5` (pre-fix this would have dropped to `4.99`). Test row deleted afterward.
+
+**Files modified**: `public/service-workers/handlers/comms.handler.js`, `docs/KNOWN_ISSUES.md`.
+
+**AGENTS.md updated**: yes — this entry; oldest entry (2026-09-04, Fix #12 + AUD-5) moved to `docs/HISTORY.md §17`.
+
+**Open issues**: logged `DOC-1` in `docs/KNOWN_ISSUES.md §3.5` (new row, not security) — `MinimaAds.md §6.1`/`§6.2`'s SDK view/click flow diagrams still describe the pre-M-4 `updateBudget` call, stale relative to `core/rewards.js`'s already-fixed behavior; discovered while implementing this fix but out of scope (different file/flow section, predates this session). Not fixed inline per CLAUDE.md multi-agent safety rules.
+
+---
+
 ### Session: 2026-09-04 (Fix #6) — `relevant:false` bypassed PREVSTATE(5) fee validation
 
 **Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #6 — first Phase 3 item, LOW complexity. Delegated to a Haiku subagent (hit the monthly spend limit mid-task after completing the code fix and half the housekeeping; parent Sonnet session verified the completed work and finished the remaining housekeeping — no code loss).
@@ -211,30 +227,6 @@ All three matched expectations exactly. First attempt hit stale-session 500 erro
 **AGENTS.md updated**: yes — this entry; oldest entry (2026-09-04, AUD-3) moved to `docs/HISTORY.md §17`.
 
 **Open issues**: none new. Phase 2 of `docs/IMPLEMENTATION_PLAN_2026-07-18.md` (Fix #5 + Fix #12) is now complete. AUD-2 (`sdk/index.js` viewer `REWARD_EVENTS` row never created on SDK's direct MAXIMA path) remains the only open item in `docs/KNOWN_ISSUES.md §3.5`. Next per the plan: Phase 3 (MEDIUM platform/integration — Fix #6 through #10, #14, #20).
-
----
-
-### Session: 2026-09-04 (Fix #12 + AUD-5) — FE auto-settle: gate on `settling`, skip creator node and publisher channels
-
-**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 2 Fix #12, combined with `docs/KNOWN_ISSUES.md §3.5` AUD-5 in one session because both live in the same file and function (`dapp/app.js`'s `_autoSettleOpenChannels`) — implemented directly by this (Sonnet) session, no delegation.
-
-**Fix** (`dapp/app.js`):
-- **AUD-5**: the `CAMPAIGN_UPDATED` handler now requires `parsed.settling === true` (in addition to the pre-existing `status === 'finished'`) before calling `_autoSettleOpenChannels`. `applyStatusChange` (`campaign.handler.js`) only ever sets `settling:true` on a *strong* sender match (Fix #3/AUD-3) — the fallback path's signal always omits it — so this closes the FE-side counterpart of the same spoofing vector Fix #3/AUD-3 closed on the SW side.
-- **Fix #12**, three skip conditions added to `_autoSettleOpenChannels` itself: (1) queries `CAMPAIGNS.CREATOR_ADDRESS` first and returns immediately, before touching `CHANNEL_STATE` at all, when it matches `MY_ADDRESS` (both `.toUpperCase()`d) — this node is the campaign's own creator, and creator-opened channels settle through the SW's `autoSettleChannelsForCampaign`/`CAMPAIGN_AUTOSETTLE_REQUEST` flow instead, not this viewer-only path; (2) skips `CHANNEL_STATE` rows with `ROLE === 'publisher'` inside the per-row loop — publisher channels settle through their own reward-voucher flow; (3) the pre-existing empty-`LATEST_TX_HEX` guard (both in the SQL `WHERE` and the per-row `if (!txHex)`) was already complete, confirmed rather than duplicated.
-- Risk noted in the plan — whether `CREATOR_ADDRESS` is the same identity space as `MY_ADDRESS` for self-created campaigns — was resolved by reading `dapp/views/creator.js:1414` (`creator_address: MY_ADDRESS` at creation) before writing the comparison: same Maxima-pk space used everywhere else, no fallback-to-keypair needed.
-- `MinimaAds.md §8.5` gained a new paragraph documenting the FE-side `settling` gate and the two skip conditions, right after the existing Fix #3/AUD-3 "Resulting rule" paragraph.
-
-**Verification — live, on real nodes, after redeploying via Node Manager's "Zip & Install to Nodes" (Update, all 5 nodes) so Node 3 was actually running the new `dapp/app.js`**: found (and killed) a stale `mcp-chrome-4400f8e` Chrome process left over from a prior session holding the Playwright profile lock — new sessions should expect this if `browser_navigate`/`browser_snapshot` fail with "Browser is already in use... use --isolated" as the very first call. Rather than replaying a full campaign/channel/escrow topology, seeded `CAMPAIGNS`/`CHANNEL_STATE` rows directly via `sqlQuery` in a `browser_evaluate` on Node 3's MinimaAds tab, spy-patched `_autoSettleOpenChannels`/`_runSettlement` to record calls instead of acting, then drove the real code paths:
-1. `handleMdsComms({type:'CAMPAIGN_UPDATED', status:'finished'})` with no `settling` field → `_autoSettleOpenChannels` **not called**. Same event with `settling:true` → **called**. (AUD-5 gate)
-2. A `CAMPAIGNS` row with `CREATOR_ADDRESS = MY_ADDRESS` (Node 3's own pk) plus one open `CHANNEL_STATE` row with a non-empty `LATEST_TX_HEX` → `_autoSettleOpenChannels` returned with **zero** `_runSettlement` calls. (creator-node skip)
-3. A different `CAMPAIGNS` row with `CREATOR_ADDRESS` set to an unrelated pk, plus two open `CHANNEL_STATE` rows for the same campaign (`ROLE='viewer'` and `ROLE='publisher'`, both with non-empty `LATEST_TX_HEX`) → exactly **one** `_runSettlement` call, for the viewer row only; the publisher row was excluded. (ROLE skip)
-All test rows deleted afterward and confirmed gone (`SELECT COUNT(*)` = 0). No console errors from the app's own code during the run.
-
-**Files modified**: `dapp/app.js`, `MinimaAds.md`, `docs/KNOWN_ISSUES.md`.
-
-**AGENTS.md updated**: yes — this entry; oldest entry (2026-09-03, live 6-node adversarial verification of Fix #1+#2+#11) moved to `docs/HISTORY.md §17`. `docs/KNOWN_ISSUES.md §3.5` AUD-5 marked Fixed. `MinimaAds.md §8.5` extended.
-
-**Open issues**: none new. AUD-2 (`sdk/index.js` viewer `REWARD_EVENTS` row never created on SDK's direct MAXIMA path) remains the only open item in `docs/KNOWN_ISSUES.md §3.5`.
 
 ---
 

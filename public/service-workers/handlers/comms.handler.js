@@ -122,17 +122,12 @@ function handleTrackView(payload) {
       }
       var amount = parseFloat(campaign.REWARD_VIEW) || 0;
       var eventId = Date.now().toString(16) + '-' + Math.floor(Math.random() * 0xFFFFFFFF).toString(16);
-      updateBudget(campaignId, amount, function(budErr) {
-        if (budErr) {
-          MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "budget update failed", reward_type: "view"}), function() {});
-          signalFE("MA_TRACK_RESULT", {confirmed: false, reason: "budget update failed", reward_type: "view"});
-          return;
-        }
-        MDS.log("[COMMS] MA_TRACK_VIEW confirmed: campaign=" + campaignId + " amount=" + amount);
-        MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: true, amount: amount, reward_type: "view"}), function() {});
-        signalFE("MA_TRACK_RESULT", {confirmed: true, amount: amount, reward_type: "view"});
-        _triggerChannelPayment(campaignId, campaign, userAddress, amount, eventId, publisherKey, frameId, publisherMx, 'view');
-      });
+      // M-4: do NOT debit local budget here. BUDGET_REMAINING is synced from the
+      // on-chain escrow coin by processEscrowCoin. See docs/AUDIT_2026-07-18_FABLE.md #7.
+      MDS.log("[COMMS] MA_TRACK_VIEW confirmed: campaign=" + campaignId + " amount=" + amount);
+      MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: true, amount: amount, reward_type: "view"}), function() {});
+      signalFE("MA_TRACK_RESULT", {confirmed: true, amount: amount, reward_type: "view"});
+      _triggerChannelPayment(campaignId, campaign, userAddress, amount, eventId, publisherKey, frameId, publisherMx, 'view');
     });
   });
 }
@@ -170,17 +165,12 @@ function handleTrackClick(payload) {
       }
       var amount = parseFloat(campaign.REWARD_CLICK) || 0;
       var eventId = Date.now().toString(16) + '-' + Math.floor(Math.random() * 0xFFFFFFFF).toString(16);
-      updateBudget(campaignId, amount, function(budErr) {
-        if (budErr) {
-          MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: false, reason: "budget update failed", reward_type: "click"}), function() {});
-          signalFE("MA_TRACK_RESULT", {confirmed: false, reason: "budget update failed", reward_type: "click"});
-          return;
-        }
-        MDS.log("[COMMS] MA_TRACK_CLICK confirmed: campaign=" + campaignId + " amount=" + amount);
-        MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: true, amount: amount, reward_type: "click"}), function() {});
-        signalFE("MA_TRACK_RESULT", {confirmed: true, amount: amount, reward_type: "click"});
-        _triggerChannelPayment(campaignId, campaign, userAddress, amount, eventId, publisherKey, frameId, publisherMx, 'click');
-      });
+      // M-4: do NOT debit local budget here. BUDGET_REMAINING is synced from the
+      // on-chain escrow coin by processEscrowCoin. See docs/AUDIT_2026-07-18_FABLE.md #7.
+      MDS.log("[COMMS] MA_TRACK_CLICK confirmed: campaign=" + campaignId + " amount=" + amount);
+      MDS.comms.broadcast(JSON.stringify({type: "MA_TRACK_RESULT", confirmed: true, amount: amount, reward_type: "click"}), function() {});
+      signalFE("MA_TRACK_RESULT", {confirmed: true, amount: amount, reward_type: "click"});
+      _triggerChannelPayment(campaignId, campaign, userAddress, amount, eventId, publisherKey, frameId, publisherMx, 'click');
     });
   });
 }

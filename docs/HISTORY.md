@@ -46,6 +46,30 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-04 (Fix #12 + AUD-5) — FE auto-settle: gate on `settling`, skip creator node and publisher channels
+
+**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 2 Fix #12, combined with `docs/KNOWN_ISSUES.md §3.5` AUD-5 in one session because both live in the same file and function (`dapp/app.js`'s `_autoSettleOpenChannels`) — implemented directly by this (Sonnet) session, no delegation.
+
+**Fix** (`dapp/app.js`):
+- **AUD-5**: the `CAMPAIGN_UPDATED` handler now requires `parsed.settling === true` (in addition to the pre-existing `status === 'finished'`) before calling `_autoSettleOpenChannels`. `applyStatusChange` (`campaign.handler.js`) only ever sets `settling:true` on a *strong* sender match (Fix #3/AUD-3) — the fallback path's signal always omits it — so this closes the FE-side counterpart of the same spoofing vector Fix #3/AUD-3 closed on the SW side.
+- **Fix #12**, three skip conditions added to `_autoSettleOpenChannels` itself: (1) queries `CAMPAIGNS.CREATOR_ADDRESS` first and returns immediately, before touching `CHANNEL_STATE` at all, when it matches `MY_ADDRESS` (both `.toUpperCase()`d) — this node is the campaign's own creator, and creator-opened channels settle through the SW's `autoSettleChannelsForCampaign`/`CAMPAIGN_AUTOSETTLE_REQUEST` flow instead, not this viewer-only path; (2) skips `CHANNEL_STATE` rows with `ROLE === 'publisher'` inside the per-row loop — publisher channels settle through their own reward-voucher flow; (3) the pre-existing empty-`LATEST_TX_HEX` guard (both in the SQL `WHERE` and the per-row `if (!txHex)`) was already complete, confirmed rather than duplicated.
+- Risk noted in the plan — whether `CREATOR_ADDRESS` is the same identity space as `MY_ADDRESS` for self-created campaigns — was resolved by reading `dapp/views/creator.js:1414` (`creator_address: MY_ADDRESS` at creation) before writing the comparison: same Maxima-pk space used everywhere else, no fallback-to-keypair needed.
+- `MinimaAds.md §8.5` gained a new paragraph documenting the FE-side `settling` gate and the two skip conditions, right after the existing Fix #3/AUD-3 "Resulting rule" paragraph.
+
+**Verification — live, on real nodes, after redeploying via Node Manager's "Zip & Install to Nodes" (Update, all 5 nodes) so Node 3 was actually running the new `dapp/app.js`**: found (and killed) a stale `mcp-chrome-4400f8e` Chrome process left over from a prior session holding the Playwright profile lock — new sessions should expect this if `browser_navigate`/`browser_snapshot` fail with "Browser is already in use... use --isolated" as the very first call. Rather than replaying a full campaign/channel/escrow topology, seeded `CAMPAIGNS`/`CHANNEL_STATE` rows directly via `sqlQuery` in a `browser_evaluate` on Node 3's MinimaAds tab, spy-patched `_autoSettleOpenChannels`/`_runSettlement` to record calls instead of acting, then drove the real code paths:
+1. `handleMdsComms({type:'CAMPAIGN_UPDATED', status:'finished'})` with no `settling` field → `_autoSettleOpenChannels` **not called**. Same event with `settling:true` → **called**. (AUD-5 gate)
+2. A `CAMPAIGNS` row with `CREATOR_ADDRESS = MY_ADDRESS` (Node 3's own pk) plus one open `CHANNEL_STATE` row with a non-empty `LATEST_TX_HEX` → `_autoSettleOpenChannels` returned with **zero** `_runSettlement` calls. (creator-node skip)
+3. A different `CAMPAIGNS` row with `CREATOR_ADDRESS` set to an unrelated pk, plus two open `CHANNEL_STATE` rows for the same campaign (`ROLE='viewer'` and `ROLE='publisher'`, both with non-empty `LATEST_TX_HEX`) → exactly **one** `_runSettlement` call, for the viewer row only; the publisher row was excluded. (ROLE skip)
+All test rows deleted afterward and confirmed gone (`SELECT COUNT(*)` = 0). No console errors from the app's own code during the run.
+
+**Files modified**: `dapp/app.js`, `MinimaAds.md`, `docs/KNOWN_ISSUES.md`.
+
+**AGENTS.md updated**: yes — this entry (since rotated here); oldest entry (2026-09-03, live 6-node adversarial verification of Fix #1+#2+#11) moved to `docs/HISTORY.md §17`. `docs/KNOWN_ISSUES.md §3.5` AUD-5 marked Fixed. `MinimaAds.md §8.5` extended.
+
+**Open issues**: none new. AUD-2 (`sdk/index.js` viewer `REWARD_EVENTS` row never created on SDK's direct MAXIMA path) remains the only open item in `docs/KNOWN_ISSUES.md §3.5`.
+
+---
+
 ### Session: 2026-09-04 (AUD-4) — Security: unauthenticated CAMPAIGN_ANNOUNCE/DATA_RESPONSE could overwrite CREATOR_ADDRESS
 
 **Source**: `docs/KNOWN_ISSUES.md §3.5` AUD-4, filed from Fix #3's own Open issue (2) — Fix #3 (2026-09-03) closed the spoofed-`CAMPAIGN_FINISH` path but the poisoning step that enabled it (an unauthenticated `CAMPAIGN_DATA_RESPONSE` overwriting `CAMPAIGNS.CREATOR_ADDRESS`) remained open. `handleCampaignAnnounce` (shared by `CAMPAIGN_ANNOUNCE` and `CAMPAIGN_DATA_RESPONSE`) → `persistCampaign` → `saveCampaign` MERGEs `CREATOR_ADDRESS`/`CREATOR_MX` straight from the payload with no sender check — the dispatcher didn't even pass `msg.data.from` to either handler. Implemented by an Opus subagent (hit the monthly spend limit once mid-task, resumed cleanly ~8h later with no code loss — confirmed via `git diff` before resuming).

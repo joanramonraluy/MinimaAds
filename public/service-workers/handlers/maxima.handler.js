@@ -65,6 +65,13 @@ function onMaxima(msg) {
     MDS.log("[MAXIMA] REGISTER_PERMANENT_RESPONSE received, status=" + (payload.status ? "ok" : "failed"));
   } else if (payload.type === "ESCROW_INFO_REQUEST") {
     handleEscrowInfoRequest(payload, msg.data.from || '');
+  } else if (payload.type === "ESCROW_INFO_RESPONSE") {
+    // Requester's node — relay the creator's response to the FE
+    // (#mycampaigns's escrow-info UI, dapp/app.js _handleEscrowInfoResponse).
+    // signalFE spreads payload's own keys at root (fragility #32); payload
+    // already carries { campaign_id, status, data }, so parsed.data.* on the
+    // FE side reads correctly with no reshaping needed here.
+    signalFE("ESCROW_INFO_RESPONSE", payload);
   } else {
     MDS.log("[MAXIMA] unknown type: " + payload.type);
   }
@@ -147,7 +154,9 @@ function handleEscrowInfoRequest(payload, fromRoute) {
     if (err || !rows || rows.length === 0) {
       MDS.log("[MAXIMA] ESCROW_INFO_REQUEST: campaign not found — " + campaignId);
       if (fromRoute) {
-        sendMaxima(null, fromRoute, {type: 'ESCROW_INFO_RESPONSE', campaign_id: campaignId, status: 'not_found', data: {}}, function() {});
+        // fromRoute is msg.data.from — a bare public key, not a Maxima route —
+        // so it belongs in sendMaxima's publicKey slot, not mxAddress.
+        sendMaxima(fromRoute, null, {type: 'ESCROW_INFO_RESPONSE', campaign_id: campaignId, status: 'not_found', data: {}}, function() {});
       }
       return;
     }
@@ -164,7 +173,8 @@ function handleEscrowInfoRequest(payload, fromRoute) {
       var escapedFromPk = escapeSql(fromPk);
       sqlQuery(
         "SELECT COUNT(*) AS C FROM CHANNEL_STATE WHERE UPPER(CAMPAIGN_ID)=UPPER('" + escapedCampaignId + "')" +
-        " AND UPPER(OPENER_MX_PK)=UPPER('" + escapedFromPk + "') AND OPENER_MX_PK != ''",
+        " AND UPPER(OPENER_MX_PK)=UPPER('" + escapedFromPk + "') AND OPENER_MX_PK != ''" +
+        " AND UPPER(STATUS) = 'OPEN'",
         function(authErr, authRows) {
           var count = (!authErr && authRows && authRows[0]) ? (parseInt(authRows[0].C, 10) || 0) : 0;
           if (count === 0) {
@@ -225,7 +235,9 @@ function _doEscrowInfoResponse(row, campaignId, fromRoute) {
     };
 
     if (fromRoute) {
-      sendMaxima(null, fromRoute, response, function(ok) {
+      // fromRoute is msg.data.from — a bare public key, not a Maxima route —
+      // so it belongs in sendMaxima's publicKey slot, not mxAddress.
+      sendMaxima(fromRoute, null, response, function(ok) {
         MDS.log("[MAXIMA] ESCROW_INFO_RESPONSE sent ok=" + ok + " campaign=" + campaignId);
       });
     }

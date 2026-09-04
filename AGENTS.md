@@ -174,6 +174,29 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
+### Session: 2026-09-04 (Fix #9 + Fix #10) — Delete dead `DO_*` FE builders; wire `ESCROW_INFO` round-trip
+
+**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #9 and Fix #10 — done together per the plan's own "Track B"/"Track C" parallelism note (independent files: `dapp/app.js` deletions vs `maxima.handler.js` wiring). Implemented directly by this (Sonnet) session, no delegation.
+
+**Fix #9** (`dapp/app.js`, ~950 lines removed): deleted `handleDoChannelOpen`, `buildAndPostChannelTx`, `finalizeChannelSplit`, `buildAndPostChannelOpenTx`, `finalizeChannelOpen`, `handleDoPublisherChannelOpen`, `startPublisherChannelTxs`, `handleDoRewardVoucher`, `buildAndExportVoucherTx`, `handleDoPublisherRewardVoucher`, `handleDoSendVoucher`, `handleDoResendChannelOpen` — the FE channel-TX builders superseded by the SW doing this work instead (per the dispatcher's own pre-existing comment: "All channel TX building and Maxima resends are now handled by the SW"). Also removed: the `handleMdsComms` dispatcher's `DO_*` legacy-warning stub (types that provably can never arrive anymore); the `handleFePending` `channel_split_sign`/`channel_split_post`/`channel_open_postsign`/`channel_open`/`voucher_sign` resume branches, replaced with a single `console.warn('[PENDING] legacy pending action ignored: ' + ctx.kind')` catch-all. Kept `runSequential` (shared with the still-live `buildAndPostStatusUpdateTx`) and `settlement`/`settlement_post`/`status_update_*` branches untouched. Verified zero remaining references to every deleted function via grep before finishing (`0 files reference it` for all twelve).
+
+**Fix #10** (`public/service-workers/handlers/maxima.handler.js`): added the missing `onMaxima` dispatcher case for inbound `ESCROW_INFO_RESPONSE` — `signalFE("ESCROW_INFO_RESPONSE", payload)` — relaying the creator's response to the FE's pre-existing (but previously unreachable) `_handleEscrowInfoResponse` handler. Narrowed the counterparty auth gate in `handleEscrowInfoRequest`: the `CHANNEL_STATE` membership query now also requires `UPPER(STATUS) = 'OPEN'`, so a settled/stale counterparty loses read access to live financials.
+
+**Bonus fix, found while verifying Fix #10 live** (same file): `_doEscrowInfoResponse`'s two `sendMaxima(null, fromRoute, ...)` calls had the arguments backwards — `fromRoute` (`msg.data.from`, a bare public key) was passed in `sendMaxima`'s `mxAddress` slot instead of its `publicKey` slot. This silently broke every escrow-info response ever sent (routed via `to:<bare PK>` instead of `publickey:<PK>`), which is exactly why nothing had caught it before — the FE relay this session just added was the first thing that would have surfaced a live response arriving at all. Fixed both call sites to `sendMaxima(fromRoute, null, ...)`.
+
+**Verification — live, two real nodes** (Node 1 = creator, Node 3 = requester), after redeploying via "Zip & Install to Nodes" (6 nodes, all Success). `browser_evaluate` hung twice for the full 30-minute tool timeout when constructing/sending the Maxima payload (consistent with this session's established pattern for Maxima-send calls specifically — DB-only `sqlQuery` calls via `browser_evaluate` kept working fine throughout) — switched to MinimaNodeManager's per-node terminal textbox for the actual `maxima action:send` calls, which worked immediately both times. Seeded a real `CAMPAIGNS` row on Node 1 (`BUDGET_TOTAL=20, BUDGET_REMAINING=15, MAX_PUBLISHER_BUDGET=2, PUBLISHER_BUDGET_SPENT=0.5`) plus a `CHANNEL_STATE` row with `OPENER_MX_PK` = Node 3's real Maxima PK, `STATUS='open'`; seeded a stale stub row (`BUDGET_REMAINING=999`) on Node 3 to observe the update.
+1. Node 3 → Node 1 `ESCROW_INFO_REQUEST` (real Maxima, `maxcontacts action:add` needed first — publickey casing had to match the contact list's stored lowercase `0x` prefix exactly, `UPPER()` in SQL doesn't apply to Minima's own RPC contact lookup): Node 1 log `[MAXIMA] ESCROW_INFO_RESPONSE sent ok=true campaign=fix10-test-1`; Node 3's `CAMPAIGNS` row updated to `BUDGET_TOTAL=20.000000, BUDGET_REMAINING=15.000000, STATUS=ACTIVE` — full round-trip confirmed, and confirms the `sendMaxima` argument-order bonus fix was load-bearing (this would have silently failed pre-fix).
+2. Flipped Node 1's `CHANNEL_STATE.STATUS` to `'settled'`, changed `BUDGET_REMAINING` to `10`, resent the identical request from Node 3: Node 3's `CAMPAIGNS` row stayed at `15.000000` (never updated to `10`) — narrowed auth gate correctly withheld the response from a no-longer-open counterparty.
+All test rows deleted on both nodes afterward, confirmed `COUNT(*) = 0`.
+
+**Files modified**: `dapp/app.js`, `public/service-workers/handlers/maxima.handler.js`, `MinimaAds.md`.
+
+**AGENTS.md updated**: yes — this entry; oldest entry (2026-09-04, Fix #7) moved to `docs/HISTORY.md §17`. `MinimaAds.md §8.15` signal table: removed the six now-dead `DO_*` rows, added `ESCROW_INFO_RESPONSE`. New `MinimaAds.md §8.19`/`§8.20` document `ESCROW_INFO_REQUEST`/`ESCROW_INFO_RESPONSE` as full Maxima message types (previously undocumented) — includes the auth-gate rule and the `sendMaxima` argument-order gotcha.
+
+**Open issues**: none new. Remaining Phase 3 item: Fix #8 (block-based expiry) — the highest-risk item in Phase 3, needs dedicated planning/clock-skew testing before attempting; not picked up this session.
+
+---
+
 ### Session: 2026-09-04 (Fix #14) — `PUBLISHER_MX` missing from FE `FRAMES` schema
 
 **Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #14 — natural follow-up to this session's Fix #20, which found and fixed the same category of FE/SW schema drift on `CHANNEL_STATE`. Implemented directly by this (Sonnet) session, no delegation.
@@ -205,22 +228,6 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 **AGENTS.md updated**: yes — this entry; oldest entry (2026-09-04, Fix #5) moved to `docs/HISTORY.md §17`.
 
 **Open issues**: none new. Remaining Phase 3 items: Fix #8 (block-based expiry — flagged in the plan as the highest-risk Phase 3 item, needs dedicated clock-skew testing, candidate for its own planning session), Fix #9 (delete ~700 lines of dead `DO_*` FE builders), Fix #10 (wire `ESCROW_INFO` round-trip), Fix #14 (`PUBLISHER_MX` FE `FRAMES` schema parity — same category of bug as this session's bonus finding, worth doing together with a full FE/SW `FRAMES` diff).
-
----
-
-### Session: 2026-09-04 (Fix #7) — `comms.handler.js` view/click no longer double-debits budget (M-4)
-
-**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #7. Implemented directly by this (Sonnet) session, no delegation.
-
-**Fix**: `handleTrackView`/`handleTrackClick` (`comms.handler.js`) — removed the direct `updateBudget(campaignId, amount, cb)` call and its `budErr` branch from both; the confirm broadcast/`signalFE`/`_triggerChannelPayment` call sequence is otherwise unchanged, just no longer nested inside the `updateBudget` callback. Added the M-4 comment from the plan so a future agent doesn't "fix" it back. This was a genuine double-accounting bug: `core/rewards.js`'s `createRewardEvent` already skips `updateBudget` for `type === 'view'\|'click'` (pre-existing M-4 fix — `BUDGET_REMAINING` is on-chain-synced via `processEscrowCoin` instead), but `comms.handler.js`'s separate `MA_TRACK_VIEW`/`MA_TRACK_CLICK` path (same-device `MDS.comms.solo`/`broadcast`, used by external host MiniDapps embedding the SDK — not the dapp's own direct `createRewardEvent` call) was still debiting locally on every call, risking a campaign flipping to `'finished'` prematurely from cross-dapp view/click traffic alone.
-
-**Verification — live**, after redeploying via "Zip & Install to Nodes" (6 nodes, all Success). `browser_evaluate` was silently declined again this session (see Fix #5's entry in `docs/HISTORY.md §17` for the established pattern) — handed the test script to the maintainer to paste into a MinimaAds tab's DevTools console instead. Script seeded a `CAMPAIGNS` row (`BUDGET_REMAINING=5`), called `MDS.comms.solo(JSON.stringify({type:'MA_TRACK_VIEW', campaignId, userAddress, ...}))` (the exact same-device path `handleTrackView` listens on), waited, then re-read `BUDGET_REMAINING`. Result: `budgetAfter: "5.000000"` — unchanged from `budgetBefore: 5` (pre-fix this would have dropped to `4.99`). Test row deleted afterward.
-
-**Files modified**: `public/service-workers/handlers/comms.handler.js`, `docs/KNOWN_ISSUES.md`.
-
-**AGENTS.md updated**: yes — this entry; oldest entry (2026-09-04, Fix #12 + AUD-5) moved to `docs/HISTORY.md §17`.
-
-**Open issues**: logged `DOC-1` in `docs/KNOWN_ISSUES.md §3.5` (new row, not security) — `MinimaAds.md §6.1`/`§6.2`'s SDK view/click flow diagrams still describe the pre-M-4 `updateBudget` call, stale relative to `core/rewards.js`'s already-fixed behavior; discovered while implementing this fix but out of scope (different file/flow section, predates this session). Not fixed inline per CLAUDE.md multi-agent safety rules.
 
 ---
 

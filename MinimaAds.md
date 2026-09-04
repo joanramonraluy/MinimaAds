@@ -1291,6 +1291,51 @@ Sent by the viewer's FE when building the campaign list and the campaign creator
 
 **Effect**: Viewer's SW signals FE with `PROFILE_RECEIVED { publickey, name, icon }`. FE caches the profile in keypair (`CREATOR_PROFILE_<PK>`) and updates the campaign list row in-place (avatar image + creator name). Cached profiles are reused on subsequent list renders without re-requesting.
 
+### 8.19 ESCROW_INFO_REQUEST
+
+**Direction**: Requester SW → Creator SW (unicast Maxima, `publickey:` routing, **`poll:false`**)
+
+Sent when a viewer or publisher's `#mycampaigns`/`#frames` view wants live escrow financials for a campaign (`dapp/views/campaigns.js`).
+
+```json
+{
+  "type": "ESCROW_INFO_REQUEST",
+  "campaign_id": "uuid"
+}
+```
+
+**Handler (creator's node)**: `handleEscrowInfoRequest(payload, fromRoute)` in `maxima.handler.js`. `fromRoute` is `msg.data.from` — the sender's Maxima public key, authenticated by the Maxima transport itself, not a payload field.
+
+**Sender authentication (audit 2026-07-18 Fix #10)**: the creator (`fromPk === CAMPAIGNS.CREATOR_ADDRESS`) always gets a response. Anyone else must be a **known channel counterparty with an `'open'` channel** — the membership query requires `CHANNEL_STATE.OPENER_MX_PK = fromPk` **and** `CHANNEL_STATE.STATUS = 'open'`. A settled or stale counterparty (channel no longer open) gets no response at all — financial data access is withdrawn once the relationship is no longer live. A stranger with neither role gets nothing.
+
+### 8.20 ESCROW_INFO_RESPONSE
+
+**Direction**: Creator SW → Requester SW (unicast Maxima, `publickey:` routing, **`poll:false`**)
+
+```json
+{
+  "type": "ESCROW_INFO_RESPONSE",
+  "campaign_id": "uuid",
+  "status": "ok | not_found",
+  "data": {
+    "budget_total": 20,
+    "budget_remaining": 15,
+    "max_publisher_budget": 2,
+    "publisher_budget_spent": 0.5,
+    "viewer_budget_spent": 0.3,
+    "publisher_budget_earned": 0,
+    "escrow_left": 16.5,
+    "campaign_status": "active"
+  }
+}
+```
+
+`status: "not_found"` (empty `data`) is sent when `campaign_id` doesn't exist locally. No response at all is sent when sender authentication fails (§8.19) — the requester's UI is expected to time out silently rather than distinguish "rejected" from "creator offline".
+
+**Handler (requester's node)**: `onMaxima` (`maxima.handler.js`) relays the payload as-is via `signalFE("ESCROW_INFO_RESPONSE", payload)` (§8.15 table) to `_handleEscrowInfoResponse(parsed)` in `dapp/app.js`, which `UPDATE`s the local `CAMPAIGNS` row (`BUDGET_TOTAL`, `BUDGET_REMAINING`, `MAX_PUBLISHER_BUDGET`, `PUBLISHER_BUDGET_SPENT`, `VIEWER_BUDGET_SPENT`, `PUBLISHER_BUDGET_EARNED`, `STATUS`) with the fresh on-chain-derived values.
+
+**Rhino note**: `sendMaxima(publicKey, mxAddress, payload, cb)` — the creator's response goes through the `publicKey` slot with `fromRoute` (a bare public key, not a route string). Passing it in the `mxAddress` slot instead silently fails delivery in the common case (audit 2026-07-18 Fix #10, found while wiring this response's FE relay — the response side had never actually been exercised before).
+
 ### 8.15 SW → FE Signal Contract
 
 | Signal type | Payload | Fired by | Trigger |
@@ -1304,15 +1349,10 @@ Sent by the viewer's FE when building the campaign list and the campaign creator
 | `AUTO_SETTLE` | `{ campaign_id, viewer_key, role, tx_hex, cumulative }` | `channel.handler.js` (SW) | Campaign finished — viewer should post settlement tx |
 | `CAMPAIGN_AUTOSETTLE_REQUEST` | `{ campaign_id, channels: [{ viewer_key, role, tx_hex, cumulative }…] }` | `channel.handler.js` (SW) | Creator campaign finished — mark channels settling and request creator to post settlement txs |
 | `SETTLE_CONFIRMED` | `{ campaign_id, amount }` | `channel.handler.js` (FE) | Settlement tx posted successfully |
-| `DO_CHANNEL_OPEN` | `{ campaign_id, viewer_key, viewer_mx, max_amount }` | `channel.handler.js` (SW) | Creator FE creates channel coin on-chain |
-| `DO_REWARD_VOUCHER` | `{ campaign_id, viewer_key, viewer_mx, event_id, cumulative }` | `channel.handler.js` (SW) | Creator FE builds partial tx and sends REWARD_VOUCHER |
-| `DO_SEND_VOUCHER` | `{ campaign_id, viewer_key, viewer_mx, cumulative, tx_hex }` | `channel.handler.js` (SW) | Creator FE re-sends REWARD_VOUCHER (reconnect sync) |
-| `DO_RESEND_CHANNEL_OPEN` | `{ campaign_id, viewer_key, viewer_mx, channel_coinid, max_amount }` | `channel.handler.js` (SW) | Creator FE re-sends CHANNEL_OPEN when no voucher issued yet |
 | `FRAME_READY` | `{ frame_id, is_builtin }` | `service.js` (SW) | Built-in frame ensured at init — SDK can resolve default frameId |
 | `FRAME_CREATED` | `{ frame_id, label }` | `dapp/views/frames.js` (FE) | New frame persisted — refresh frame list |
 | `PUBLISHER_REWARD_CONFIRMED` | `{ event_id, amount, frame_id, campaign_id }` | `core/rewards.js` (FE) | Publisher reward persisted — update Frame earnings UI |
-| `DO_PUBLISHER_CHANNEL_OPEN` | `{ campaign_id, publisher_key, publisher_mx, frame_id, max_amount }` | `channel.handler.js` (SW) | Creator FE creates publisher channel coin on-chain |
-| `DO_PUBLISHER_REWARD_VOUCHER` | `{ campaign_id, publisher_key, publisher_mx, frame_id, event_id, cumulative }` | `channel.handler.js` (SW) | Creator FE builds publisher voucher tx and sends REWARD_VOUCHER |
+| `ESCROW_INFO_RESPONSE` | `{ campaign_id, status, data: {...} }` | `maxima.handler.js` (SW) | ESCROW_INFO_RESPONSE Maxima message received — relayed as-is to `_handleEscrowInfoResponse` (§8.20) |
 | `CREATOR_LIVENESS_PONG` | `{ campaign_id }` | `campaign.handler.js` (SW) | CREATOR_LIVENESS_PONG received — SDK resolves pending liveness check |
 | `STATUS_TX_PENDING` | `{ campaign_id, status, pending_uid }` | `dapp/views/mycampaigns.js` (FE) | Status-change tx awaiting Hub approval — UI shows "awaiting confirmation" until the V3 change coin is confirmed on-chain |
 | `PROFILE_RECEIVED` | `{ publickey, name, icon }` | `campaign.handler.js` (SW) | PROFILE_RESPONSE received — viewer FE updates creator avatar/name in campaign list |

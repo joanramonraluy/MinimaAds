@@ -46,6 +46,22 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-04 (Fix #7) — `comms.handler.js` view/click no longer double-debits budget (M-4)
+
+**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #7. Implemented directly by this (Sonnet) session, no delegation.
+
+**Fix**: `handleTrackView`/`handleTrackClick` (`comms.handler.js`) — removed the direct `updateBudget(campaignId, amount, cb)` call and its `budErr` branch from both; the confirm broadcast/`signalFE`/`_triggerChannelPayment` call sequence is otherwise unchanged, just no longer nested inside the `updateBudget` callback. Added the M-4 comment from the plan so a future agent doesn't "fix" it back. This was a genuine double-accounting bug: `core/rewards.js`'s `createRewardEvent` already skips `updateBudget` for `type === 'view'\|'click'` (pre-existing M-4 fix — `BUDGET_REMAINING` is on-chain-synced via `processEscrowCoin` instead), but `comms.handler.js`'s separate `MA_TRACK_VIEW`/`MA_TRACK_CLICK` path (same-device `MDS.comms.solo`/`broadcast`, used by external host MiniDapps embedding the SDK — not the dapp's own direct `createRewardEvent` call) was still debiting locally on every call, risking a campaign flipping to `'finished'` prematurely from cross-dapp view/click traffic alone.
+
+**Verification — live**, after redeploying via "Zip & Install to Nodes" (6 nodes, all Success). `browser_evaluate` was silently declined again this session (see Fix #5's entry in `docs/HISTORY.md §17` for the established pattern) — handed the test script to the maintainer to paste into a MinimaAds tab's DevTools console instead. Script seeded a `CAMPAIGNS` row (`BUDGET_REMAINING=5`), called `MDS.comms.solo(JSON.stringify({type:'MA_TRACK_VIEW', campaignId, userAddress, ...}))` (the exact same-device path `handleTrackView` listens on), waited, then re-read `BUDGET_REMAINING`. Result: `budgetAfter: "5.000000"` — unchanged from `budgetBefore: 5` (pre-fix this would have dropped to `4.99`). Test row deleted afterward.
+
+**Files modified**: `public/service-workers/handlers/comms.handler.js`, `docs/KNOWN_ISSUES.md`.
+
+**AGENTS.md updated**: yes — this entry (since rotated here); oldest entry (2026-09-04, Fix #12 + AUD-5) moved to `docs/HISTORY.md §17`.
+
+**Open issues**: logged `DOC-1` in `docs/KNOWN_ISSUES.md §3.5` (new row, not security) — `MinimaAds.md §6.1`/`§6.2`'s SDK view/click flow diagrams still describe the pre-M-4 `updateBudget` call, stale relative to `core/rewards.js`'s already-fixed behavior; discovered while implementing this fix but out of scope (different file/flow section, predates this session). Not fixed inline per CLAUDE.md multi-agent safety rules.
+
+---
+
 ### Session: 2026-09-04 (Fix #6) — `relevant:false` bypassed PREVSTATE(5) fee validation
 
 **Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #6 — first Phase 3 item, LOW complexity. Delegated to a Haiku subagent (hit the monthly spend limit mid-task after completing the code fix and half the housekeeping; parent Sonnet session verified the completed work and finished the remaining housekeeping — no code loss).

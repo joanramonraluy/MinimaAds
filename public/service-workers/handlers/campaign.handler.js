@@ -209,6 +209,15 @@ function handleCampaignPause(payload, senderPk) {
     return;
   }
   _assertCreatorThen(payload.campaign_id, senderPk, function(strongSender) {
+    // Audit 2026-07-18 AUD-3 — same reasoning as handleCampaignFinish's Fix #3
+    // guard: applyStatusChange's isSettling gate also covers 'paused', so a
+    // fallback-verified PAUSE could otherwise still force
+    // autoSettleChannelsForCampaign on a campaign the sender does not control.
+    if (!strongSender) {
+      MDS.log("[CAMPAIGN] PAUSE via fallback creator check — deferring auto-settle to on-chain confirmation");
+      applyStatusChange(payload.campaign_id, "paused", true);
+      return;
+    }
     applyStatusChange(payload.campaign_id, "paused");
   });
 }

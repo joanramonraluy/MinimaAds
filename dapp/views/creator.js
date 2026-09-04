@@ -1512,8 +1512,13 @@ var ESCROW_SCRIPT_V4 =
   "ENDIF " +
   "RETURN TRUE";
 
-// Mirror of service.js buildChannelScript(): (MAX_CAMPAIGN_DAYS + SETTLEMENT_GRACE_DAYS) * 1728 = (90 + 7) * 1728 = 167,616
-var CHANNEL_SCRIPT_FE = 'IF @COINAGE GT (167616) AND SIGNEDBY(PREVSTATE(1)) THEN RETURN TRUE ENDIF RETURN MULTISIG(2 PREVSTATE(1) PREVSTATE(2))';
+// Mirror of service.js buildChannelScript(): timelock computed from LIMITS, not hardcoded.
+// Ensures script address matches the SW escrow channel script exactly.
+function buildChannelScriptFE() {
+  var timelockBlocks = (LIMITS.MAX_CAMPAIGN_DAYS + LIMITS.SETTLEMENT_GRACE_DAYS) * 1728;
+  return 'IF @COINAGE GT (' + timelockBlocks + ') AND SIGNEDBY(PREVSTATE(1)) THEN RETURN TRUE ENDIF RETURN MULTISIG(2 PREVSTATE(1) PREVSTATE(2))';
+}
+var CHANNEL_SCRIPT_FE = buildChannelScriptFE();
 
 // Resolves the escrow address for new campaigns (T-SC3).
 // Tries V3 first (ESCROW_ADDRESS_V3); registers via newscript if missing.

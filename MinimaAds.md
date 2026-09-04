@@ -428,9 +428,15 @@ var LIMITS = {
   MAX_CAMPAIGNS_PER_SESSION:       10,
   MIN_BUDGET:                      100,    // minimum campaign budget in MINIMA (~$0.77)
   MIN_REWARD_VIEW:                 0.001,  // minimum reward per view in MINIMA
-  MIN_REWARD_CLICK:                0.001,  // minimum reward per click in MINIMA
-  MIN_PUBLISHER_REWARD_VIEW:       0.01,  // floor for PUBLISHER_REWARD_VIEW (only applies when R_p > 0)
-  MAX_CAMPAIGN_DAYS:               90      // maximum campaign duration in days
+  MIN_REWARD_CLICK:                0.005,  // minimum reward per click in MINIMA
+  MAX_CAMPAIGN_DAYS:               90,     // maximum campaign duration in days
+  MIN_PUBLISHER_REWARD_VIEW:       0.001,  // floor for PUBLISHER_REWARD_VIEW (only applies when R_p > 0)
+  // Maximum Minima a viewer channel may reserve in a single CHANNEL_OPEN_REQUEST.
+  // Prevents a single attacker channel from pre-reserving the entire campaign budget.
+  MAX_CHANNEL_RESERVATION:         10,
+  // Grace period after campaign ends before creator can unilaterally reclaim channel coins.
+  // Guarantees viewers have this many days to settle after campaign finishes.
+  SETTLEMENT_GRACE_DAYS:           7
 };
 ```
 
@@ -442,12 +448,14 @@ var LIMITS = {
 | `MAX_CLICKS_PER_CAMPAIGN_PER_DAY` | 100 | `validation.js` → same query for `type='click'` |
 | `COOLDOWN_BETWEEN_REWARDS_MS` | 30 s | `validation.js` fallback only — overridden by `CAMPAIGNS.COOLDOWN_MS` when set |
 | `MIN_VIEW_DURATION_MS` | 3 s | SDK client-side timer — must complete before view event is emitted |
-| `MAX_CAMPAIGNS_PER_SESSION` | 10 | `selection.js` — session counter, never persisted to DB |
+| `MAX_CAMPAIGNS_PER_SESSION` | 10 | **DEPRECATED** — not currently enforced (rotated via `_seenCampaignIds` only, see SEL-1); kept in `LIMITS` for future use |
 | `MIN_BUDGET` | 100 MINIMA | `creator.js` submit validation + HTML `min` attribute — anti-spam floor (~$0.77 at current rates) |
 | `MIN_REWARD_VIEW` | 0.001 MINIMA | `creator.js` submit validation + HTML `min` attribute |
-| `MIN_REWARD_CLICK` | 0.001 MINIMA | `creator.js` submit validation + HTML `min` attribute |
-| `MIN_PUBLISHER_REWARD_VIEW` | 0.01 MINIMA | `creator.js` submit validation — only applies when `PUBLISHER_REWARD_VIEW > 0`; value of 0 (disabled) is always valid |
+| `MIN_REWARD_CLICK` | 0.005 MINIMA | `creator.js` submit validation + HTML `min` attribute |
 | `MAX_CAMPAIGN_DAYS` | 90 | `creator.js` submit validation + HTML `max` attribute |
+| `MIN_PUBLISHER_REWARD_VIEW` | 0.001 MINIMA | `creator.js` submit validation — only applies when `PUBLISHER_REWARD_VIEW > 0`; value of 0 (disabled) is always valid |
+| `MAX_CHANNEL_RESERVATION` | 10 MINIMA | `channel.handler.js` → `CHANNEL_OPEN_REQUEST` validation + `comms.handler.js` + SDK `openChannel()` |
+| `SETTLEMENT_GRACE_DAYS` | 7 | `service.js` `buildChannelScript()` — timelock computed as `(MAX_CAMPAIGN_DAYS + SETTLEMENT_GRACE_DAYS) * 1728` blocks |
 
 ---
 
@@ -1461,9 +1469,11 @@ var LIMITS = {
   MAX_CAMPAIGNS_PER_SESSION:       10,
   MIN_BUDGET:                      100,
   MIN_REWARD_VIEW:                 0.001,
-  MIN_REWARD_CLICK:                0.001,
-  MIN_PUBLISHER_REWARD_VIEW:       0.01,
-  MAX_CAMPAIGN_DAYS:               90
+  MIN_REWARD_CLICK:                0.005,
+  MAX_CAMPAIGN_DAYS:               90,
+  MIN_PUBLISHER_REWARD_VIEW:       0.001,
+  MAX_CHANNEL_RESERVATION:         10,
+  SETTLEMENT_GRACE_DAYS:           7
 };
 
 MDS.init(function(msg) {
@@ -1630,7 +1640,8 @@ MinimaAds.getAd(userAddress, interests, cb)
 // interests:   string (comma-separated tags) | null
 // cb:          function(err, ad | null)
 // Loads active campaigns, enriches with ad fields, runs selectAd.
-// Respects MAX_CAMPAIGNS_PER_SESSION.
+// NOTE: MAX_CAMPAIGNS_PER_SESSION is defined in LIMITS but not currently enforced
+//       (deprecated, see SEL-1 and Fix #13); rotated via _seenCampaignIds only.
 
 MinimaAds.render(ad, containerId)
 // ad:          object returned by getAd

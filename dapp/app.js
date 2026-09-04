@@ -17,7 +17,9 @@ var LIMITS = {
   MIN_REWARD_VIEW:                 0.001,
   MIN_REWARD_CLICK:                0.005,
   MAX_CAMPAIGN_DAYS:               90,
-  MIN_PUBLISHER_REWARD_VIEW:       0.001
+  MIN_PUBLISHER_REWARD_VIEW:       0.001,
+  MAX_CHANNEL_RESERVATION:         10,
+  SETTLEMENT_GRACE_DAYS:           7
 };
 
 var MY_ADDRESS = '';

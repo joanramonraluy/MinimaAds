@@ -864,21 +864,103 @@ function handleLocalStatusChange(payload) {
   applyStatusChange(payload.campaign_id, s);
 }
 
-// checkExpiredCampaigns — called on every NEWBLOCK from service.js.
-// Marks any active campaign whose EXPIRES_AT has passed as 'finished'.
+// checkExpiredCampaigns — called on every NEWBLOCK from service.js with the new
+// chain tip height (msg.data.txpow.header.block).
+//
+// Audit 2026-07-18 Fix #8 — expiry is block-based, not wall-clock.
+// CAMPAIGNS.EXPIRES_AT is only an estimate computed at creation time from a block
+// count; the authoritative deadline is the escrow coin's state port 2 (expiry
+// block — MinimaAds.md Appendix B.3), which is what the creator actually funded.
+// Clock skew between nodes and block-time variance make the ms value drift from
+// the chain, and 'finished' is terminal (KNOWN_ISSUES #46) — an early ms-based
+// expiry permanently kills a still-funded campaign on that node. So:
+//   - escrow coin readable with a port-2 expiry → finish only when
+//     currentBlock >= expiryBlock (the chain is authoritative);
+//   - escrow coin absent/spent/settled, or carrying no port 2 → fall back to the
+//     ms comparison, but only well past EXPIRES_AT (safety margin below).
 // Only runs on the local node — other nodes learn the status via the liveness ping.
 // Rhino-safe: var, function(), no arrows, no template literals.
-function checkExpiredCampaigns() {
+
+// Escrow-coin lookups are limited to campaigns expiring no more than this far in
+// the future, so a node tracking many active campaigns does not issue one coin
+// lookup per campaign on every NEWBLOCK. Campaigns already past EXPIRES_AT are
+// always included — those are exactly the ones needing the on-chain check.
+var EXPIRY_LOOKUP_WINDOW_MS = 172800000;   // 48 h
+
+// Wall-clock fallback path only: extra grace on top of EXPIRES_AT before a
+// campaign whose on-chain expiry cannot be read is finished. Absorbs clock skew
+// between the creator's node (which computed EXPIRES_AT) and this one.
+var EXPIRY_FALLBACK_MARGIN_MS = 86400000;  // 24 h
+
+function checkExpiredCampaigns(currentBlock) {
+  var blockNum = parseInt(currentBlock, 10);
+  if (!isFinite(blockNum) || blockNum <= 0) { blockNum = 0; }
   var now = Date.now();
   sqlQuery(
-    "SELECT ID FROM CAMPAIGNS WHERE STATUS = 'active' AND EXPIRES_AT IS NOT NULL AND EXPIRES_AT < " + now,
+    "SELECT ID, ESCROW_COINID, EXPIRES_AT FROM CAMPAIGNS" +
+    " WHERE STATUS = 'active' AND EXPIRES_AT IS NOT NULL" +
+    " AND EXPIRES_AT < " + (now + EXPIRY_LOOKUP_WINDOW_MS),
     function(err, rows) {
       if (err || !rows || rows.length === 0) { return; }
       for (var i = 0; i < rows.length; i++) {
-        applyStatusChange(rows[i].ID, 'finished');
+        _checkCampaignExpiry(rows[i], blockNum, now);
       }
     }
   );
+}
+
+// One candidate row. Prefers the on-chain deadline; falls back to wall clock only
+// when no escrow expiry can be read.
+function _checkCampaignExpiry(row, currentBlock, now) {
+  var campaignId = row.ID;
+  var expiresAt  = (row.EXPIRES_AT !== null && row.EXPIRES_AT !== undefined && row.EXPIRES_AT !== '')
+    ? parseInt(row.EXPIRES_AT, 10) : 0;
+  var coinId     = row.ESCROW_COINID || '';
+
+  // ESCROW_COINID can originate from a Maxima payload (CAMPAIGN_ANNOUNCE), so it
+  // is interpolated into an MDS command only when it looks like a real coin id.
+  if (!isHexKey(coinId)) {
+    _expireByWallClock(campaignId, expiresAt, now);
+    return;
+  }
+
+  // No relevant: param — see fragility #28 / Fix #6: any presence of relevant:
+  // is read as true and restricts the search to this wallet's own coins, which
+  // would hide a remote creator's escrow coin.
+  MDS.cmd("coins coinid:" + coinId, function(res) {
+    var coin = (res && res.status && res.response && res.response.length > 0) ? res.response[0] : null;
+    if (!coin) {
+      // Escrow already spent, settled or reclaimed — no on-chain deadline left.
+      MDS.log("[CAMPAIGN] expiry check: escrow coin not found for " + campaignId + " — wall-clock fallback");
+      _expireByWallClock(campaignId, expiresAt, now);
+      return;
+    }
+    var expiryBlock = parseInt(getStateVar(coin.state || [], 2), 10);
+    if (!isFinite(expiryBlock) || expiryBlock <= 0) {
+      MDS.log("[CAMPAIGN] expiry check: no state port 2 on escrow coin for " + campaignId + " — wall-clock fallback");
+      _expireByWallClock(campaignId, expiresAt, now);
+      return;
+    }
+    if (currentBlock <= 0) {
+      // Block height unknown this round — never guess, wait for the next NEWBLOCK.
+      MDS.log("[CAMPAIGN] expiry check: current block unknown for " + campaignId + " — deferring");
+      return;
+    }
+    MDS.log("[CAMPAIGN] expiry check: block " + currentBlock + " vs escrow expiry " + expiryBlock);
+    if (currentBlock >= expiryBlock) {
+      MDS.log("[CAMPAIGN] escrow expiry block reached, finishing: " + campaignId);
+      applyStatusChange(campaignId, 'finished');
+    }
+  });
+}
+
+// Fallback path — only reached when the on-chain expiry is unreadable. Requires
+// EXPIRES_AT to be past by EXPIRY_FALLBACK_MARGIN_MS before finishing.
+function _expireByWallClock(campaignId, expiresAt, now) {
+  if (expiresAt <= 0) { return; }
+  if (now <= expiresAt + EXPIRY_FALLBACK_MARGIN_MS) { return; }
+  MDS.log("[CAMPAIGN] expiry check: EXPIRES_AT + margin passed, finishing: " + campaignId);
+  applyStatusChange(campaignId, 'finished');
 }
 
 // Server-side rate-limit for CAMPAIGN_DATA_RESPONSE (bug #14).

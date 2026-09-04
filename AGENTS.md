@@ -174,6 +174,26 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
+### Session: 2026-09-04 (Fix #8) — Block-based campaign expiry instead of wall-clock ms
+
+**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #8 — the last open Phase 3 item and the one the plan flags as its highest-risk (a bug here terminally finishes live, funded campaigns). Delegated to an Opus session with plan-mode design, per maintainer instruction. **Phase 3 is now complete.**
+
+**Fix** (`public/service-workers/handlers/campaign.handler.js` + `service.js`): `checkExpiredCampaigns()` compared `EXPIRES_AT < Date.now()` — but `EXPIRES_AT` is only an estimate computed at creation from a block count, while what the creator actually funded is the escrow coin's state port 2 (expiry block, MinimaAds.md App. B.3). Clock skew or block-time variance therefore killed still-funded campaigns permanently (`finished` is terminal, KNOWN_ISSUES #46). Now `checkExpiredCampaigns(currentBlock)` takes the tip height from the NEWBLOCK event (`msg.data.txpow.header.block`, read defensively in `service.js`) and per candidate campaign: reads the escrow coin via `MDS.cmd("coins coinid:" + ESCROW_COINID)` (no `relevant:` — depends on Fix #6) and finishes only when `currentBlock >= port 2`; falls back to the ms comparison **only** when the coin is absent/spent or carries no port 2, and then only past `EXPIRES_AT + 24 h`; defers entirely when the tip height is unknown rather than guessing. Coin lookups are bounded by a 48 h window on `EXPIRES_AT` in the SQL itself, so far-future campaigns are never looked up. `ESCROW_COINID` (which can arrive from a Maxima payload) is passed through the existing `isHexKey` guard before being interpolated into the MDS command. No schema change, no LIMITS change — the two thresholds are local named constants, matching the existing `SIX_HOURS_MS` precedent in the same file.
+
+**Verification — live, against test node 1's real chain, but NOT through a deployed SW.** The Playwright browser profile was locked by a running Chrome instance this session was not permitted to kill, and the fallback (authenticating to MDS over HTTPS from the shell to reach the dapp's H2 DB) was blocked by the permission classifier — so "Zip & Install to Nodes" and any dapp-DB seeding were both unavailable. Instead the **real function bodies** were loaded from disk into a Node `vm` sandbox (real `core/minima.js` `isHexKey`, real `campaign.handler.js`; only `sqlQuery`/`applyStatusChange` stubbed to feed candidate rows and record decisions) with `MDS.cmd` wired to node 1's live RPC — so every coin lookup was a genuine `coins coinid:` against the real chain. Two real coins carrying escrow-shaped state (ports 1/2/3/7) were created on node 1 via RPC `send`.
+1. **Coin-JSON shape confirmed empirically**: `coins coinid:` returns `state` as `[{port,type,data}]` with port 2 = `"856"` (plain integer string) and **no `prevstate` key at all** — which is what made KNOWN_ISSUES #52 below visible.
+2. **13/13 scenario tests passed**: chain-not-yet-expired (no finish) / `currentBlock == expiry` (finish) / `expiry-1` (no finish, off-by-one guard); clock skew +2 h with a live coin (chain wins, no finish); +2 h with no coin (inside 24 h margin, no finish) vs +25 h (finish); coin absent on chain at +25 h (fallback finish) vs +2 h (holds); far-future campaign (+10 d) never looked up and never finished; campaign expiring in 24 h looked up but not finished; injection-shaped `ESCROW_COINID` (`"0xAA relevant:true"`) rejected before any `MDS.cmd`; unknown tip height with a live coin defers; mixed batch finishes only the right row.
+3. **Live advancing-tip test** (the plan's headline test): a campaign whose `EXPIRES_AT` claimed it expired 10 days ago, pointed at a real coin with port 2 = 863, stayed active across real tips 859 → 862 and finished at tip 863 exactly — `[CAMPAIGN] expiry check: block 863 vs escrow expiry 863`.
+Not covered: execution inside Rhino on an installed SW (diff mechanically scanned for arrow functions / `let` / `const` / template literals / `console.log` / trailing commas — none) and a real escrow coin produced by the actual campaign-creation flow (no campaigns existed on the test nodes; all six had zero escrow coins). Two 1-Minima test coins remain on node 1 at its own address.
+
+**Files modified**: `public/service-workers/handlers/campaign.handler.js`, `service.js`, `MinimaAds.md`, `docs/KNOWN_ISSUES.md`.
+
+**AGENTS.md updated**: yes — this entry; oldest entry (2026-09-04, Fix #20) moved to `docs/HISTORY.md §17`. `MinimaAds.md §11.2` gained a paragraph describing the block-based expiry rule; App. B.3's port-2 row rewritten (it said "UI reference" — port 2 is now authoritative off-chain).
+
+**Open issues**: two found while implementing this, both documented in `docs/KNOWN_ISSUES.md` and **not fixed inline** (CLAUDE.md §8). **#51 — the escrow split tx drops state port 2**: `swBuildAndPostChannelTx` carries forward ports 1/3/4/5/6/7 but not 2, and `ESCROW_COINID` is repointed to the change coin on every channel open, so from the first channel open onwards this fix degrades to its wall-clock fallback. Three-line fix (mirror the existing `ps5`/`ps6` carry-forward) but it touches a live escrow spending tx, so it needs its own session and a real split test. **#52 — `_continueCampaignAnnounce` reads `res.response[0].prevstate`, a key Minima never emits**, so both the `PREVSTATE(5)` platform-key and `PREVSTATE(6)` foundation-key checks on inbound announces are dead code that always accepts; one-line fix (`.state`), same class as Fix #6.
+
+---
+
 ### Session: 2026-09-04 (Fix #9 + Fix #10) — Delete dead `DO_*` FE builders; wire `ESCROW_INFO` round-trip
 
 **Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #9 and Fix #10 — done together per the plan's own "Track B"/"Track C" parallelism note (independent files: `dapp/app.js` deletions vs `maxima.handler.js` wiring). Implemented directly by this (Sonnet) session, no delegation.
@@ -210,24 +230,6 @@ All test rows deleted on both nodes afterward, confirmed `COUNT(*) = 0`.
 **AGENTS.md updated**: yes — this entry; oldest entry (2026-09-04, Fix #6) moved to `docs/HISTORY.md §17`.
 
 **Open issues**: none new. Remaining Phase 3 items: Fix #8 (block-based expiry — highest-risk item, needs dedicated planning/clock-skew testing), Fix #9 (delete ~700 lines of dead `DO_*` FE builders), Fix #10 (wire `ESCROW_INFO` round-trip).
-
----
-
-### Session: 2026-09-04 (Fix #20) — Removed dead `ALTER COLUMN` statements in db-init.js + FE VIEWER_KEY parity fix
-
-**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #20. Implemented directly by this (Sonnet) session, no delegation.
-
-**Fix** (`public/service-workers/db-init.js`): removed two `sqlQuery("ALTER TABLE ... ALTER COLUMN ...", ...)` calls (`REWARD_EVENTS.PUBLISHER_ID`, `CHANNEL_STATE.VIEWER_KEY`) whose target column defs were **already** present verbatim in the `CREATE TABLE IF NOT EXISTS` statements above them — both were dead leftovers from an earlier migration that had already been folded into the CREATE, so per the plan's step 1 there was nothing left to fold; just deleted the two calls and un-nested their callback bodies by one level each (matching `}); // end ... migration` closers removed too). Per `docs/KNOWN_ISSUES.md §4` (dev DBs reset on reinstall, CREATE is the source of truth) no belt-and-suspenders replacement was added — the audit's core complaint was that a raw `ALTER COLUMN` failure aborts the rest of `initDB`'s callback chain silently; removing the dead calls removes that specific risk outright.
-
-**Bonus finding, fixed in scope** (same column, same concern as this fix, CLAUDE.md's DB-parity checklist item): while confirming the SW's `CHANNEL_STATE.VIEWER_KEY VARCHAR(512)` was already correct, found the FE's own `initFEChannelState` (`dapp/app.js`) had never been updated to match — it still defined `VIEWER_KEY VARCHAR(66)`. `VIEWER_KEY` holds a full Maxima public key (200+ chars, e.g. the RSA-style keys seen throughout this session's testing), so this was a live truncation/data-loss risk on any FE-side write path. Widened to `VARCHAR(512)` to match the SW. Checked `SPLIT_COINID` (SW-only column, present in `CHANNEL_STATE` migrations but absent from the FE definition) — confirmed via grep it's never read/written from any FE file, purely internal SW bookkeeping for escrow split-coin retries, so its absence on the FE is not a parity bug and was left alone.
-
-**Verification — live**, after redeploying via "Zip & Install to Nodes" (6 nodes, all Success). `browser_evaluate` worked normally this time (no repeat of the silent-decline pattern from earlier fixes this session). On a freshly-booted node: `sqlQuery` round-trips against `CHANNEL_STATE`/`REWARD_EVENTS`/`CAMPAIGNS` all succeeded with no errors (confirms `initDB` completes cleanly post-removal, no regression from deleting the two `ALTER COLUMN` calls). Directly tested the `VIEWER_KEY` widening: inserted a 252-character `VIEWER_KEY` into `CHANNEL_STATE` (well over the old `VARCHAR(66)` limit) — stored and read back at the full 252 chars, no truncation, no error. Test row deleted afterward.
-
-**Files modified**: `public/service-workers/db-init.js`, `dapp/app.js`.
-
-**AGENTS.md updated**: yes — this entry; oldest entry (2026-09-04, Fix #5) moved to `docs/HISTORY.md §17`.
-
-**Open issues**: none new. Remaining Phase 3 items: Fix #8 (block-based expiry — flagged in the plan as the highest-risk Phase 3 item, needs dedicated clock-skew testing, candidate for its own planning session), Fix #9 (delete ~700 lines of dead `DO_*` FE builders), Fix #10 (wire `ESCROW_INFO` round-trip), Fix #14 (`PUBLISHER_MX` FE `FRAMES` schema parity — same category of bug as this session's bonus finding, worth doing together with a full FE/SW `FRAMES` diff).
 
 ---
 

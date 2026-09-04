@@ -1480,7 +1480,9 @@ MDS.init(function(msg) {
 | `inited` | `onInited()` | Init DB schema, register node in USER_PROFILE, start re-broadcast |
 | `MAXIMA` | `onMaxima(data)` | Decode hex payload, route by `payload.type` |
 | `MDS_TIMER_10SECONDS` | `onTimer()` | Re-broadcast active campaigns, check expirations, scan escrow coins |
-| `NEWBLOCK` | `onNewBlock()` | Check campaign expiry; trigger AUTO_SETTLE signal for expired campaigns with open channels |
+| `NEWBLOCK` | `onNewBlock()` | Check campaign expiry (block-based — see below); trigger AUTO_SETTLE signal for expired campaigns with open channels |
+
+**Campaign expiry is block-based (audit Fix #8).** `checkExpiredCampaigns(currentBlock)` receives the new tip height from the event (`msg.data.txpow.header.block`). For each active campaign expiring within 48 h of now (a window that also bounds the number of coin lookups per block), it reads the escrow coin (`coins coinid:<ESCROW_COINID>`, no `relevant:` — fragility #28) and finishes the campaign only when `currentBlock >= state port 2` (the funded expiry block, Appendix B.3). `CAMPAIGNS.EXPIRES_AT` is only an estimate computed at creation and is used solely as a fallback — when the escrow coin is absent, spent or carries no port 2 — and then only once `EXPIRES_AT + 24 h` has passed, so clock skew between nodes cannot prematurely finish a funded campaign (`finished` is terminal, KNOWN_ISSUES #46). When the tip height is unknown the check defers to the next `NEWBLOCK` rather than guessing.
 
 ### 11.3 Maxima Message Handlers
 
@@ -1778,7 +1780,7 @@ RETURN TRUE
 | Port | Read by | Value | Type | Purpose |
 |---|---|---|---|---|
 | 1 | `PREVSTATE(1)` | Creator wallet public key | `0x` hex (64 chars) | Required signer — frozen at coin creation |
-| 2 | `PREVSTATE(2)` | Campaign expiry block | integer string | UI reference; not enforced by script |
+| 2 | `PREVSTATE(2)` | Campaign expiry block | integer string | Not enforced by the script, but authoritative off-chain: `checkExpiredCampaigns` (§11.2, Fix #8) finishes a campaign only once the chain tip reaches this height. Read from the coin's own `state` array — a coin JSON has no `prevstate` key. **Not carried forward by the escrow split tx** — see KNOWN_ISSUES #51 |
 | 3 | `PREVSTATE(3)` | Campaign ID (hex-encoded UTF-8) | `0x` hex | Links on-chain coin to H2 campaign record |
 | 4 | `PREVSTATE(4)` | Creator Mx address | `Mx...` string | Enables on-chain discovery: viewer nodes send REQUEST_CAMPAIGN_DATA to this address |
 | **5** | `PREVSTATE(5)` | **PLATFORM_KEY** | `0x` hex or `0x00` | Fee recipient — validated by network; `0x00` = fee disabled (MVP) |

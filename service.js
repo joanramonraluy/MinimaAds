@@ -412,7 +412,11 @@ MDS.init(function(msg) {
   if (msg.event === "inited")   { onInited(); }
   if (msg.event === "MAXIMA")   { onMaxima(msg); }
   if (msg.event === "NEWBLOCK") {
-    scanEscrowCoins(); checkPendingChannelOpens(); checkExpiredCampaigns(); _checkChannelCoinsOnBlock(); pruneDedupLog();
+    // Fix #8 — campaign expiry is driven by chain height, not wall clock.
+    // NEWBLOCK data is the TxPoW of the new tip; height at header.block.
+    var tipBlock = 0;
+    try { tipBlock = parseInt(msg.data.txpow.header.block, 10); } catch (e) { tipBlock = 0; }
+    scanEscrowCoins(); checkPendingChannelOpens(); checkExpiredCampaigns(tipBlock); _checkChannelCoinsOnBlock(); pruneDedupLog();
     processMaximaOutbox();
     _livenessCheckBlock++;
     if (_livenessCheckBlock % 20 === 0) { checkCampaignStatuses(); }

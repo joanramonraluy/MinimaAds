@@ -147,7 +147,7 @@ function _continueCampaignAnnounce(payload, campaignId) {
     return;
   }
 
-  MDS.cmd("coins coinid:" + coinId + " relevant:false", function(res) {
+  MDS.cmd("coins coinid:" + coinId, function(res) {
     if (!res.status || !res.response || res.response.length === 0) {
       MDS.log("[CAMPAIGN] on-chain coin not found for PK verification, accepting: " + campaignId);
       persistCampaign(payload, campaignId);

@@ -174,6 +174,22 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
+### Session: 2026-09-04 (Fix #6) — `relevant:false` bypassed PREVSTATE(5) fee validation
+
+**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #6 — first Phase 3 item, LOW complexity. Delegated to a Haiku subagent (hit the monthly spend limit mid-task after completing the code fix and half the housekeeping; parent Sonnet session verified the completed work and finished the remaining housekeeping — no code loss).
+
+**Fix**: `campaign.handler.js`'s `_continueCampaignAnnounce` — `MDS.cmd("coins coinid:" + coinId + " relevant:false", ...)` → `MDS.cmd("coins coinid:" + coinId, ...)`. Per fragility #28 (AGENTS.md §3.5): Minima's `coins` RPC treats `relevant:` as a boolean *presence* check, not a value check, so `relevant:false` was being read as `relevant=true` and using `getRelevantCoins()` (wallet-filtered) instead of the intended `getAllCoins()` (full UTXO scan) — a remote creator's escrow coin was never found, so PREVSTATE(5) fee validation always silently fell through to the "coin not found, accepting" branch. Omitting `relevant:` entirely is the correct way to get `relevant=false` behavior. The "not found, accepting" fallback branch itself is untouched — it now just actually runs only when the coin is genuinely absent from the full UTXO scan, not on every call.
+
+**Verification**: code-reading + `node --check public/service-workers/handlers/campaign.handler.js` (LOW complexity, 15-min estimate in the plan — no live node test performed, matching the plan's own effort sizing; the plan's suggested live test — announce from node A, receive on node B, confirm the PREVSTATE(5) log line executes — remains available for a future session if desired).
+
+**Files modified**: `public/service-workers/handlers/campaign.handler.js`.
+
+**AGENTS.md updated**: yes — this entry; oldest entry (2026-09-04, AUD-4) moved to `docs/HISTORY.md §17`.
+
+**Open issues**: none new. Next per the plan: remaining Phase 3 items (Fix #7 through #10, #14, #20).
+
+---
+
 ### Session: 2026-09-04 (Fix #5) — `_livenessCache` key normalization + status-less invalidation
 
 **Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 2, Fix #5 — the last item blocking Phase 2 completion (Fix #12 landed earlier this session). Implemented directly by this (Sonnet) session, no delegation.
@@ -219,32 +235,6 @@ All test rows deleted afterward and confirmed gone (`SELECT COUNT(*)` = 0). No c
 **AGENTS.md updated**: yes — this entry; oldest entry (2026-09-03, live 6-node adversarial verification of Fix #1+#2+#11) moved to `docs/HISTORY.md §17`. `docs/KNOWN_ISSUES.md §3.5` AUD-5 marked Fixed. `MinimaAds.md §8.5` extended.
 
 **Open issues**: none new. AUD-2 (`sdk/index.js` viewer `REWARD_EVENTS` row never created on SDK's direct MAXIMA path) remains the only open item in `docs/KNOWN_ISSUES.md §3.5`.
-
----
-
-### Session: 2026-09-04 (AUD-4) — Security: unauthenticated CAMPAIGN_ANNOUNCE/DATA_RESPONSE could overwrite CREATOR_ADDRESS
-
-**Source**: `docs/KNOWN_ISSUES.md §3.5` AUD-4, filed from Fix #3's own Open issue (2) — Fix #3 (2026-09-03) closed the spoofed-`CAMPAIGN_FINISH` path but the poisoning step that enabled it (an unauthenticated `CAMPAIGN_DATA_RESPONSE` overwriting `CAMPAIGNS.CREATOR_ADDRESS`) remained open. `handleCampaignAnnounce` (shared by `CAMPAIGN_ANNOUNCE` and `CAMPAIGN_DATA_RESPONSE`) → `persistCampaign` → `saveCampaign` MERGEs `CREATOR_ADDRESS`/`CREATOR_MX` straight from the payload with no sender check — the dispatcher didn't even pass `msg.data.from` to either handler. Implemented by an Opus subagent (hit the monthly spend limit once mid-task, resumed cleanly ~8h later with no code loss — confirmed via `git diff` before resuming).
-
-**Fix** (identity fields protected once a row has an established strong identity; everything else keeps syncing exactly as before):
-- `maxima.handler.js` — both `CAMPAIGN_ANNOUNCE` and `CAMPAIGN_DATA_RESPONSE` call sites now pass `msg.data.from || ''`; `handleCampaignDataResponse(payload, senderPk)` threads it into `handleCampaignAnnounce`.
-- `campaign.handler.js` — `handleCampaignAnnounce(payload, senderPk)` is now a thin outer gate wrapping the unchanged former body (renamed `_continueCampaignAnnounce`). `getCampaign` → no existing row = first discovery, trust-on-first-use; no strong identity yet = first-write-wins preserved (legacy rows); sender matches the strong route = payload trusted; **otherwise** `payload.campaign.creator_address`/`creator_mx` are pinned to the stored DB values, logged as `[CAMPAIGN] ANNOUNCE identity fields pinned (sender not strongly verified). campaign=<id>`, and the rest of the row (budget, status, ad content) still syncs normally.
-- New helper `_resolveStrongCreatorPk(existing, campaignId, cb)` — same two strong sources/precedence as Fix #3's `_assertCreatorThen` (`CAMPAIGNS.CREATOR_MX`, else keypair `CREATOR_MX_<id>` cached from on-chain escrow `STATE(4)`). **Deliberately not shared with `_assertCreatorThen`** — that function resolves by first *match* across the two sources, this helper by first *resolvable* PK; sharing it would silently downgrade a legitimate Fix #3 creator-match from strong to fallback in an edge case where the two sources disagree. 6 duplicated lines judged cheaper than that regression risk.
-- `core/campaigns.js`/`saveCampaign` deliberately untouched (Stable Core API, CLAUDE.md §5) — all protection happens by mutating `payload.campaign` before it reaches `saveCampaign`.
-
-**Verification — live, adversarial, on a lightweight simulated setup** (the 6 nodes had been fully reset to genesis between sessions, wiping all prior test campaigns/channels; rather than replaying the full escrow/MLS/foundation topology from `docs/TESTING_SETUP.md §6`, seeded the precondition directly — a `CAMPAIGNS` row plus keypair `CREATOR_MX_aud4-test-1` set to Node 1's real permanent route via `MDS.sql`/`MDS.keypair.set` in a `browser_evaluate` call on Node 3 — then attacked with real Maxima messages between real node identities, same adversarial rigor as Fix #3/#4, less setup):
-1. **Attack**: crafted `CAMPAIGN_DATA_RESPONSE` from Node 2 (unrelated node, standing in for "attacker") with `creator_address` = Node 2's own PK, targeting the strongly-anchored test campaign on Node 3. Result: `[CAMPAIGN] ANNOUNCE identity fields pinned (sender not strongly verified). campaign=aud4-test-1` → `CAMPAIGNS.CREATOR_ADDRESS` on Node 3 **stayed Node 1's real PK**, while `TITLE`/`BUDGET_REMAINING` in the same message **did** update — confirming only the identity fields are protected, everything else still syncs.
-2. **Bonus — follow-up spoofed FINISH dies at the door**: immediately after, a crafted `CAMPAIGN_FINISH` from the same Node 2 got the pre-existing hard rejection `[CAMPAIGN] status change rejected: sender is not the creator` — **not** Fix #3's fallback line, because the poisoning step that would have enabled the fallback path never landed.
-3. **Legit re-sync from the real creator**: a `CAMPAIGN_DATA_RESPONSE` from Node 1 (the actual strong-route holder) with an updated title/budget persisted cleanly with **no** pinning log line — `[CAMPAIGN] ANNOUNCE persisted` only, confirming the real creator's re-syncs are unaffected.
-Test campaign row deleted afterward (`DELETE FROM CAMPAIGNS/ADS WHERE ID='aud4-test-1'`) — no lasting state left on Node 3.
-
-**Files modified**: `public/service-workers/handlers/campaign.handler.js`, `public/service-workers/handlers/maxima.handler.js`
-
-**AGENTS.md updated**: yes — this entry; oldest entry (2026-09-03, Fix #4) moved to `docs/HISTORY.md §17`. `MinimaAds.md §8.5`: yes — extended the "Sender authentication (inbound)" block with an AUD-4 paragraph pair. `docs/KNOWN_ISSUES.md §3.5` AUD-4 marked Fixed.
-
-**Operational note**: the maintainer added a project-level permission rule (`.claude/settings.local.json` → `permissions.allow`, 10 `mcp__playwright__browser_*` tool entries) after the "Zip & Install to Nodes" click kept getting blocked by the harness's auto-mode classifier across the last three sessions (Fix #3, Fix #4, and the start of this one) — self-editing that file was *also* blocked when attempted from within a session (both via the `update-config` skill and a direct `Edit` call), confirming it's a genuine harness-level guard against self-granted permissions, not bypassable from inside a session no matter how the edit is attempted. The rule was added from a **separate terminal-launched Claude Code session** instead. Empirically confirmed working immediately after: the same click that failed twice in earlier sessions succeeded on the first attempt once the rule was in place. Future sessions should no longer need a maintainer click for this specific deploy action.
-
-**Open issues**: AUD-3 (fallback-verified `CAMPAIGN_PAUSE`) and AUD-5 (`dapp/app.js` FE residual) remain open, untouched by this fix — see `docs/KNOWN_ISSUES.md §3.5`.
 
 ---
 

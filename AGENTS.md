@@ -174,6 +174,30 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
+### Session: 2026-09-04 (Fix #12 + AUD-5) — FE auto-settle: gate on `settling`, skip creator node and publisher channels
+
+**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 2 Fix #12, combined with `docs/KNOWN_ISSUES.md §3.5` AUD-5 in one session because both live in the same file and function (`dapp/app.js`'s `_autoSettleOpenChannels`) — implemented directly by this (Sonnet) session, no delegation.
+
+**Fix** (`dapp/app.js`):
+- **AUD-5**: the `CAMPAIGN_UPDATED` handler now requires `parsed.settling === true` (in addition to the pre-existing `status === 'finished'`) before calling `_autoSettleOpenChannels`. `applyStatusChange` (`campaign.handler.js`) only ever sets `settling:true` on a *strong* sender match (Fix #3/AUD-3) — the fallback path's signal always omits it — so this closes the FE-side counterpart of the same spoofing vector Fix #3/AUD-3 closed on the SW side.
+- **Fix #12**, three skip conditions added to `_autoSettleOpenChannels` itself: (1) queries `CAMPAIGNS.CREATOR_ADDRESS` first and returns immediately, before touching `CHANNEL_STATE` at all, when it matches `MY_ADDRESS` (both `.toUpperCase()`d) — this node is the campaign's own creator, and creator-opened channels settle through the SW's `autoSettleChannelsForCampaign`/`CAMPAIGN_AUTOSETTLE_REQUEST` flow instead, not this viewer-only path; (2) skips `CHANNEL_STATE` rows with `ROLE === 'publisher'` inside the per-row loop — publisher channels settle through their own reward-voucher flow; (3) the pre-existing empty-`LATEST_TX_HEX` guard (both in the SQL `WHERE` and the per-row `if (!txHex)`) was already complete, confirmed rather than duplicated.
+- Risk noted in the plan — whether `CREATOR_ADDRESS` is the same identity space as `MY_ADDRESS` for self-created campaigns — was resolved by reading `dapp/views/creator.js:1414` (`creator_address: MY_ADDRESS` at creation) before writing the comparison: same Maxima-pk space used everywhere else, no fallback-to-keypair needed.
+- `MinimaAds.md §8.5` gained a new paragraph documenting the FE-side `settling` gate and the two skip conditions, right after the existing Fix #3/AUD-3 "Resulting rule" paragraph.
+
+**Verification — live, on real nodes, after redeploying via Node Manager's "Zip & Install to Nodes" (Update, all 5 nodes) so Node 3 was actually running the new `dapp/app.js`**: found (and killed) a stale `mcp-chrome-4400f8e` Chrome process left over from a prior session holding the Playwright profile lock — new sessions should expect this if `browser_navigate`/`browser_snapshot` fail with "Browser is already in use... use --isolated" as the very first call. Rather than replaying a full campaign/channel/escrow topology, seeded `CAMPAIGNS`/`CHANNEL_STATE` rows directly via `sqlQuery` in a `browser_evaluate` on Node 3's MinimaAds tab, spy-patched `_autoSettleOpenChannels`/`_runSettlement` to record calls instead of acting, then drove the real code paths:
+1. `handleMdsComms({type:'CAMPAIGN_UPDATED', status:'finished'})` with no `settling` field → `_autoSettleOpenChannels` **not called**. Same event with `settling:true` → **called**. (AUD-5 gate)
+2. A `CAMPAIGNS` row with `CREATOR_ADDRESS = MY_ADDRESS` (Node 3's own pk) plus one open `CHANNEL_STATE` row with a non-empty `LATEST_TX_HEX` → `_autoSettleOpenChannels` returned with **zero** `_runSettlement` calls. (creator-node skip)
+3. A different `CAMPAIGNS` row with `CREATOR_ADDRESS` set to an unrelated pk, plus two open `CHANNEL_STATE` rows for the same campaign (`ROLE='viewer'` and `ROLE='publisher'`, both with non-empty `LATEST_TX_HEX`) → exactly **one** `_runSettlement` call, for the viewer row only; the publisher row was excluded. (ROLE skip)
+All test rows deleted afterward and confirmed gone (`SELECT COUNT(*)` = 0). No console errors from the app's own code during the run.
+
+**Files modified**: `dapp/app.js`, `MinimaAds.md`, `docs/KNOWN_ISSUES.md`.
+
+**AGENTS.md updated**: yes — this entry; oldest entry (2026-09-03, live 6-node adversarial verification of Fix #1+#2+#11) moved to `docs/HISTORY.md §17`. `docs/KNOWN_ISSUES.md §3.5` AUD-5 marked Fixed. `MinimaAds.md §8.5` extended.
+
+**Open issues**: none new. AUD-2 (`sdk/index.js` viewer `REWARD_EVENTS` row never created on SDK's direct MAXIMA path) remains the only open item in `docs/KNOWN_ISSUES.md §3.5`.
+
+---
+
 ### Session: 2026-09-04 (AUD-4) — Security: unauthenticated CAMPAIGN_ANNOUNCE/DATA_RESPONSE could overwrite CREATOR_ADDRESS
 
 **Source**: `docs/KNOWN_ISSUES.md §3.5` AUD-4, filed from Fix #3's own Open issue (2) — Fix #3 (2026-09-03) closed the spoofed-`CAMPAIGN_FINISH` path but the poisoning step that enabled it (an unauthenticated `CAMPAIGN_DATA_RESPONSE` overwriting `CAMPAIGNS.CREATOR_ADDRESS`) remained open. `handleCampaignAnnounce` (shared by `CAMPAIGN_ANNOUNCE` and `CAMPAIGN_DATA_RESPONSE`) → `persistCampaign` → `saveCampaign` MERGEs `CREATOR_ADDRESS`/`CREATOR_MX` straight from the payload with no sender check — the dispatcher didn't even pass `msg.data.from` to either handler. Implemented by an Opus subagent (hit the monthly spend limit once mid-task, resumed cleanly ~8h later with no code loss — confirmed via `git diff` before resuming).
@@ -197,33 +221,6 @@ Test campaign row deleted afterward (`DELETE FROM CAMPAIGNS/ADS WHERE ID='aud4-t
 **Operational note**: the maintainer added a project-level permission rule (`.claude/settings.local.json` → `permissions.allow`, 10 `mcp__playwright__browser_*` tool entries) after the "Zip & Install to Nodes" click kept getting blocked by the harness's auto-mode classifier across the last three sessions (Fix #3, Fix #4, and the start of this one) — self-editing that file was *also* blocked when attempted from within a session (both via the `update-config` skill and a direct `Edit` call), confirming it's a genuine harness-level guard against self-granted permissions, not bypassable from inside a session no matter how the edit is attempted. The rule was added from a **separate terminal-launched Claude Code session** instead. Empirically confirmed working immediately after: the same click that failed twice in earlier sessions succeeded on the first attempt once the rule was in place. Future sessions should no longer need a maintainer click for this specific deploy action.
 
 **Open issues**: AUD-3 (fallback-verified `CAMPAIGN_PAUSE`) and AUD-5 (`dapp/app.js` FE residual) remain open, untouched by this fix — see `docs/KNOWN_ISSUES.md §3.5`.
-
----
-
-### Session: 2026-09-03 — Verification: live 6-node adversarial test of audit Fix #1+#2+#11 (channel.handler.js sender auth)
-
-**Source**: maintainer asked to verify (not re-implement) that commits `a423873`/`fd92673` (2026-09-01, see below and `docs/HISTORY.md §17` for the 2026-07-18 fix entry) actually hold up against a real hostile peer, per `docs/IMPLEMENTATION_PLAN_2026-07-18.md`'s own Next Steps note that Phase 1 needs a two-node adversarial test before being considered shippable. No code was changed this session — this is the executed version of the five-point manual test plan written at fix time.
-
-**Setup**: the maintainer's usual 5-node topology (Node1=creator, Node2=publisher, Node3=viewer, Node4=MinimaAds Creator, Node5=Foundation/relay, per `docs/TESTING_SETUP.md §6`) plus a 6th node added specifically as an unprivileged attacker (no MinimaAds installed — attacks were raw `maxima action:send` RPC calls from its MinimaNodeManager console, not through the dapp UI). A real campaign was published from Node 1 (`1a067a5e4a7-b3a50359`, escrow tx confirmed on-chain) and viewed from Node 3 to get a real open channel with a real creator-signed voucher (`cumulative:0.02`) to attack.
-
-**Results — all 5 rejected/accepted as expected, verified against Node 3's live SW log (`[CHANNEL] ...` lines) and its Earnings UI (`TOTAL_EARNED` unchanged across every attack)**:
-1. **Happy path**: Node 3 opens channel, receives voucher → `CHANNEL_OPENED` + `VOUCHER_RECEIVED cumulative:0.02`, Earnings UI shows `0,020000 MINIMA`.
-2. **Spoofed `REWARD_VOUCHER`** (Node 6 → Node 3, claiming `cumulative:0`, forging no real identity): `[CHANNEL] REWARD_VOUCHER rejected: sender is not the campaign creator`. `LATEST_TX_HEX`/`TOTAL_EARNED` untouched.
-3. **Non-monotonic `cumulative`** (Node 1, the *real* creator — sender-auth passes — sends `cumulative:0.01 < 0.02`): `[CHANNEL] REWARD_VOUCHER rejected: non-monotonic cumulative (0.01 < 0.02)`.
-4. **Replay** (Node 1 re-sends the exact original `event_id`/`cumulative`): `[CHANNEL] REWARD_VOUCHER duplicate event, skipping profile update`. Earnings unchanged (no double-credit).
-5. **Unauthenticated `VOUCHER_SYNC_REQUEST`** (Node 6 → Node 1, asking for Node 3's voucher): `[CHANNEL] VOUCHER_SYNC_REQUEST rejected: senderPk != OPENER_MX_PK`.
-
-Point 3 and 4 are the more interesting proof: the sender-identity check (`msg.data.from`) is authenticated by Maxima's transport layer itself, not by anything in the JSON payload — Node 6 could not forge being Node 1 no matter what the payload claimed, so those two tests had to be sent from the *actual* Node 1 to isolate the monotonicity/dedup guards specifically (sender-auth would otherwise mask them). This confirms the audit's threat model (`msg.data.from` is cryptographically the sender) matches the real implementation.
-
-**Not separately tested**: a spoofed `CHANNEL_OPEN` (item 4 of the original audit's CRITICAL finding) — it runs through the identical `_assertCampaignCreatorSender` guard already proven by test #2/#3, so a dedicated run would be redundant coverage of the same code path, not a different one.
-
-**Operational finding worth keeping** (not a bug, a Maxima RPC gotcha): `maxima action:send publickey:X` fails with `"No Contact found for publickey : X"` unless the sending node has first run `maxcontacts action:add contact:<X's Mx-contact string>` — even when both nodes already share a P2P/relay connection. Each node needs its OWN contact entry per destination public key; there's no implicit routing from being on the same relay. Get the target's Mx-contact string via a plain `maxima` RPC call on the target node (`response.contact` field) before attempting `action:send` to it from a third node.
-
-**Files modified**: none (verification only). `AGENTS.md §6` (this entry, fix #1+2+11 entry moved to `docs/HISTORY.md §17`).
-
-**AGENTS.md updated**: yes — this entry.
-
-**Open issues**: none new. Confirms Fix #1/#2/#11 (SW + SDK, both commits) hold against a real hostile third node; Phase 1 of `docs/IMPLEMENTATION_PLAN_2026-07-18.md` can be considered adversarially verified. Next per the plan: Fix #4 (`MAX_CHANNEL_RESERVATION` on publisher channels, LOW-MEDIUM, same file) and/or Fix #3 (spoofable CAMPAIGN_PAUSE/FINISH, HIGH, different file — `campaign.handler.js`) can proceed.
 
 ---
 

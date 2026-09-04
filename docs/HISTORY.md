@@ -46,6 +46,33 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-03 — Verification: live 6-node adversarial test of audit Fix #1+#2+#11 (channel.handler.js sender auth)
+
+**Source**: maintainer asked to verify (not re-implement) that commits `a423873`/`fd92673` (2026-09-01, see below for the 2026-07-18 fix entry) actually hold up against a real hostile peer, per `docs/IMPLEMENTATION_PLAN_2026-07-18.md`'s own Next Steps note that Phase 1 needs a two-node adversarial test before being considered shippable. No code was changed this session — this is the executed version of the five-point manual test plan written at fix time.
+
+**Setup**: the maintainer's usual 5-node topology (Node1=creator, Node2=publisher, Node3=viewer, Node4=MinimaAds Creator, Node5=Foundation/relay, per `docs/TESTING_SETUP.md §6`) plus a 6th node added specifically as an unprivileged attacker (no MinimaAds installed — attacks were raw `maxima action:send` RPC calls from its MinimaNodeManager console, not through the dapp UI). A real campaign was published from Node 1 (`1a067a5e4a7-b3a50359`, escrow tx confirmed on-chain) and viewed from Node 3 to get a real open channel with a real creator-signed voucher (`cumulative:0.02`) to attack.
+
+**Results — all 5 rejected/accepted as expected, verified against Node 3's live SW log (`[CHANNEL] ...` lines) and its Earnings UI (`TOTAL_EARNED` unchanged across every attack)**:
+1. **Happy path**: Node 3 opens channel, receives voucher → `CHANNEL_OPENED` + `VOUCHER_RECEIVED cumulative:0.02`, Earnings UI shows `0,020000 MINIMA`.
+2. **Spoofed `REWARD_VOUCHER`** (Node 6 → Node 3, claiming `cumulative:0`, forging no real identity): `[CHANNEL] REWARD_VOUCHER rejected: sender is not the campaign creator`. `LATEST_TX_HEX`/`TOTAL_EARNED` untouched.
+3. **Non-monotonic `cumulative`** (Node 1, the *real* creator — sender-auth passes — sends `cumulative:0.01 < 0.02`): `[CHANNEL] REWARD_VOUCHER rejected: non-monotonic cumulative (0.01 < 0.02)`.
+4. **Replay** (Node 1 re-sends the exact original `event_id`/`cumulative`): `[CHANNEL] REWARD_VOUCHER duplicate event, skipping profile update`. Earnings unchanged (no double-credit).
+5. **Unauthenticated `VOUCHER_SYNC_REQUEST`** (Node 6 → Node 1, asking for Node 3's voucher): `[CHANNEL] VOUCHER_SYNC_REQUEST rejected: senderPk != OPENER_MX_PK`.
+
+Point 3 and 4 are the more interesting proof: the sender-identity check (`msg.data.from`) is authenticated by Maxima's transport layer itself, not by anything in the JSON payload — Node 6 could not forge being Node 1 no matter what the payload claimed, so those two tests had to be sent from the *actual* Node 1 to isolate the monotonicity/dedup guards specifically (sender-auth would otherwise mask them). This confirms the audit's threat model (`msg.data.from` is cryptographically the sender) matches the real implementation.
+
+**Not separately tested**: a spoofed `CHANNEL_OPEN` (item 4 of the original audit's CRITICAL finding) — it runs through the identical `_assertCampaignCreatorSender` guard already proven by test #2/#3, so a dedicated run would be redundant coverage of the same code path, not a different one.
+
+**Operational finding worth keeping** (not a bug, a Maxima RPC gotcha): `maxima action:send publickey:X` fails with `"No Contact found for publickey : X"` unless the sending node has first run `maxcontacts action:add contact:<X's Mx-contact string>` — even when both nodes already share a P2P/relay connection. Each node needs its OWN contact entry per destination public key; there's no implicit routing from being on the same relay. Get the target's Mx-contact string via a plain `maxima` RPC call on the target node (`response.contact` field) before attempting `action:send` to it from a third node.
+
+**Files modified**: none (verification only).
+
+**AGENTS.md updated**: yes — this entry (since rotated here).
+
+**Open issues**: none new. Confirms Fix #1/#2/#11 (SW + SDK, both commits) hold against a real hostile third node; Phase 1 of `docs/IMPLEMENTATION_PLAN_2026-07-18.md` can be considered adversarially verified. Next per the plan: Fix #4 (`MAX_CHANNEL_RESERVATION` on publisher channels, LOW-MEDIUM, same file) and/or Fix #3 (spoofable CAMPAIGN_PAUSE/FINISH, HIGH, different file — `campaign.handler.js`) can proceed.
+
+---
+
 ### Session: 2026-09-03 (Fix #3) — Security: spoofable CAMPAIGN_FINISH could force channel settlement (V1/V2)
 
 **Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 1, Fix #3. Implemented by an Opus subagent (this session ran out of Anthropic monthly spend mid-task once and was resumed — see Open issues), verified live by the parent Sonnet session. `_assertCreatorThen` (`campaign.handler.js`, pre-fix) accepted `CAMPAIGN_PAUSE/FINISH/RESUME` from any sender matching `CAMPAIGNS.CREATOR_ADDRESS`. For announce/`CAMPAIGN_DATA_RESPONSE`-discovered campaigns that column is filled from a Maxima *payload* field, so it is a weak identity: a peer that first poisons the row via an unauthenticated `CAMPAIGN_DATA_RESPONSE` could then send a `CAMPAIGN_FINISH` and force `autoSettleChannelsForCampaign` (`:592`) — an irreversible L1 settlement — on a campaign it does not control. Verifying V1/V2 senders on-chain via `PREVSTATE(4)` was rejected by the plan as a security gate (needs a coin lookup that hits platform bug #6, `relevant:false`).

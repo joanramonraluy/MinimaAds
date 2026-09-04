@@ -292,7 +292,11 @@ function handleMdsComms(parsed) {
     // Issue 1: viewer auto-settle — when a campaign finishes, check if this node
     // has open channels for it and post the settlement tx. Runs on viewer's node
     // where the local VIEWER_WALLET_PK_<campaignId> keypair is available to sign.
-    if (parsed.type === 'CAMPAIGN_UPDATED' && parsed.status === 'finished' && parsed.campaign_id) {
+    // AUD-5: only the SW's genuine settling signal (settling:true, set by
+    // applyStatusChange only when skipAutoSettle is false — see Fix #3) may
+    // trigger the FE's own auto-settle. A fallback-verified CAMPAIGN_FINISH/
+    // PAUSE omits settling:true, so it can no longer force this client-side path.
+    if (parsed.type === 'CAMPAIGN_UPDATED' && parsed.status === 'finished' && parsed.settling === true && parsed.campaign_id) {
       _autoSettleOpenChannels(parsed.campaign_id);
     }
     if ((currentRoute() === 'viewer' || currentRoute() === 'campaign-detail') && typeof onCampaignsChanged === 'function') {
@@ -456,28 +460,49 @@ function _handleAutoSettleRequest(parsed) {
 function _autoSettleOpenChannels(campaignId) {
   if (!campaignId) { return; }
   if (typeof sqlQuery !== 'function' || typeof _runSettlement !== 'function') { return; }
+  // Fix #12: this path is for VIEWER nodes only. On the creator's own node,
+  // settlement (if any) is driven by the SW's autoSettleChannelsForCampaign /
+  // CAMPAIGN_AUTOSETTLE_REQUEST flow instead — running this here too would just
+  // be noise (creator-opened channels need viewer co-sign, see _handleAutoSettleRequest).
+  // CAMPAIGNS.CREATOR_ADDRESS is set to the creator's own MY_ADDRESS at creation
+  // (dapp/views/creator.js) and is the same Maxima-pk identity space compared
+  // everywhere else, so a direct match is unambiguous here.
   sqlQuery(
-    "SELECT VIEWER_KEY, ROLE, LATEST_TX_HEX, CUMULATIVE_EARNED" +
-    " FROM CHANNEL_STATE" +
-    " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
-    " AND STATUS = 'open'" +
-    " AND LATEST_TX_HEX != ''",
-    function(err, rows) {
-      if (err || !rows || rows.length === 0) { return; }
-      console.log('[AUTOSETTLE] viewer auto-settle:', rows.length, 'channel(s) for campaign:', campaignId);
-      for (var i = 0; i < rows.length; i++) {
-        (function(row) {
-          var viewerKey  = row.VIEWER_KEY  || '';
-          var role       = row.ROLE        || 'viewer';
-          var txHex      = row.LATEST_TX_HEX || '';
-          var cumulative = parseFloat(row.CUMULATIVE_EARNED || 0);
-          if (!viewerKey || !txHex) { return; }
-          // _runSettlement: checks channel status (passes if 'open'), gets
-          // VIEWER_WALLET_PK_<campaignId> from local keypairs, then imports,
-          // signs, and posts the settlement tx.
-          _runSettlement(campaignId, viewerKey, role, txHex, null, cumulative);
-        })(rows[i]);
+    "SELECT CREATOR_ADDRESS FROM CAMPAIGNS" +
+    " WHERE UPPER(ID) = UPPER('" + escapeSql(campaignId) + "')",
+    function(errC, campaignRows) {
+      if (errC) { return; }
+      var creatorAddress = (campaignRows && campaignRows[0] && campaignRows[0].CREATOR_ADDRESS) || '';
+      if (MY_ADDRESS && creatorAddress && MY_ADDRESS.toUpperCase() === creatorAddress.toUpperCase()) {
+        return;
       }
+      sqlQuery(
+        "SELECT VIEWER_KEY, ROLE, LATEST_TX_HEX, CUMULATIVE_EARNED" +
+        " FROM CHANNEL_STATE" +
+        " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
+        " AND STATUS = 'open'" +
+        " AND LATEST_TX_HEX != ''",
+        function(err, rows) {
+          if (err || !rows || rows.length === 0) { return; }
+          console.log('[AUTOSETTLE] viewer auto-settle:', rows.length, 'channel(s) for campaign:', campaignId);
+          for (var i = 0; i < rows.length; i++) {
+            (function(row) {
+              var viewerKey  = row.VIEWER_KEY  || '';
+              var role       = row.ROLE        || 'viewer';
+              var txHex      = row.LATEST_TX_HEX || '';
+              var cumulative = parseFloat(row.CUMULATIVE_EARNED || 0);
+              // Fix #12: publisher channels settle through their own reward-voucher
+              // flow (frames.js), not this viewer-campaign-finish path.
+              if (role === 'publisher') { return; }
+              if (!viewerKey || !txHex) { return; }
+              // _runSettlement: checks channel status (passes if 'open'), gets
+              // VIEWER_WALLET_PK_<campaignId> from local keypairs, then imports,
+              // signs, and posts the settlement tx.
+              _runSettlement(campaignId, viewerKey, role, txHex, null, cumulative);
+            })(rows[i]);
+          }
+        }
+      );
     }
   );
 }

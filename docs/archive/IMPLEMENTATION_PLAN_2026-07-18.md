@@ -1,6 +1,6 @@
 # Implementation Plan — MinimaAds Audit Fixes (2026-07-18)
 
-Source audit: `/home/joanramon/Minima/MinimaAds/docs/AUDIT_2026-07-18_FABLE.md`
+Source audit: `/home/joanramon/Minima/MinimaAds/docs/archive/AUDIT_2026-07-18_FABLE.md`
 
 Verified against live code: dispatcher call sites (`maxima.handler.js:41–67`), handler signatures (`channel.handler.js:19,361,556,715,865,891`), LIMITS (`service.js:13–24`, `dapp/app.js:15–20`).
 
@@ -220,7 +220,7 @@ Verified against live code: dispatcher call sites (`maxima.handler.js:41–67`),
 3. Add a comment referencing M-4 so a future agent doesn't "fix" it back:
    ```javascript
    // M-4: do NOT debit local budget here. BUDGET_REMAINING is synced from the
-   // on-chain escrow coin by processEscrowCoin. See docs/AUDIT_2026-07-18_FABLE.md #7.
+   // on-chain escrow coin by processEscrowCoin. See docs/archive/AUDIT_2026-07-18_FABLE.md #7.
    ```
 4. Rhino-safe syntax throughout.
 
@@ -491,4 +491,4 @@ Verified against live code: dispatcher call sites (`maxima.handler.js:41–67`),
 1. **Delegate first**: Fix #1+#2+#11 as a single Opus task — it is the CRITICAL finding, blocks #4 and #15, and the three changes share one auth pattern in one file. #3 (Opus) and Phase 2 (#5, #12, Sonnet) can start in parallel immediately since there is no file overlap.
 2. **Commit strategy**: one commit per fix (or per bundled session, e.g. "#1+#2+#11"), pushed **only when the maintainer explicitly requests** (CLAUDE.md §6 process rules — no proactive push). Batch review per phase: Phase 1 gets its own review gate before Phase 3 touches the same files.
 3. **Mainnet/testnet**: Phase 1 needs a two-node adversarial test (crafted hostile payloads) before ship; #8 needs a full campaign-lifecycle testnet run. Everything else is verifiable on a single dev node.
-4. **Handoff notes**: yes — every session's handoff entry in `AGENTS.md §6` should reference this plan and the audit (`docs/AUDIT_2026-07-18_FABLE.md`) with the fix ID(s) completed, and mark the corresponding items in `docs/KNOWN_ISSUES.md`/`docs/TASKS.md`. Spec updates required along the way: §8.5 (#3), §8.15 (#17), §5 (#16), §5.1/§13.2 (#13) — per CLAUDE.md §4 Step 4.
+4. **Handoff notes**: yes — every session's handoff entry in `AGENTS.md §6` should reference this plan and the audit (`docs/archive/AUDIT_2026-07-18_FABLE.md`) with the fix ID(s) completed, and mark the corresponding items in `docs/KNOWN_ISSUES.md`/`docs/TASKS.md`. Spec updates required along the way: §8.5 (#3), §8.15 (#17), §5 (#16), §5.1/§13.2 (#13) — per CLAUDE.md §4 Step 4.

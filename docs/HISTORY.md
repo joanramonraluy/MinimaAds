@@ -92,7 +92,7 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ### Session: 2026-09-05 (Fragility #51) — Escrow split tx dropped state port 2 (campaign expiry block)
 
-**Source**: `docs/KNOWN_ISSUES.md` fragility #51, the last open item from `docs/IMPLEMENTATION_PLAN_2026-07-18.md`'s audit (found while implementing Fix #8, deliberately deferred as its own session — protocol-level change to a live escrow spending tx). Complexity HIGH per CLAUDE.md §2 rubric; maintainer confirmed continuing on Sonnet after an interrupted Opus subagent attempt (see below) rather than relaunching.
+**Source**: `docs/KNOWN_ISSUES.md` fragility #51, the last open item from `docs/archive/IMPLEMENTATION_PLAN_2026-07-18.md`'s audit (found while implementing Fix #8, deliberately deferred as its own session — protocol-level change to a live escrow spending tx). Complexity HIGH per CLAUDE.md §2 rubric; maintainer confirmed continuing on Sonnet after an interrupted Opus subagent attempt (see below) rather than relaunching.
 
 **Problem**: `_swBuildAndPostChannelTxInner` (`channel.handler.js`) carried forward state ports 1, 3, 4, 7 (+5, 6 when present) from the input escrow coin into the split tx's `stateCmds`, but never port 2 (the funded expiry block). Since `CAMPAIGNS.ESCROW_COINID` is repointed to the change coin after every channel open, every campaign silently lost its on-chain expiry block from its first channel open onwards, degrading Fix #8's block-based expiry check to the wall-clock fallback (`EXPIRES_AT + 24h`) — not catastrophic (margin already covers it) but defeats Fix #8's precision.
 
@@ -108,7 +108,7 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 **Sections updated**: `docs/KNOWN_ISSUES.md` #51 marked Fixed.
 
-**Open issues**: none — this was the last open item from `docs/IMPLEMENTATION_PLAN_2026-07-18.md`'s audit. Phases 1–4 plus both fragilities found during Fix #8 (#51, #52) are now all closed.
+**Open issues**: none — this was the last open item from `docs/archive/IMPLEMENTATION_PLAN_2026-07-18.md`'s audit. Phases 1–4 plus both fragilities found during Fix #8 (#51, #52) are now all closed.
 
 ---
 
@@ -158,7 +158,7 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ### Session: 2026-09-05 (Fix #15) — Voucher-loss self-healing on settlement failure
 
-**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 4, Fix #15 — the last item on the audit plan. Complexity MEDIUM, maintainer confirmed Sonnet directly (no delegation). This closes the plan: Phases 1–4 are now all complete.
+**Source**: `docs/archive/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 4, Fix #15 — the last item on the audit plan. Complexity MEDIUM, maintainer confirmed Sonnet directly (no delegation). This closes the plan: Phases 1–4 are now all complete.
 
 **Problem**: `_runSettlement`'s failure branches (`txnimport` and `txnsign` failures inside `onError()`; `txnpost` failure in `_postSettleTx`) just showed "Settlement failed: <error>" and stopped. Per MinimaAds.md §6.8/§8.12, the creator already resends its authoritative `REWARD_VOUCHER` on `VOUCHER_SYNC_REQUEST` — the SDK's own `_onReconnect` flow already uses this on reconnect, but nothing triggered it when a settlement attempt with a stale/corrupted `LATEST_TX_HEX` failed.
 
@@ -190,7 +190,7 @@ Fix #15 is now fully verified live, not just by isolated logic test.
 
 ### Session: 2026-09-05 (Fix #18) — Reward-ID collision resistance across all five generation sites
 
-**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 4, Fix #18. Complexity LOW (per rubric, though it touches ID-generation logic), maintainer confirmed Sonnet directly (no delegation). Implemented in this same session's context.
+**Source**: `docs/archive/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 4, Fix #18. Complexity LOW (per rubric, though it touches ID-generation logic), maintainer confirmed Sonnet directly (no delegation). Implemented in this same session's context.
 
 **Problem**: `Date.now().toString(16) + '-' + Math.floor(Math.random() * 0xFFFFFFFF).toString(16)` can produce identical IDs when two events land in the same millisecond (rapid clicks). This ID becomes `REWARD_EVENTS.ID`/`DEDUP_LOG.ID` downstream — a collision silently drops the second reward as a "duplicate", i.e. a real user-facing loss of funds, not just a data-hygiene issue.
 
@@ -259,7 +259,7 @@ Fix #15 is now fully verified live, not just by isolated logic test.
 
 ### Session: 2026-09-04 (Fix #16 + Fix #13) — LIMITS mismatch sync + dynamic channel script timelock
 
-**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #16 and accompanying Fix #13 (bonus discovery). Decisions pre-taken by maintainer via project instructions. Implemented directly by this (Haiku) session, no delegation needed.
+**Source**: `docs/archive/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #16 and accompanying Fix #13 (bonus discovery). Decisions pre-taken by maintainer via project instructions. Implemented directly by this (Haiku) session, no delegation needed.
 
 **Fix #16** (LIMITS sync across three files):
 - `MinimaAds.md` first LIMITS block (line ~423): corrected `MIN_REWARD_CLICK: 0.001 → 0.005` and `MIN_PUBLISHER_REWARD_VIEW: 0.01 → 0.001` to match actual enforced values in `service.js`; added `MAX_CHANNEL_RESERVATION: 10` and `SETTLEMENT_GRACE_DAYS: 7` (already present in SW, now documented).
@@ -281,7 +281,7 @@ Fix #15 is now fully verified live, not just by isolated logic test.
 
 ### Session: 2026-09-04 (Fix #9 + Fix #10) — Delete dead `DO_*` FE builders; wire `ESCROW_INFO` round-trip
 
-**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #9 and Fix #10 — done together per the plan's own "Track B"/"Track C" parallelism note (independent files: `dapp/app.js` deletions vs `maxima.handler.js` wiring). Implemented directly by this (Sonnet) session, no delegation.
+**Source**: `docs/archive/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #9 and Fix #10 — done together per the plan's own "Track B"/"Track C" parallelism note (independent files: `dapp/app.js` deletions vs `maxima.handler.js` wiring). Implemented directly by this (Sonnet) session, no delegation.
 
 **Fix #9** (`dapp/app.js`, ~950 lines removed): deleted `handleDoChannelOpen`, `buildAndPostChannelTx`, `finalizeChannelSplit`, `buildAndPostChannelOpenTx`, `finalizeChannelOpen`, `handleDoPublisherChannelOpen`, `startPublisherChannelTxs`, `handleDoRewardVoucher`, `buildAndExportVoucherTx`, `handleDoPublisherRewardVoucher`, `handleDoSendVoucher`, `handleDoResendChannelOpen` — the FE channel-TX builders superseded by the SW doing this work instead (per the dispatcher's own pre-existing comment: "All channel TX building and Maxima resends are now handled by the SW"). Also removed: the `handleMdsComms` dispatcher's `DO_*` legacy-warning stub (types that provably can never arrive anymore); the `handleFePending` `channel_split_sign`/`channel_split_post`/`channel_open_postsign`/`channel_open`/`voucher_sign` resume branches, replaced with a single `console.warn('[PENDING] legacy pending action ignored: ' + ctx.kind')` catch-all. Kept `runSequential` (shared with the still-live `buildAndPostStatusUpdateTx`) and `settlement`/`settlement_post`/`status_update_*` branches untouched. Verified zero remaining references to every deleted function via grep before finishing (`0 files reference it` for all twelve).
 
@@ -304,7 +304,7 @@ All test rows deleted on both nodes afterward, confirmed `COUNT(*) = 0`.
 
 ### Session: 2026-09-04 (Fix #14) — `PUBLISHER_MX` missing from FE `FRAMES` schema
 
-**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #14 — natural follow-up to this session's Fix #20, which found and fixed the same category of FE/SW schema drift on `CHANNEL_STATE`. Implemented directly by this (Sonnet) session, no delegation.
+**Source**: `docs/archive/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #14 — natural follow-up to this session's Fix #20, which found and fixed the same category of FE/SW schema drift on `CHANNEL_STATE`. Implemented directly by this (Sonnet) session, no delegation.
 
 **Fix** (`dapp/app.js` `initFEFrames`): added `PUBLISHER_MX VARCHAR(512) DEFAULT ''` to the FE `CREATE TABLE IF NOT EXISTS FRAMES (...)`, copied verbatim from the SW's already-correct definition (`db-init.js` `sql_frames`), plus the matching `ALTER TABLE FRAMES ADD COLUMN IF NOT EXISTS PUBLISHER_MX VARCHAR(512) DEFAULT ''` migration for already-installed FE tables (mirrors `db-init.js:158`). This was a real, exploitable bug, not just a latent one: `dapp/views/frames.js:246` directly runs `SELECT PUBLISHER_KEY, PUBLISHER_MX FROM FRAMES` against the FE's own local table — with the column missing, that query would throw a "column not found" SQL error. Diffed both `FRAMES` definitions column-for-column per the plan's step 3 — after this fix they match exactly, no further drift found.
 
@@ -320,7 +320,7 @@ All test rows deleted on both nodes afterward, confirmed `COUNT(*) = 0`.
 
 ### Session: 2026-09-04 (Fix #8) — Block-based campaign expiry instead of wall-clock ms
 
-**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #8 — the last open Phase 3 item and the one the plan flags as its highest-risk (a bug here terminally finishes live, funded campaigns). Delegated to an Opus session with plan-mode design, per maintainer instruction. **Phase 3 is now complete.**
+**Source**: `docs/archive/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #8 — the last open Phase 3 item and the one the plan flags as its highest-risk (a bug here terminally finishes live, funded campaigns). Delegated to an Opus session with plan-mode design, per maintainer instruction. **Phase 3 is now complete.**
 
 **Fix** (`public/service-workers/handlers/campaign.handler.js` + `service.js`): `checkExpiredCampaigns()` compared `EXPIRES_AT < Date.now()` — but `EXPIRES_AT` is only an estimate computed at creation from a block count, while what the creator actually funded is the escrow coin's state port 2 (expiry block, MinimaAds.md App. B.3). Clock skew or block-time variance therefore killed still-funded campaigns permanently (`finished` is terminal, KNOWN_ISSUES #46). Now `checkExpiredCampaigns(currentBlock)` takes the tip height from the NEWBLOCK event (`msg.data.txpow.header.block`, read defensively in `service.js`) and per candidate campaign: reads the escrow coin via `MDS.cmd("coins coinid:" + ESCROW_COINID)` (no `relevant:` — depends on Fix #6) and finishes only when `currentBlock >= port 2`; falls back to the ms comparison **only** when the coin is absent/spent or carries no port 2, and then only past `EXPIRES_AT + 24 h`; defers entirely when the tip height is unknown rather than guessing. Coin lookups are bounded by a 48 h window on `EXPIRES_AT` in the SQL itself, so far-future campaigns are never looked up. `ESCROW_COINID` (which can arrive from a Maxima payload) is passed through the existing `isHexKey` guard before being interpolated into the MDS command. No schema change, no LIMITS change — the two thresholds are local named constants, matching the existing `SIX_HOURS_MS` precedent in the same file.
 
@@ -340,7 +340,7 @@ Not covered: execution inside Rhino on an installed SW (diff mechanically scanne
 
 ### Session: 2026-09-04 (Fix #20) — Removed dead `ALTER COLUMN` statements in db-init.js + FE VIEWER_KEY parity fix
 
-**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #20. Implemented directly by this (Sonnet) session, no delegation.
+**Source**: `docs/archive/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #20. Implemented directly by this (Sonnet) session, no delegation.
 
 **Fix** (`public/service-workers/db-init.js`): removed two `sqlQuery("ALTER TABLE ... ALTER COLUMN ...", ...)` calls (`REWARD_EVENTS.PUBLISHER_ID`, `CHANNEL_STATE.VIEWER_KEY`) whose target column defs were **already** present verbatim in the `CREATE TABLE IF NOT EXISTS` statements above them — both were dead leftovers from an earlier migration that had already been folded into the CREATE, so per the plan's step 1 there was nothing left to fold; just deleted the two calls and un-nested their callback bodies by one level each (matching `}); // end ... migration` closers removed too). Per `docs/KNOWN_ISSUES.md §4` (dev DBs reset on reinstall, CREATE is the source of truth) no belt-and-suspenders replacement was added — the audit's core complaint was that a raw `ALTER COLUMN` failure aborts the rest of `initDB`'s callback chain silently; removing the dead calls removes that specific risk outright.
 
@@ -358,7 +358,7 @@ Not covered: execution inside Rhino on an installed SW (diff mechanically scanne
 
 ### Session: 2026-09-04 (Fix #7) — `comms.handler.js` view/click no longer double-debits budget (M-4)
 
-**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #7. Implemented directly by this (Sonnet) session, no delegation.
+**Source**: `docs/archive/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #7. Implemented directly by this (Sonnet) session, no delegation.
 
 **Fix**: `handleTrackView`/`handleTrackClick` (`comms.handler.js`) — removed the direct `updateBudget(campaignId, amount, cb)` call and its `budErr` branch from both; the confirm broadcast/`signalFE`/`_triggerChannelPayment` call sequence is otherwise unchanged, just no longer nested inside the `updateBudget` callback. Added the M-4 comment from the plan so a future agent doesn't "fix" it back. This was a genuine double-accounting bug: `core/rewards.js`'s `createRewardEvent` already skips `updateBudget` for `type === 'view'\|'click'` (pre-existing M-4 fix — `BUDGET_REMAINING` is on-chain-synced via `processEscrowCoin` instead), but `comms.handler.js`'s separate `MA_TRACK_VIEW`/`MA_TRACK_CLICK` path (same-device `MDS.comms.solo`/`broadcast`, used by external host MiniDapps embedding the SDK — not the dapp's own direct `createRewardEvent` call) was still debiting locally on every call, risking a campaign flipping to `'finished'` prematurely from cross-dapp view/click traffic alone.
 
@@ -374,7 +374,7 @@ Not covered: execution inside Rhino on an installed SW (diff mechanically scanne
 
 ### Session: 2026-09-04 (Fix #6) — `relevant:false` bypassed PREVSTATE(5) fee validation
 
-**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #6 — first Phase 3 item, LOW complexity. Delegated to a Haiku subagent (hit the monthly spend limit mid-task after completing the code fix and half the housekeeping; parent Sonnet session verified the completed work and finished the remaining housekeeping — no code loss).
+**Source**: `docs/archive/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #6 — first Phase 3 item, LOW complexity. Delegated to a Haiku subagent (hit the monthly spend limit mid-task after completing the code fix and half the housekeeping; parent Sonnet session verified the completed work and finished the remaining housekeeping — no code loss).
 
 **Fix**: `campaign.handler.js`'s `_continueCampaignAnnounce` — `MDS.cmd("coins coinid:" + coinId + " relevant:false", ...)` → `MDS.cmd("coins coinid:" + coinId, ...)`. Per fragility #28 (AGENTS.md §3.5): Minima's `coins` RPC treats `relevant:` as a boolean *presence* check, not a value check, so `relevant:false` was being read as `relevant=true` and using `getRelevantCoins()` (wallet-filtered) instead of the intended `getAllCoins()` (full UTXO scan) — a remote creator's escrow coin was never found, so PREVSTATE(5) fee validation always silently fell through to the "coin not found, accepting" branch. Omitting `relevant:` entirely is the correct way to get `relevant=false` behavior. The "not found, accepting" fallback branch itself is untouched — it now just actually runs only when the coin is genuinely absent from the full UTXO scan, not on every call.
 
@@ -390,7 +390,7 @@ Not covered: execution inside Rhino on an installed SW (diff mechanically scanne
 
 ### Session: 2026-09-04 (Fix #5) — `_livenessCache` key normalization + status-less invalidation
 
-**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 2, Fix #5 — the last item blocking Phase 2 completion (Fix #12 landed earlier this session). Implemented directly by this (Sonnet) session, no delegation.
+**Source**: `docs/archive/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 2, Fix #5 — the last item blocking Phase 2 completion (Fix #12 landed earlier this session). Implemented directly by this (Sonnet) session, no delegation.
 
 **Fix** (`sdk/index.js`):
 - New `_livenessKey(campaignId)` helper (`.toUpperCase()`), routed through every read/write of `_livenessCache` (`getAd`'s filter, `_checkCreatorLiveness`, `_onCreatorLivenessPong`, `_onCampaignUpdatedCore`) — `campaign_id` reaches the cache from two sources (`campaign.ID` DB rows vs `parsed.campaign_id` from Maxima signals) with no guaranteed shared casing; without normalization a mismatch silently defeats the offline filter (fragility #12 pattern, applied to this in-memory map).
@@ -408,13 +408,13 @@ All three matched expectations exactly. First attempt hit stale-session 500 erro
 
 **AGENTS.md updated**: yes — this entry (since rotated here); oldest entry (2026-09-04, AUD-3) moved to `docs/HISTORY.md §17`.
 
-**Open issues**: none new. Phase 2 of `docs/IMPLEMENTATION_PLAN_2026-07-18.md` (Fix #5 + Fix #12) is now complete. AUD-2 (`sdk/index.js` viewer `REWARD_EVENTS` row never created on SDK's direct MAXIMA path) remains the only open item in `docs/KNOWN_ISSUES.md §3.5`. Next per the plan: Phase 3 (MEDIUM platform/integration — Fix #6 through #10, #14, #20).
+**Open issues**: none new. Phase 2 of `docs/archive/IMPLEMENTATION_PLAN_2026-07-18.md` (Fix #5 + Fix #12) is now complete. AUD-2 (`sdk/index.js` viewer `REWARD_EVENTS` row never created on SDK's direct MAXIMA path) remains the only open item in `docs/KNOWN_ISSUES.md §3.5`. Next per the plan: Phase 3 (MEDIUM platform/integration — Fix #6 through #10, #14, #20).
 
 ---
 
 ### Session: 2026-09-04 (Fix #12 + AUD-5) — FE auto-settle: gate on `settling`, skip creator node and publisher channels
 
-**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 2 Fix #12, combined with `docs/KNOWN_ISSUES.md §3.5` AUD-5 in one session because both live in the same file and function (`dapp/app.js`'s `_autoSettleOpenChannels`) — implemented directly by this (Sonnet) session, no delegation.
+**Source**: `docs/archive/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 2 Fix #12, combined with `docs/KNOWN_ISSUES.md §3.5` AUD-5 in one session because both live in the same file and function (`dapp/app.js`'s `_autoSettleOpenChannels`) — implemented directly by this (Sonnet) session, no delegation.
 
 **Fix** (`dapp/app.js`):
 - **AUD-5**: the `CAMPAIGN_UPDATED` handler now requires `parsed.settling === true` (in addition to the pre-existing `status === 'finished'`) before calling `_autoSettleOpenChannels`. `applyStatusChange` (`campaign.handler.js`) only ever sets `settling:true` on a *strong* sender match (Fix #3/AUD-3) — the fallback path's signal always omits it — so this closes the FE-side counterpart of the same spoofing vector Fix #3/AUD-3 closed on the SW side.
@@ -482,7 +482,7 @@ Test campaign row deleted afterward (`DELETE FROM CAMPAIGNS/ADS WHERE ID='aud4-t
 
 ### Session: 2026-09-03 — Verification: live 6-node adversarial test of audit Fix #1+#2+#11 (channel.handler.js sender auth)
 
-**Source**: maintainer asked to verify (not re-implement) that commits `a423873`/`fd92673` (2026-09-01, see below for the 2026-07-18 fix entry) actually hold up against a real hostile peer, per `docs/IMPLEMENTATION_PLAN_2026-07-18.md`'s own Next Steps note that Phase 1 needs a two-node adversarial test before being considered shippable. No code was changed this session — this is the executed version of the five-point manual test plan written at fix time.
+**Source**: maintainer asked to verify (not re-implement) that commits `a423873`/`fd92673` (2026-09-01, see below for the 2026-07-18 fix entry) actually hold up against a real hostile peer, per `docs/archive/IMPLEMENTATION_PLAN_2026-07-18.md`'s own Next Steps note that Phase 1 needs a two-node adversarial test before being considered shippable. No code was changed this session — this is the executed version of the five-point manual test plan written at fix time.
 
 **Setup**: the maintainer's usual 5-node topology (Node1=creator, Node2=publisher, Node3=viewer, Node4=MinimaAds Creator, Node5=Foundation/relay, per `docs/TESTING_SETUP.md §6`) plus a 6th node added specifically as an unprivileged attacker (no MinimaAds installed — attacks were raw `maxima action:send` RPC calls from its MinimaNodeManager console, not through the dapp UI). A real campaign was published from Node 1 (`1a067a5e4a7-b3a50359`, escrow tx confirmed on-chain) and viewed from Node 3 to get a real open channel with a real creator-signed voucher (`cumulative:0.02`) to attack.
 
@@ -503,13 +503,13 @@ Point 3 and 4 are the more interesting proof: the sender-identity check (`msg.da
 
 **AGENTS.md updated**: yes — this entry (since rotated here).
 
-**Open issues**: none new. Confirms Fix #1/#2/#11 (SW + SDK, both commits) hold against a real hostile third node; Phase 1 of `docs/IMPLEMENTATION_PLAN_2026-07-18.md` can be considered adversarially verified. Next per the plan: Fix #4 (`MAX_CHANNEL_RESERVATION` on publisher channels, LOW-MEDIUM, same file) and/or Fix #3 (spoofable CAMPAIGN_PAUSE/FINISH, HIGH, different file — `campaign.handler.js`) can proceed.
+**Open issues**: none new. Confirms Fix #1/#2/#11 (SW + SDK, both commits) hold against a real hostile third node; Phase 1 of `docs/archive/IMPLEMENTATION_PLAN_2026-07-18.md` can be considered adversarially verified. Next per the plan: Fix #4 (`MAX_CHANNEL_RESERVATION` on publisher channels, LOW-MEDIUM, same file) and/or Fix #3 (spoofable CAMPAIGN_PAUSE/FINISH, HIGH, different file — `campaign.handler.js`) can proceed.
 
 ---
 
 ### Session: 2026-09-03 (Fix #3) — Security: spoofable CAMPAIGN_FINISH could force channel settlement (V1/V2)
 
-**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 1, Fix #3. Implemented by an Opus subagent (this session ran out of Anthropic monthly spend mid-task once and was resumed — see Open issues), verified live by the parent Sonnet session. `_assertCreatorThen` (`campaign.handler.js`, pre-fix) accepted `CAMPAIGN_PAUSE/FINISH/RESUME` from any sender matching `CAMPAIGNS.CREATOR_ADDRESS`. For announce/`CAMPAIGN_DATA_RESPONSE`-discovered campaigns that column is filled from a Maxima *payload* field, so it is a weak identity: a peer that first poisons the row via an unauthenticated `CAMPAIGN_DATA_RESPONSE` could then send a `CAMPAIGN_FINISH` and force `autoSettleChannelsForCampaign` (`:592`) — an irreversible L1 settlement — on a campaign it does not control. Verifying V1/V2 senders on-chain via `PREVSTATE(4)` was rejected by the plan as a security gate (needs a coin lookup that hits platform bug #6, `relevant:false`).
+**Source**: `docs/archive/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 1, Fix #3. Implemented by an Opus subagent (this session ran out of Anthropic monthly spend mid-task once and was resumed — see Open issues), verified live by the parent Sonnet session. `_assertCreatorThen` (`campaign.handler.js`, pre-fix) accepted `CAMPAIGN_PAUSE/FINISH/RESUME` from any sender matching `CAMPAIGNS.CREATOR_ADDRESS`. For announce/`CAMPAIGN_DATA_RESPONSE`-discovered campaigns that column is filled from a Maxima *payload* field, so it is a weak identity: a peer that first poisons the row via an unauthenticated `CAMPAIGN_DATA_RESPONSE` could then send a `CAMPAIGN_FINISH` and force `autoSettleChannelsForCampaign` (`:592`) — an irreversible L1 settlement — on a campaign it does not control. Verifying V1/V2 senders on-chain via `PREVSTATE(4)` was rejected by the plan as a security gate (needs a coin lookup that hits platform bug #6, `relevant:false`).
 
 **Fix** (`campaign.handler.js` only):
 - `_assertCreatorThen` now calls `ok(strongSender)` with a trust flag. **Strong** = sender matched a permanent route `MAX#<pk>#<mls>`, from `CAMPAIGNS.CREATOR_MX` *or* from keypair `CREATOR_MX_<campaignId>` (cached from on-chain escrow `STATE(4)`) — neither settable by a payload. **Fallback** = matched `CREATOR_ADDRESS` only. No match → rejected, still fails closed. Hand-rolled `MAX#` parsing replaced with `parseMaximaRoute` (also rejects legacy `MAX#Mx…#mls`). Same two sources and precedence as `channel.handler.js`'s `_assertCampaignCreatorSender`.
@@ -535,7 +535,7 @@ Point 3 and 4 are the more interesting proof: the sender-identity check (`msg.da
 
 ### Session: 2026-09-03 (Fix #4) — Security: cap publisher CHANNEL_OPEN_REQUEST to LIMITS.MAX_CHANNEL_RESERVATION
 
-**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 1, Fix #4 — the publisher branch of `handleChannelOpenRequest` capped a publisher's channel reservation only at `MAX_PUBLISHER_BUDGET` remaining, never at the same per-channel ceiling (`LIMITS.MAX_CHANNEL_RESERVATION`, value 10) already enforced on the viewer branch (`channel.handler.js:230–235`). A publisher (or a hand-crafted `CHANNEL_OPEN_REQUEST`) could pre-reserve up to the entire remaining publisher budget in one channel.
+**Source**: `docs/archive/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 1, Fix #4 — the publisher branch of `handleChannelOpenRequest` capped a publisher's channel reservation only at `MAX_PUBLISHER_BUDGET` remaining, never at the same per-channel ceiling (`LIMITS.MAX_CHANNEL_RESERVATION`, value 10) already enforced on the viewer branch (`channel.handler.js:230–235`). A publisher (or a hand-crafted `CHANNEL_OPEN_REQUEST`) could pre-reserve up to the entire remaining publisher budget in one channel.
 
 **Fix**: `channel.handler.js:96–103` — after computing `effectiveCap = Math.min(maxAmount, pubRemaining)`, added the same clamp pattern the viewer branch already uses: `var reservationCap = LIMITS.MAX_CHANNEL_RESERVATION || 10; if (effectiveCap > reservationCap) { ...log...; effectiveCap = reservationCap; }`, placed *before* the existing budget log line so the log reflects the final capped value. No hardcoded `10` — reads `LIMITS.MAX_CHANNEL_RESERVATION` (`service.js:21`), matching CLAUDE.md §6. Sender side (`_doSendPublisherChannelOpenRequest:1319`) intentionally untouched — this is a receiver-side defense against hand-crafted requests, per the plan.
 
@@ -616,7 +616,7 @@ Public API unchanged (`MinimaAds.{init,getAd,render,trackView,trackClick,handleM
 
 ### Session: 2026-07-18 (audit fixes #1 + #2 + #11) — Security: authenticate inbound channel Maxima handlers
 
-**Source**: `docs/AUDIT_2026-07-18_FABLE.md` (CRITICAL + HIGH findings) and `docs/IMPLEMENTATION_PLAN_2026-07-18.md` (Phase 1, Fix #1 / #2 / #11).
+**Source**: `docs/archive/AUDIT_2026-07-18_FABLE.md` (CRITICAL + HIGH findings) and `docs/archive/IMPLEMENTATION_PLAN_2026-07-18.md` (Phase 1, Fix #1 / #2 / #11).
 
 **Problem**: N2-4 hardened `handleRewardRequest` with an `OPENER_MX_PK` sender binding but left its three mirror handlers unauthenticated — the dispatcher did not even pass `msg.data.from` to them. Any Maxima peer knowing a `(campaign_id, viewer_key)` pair could:
 1. Send a crafted `REWARD_VOUCHER` → `updateChannelVoucher` overwrote `LATEST_TX_HEX`, destroying the viewer's only creator-signed settlement voucher (real economic loss). No monotonicity check existed, so a *lower* `cumulative` was accepted.

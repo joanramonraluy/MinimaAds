@@ -153,7 +153,12 @@ function _continueCampaignAnnounce(payload, campaignId) {
       persistCampaign(payload, campaignId);
       return;
     }
-    var prevstates = res.response[0].prevstate || [];
+    // Fragility #52: Minima's coin JSON never carries a "prevstate" key — only
+    // "state" (the state the coin carries now, which becomes PREVSTATE on its
+    // next spend; confirmed against Coin.toJSON()). Reading .prevstate here
+    // silently returned [] forever, so the PREVSTATE(5)/(6) checks below never
+    // actually validated anything against the real on-chain keys.
+    var prevstates = res.response[0].state || [];
     var onChainPk = getStateVar(prevstates, 5);
     // If escrow was created without PLATFORM_KEY (0x00), accept regardless of local setting.
     // Creator and viewer may have different PLATFORM_KEY overrides; 0x00 means creator had fee disabled.

@@ -174,6 +174,30 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
+### Session: 2026-09-05 (Fragility #52) — Dead PREVSTATE(5)/(6) validation on campaign announces
+
+**Source**: `docs/KNOWN_ISSUES.md` fragility #52, found (but out of scope) while implementing Fix #8. Complexity MEDIUM (one-line code change, but activates a previously-dead security check — maintainer confirmed Sonnet directly, no delegation). Picked up after Fix #8/#15/#17/#18/#19 and the LIMITS regression closed out Phases 1–4.
+
+**Problem**: `_continueCampaignAnnounce` (`campaign.handler.js`) read `res.response[0].prevstate` to verify a campaign's escrow coin carries the locally-configured `PLATFORM_KEY`/`FOUNDATION_KEY` at state ports 5/6. Minima's `Coin.toJSON()` never emits a `prevstate` key (confirmed against `refs/Minima-1.0.45/src/org/minima/objects/Coin.java` and empirically against a real coin) — only `state`. So `prevstates` was always `[]`, both key checks always no-opped, and a `CAMPAIGN_ANNOUNCE` was accepted regardless of whether its escrow's real on-chain keys matched. Same bug family as Fix #6 (that one made the coin unfindable; this one made the state unreadable even once found).
+
+**Fix**: one line — `var prevstates = res.response[0].state || [];` — plus a comment explaining the naming trap ("PREVSTATE(n)" in the specs means the coin's *current* state, which becomes PREVSTATE on its *next* spend).
+
+**Risk considered before touching it**: this activates a check that was previously silently inert. If `PLATFORM_KEY`/`FOUNDATION_KEY` are misconfigured anywhere (mismatched across nodes, or not actually written into escrow state the way the check expects), announces that used to pass unconditionally could start being silently dropped. Confirmed this is a real live path in the current test topology — all 6 nodes have `PLATFORM_KEY`/`FOUNDATION_KEY` overridden (not null), so `localPlatformSet`/`localFoundationSet` are true and the check actually runs (the `!localPlatformSet && !localFoundationSet` early-out at the top of the function does NOT apply here).
+
+**Verification — live, positive path only**: redeployed to all 6 nodes. Created a brand-new real campaign (node 1) after the fix — real escrow coin, real state port 5/6 values written by `creator.js`. Confirmed on a remote node (node 5) via `sqlQuery`: the `CAMPAIGN_ANNOUNCE` propagated and persisted (`STATUS='active'`) exactly as before the fix — the now-real key check did not reject a legitimate campaign. **Negative path (crafted announce against a coin with a deliberately mismatched port 5/6, confirming the check now actually rejects) was not attempted** — judged disproportionate for a one-line change already root-caused precisely against Minima's own source, given the session's time already invested; noted in `docs/KNOWN_ISSUES.md` #52 if the maintainer wants that extra rigor later.
+
+**Also fixed this session, found by chance while setting up this verification**: a live regression from yesterday's Fix #13 commit — `creator.js`'s `buildChannelScriptFE()` was evaluated eagerly at script-load time, before `dapp/app.js` (loaded after it in `index.html`) had defined the global `LIMITS` it depends on, throwing `ReferenceError: LIMITS is not defined` on every Creator page load and leaving `CHANNEL_SCRIPT_ADDRESS` resolution broken. Fixed by computing it lazily at the point of use instead of at module scope. See commit history for full detail — this was significant enough to warrant its own commit, done immediately rather than batched with #52.
+
+**Files modified**: `public/service-workers/handlers/campaign.handler.js`, `docs/KNOWN_ISSUES.md`.
+
+**AGENTS.md updated**: yes — this entry; oldest entry (2026-09-05, Fix #18) moved to `docs/HISTORY.md §17`.
+
+**Sections updated**: `docs/KNOWN_ISSUES.md` #52 marked Fixed.
+
+**Open issues**: fragility #51 (escrow split tx drops state port 2, degrades Fix #8 after first channel open) is the one remaining open item from the audit — HIGH complexity, protocol-level change to a live escrow spending tx, needs its own dedicated session with Opus + plan mode and real split+channel-open verification, same rigor as Fix #8 itself.
+
+---
+
 ### Session: 2026-09-05 (regression) — `LIMITS is not defined` crash in `creator.js` channel script builder
 
 **Source**: not a plan item — found live, by chance, while setting up the environment to do Fix #15's live E2E verification (see next entry). First page load of the Creator view threw `ReferenceError: LIMITS is not defined` in the browser console, on every load, before any user interaction.
@@ -226,35 +250,6 @@ Fix #15 is now fully verified live, not just by isolated logic test.
 
 ---
 
-### Session: 2026-09-05 (Fix #18) — Reward-ID collision resistance across all five generation sites
-
-**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 4, Fix #18. Complexity LOW (per rubric, though it touches ID-generation logic), maintainer confirmed Sonnet directly (no delegation). Implemented in this same session's context.
-
-**Problem**: `Date.now().toString(16) + '-' + Math.floor(Math.random() * 0xFFFFFFFF).toString(16)` can produce identical IDs when two events land in the same millisecond (rapid clicks). This ID becomes `REWARD_EVENTS.ID`/`DEDUP_LOG.ID` downstream — a collision silently drops the second reward as a "duplicate", i.e. a real user-facing loss of funds, not just a data-hygiene issue.
-
-**Sites fixed** (the plan named four; a fifth was found and included — see below):
-1. `core/rewards.js` `_generateRewardId()` — canonical fallback used by `createRewardEvent`.
-2. `public/service-workers/handlers/comms.handler.js` — two identical inline generations (`handleTrackView`/`handleTrackClick`) consolidated into one shared `_generateCommsEventId()` with its own counter (`_commsEventIdCounter`, distinctly named from `core/rewards.js`'s counter since both `MDS.load()` into the same SW global scope — same top-level `var` name across files loaded that way would silently reset each other).
-3. `dapp/app.js` `generateUID()` — backs `CAMPAIGNS.ID`, `ADS.ID`, `FRAMES.FRAME_ID`, and settlement txIds; same collision class.
-4. **`sdk/index.js`** — **not in the original plan's four sites, but the most consequential one**: `channel.handler.js` (`createRewardEvent({id: ctx.eventId, ...})`) uses the eventId the *viewer's SDK* generated client-side as the literal `REWARD_EVENTS.ID` — so the SDK-side generator was actually more load-bearing than `core/rewards.js`'s own fallback for the common reward path. Fixed both of its inline sites (`doCreateReward()`'s `eventId`, and `_sendPublisherRewardRequest`'s `evtId` — which had even weaker entropy, `0xFFFF` instead of `0xFFFFFFFF`) via a new `_generateSdkEventId(prefix)` helper scoped inside the SDK's existing IIFE (no cross-file collision risk — its `var`s are private to the closure, unlike the SW files).
-
-**Fix pattern** (identical everywhere, Rhino-safe where required — `var`, `function()`, string concat, no arrows/template literals): a monotonic per-scope counter (mod `0xFFFF`) plus a second `0xFFFFFFFF` random segment appended to the existing timestamp+random pair. Format stays prefix-compatible (nothing parses these IDs, per the plan) — `'pub_'` prefix on the publisher-reward site preserved via the `prefix` param.
-
-**Schema check**: `REWARD_EVENTS.ID`/`DEDUP_LOG.ID` are `VARCHAR(256)` — the new ~35–40 char IDs fit with wide margin, no migration needed in either runtime.
-
-**Out of scope, deliberately not touched**: `dapp/views/earnings.js`'s `settleId` (`'stl_' + Date.now().toString(16)`) — this is a transient Minima `txnimport`/`txnsign`/`txnpost id:` builder handle, deleted (`txndelete`) at the end of each settlement attempt, not a DB primary key. Different risk class, out of this fix's scope.
-
-**Verification**: `node --check` passed on all four touched files (`core/rewards.js`, `comms.handler.js`, `dapp/app.js`, `sdk/index.js`). Grepped for the old weak pattern project-wide after the edit — zero remaining hits outside this fix's own new helper functions.
-
-**Files modified**: `core/rewards.js`, `public/service-workers/handlers/comms.handler.js`, `dapp/app.js`, `sdk/index.js`.
-
-**AGENTS.md updated**: yes — this entry; oldest entry (2026-09-04, Fix #9 + Fix #10) moved to `docs/HISTORY.md §17`.
-
-**Sections updated**: none in `MinimaAds.md` — the ID format was never a documented contract ("nothing parses these IDs"), so no spec drift was introduced.
-
-**Open issues**: none new. Remaining Phase 4 item: Fix #15 (voucher-loss self-healing via `VOUCHER_SYNC_REQUEST`) — the last item on the audit plan, MEDIUM complexity, needs live verification with a corrupted `LATEST_TX_HEX` in devtools.
-
----
 
 
 

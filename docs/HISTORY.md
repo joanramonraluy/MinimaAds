@@ -46,6 +46,36 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-05 (Fix #18) — Reward-ID collision resistance across all five generation sites
+
+**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 4, Fix #18. Complexity LOW (per rubric, though it touches ID-generation logic), maintainer confirmed Sonnet directly (no delegation). Implemented in this same session's context.
+
+**Problem**: `Date.now().toString(16) + '-' + Math.floor(Math.random() * 0xFFFFFFFF).toString(16)` can produce identical IDs when two events land in the same millisecond (rapid clicks). This ID becomes `REWARD_EVENTS.ID`/`DEDUP_LOG.ID` downstream — a collision silently drops the second reward as a "duplicate", i.e. a real user-facing loss of funds, not just a data-hygiene issue.
+
+**Sites fixed** (the plan named four; a fifth was found and included — see below):
+1. `core/rewards.js` `_generateRewardId()` — canonical fallback used by `createRewardEvent`.
+2. `public/service-workers/handlers/comms.handler.js` — two identical inline generations (`handleTrackView`/`handleTrackClick`) consolidated into one shared `_generateCommsEventId()` with its own counter (`_commsEventIdCounter`, distinctly named from `core/rewards.js`'s counter since both `MDS.load()` into the same SW global scope — same top-level `var` name across files loaded that way would silently reset each other).
+3. `dapp/app.js` `generateUID()` — backs `CAMPAIGNS.ID`, `ADS.ID`, `FRAMES.FRAME_ID`, and settlement txIds; same collision class.
+4. **`sdk/index.js`** — **not in the original plan's four sites, but the most consequential one**: `channel.handler.js` (`createRewardEvent({id: ctx.eventId, ...})`) uses the eventId the *viewer's SDK* generated client-side as the literal `REWARD_EVENTS.ID` — so the SDK-side generator was actually more load-bearing than `core/rewards.js`'s own fallback for the common reward path. Fixed both of its inline sites (`doCreateReward()`'s `eventId`, and `_sendPublisherRewardRequest`'s `evtId` — which had even weaker entropy, `0xFFFF` instead of `0xFFFFFFFF`) via a new `_generateSdkEventId(prefix)` helper scoped inside the SDK's existing IIFE (no cross-file collision risk — its `var`s are private to the closure, unlike the SW files).
+
+**Fix pattern** (identical everywhere, Rhino-safe where required — `var`, `function()`, string concat, no arrows/template literals): a monotonic per-scope counter (mod `0xFFFF`) plus a second `0xFFFFFFFF` random segment appended to the existing timestamp+random pair. Format stays prefix-compatible (nothing parses these IDs, per the plan) — `'pub_'` prefix on the publisher-reward site preserved via the `prefix` param.
+
+**Schema check**: `REWARD_EVENTS.ID`/`DEDUP_LOG.ID` are `VARCHAR(256)` — the new ~35–40 char IDs fit with wide margin, no migration needed in either runtime.
+
+**Out of scope, deliberately not touched**: `dapp/views/earnings.js`'s `settleId` (`'stl_' + Date.now().toString(16)`) — this is a transient Minima `txnimport`/`txnsign`/`txnpost id:` builder handle, deleted (`txndelete`) at the end of each settlement attempt, not a DB primary key. Different risk class, out of this fix's scope.
+
+**Verification**: `node --check` passed on all four touched files (`core/rewards.js`, `comms.handler.js`, `dapp/app.js`, `sdk/index.js`). Grepped for the old weak pattern project-wide after the edit — zero remaining hits outside this fix's own new helper functions.
+
+**Files modified**: `core/rewards.js`, `public/service-workers/handlers/comms.handler.js`, `dapp/app.js`, `sdk/index.js`.
+
+**AGENTS.md updated**: yes — this entry; oldest entry (2026-09-04, Fix #9 + Fix #10) moved to `docs/HISTORY.md §17`.
+
+**Sections updated**: none in `MinimaAds.md` — the ID format was never a documented contract ("nothing parses these IDs"), so no spec drift was introduced.
+
+**Open issues**: none new. Remaining Phase 4 item: Fix #15 (voucher-loss self-healing via `VOUCHER_SYNC_REQUEST`) — the last item on the audit plan, MEDIUM complexity, needs live verification with a corrupted `LATEST_TX_HEX` in devtools.
+
+---
+
 ### Session: 2026-09-05 (Fix #19 + Fix #17) — Resolve AUTO_SETTLE signal lift (cleanup, multi-session completion)
 
 **Source**: Fix #19 (log noise in `_maxDelivered` 'delivery failed' line) + Fix #17 (lift deprecated `AUTO_SETTLE` signal type). Prior execution halted mid-Fix #17 part 2 by infrastructure rate limit (not code error). Previous sessions completed Fix #19 and Fix #17 part 1 (dispatcher removal). This session: finish parts 2–3 (function deletion + documentation updates).

@@ -46,6 +46,45 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-05 (Fix #19 + Fix #17) — Resolve AUTO_SETTLE signal lift (cleanup, multi-session completion)
+
+**Source**: Fix #19 (log noise in `_maxDelivered` 'delivery failed' line) + Fix #17 (lift deprecated `AUTO_SETTLE` signal type). Prior execution halted mid-Fix #17 part 2 by infrastructure rate limit (not code error). Previous sessions completed Fix #19 and Fix #17 part 1 (dispatcher removal). This session: finish parts 2–3 (function deletion + documentation updates).
+
+**Fix #19 status** (completed in prior execution, not re-touched): `core/minima.js:71` already has the reduced log: `MDS.log("[MINIMA] " + label + " delivery failed: delivered=" + delivered + " error=" + err);` without the per-delivery noise. ✓
+
+**Fix #17 part 1 status** (completed in prior execution, not re-touched): `dapp/app.js`'s `AUTO_SETTLE` dispatcher block already removed. `grep -n "AUTO_SETTLE" dapp/app.js` confirmed: no hits. ✓
+
+**Fix #17 part 2** (`dapp/views/earnings.js`): 
+- Removed the dead handler function `onAutoSettle` (was lines 654–664, unreferenced after part 1 dispatcher removal).
+- Updated the file's header comment (line 5): removed `onAutoSettle` from the handlers list (now: `onChannelOpened, onVoucherReceived, onSettleConfirmed`).
+- Kept `onSettleConfirmed`, `_runSettlement`, and `_postSettleTx` untouched (still active).
+- Verified: `node --check dapp/views/earnings.js` passes syntax validation.
+
+**Fix #17 part 3** (`MinimaAds.md`):
+1. **§8.15 (signal table, line ~1357)**: removed the row for `AUTO_SETTLE` signal type. `CAMPAIGN_AUTOSETTLE_REQUEST` row stays (now line 1357).
+2. **§6.7 (Automatic trigger block, lines ~636–639)**: replaced the old AUTO_SETTLE logic with the new CAMPAIGN_AUTOSETTLE_REQUEST + `_autoSettleOpenChannels` flow:
+   ```
+   OLD: SW detects finished → signalFE('AUTO_SETTLE', { ... })
+   NEW: SW detects finished with settling:true → creator's autoSettleChannelsForCampaign() emits
+        CAMPAIGN_AUTOSETTLE_REQUEST → viewer's _autoSettleOpenChannels processes it
+   ```
+3. **§11.2 (NEWBLOCK event handler, line ~1495)**: updated the Action column from
+   `"trigger AUTO_SETTLE signal for expired campaigns"` to
+   `"expired campaigns finishing triggers the auto-settle flow (§6.7: CAMPAIGN_AUTOSETTLE_REQUEST + viewer _autoSettleOpenChannels)"`.
+
+**Validation**:
+- `grep -rn "AUTO_SETTLE" --include=*.js .` in repo: only matches now are `CAMPAIGN_AUTOSETTLE_REQUEST` (the kept signal) and comments referencing it — zero bare `'AUTO_SETTLE'` or `onAutoSettle` references remain. ✓
+- `grep -n "AUTO_SETTLE" MinimaAds.md`: only `CAMPAIGN_AUTOSETTLE_REQUEST` remains. ✓
+- `node --check dapp/views/earnings.js`: syntax valid. ✓
+
+**Files modified**: `dapp/views/earnings.js`, `MinimaAds.md`.
+
+**AGENTS.md updated**: yes — this entry added; oldest entry (Fix #14, 2026-09-04) moved to `docs/HISTORY.md §17` per the 3-entry rule.
+
+**Open issues**: none new.
+
+---
+
 ### Session: 2026-09-04 (Fix #16 + Fix #13) — LIMITS mismatch sync + dynamic channel script timelock
 
 **Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #16 and accompanying Fix #13 (bonus discovery). Decisions pre-taken by maintainer via project instructions. Implemented directly by this (Haiku) session, no delegation needed.

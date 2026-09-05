@@ -174,6 +174,28 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
+### Session: 2026-09-05 (AUD-2) — Viewer REWARD_EVENTS row never created on the SDK's direct MAXIMA path
+
+**Source**: `docs/KNOWN_ISSUES.md` AUD-2, discovered while fixing AUD-1, left open as out-of-scope. Complexity MEDIUM (single-file bug fix, contained business logic, no schema/Maxima-shape change) — maintainer confirmed Sonnet directly.
+
+**Problem**: `_handleRewardVoucherPayload` (`sdk/index.js`) — the code path a *foreign* MiniDapp hits when it embeds only `sdk/index.js` and decodes raw Maxima `REWARD_VOUCHER` messages itself, with no local copy of our Service Worker — calls `updateChannelVoucher` (writing the new `CUMULATIVE_EARNED` to `CHANNEL_STATE`) *before* calling `_onVoucherReceivedCore`. That function's viewer branch then re-read the channel via `_getMyChannel`, so `oldCumulative` was already the *new* value — `amount = newCumulative - oldCumulative` always computed `0`, and the `amount <= 0` guard silently dropped the reward. Real economic loss for viewers on any host that integrates the SDK without our SW.
+
+**Correction to the original KNOWN_ISSUES.md note**: it claimed "the SW path passes the pre-write oldCumulative and is unaffected" — investigated and that's not quite why. `channel.handler.js` (our own SW) never goes through this SDK code at all: it writes `REWARD_EVENTS`/`USER_PROFILE` directly itself and only fires `VOUCHER_RECEIVED` for FE UI refresh. When our own FE separately polls the same raw Maxima message, `_isDuplicateEvent` already sees the SW's own `DEDUP_LOG` row and returns early, before ever reaching the broken subtraction. So the bug was real but literally unreachable in our fully-integrated dapp — only a bare-SDK host (no local SW) ever depended on this function to persist the reward, and it always failed there.
+
+**Fix**: `_handleRewardVoucherPayload` already captures the pre-write cumulative (`oldCum`, via `_storedCumulative`, for its own monotonicity guard) — now passes it through as `old_cumulative` on the object handed to `_onVoucherReceivedCore`. Extracted the viewer branch's reward-creation logic into a new `_createViewerRewardFromVoucher(parsed, oldCumulative)` helper: uses `parsed.old_cumulative` when present, otherwise falls back to the original `_getMyChannel` read (still correct for the SW-signaled `VOUCHER_RECEIVED` MDSCOMMS path and the exposed `window.onVoucherReceived` public API, neither of which pass a pre-write value or suffer the race). No public function signature changed — `_onVoucherReceivedCore(parsed)` still takes one argument; `old_cumulative` is an optional field on it.
+
+**Verification — isolated logic test, not live E2E (deliberate, discussed with maintainer)**: the 6-node test harness always runs the SW alongside the SDK, so the dedup guard above means the buggy branch is structurally unreachable there regardless of whether the fix is present — a live E2E run would prove nothing about this specific bug. Instead: loaded the real `sdk/index.js` source into a `vm`-sandboxed context with all `core/*.js` externals stubbed (`getCampaign`, `getChannelState`, `isDuplicate`, `updateChannelVoucher` — the stub actually mutates a fake `CHANNEL_STATE.CUMULATIVE_EARNED`, reproducing the real write-then-read race — `createRewardEvent` as a spy), driven through the real public entry point `MinimaAds.handleMdsEvent` with a fabricated raw MAXIMA `REWARD_VOUCHER` event (not a hand-rolled call to the private function). Against the pre-fix source: `createRewardEvent` called 0 times (reward silently dropped, reproducing AUD-2 exactly). Against the fixed source: called exactly once, with the correct amount (0.06 → 0.08 cumulative, delta 0.02).
+
+**Files modified**: `sdk/index.js`, `docs/KNOWN_ISSUES.md`.
+
+**AGENTS.md updated**: yes — this entry; oldest entry (2026-09-05, Fragility #52) moved to `docs/HISTORY.md §17`.
+
+**Sections updated**: `docs/KNOWN_ISSUES.md` AUD-2 marked Fixed.
+
+**Open issues**: none new. `docs/KNOWN_ISSUES.md`'s audit-findings tables (AUD-1 through AUD-5, DOC-1) are now all closed; fragility #51/#52 (separate table) were closed in prior sessions this same day.
+
+---
+
 ### Session: 2026-09-05 (DOC-1) — Stale flow docs describing pre-M-4 SDK reward flow
 
 **Source**: `docs/KNOWN_ISSUES.md` DOC-1, noted at implementation time of prior session fixes but left open as out-of-scope. Complexity LOW (pure documentation rewrite, no code change). Haiku confirmed directly by maintainer.
@@ -215,30 +237,6 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 **Sections updated**: `docs/KNOWN_ISSUES.md` #51 marked Fixed.
 
 **Open issues**: none — this was the last open item from `docs/IMPLEMENTATION_PLAN_2026-07-18.md`'s audit. Phases 1–4 plus both fragilities found during Fix #8 (#51, #52) are now all closed.
-
----
-
-### Session: 2026-09-05 (Fragility #52) — Dead PREVSTATE(5)/(6) validation on campaign announces
-
-**Source**: `docs/KNOWN_ISSUES.md` fragility #52, found (but out of scope) while implementing Fix #8. Complexity MEDIUM (one-line code change, but activates a previously-dead security check — maintainer confirmed Sonnet directly, no delegation). Picked up after Fix #8/#15/#17/#18/#19 and the LIMITS regression closed out Phases 1–4.
-
-**Problem**: `_continueCampaignAnnounce` (`campaign.handler.js`) read `res.response[0].prevstate` to verify a campaign's escrow coin carries the locally-configured `PLATFORM_KEY`/`FOUNDATION_KEY` at state ports 5/6. Minima's `Coin.toJSON()` never emits a `prevstate` key (confirmed against `refs/Minima-1.0.45/src/org/minima/objects/Coin.java` and empirically against a real coin) — only `state`. So `prevstates` was always `[]`, both key checks always no-opped, and a `CAMPAIGN_ANNOUNCE` was accepted regardless of whether its escrow's real on-chain keys matched. Same bug family as Fix #6 (that one made the coin unfindable; this one made the state unreadable even once found).
-
-**Fix**: one line — `var prevstates = res.response[0].state || [];` — plus a comment explaining the naming trap ("PREVSTATE(n)" in the specs means the coin's *current* state, which becomes PREVSTATE on its *next* spend).
-
-**Risk considered before touching it**: this activates a check that was previously silently inert. If `PLATFORM_KEY`/`FOUNDATION_KEY` are misconfigured anywhere (mismatched across nodes, or not actually written into escrow state the way the check expects), announces that used to pass unconditionally could start being silently dropped. Confirmed this is a real live path in the current test topology — all 6 nodes have `PLATFORM_KEY`/`FOUNDATION_KEY` overridden (not null), so `localPlatformSet`/`localFoundationSet` are true and the check actually runs (the `!localPlatformSet && !localFoundationSet` early-out at the top of the function does NOT apply here).
-
-**Verification — live, positive path only**: redeployed to all 6 nodes. Created a brand-new real campaign (node 1) after the fix — real escrow coin, real state port 5/6 values written by `creator.js`. Confirmed on a remote node (node 5) via `sqlQuery`: the `CAMPAIGN_ANNOUNCE` propagated and persisted (`STATUS='active'`) exactly as before the fix — the now-real key check did not reject a legitimate campaign. **Negative path (crafted announce against a coin with a deliberately mismatched port 5/6, confirming the check now actually rejects) was not attempted** — judged disproportionate for a one-line change already root-caused precisely against Minima's own source, given the session's time already invested; noted in `docs/KNOWN_ISSUES.md` #52 if the maintainer wants that extra rigor later.
-
-**Also fixed this session, found by chance while setting up this verification**: a live regression from yesterday's Fix #13 commit — `creator.js`'s `buildChannelScriptFE()` was evaluated eagerly at script-load time, before `dapp/app.js` (loaded after it in `index.html`) had defined the global `LIMITS` it depends on, throwing `ReferenceError: LIMITS is not defined` on every Creator page load and leaving `CHANNEL_SCRIPT_ADDRESS` resolution broken. Fixed by computing it lazily at the point of use instead of at module scope. See commit history for full detail — this was significant enough to warrant its own commit, done immediately rather than batched with #52.
-
-**Files modified**: `public/service-workers/handlers/campaign.handler.js`, `docs/KNOWN_ISSUES.md`.
-
-**AGENTS.md updated**: yes — this entry; oldest entry (2026-09-05, Fix #18) moved to `docs/HISTORY.md §17`.
-
-**Sections updated**: `docs/KNOWN_ISSUES.md` #52 marked Fixed.
-
-**Open issues**: fragility #51 (escrow split tx drops state port 2, degrades Fix #8 after first channel open) is the one remaining open item from the audit — HIGH complexity, protocol-level change to a live escrow spending tx, needs its own dedicated session with Opus + plan mode and real split+channel-open verification, same rigor as Fix #8 itself.
 
 ---
 

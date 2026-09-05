@@ -957,28 +957,42 @@
 
     // Viewer voucher — create REWARD_EVENT now that it's confirmed
     console.log('[SDK] VOUCHER_RECEIVED campaign:' + parsed.campaign_id + ' cumulative:' + parsed.cumulative);
-    _getMyChannel(parsed.campaign_id, function(chErr, channel) {
-      var oldCumulative = (chErr || !channel) ? 0 : parseFloat(channel.CUMULATIVE_EARNED || 0);
-      var newCumulative = parseFloat(parsed.cumulative);
-      var amount = newCumulative - oldCumulative;
-      getCampaign(parsed.campaign_id, function(err, campaign) {
-        if (err || !campaign || amount <= 0) {
-          _clearPendingByCumulative(parsed.campaign_id, newCumulative, function() {});
-          return;
-        }
-        _lookupAdId(parsed.campaign_id, function(errAd, adId) {
-          var params = {
-            id: parsed.event_id,
-            campaign_id: parsed.campaign_id,
-            ad_id: adId || '',
-            user_address: parsed.viewer_key,
-            type: parsed.reward_type || 'view',
-            amount: amount
-          };
-          createRewardEvent(params, function() {
-            _clearPendingByCumulative(parsed.campaign_id, newCumulative, function() {
-              console.log('[SDK] pending cleared for campaign:' + parsed.campaign_id);
-            });
+    // AUD-2: on the direct-Maxima path (_handleRewardVoucherPayload),
+    // updateChannelVoucher has already overwritten CUMULATIVE_EARNED with the
+    // NEW value by the time we get here, so re-reading it via _getMyChannel
+    // would make oldCumulative === newCumulative and amount always compute to
+    // 0 — no reward ever recorded on SDK-hosted nodes with no local SW. That
+    // caller instead passes the value it captured before the write.
+    if (parsed.old_cumulative !== undefined) {
+      _createViewerRewardFromVoucher(parsed, parseFloat(parsed.old_cumulative) || 0);
+    } else {
+      _getMyChannel(parsed.campaign_id, function(chErr, channel) {
+        var oldCumulative = (chErr || !channel) ? 0 : parseFloat(channel.CUMULATIVE_EARNED || 0);
+        _createViewerRewardFromVoucher(parsed, oldCumulative);
+      });
+    }
+  }
+
+  function _createViewerRewardFromVoucher(parsed, oldCumulative) {
+    var newCumulative = parseFloat(parsed.cumulative);
+    var amount = newCumulative - oldCumulative;
+    getCampaign(parsed.campaign_id, function(err, campaign) {
+      if (err || !campaign || amount <= 0) {
+        _clearPendingByCumulative(parsed.campaign_id, newCumulative, function() {});
+        return;
+      }
+      _lookupAdId(parsed.campaign_id, function(errAd, adId) {
+        var params = {
+          id: parsed.event_id,
+          campaign_id: parsed.campaign_id,
+          ad_id: adId || '',
+          user_address: parsed.viewer_key,
+          type: parsed.reward_type || 'view',
+          amount: amount
+        };
+        createRewardEvent(params, function() {
+          _clearPendingByCumulative(parsed.campaign_id, newCumulative, function() {
+            console.log('[SDK] pending cleared for campaign:' + parsed.campaign_id);
           });
         });
       });
@@ -1257,6 +1271,12 @@
               viewer_key: payload.viewer_key,
               event_id: payload.event_id,
               cumulative: cumulative,
+              // AUD-2: pass the pre-write cumulative captured above — by the
+              // time _onVoucherReceivedCore runs, updateChannelVoucher has
+              // already overwritten CHANNEL_STATE.CUMULATIVE_EARNED with the
+              // new value, so a fresh _getMyChannel read would see the new
+              // value on both sides of the subtraction.
+              old_cumulative: oldCum,
               role: role,
               reward_type: payload.reward_type || 'view',
               frame_id: payload.frame_id || ''

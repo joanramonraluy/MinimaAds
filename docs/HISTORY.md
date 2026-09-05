@@ -46,6 +46,30 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-05 (Fragility #52) — Dead PREVSTATE(5)/(6) validation on campaign announces
+
+**Source**: `docs/KNOWN_ISSUES.md` fragility #52, found (but out of scope) while implementing Fix #8. Complexity MEDIUM (one-line code change, but activates a previously-dead security check — maintainer confirmed Sonnet directly, no delegation). Picked up after Fix #8/#15/#17/#18/#19 and the LIMITS regression closed out Phases 1–4.
+
+**Problem**: `_continueCampaignAnnounce` (`campaign.handler.js`) read `res.response[0].prevstate` to verify a campaign's escrow coin carries the locally-configured `PLATFORM_KEY`/`FOUNDATION_KEY` at state ports 5/6. Minima's `Coin.toJSON()` never emits a `prevstate` key (confirmed against `refs/Minima-1.0.45/src/org/minima/objects/Coin.java` and empirically against a real coin) — only `state`. So `prevstates` was always `[]`, both key checks always no-opped, and a `CAMPAIGN_ANNOUNCE` was accepted regardless of whether its escrow's real on-chain keys matched. Same bug family as Fix #6 (that one made the coin unfindable; this one made the state unreadable even once found).
+
+**Fix**: one line — `var prevstates = res.response[0].state || [];` — plus a comment explaining the naming trap ("PREVSTATE(n)" in the specs means the coin's *current* state, which becomes PREVSTATE on its *next* spend).
+
+**Risk considered before touching it**: this activates a check that was previously silently inert. If `PLATFORM_KEY`/`FOUNDATION_KEY` are misconfigured anywhere (mismatched across nodes, or not actually written into escrow state the way the check expects), announces that used to pass unconditionally could start being silently dropped. Confirmed this is a real live path in the current test topology — all 6 nodes have `PLATFORM_KEY`/`FOUNDATION_KEY` overridden (not null), so `localPlatformSet`/`localFoundationSet` are true and the check actually runs (the `!localPlatformSet && !localFoundationSet` early-out at the top of the function does NOT apply here).
+
+**Verification — live, positive path only**: redeployed to all 6 nodes. Created a brand-new real campaign (node 1) after the fix — real escrow coin, real state port 5/6 values written by `creator.js`. Confirmed on a remote node (node 5) via `sqlQuery`: the `CAMPAIGN_ANNOUNCE` propagated and persisted (`STATUS='active'`) exactly as before the fix — the now-real key check did not reject a legitimate campaign. **Negative path (crafted announce against a coin with a deliberately mismatched port 5/6, confirming the check now actually rejects) was not attempted** — judged disproportionate for a one-line change already root-caused precisely against Minima's own source, given the session's time already invested; noted in `docs/KNOWN_ISSUES.md` #52 if the maintainer wants that extra rigor later.
+
+**Also fixed this session, found by chance while setting up this verification**: a live regression from yesterday's Fix #13 commit — `creator.js`'s `buildChannelScriptFE()` was evaluated eagerly at script-load time, before `dapp/app.js` (loaded after it in `index.html`) had defined the global `LIMITS` it depends on, throwing `ReferenceError: LIMITS is not defined` on every Creator page load and leaving `CHANNEL_SCRIPT_ADDRESS` resolution broken. Fixed by computing it lazily at the point of use instead of at module scope. See commit history for full detail — this was significant enough to warrant its own commit, done immediately rather than batched with #52.
+
+**Files modified**: `public/service-workers/handlers/campaign.handler.js`, `docs/KNOWN_ISSUES.md`.
+
+**AGENTS.md updated**: yes — this entry; oldest entry (2026-09-05, Fix #18) moved to `docs/HISTORY.md §17`.
+
+**Sections updated**: `docs/KNOWN_ISSUES.md` #52 marked Fixed.
+
+**Open issues**: fragility #51 (escrow split tx drops state port 2, degrades Fix #8 after first channel open) is the one remaining open item from the audit — HIGH complexity, protocol-level change to a live escrow spending tx, needs its own dedicated session with Opus + plan mode and real split+channel-open verification, same rigor as Fix #8 itself.
+
+---
+
 ### Session: 2026-09-05 (regression) — `LIMITS is not defined` crash in `creator.js` channel script builder
 
 **Source**: not a plan item — found live, by chance, while setting up the environment to do Fix #15's live E2E verification (see next entry). First page load of the Creator view threw `ReferenceError: LIMITS is not defined` in the browser console, on every load, before any user interaction.

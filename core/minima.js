@@ -68,7 +68,7 @@ function _maxDelivered(res, label) {
       if (res.response.error) { err = res.response.error; }
       else if (res.response.message) { err = res.response.message; }
     }
-    MDS.log("[MINIMA] " + label + " delivery failed: " + err + " | resp=" + JSON.stringify(res && res.response ? res.response : res));
+    MDS.log("[MINIMA] " + label + " delivery failed: delivered=" + delivered + " error=" + err);
   }
   return delivered;
 }

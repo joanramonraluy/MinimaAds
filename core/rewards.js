@@ -3,8 +3,15 @@
 // Rhino-compatible: var only, no arrow functions, no template literals.
 // All DB access via sqlQuery(). No bare MDS.sql calls.
 
+// Fix #18: a bare timestamp+random pair can collide when two events land in the
+// same millisecond (rapid clicks). A monotonic per-process counter plus a second
+// random segment makes that practically impossible while staying prefix-compatible
+// (nothing parses these IDs).
+var _rewardIdCounter = 0;
 function _generateRewardId() {
-  return Date.now().toString(16) + '-' + Math.floor(Math.random() * 0xFFFFFFFF).toString(16);
+  _rewardIdCounter = (_rewardIdCounter + 1) % 0xFFFF;
+  return Date.now().toString(16) + '-' + _rewardIdCounter.toString(16) + '-' +
+    Math.floor(Math.random() * 0xFFFFFFFF).toString(16) + Math.floor(Math.random() * 0xFFFFFFFF).toString(16);
 }
 
 function createRewardEvent(params, cb) {

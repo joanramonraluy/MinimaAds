@@ -2,7 +2,7 @@
 // Shows: total earned (USER_PROFILE), reward event history (REWARD_EVENTS),
 // and pending channel settlements (CHANNEL_STATE) with settle buttons.
 // Channel settlement functions (_runSettlement, _postSettleTx) and signal
-// handlers (onChannelOpened, onVoucherReceived, onAutoSettle, onSettleConfirmed)
+// handlers (onChannelOpened, onVoucherReceived, onSettleConfirmed)
 // live here as globals so app.js can call them regardless of active route.
 
 // Helper: Format time remaining (e.g., "23d 5h", "12h", "EXPIRED")
@@ -649,18 +649,6 @@ function onVoucherReceived(parsed) {
   }
   _refreshChannelRewards();
   if (typeof loadTodayEarned === 'function') { loadTodayEarned(); }
-}
-
-function onAutoSettle(parsed) {
-  console.log('[EARNINGS] onAutoSettle campaign:', parsed && parsed.campaign_id,
-    'cumulative:', parsed && parsed.cumulative);
-  if (!parsed || !parsed.campaign_id || !parsed.viewer_key || !parsed.tx_hex) {
-    console.warn('[EARNINGS] onAutoSettle: incomplete payload', parsed);
-    return;
-  }
-  var statusEl = document.getElementById('ma-channel-settle-status');
-  if (statusEl) { statusEl.textContent = 'Settling reward channel automatically…'; }
-  _runSettlement(parsed.campaign_id, parsed.viewer_key, parsed.role || 'viewer', parsed.tx_hex, null, parsed.cumulative);
 }
 
 function onSettleConfirmed(parsed) {

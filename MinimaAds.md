@@ -634,9 +634,12 @@ Settlement turns the off-chain accumulated `LATEST_TX_HEX` into an on-chain tran
 
 ```
 Automatic trigger:
-  SW detects campaign STATUS = 'finished' (via CAMPAIGN_FINISH Maxima or NEWBLOCK expiry check)
-  → for each CHANNEL_STATE WHERE campaign_id = X AND status = 'open' AND latest_tx_hex != ''
-  → signalFE('AUTO_SETTLE', { campaign_id, viewer_key, tx_hex })
+  SW detects campaign STATUS = 'finished' with settling:true (via CAMPAIGN_FINISH Maxima,
+  CAMPAIGN_PAUSE, or NEWBLOCK expiry check)
+  → creator's SW: autoSettleChannelsForCampaign() emits signalFE('CAMPAIGN_AUTOSETTLE_REQUEST',
+    { campaign_id, channels: [{ viewer_key, role, tx_hex, cumulative }…] })
+  → viewer's FE: CAMPAIGN_UPDATED (status='finished', settling:true) triggers
+    _autoSettleOpenChannels(campaign_id), which posts each open channel's latest_tx_hex
 
 Manual trigger:
   Viewer clicks "Settle rewards" button in UI
@@ -1354,7 +1357,6 @@ Sent when a viewer or publisher's `#mycampaigns`/`#frames` view wants live escro
 | `NEW_CAMPAIGN` | `{ campaign_id }` | `campaign.handler.js` (SW) | CAMPAIGN_ANNOUNCE received and persisted |
 | `CHANNEL_OPENED` | `{ campaign_id, channel_coinid, max_amount }` | `channel.handler.js` (SW) | Channel coin confirmed on-chain, viewer can earn |
 | `VOUCHER_RECEIVED` | `{ campaign_id, cumulative }` | `channel.handler.js` (SW) | New REWARD_VOUCHER stored; viewer balance updated |
-| `AUTO_SETTLE` | `{ campaign_id, viewer_key, role, tx_hex, cumulative }` | `channel.handler.js` (SW) | Campaign finished — viewer should post settlement tx |
 | `CAMPAIGN_AUTOSETTLE_REQUEST` | `{ campaign_id, channels: [{ viewer_key, role, tx_hex, cumulative }…] }` | `channel.handler.js` (SW) | Creator campaign finished — mark channels settling and request creator to post settlement txs |
 | `SETTLE_CONFIRMED` | `{ campaign_id, amount }` | `channel.handler.js` (FE) | Settlement tx posted successfully |
 | `FRAME_READY` | `{ frame_id, is_builtin }` | `service.js` (SW) | Built-in frame ensured at init — SDK can resolve default frameId |
@@ -1490,7 +1492,7 @@ MDS.init(function(msg) {
 | `inited` | `onInited()` | Init DB schema, register node in USER_PROFILE, start re-broadcast |
 | `MAXIMA` | `onMaxima(data)` | Decode hex payload, route by `payload.type` |
 | `MDS_TIMER_10SECONDS` | `onTimer()` | Re-broadcast active campaigns, check expirations, scan escrow coins |
-| `NEWBLOCK` | `onNewBlock()` | Check campaign expiry (block-based — see below); trigger AUTO_SETTLE signal for expired campaigns with open channels |
+| `NEWBLOCK` | `onNewBlock()` | Check campaign expiry (block-based — see below); expired campaigns finishing triggers the auto-settle flow (§6.7: CAMPAIGN_AUTOSETTLE_REQUEST + viewer _autoSettleOpenChannels) |
 
 **Campaign expiry is block-based (audit Fix #8).** `checkExpiredCampaigns(currentBlock)` receives the new tip height from the event (`msg.data.txpow.header.block`). For each active campaign expiring within 48 h of now (a window that also bounds the number of coin lookups per block), it reads the escrow coin (`coins coinid:<ESCROW_COINID>`, no `relevant:` — fragility #28) and finishes the campaign only when `currentBlock >= state port 2` (the funded expiry block, Appendix B.3). `CAMPAIGNS.EXPIRES_AT` is only an estimate computed at creation and is used solely as a fallback — when the escrow coin is absent, spent or carries no port 2 — and then only once `EXPIRES_AT + 24 h` has passed, so clock skew between nodes cannot prematurely finish a funded campaign (`finished` is terminal, KNOWN_ISSUES #46). When the tip height is unknown the check defers to the next `NEWBLOCK` rather than guessing.
 

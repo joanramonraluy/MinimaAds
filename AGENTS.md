@@ -174,6 +174,75 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
+### Session: 2026-09-05 (Fix #18) — Reward-ID collision resistance across all five generation sites
+
+**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 4, Fix #18. Complexity LOW (per rubric, though it touches ID-generation logic), maintainer confirmed Sonnet directly (no delegation). Implemented in this same session's context.
+
+**Problem**: `Date.now().toString(16) + '-' + Math.floor(Math.random() * 0xFFFFFFFF).toString(16)` can produce identical IDs when two events land in the same millisecond (rapid clicks). This ID becomes `REWARD_EVENTS.ID`/`DEDUP_LOG.ID` downstream — a collision silently drops the second reward as a "duplicate", i.e. a real user-facing loss of funds, not just a data-hygiene issue.
+
+**Sites fixed** (the plan named four; a fifth was found and included — see below):
+1. `core/rewards.js` `_generateRewardId()` — canonical fallback used by `createRewardEvent`.
+2. `public/service-workers/handlers/comms.handler.js` — two identical inline generations (`handleTrackView`/`handleTrackClick`) consolidated into one shared `_generateCommsEventId()` with its own counter (`_commsEventIdCounter`, distinctly named from `core/rewards.js`'s counter since both `MDS.load()` into the same SW global scope — same top-level `var` name across files loaded that way would silently reset each other).
+3. `dapp/app.js` `generateUID()` — backs `CAMPAIGNS.ID`, `ADS.ID`, `FRAMES.FRAME_ID`, and settlement txIds; same collision class.
+4. **`sdk/index.js`** — **not in the original plan's four sites, but the most consequential one**: `channel.handler.js` (`createRewardEvent({id: ctx.eventId, ...})`) uses the eventId the *viewer's SDK* generated client-side as the literal `REWARD_EVENTS.ID` — so the SDK-side generator was actually more load-bearing than `core/rewards.js`'s own fallback for the common reward path. Fixed both of its inline sites (`doCreateReward()`'s `eventId`, and `_sendPublisherRewardRequest`'s `evtId` — which had even weaker entropy, `0xFFFF` instead of `0xFFFFFFFF`) via a new `_generateSdkEventId(prefix)` helper scoped inside the SDK's existing IIFE (no cross-file collision risk — its `var`s are private to the closure, unlike the SW files).
+
+**Fix pattern** (identical everywhere, Rhino-safe where required — `var`, `function()`, string concat, no arrows/template literals): a monotonic per-scope counter (mod `0xFFFF`) plus a second `0xFFFFFFFF` random segment appended to the existing timestamp+random pair. Format stays prefix-compatible (nothing parses these IDs, per the plan) — `'pub_'` prefix on the publisher-reward site preserved via the `prefix` param.
+
+**Schema check**: `REWARD_EVENTS.ID`/`DEDUP_LOG.ID` are `VARCHAR(256)` — the new ~35–40 char IDs fit with wide margin, no migration needed in either runtime.
+
+**Out of scope, deliberately not touched**: `dapp/views/earnings.js`'s `settleId` (`'stl_' + Date.now().toString(16)`) — this is a transient Minima `txnimport`/`txnsign`/`txnpost id:` builder handle, deleted (`txndelete`) at the end of each settlement attempt, not a DB primary key. Different risk class, out of this fix's scope.
+
+**Verification**: `node --check` passed on all four touched files (`core/rewards.js`, `comms.handler.js`, `dapp/app.js`, `sdk/index.js`). Grepped for the old weak pattern project-wide after the edit — zero remaining hits outside this fix's own new helper functions.
+
+**Files modified**: `core/rewards.js`, `public/service-workers/handlers/comms.handler.js`, `dapp/app.js`, `sdk/index.js`.
+
+**AGENTS.md updated**: yes — this entry; oldest entry (2026-09-04, Fix #9 + Fix #10) moved to `docs/HISTORY.md §17`.
+
+**Sections updated**: none in `MinimaAds.md` — the ID format was never a documented contract ("nothing parses these IDs"), so no spec drift was introduced.
+
+**Open issues**: none new. Remaining Phase 4 item: Fix #15 (voucher-loss self-healing via `VOUCHER_SYNC_REQUEST`) — the last item on the audit plan, MEDIUM complexity, needs live verification with a corrupted `LATEST_TX_HEX` in devtools.
+
+---
+
+### Session: 2026-09-05 (Fix #19 + Fix #17) — Resolve AUTO_SETTLE signal lift (cleanup, multi-session completion)
+
+**Source**: Fix #19 (log noise in `_maxDelivered` 'delivery failed' line) + Fix #17 (lift deprecated `AUTO_SETTLE` signal type). Prior execution halted mid-Fix #17 part 2 by infrastructure rate limit (not code error). Previous sessions completed Fix #19 and Fix #17 part 1 (dispatcher removal). This session: finish parts 2–3 (function deletion + documentation updates).
+
+**Fix #19 status** (completed in prior execution, not re-touched): `core/minima.js:71` already has the reduced log: `MDS.log("[MINIMA] " + label + " delivery failed: delivered=" + delivered + " error=" + err);` without the per-delivery noise. ✓
+
+**Fix #17 part 1 status** (completed in prior execution, not re-touched): `dapp/app.js`'s `AUTO_SETTLE` dispatcher block already removed. `grep -n "AUTO_SETTLE" dapp/app.js` confirmed: no hits. ✓
+
+**Fix #17 part 2** (`dapp/views/earnings.js`): 
+- Removed the dead handler function `onAutoSettle` (was lines 654–664, unreferenced after part 1 dispatcher removal).
+- Updated the file's header comment (line 5): removed `onAutoSettle` from the handlers list (now: `onChannelOpened, onVoucherReceived, onSettleConfirmed`).
+- Kept `onSettleConfirmed`, `_runSettlement`, and `_postSettleTx` untouched (still active).
+- Verified: `node --check dapp/views/earnings.js` passes syntax validation.
+
+**Fix #17 part 3** (`MinimaAds.md`):
+1. **§8.15 (signal table, line ~1357)**: removed the row for `AUTO_SETTLE` signal type. `CAMPAIGN_AUTOSETTLE_REQUEST` row stays (now line 1357).
+2. **§6.7 (Automatic trigger block, lines ~636–639)**: replaced the old AUTO_SETTLE logic with the new CAMPAIGN_AUTOSETTLE_REQUEST + `_autoSettleOpenChannels` flow:
+   ```
+   OLD: SW detects finished → signalFE('AUTO_SETTLE', { ... })
+   NEW: SW detects finished with settling:true → creator's autoSettleChannelsForCampaign() emits
+        CAMPAIGN_AUTOSETTLE_REQUEST → viewer's _autoSettleOpenChannels processes it
+   ```
+3. **§11.2 (NEWBLOCK event handler, line ~1495)**: updated the Action column from
+   `"trigger AUTO_SETTLE signal for expired campaigns"` to
+   `"expired campaigns finishing triggers the auto-settle flow (§6.7: CAMPAIGN_AUTOSETTLE_REQUEST + viewer _autoSettleOpenChannels)"`.
+
+**Validation**:
+- `grep -rn "AUTO_SETTLE" --include=*.js .` in repo: only matches now are `CAMPAIGN_AUTOSETTLE_REQUEST` (the kept signal) and comments referencing it — zero bare `'AUTO_SETTLE'` or `onAutoSettle` references remain. ✓
+- `grep -n "AUTO_SETTLE" MinimaAds.md`: only `CAMPAIGN_AUTOSETTLE_REQUEST` remains. ✓
+- `node --check dapp/views/earnings.js`: syntax valid. ✓
+
+**Files modified**: `dapp/views/earnings.js`, `MinimaAds.md`.
+
+**AGENTS.md updated**: yes — this entry added; oldest entry (Fix #14, 2026-09-04) moved to `docs/HISTORY.md §17` per the 3-entry rule.
+
+**Open issues**: none new.
+
+---
+
 ### Session: 2026-09-04 (Fix #16 + Fix #13) — LIMITS mismatch sync + dynamic channel script timelock
 
 **Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #16 and accompanying Fix #13 (bonus discovery). Decisions pre-taken by maintainer via project instructions. Implemented directly by this (Haiku) session, no delegation needed.
@@ -196,44 +265,6 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 
 ---
 
-### Session: 2026-09-04 (Fix #9 + Fix #10) — Delete dead `DO_*` FE builders; wire `ESCROW_INFO` round-trip
-
-**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #9 and Fix #10 — done together per the plan's own "Track B"/"Track C" parallelism note (independent files: `dapp/app.js` deletions vs `maxima.handler.js` wiring). Implemented directly by this (Sonnet) session, no delegation.
-
-**Fix #9** (`dapp/app.js`, ~950 lines removed): deleted `handleDoChannelOpen`, `buildAndPostChannelTx`, `finalizeChannelSplit`, `buildAndPostChannelOpenTx`, `finalizeChannelOpen`, `handleDoPublisherChannelOpen`, `startPublisherChannelTxs`, `handleDoRewardVoucher`, `buildAndExportVoucherTx`, `handleDoPublisherRewardVoucher`, `handleDoSendVoucher`, `handleDoResendChannelOpen` — the FE channel-TX builders superseded by the SW doing this work instead (per the dispatcher's own pre-existing comment: "All channel TX building and Maxima resends are now handled by the SW"). Also removed: the `handleMdsComms` dispatcher's `DO_*` legacy-warning stub (types that provably can never arrive anymore); the `handleFePending` `channel_split_sign`/`channel_split_post`/`channel_open_postsign`/`channel_open`/`voucher_sign` resume branches, replaced with a single `console.warn('[PENDING] legacy pending action ignored: ' + ctx.kind')` catch-all. Kept `runSequential` (shared with the still-live `buildAndPostStatusUpdateTx`) and `settlement`/`settlement_post`/`status_update_*` branches untouched. Verified zero remaining references to every deleted function via grep before finishing (`0 files reference it` for all twelve).
-
-**Fix #10** (`public/service-workers/handlers/maxima.handler.js`): added the missing `onMaxima` dispatcher case for inbound `ESCROW_INFO_RESPONSE` — `signalFE("ESCROW_INFO_RESPONSE", payload)` — relaying the creator's response to the FE's pre-existing (but previously unreachable) `_handleEscrowInfoResponse` handler. Narrowed the counterparty auth gate in `handleEscrowInfoRequest`: the `CHANNEL_STATE` membership query now also requires `UPPER(STATUS) = 'OPEN'`, so a settled/stale counterparty loses read access to live financials.
-
-**Bonus fix, found while verifying Fix #10 live** (same file): `_doEscrowInfoResponse`'s two `sendMaxima(null, fromRoute, ...)` calls had the arguments backwards — `fromRoute` (`msg.data.from`, a bare public key) was passed in `sendMaxima`'s `mxAddress` slot instead of its `publicKey` slot. This silently broke every escrow-info response ever sent (routed via `to:<bare PK>` instead of `publickey:<PK>`), which is exactly why nothing had caught it before — the FE relay this session just added was the first thing that would have surfaced a live response arriving at all. Fixed both call sites to `sendMaxima(fromRoute, null, ...)`.
-
-**Verification — live, two real nodes** (Node 1 = creator, Node 3 = requester), after redeploying via "Zip & Install to Nodes" (6 nodes, all Success). `browser_evaluate` hung twice for the full 30-minute tool timeout when constructing/sending the Maxima payload (consistent with this session's established pattern for Maxima-send calls specifically — DB-only `sqlQuery` calls via `browser_evaluate` kept working fine throughout) — switched to MinimaNodeManager's per-node terminal textbox for the actual `maxima action:send` calls, which worked immediately both times. Seeded a real `CAMPAIGNS` row on Node 1 (`BUDGET_TOTAL=20, BUDGET_REMAINING=15, MAX_PUBLISHER_BUDGET=2, PUBLISHER_BUDGET_SPENT=0.5`) plus a `CHANNEL_STATE` row with `OPENER_MX_PK` = Node 3's real Maxima PK, `STATUS='open'`; seeded a stale stub row (`BUDGET_REMAINING=999`) on Node 3 to observe the update.
-1. Node 3 → Node 1 `ESCROW_INFO_REQUEST` (real Maxima, `maxcontacts action:add` needed first — publickey casing had to match the contact list's stored lowercase `0x` prefix exactly, `UPPER()` in SQL doesn't apply to Minima's own RPC contact lookup): Node 1 log `[MAXIMA] ESCROW_INFO_RESPONSE sent ok=true campaign=fix10-test-1`; Node 3's `CAMPAIGNS` row updated to `BUDGET_TOTAL=20.000000, BUDGET_REMAINING=15.000000, STATUS=ACTIVE` — full round-trip confirmed, and confirms the `sendMaxima` argument-order bonus fix was load-bearing (this would have silently failed pre-fix).
-2. Flipped Node 1's `CHANNEL_STATE.STATUS` to `'settled'`, changed `BUDGET_REMAINING` to `10`, resent the identical request from Node 3: Node 3's `CAMPAIGNS` row stayed at `15.000000` (never updated to `10`) — narrowed auth gate correctly withheld the response from a no-longer-open counterparty.
-All test rows deleted on both nodes afterward, confirmed `COUNT(*) = 0`.
-
-**Files modified**: `dapp/app.js`, `public/service-workers/handlers/maxima.handler.js`, `MinimaAds.md`.
-
-**AGENTS.md updated**: yes — this entry; oldest entry (2026-09-04, Fix #7) moved to `docs/HISTORY.md §17`. `MinimaAds.md §8.15` signal table: removed the six now-dead `DO_*` rows, added `ESCROW_INFO_RESPONSE`. New `MinimaAds.md §8.19`/`§8.20` document `ESCROW_INFO_REQUEST`/`ESCROW_INFO_RESPONSE` as full Maxima message types (previously undocumented) — includes the auth-gate rule and the `sendMaxima` argument-order gotcha.
-
-**Open issues**: none new. Remaining Phase 3 item: Fix #8 (block-based expiry) — the highest-risk item in Phase 3, needs dedicated planning/clock-skew testing before attempting; not picked up this session.
-
----
-
-### Session: 2026-09-04 (Fix #14) — `PUBLISHER_MX` missing from FE `FRAMES` schema
-
-**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #14 — natural follow-up to this session's Fix #20, which found and fixed the same category of FE/SW schema drift on `CHANNEL_STATE`. Implemented directly by this (Sonnet) session, no delegation.
-
-**Fix** (`dapp/app.js` `initFEFrames`): added `PUBLISHER_MX VARCHAR(512) DEFAULT ''` to the FE `CREATE TABLE IF NOT EXISTS FRAMES (...)`, copied verbatim from the SW's already-correct definition (`db-init.js` `sql_frames`), plus the matching `ALTER TABLE FRAMES ADD COLUMN IF NOT EXISTS PUBLISHER_MX VARCHAR(512) DEFAULT ''` migration for already-installed FE tables (mirrors `db-init.js:158`). This was a real, exploitable bug, not just a latent one: `dapp/views/frames.js:246` directly runs `SELECT PUBLISHER_KEY, PUBLISHER_MX FROM FRAMES` against the FE's own local table — with the column missing, that query would throw a "column not found" SQL error. Diffed both `FRAMES` definitions column-for-column per the plan's step 3 — after this fix they match exactly, no further drift found.
-
-**Verification — live**, after redeploying via "Zip & Install to Nodes" (6 nodes, all Success). On Node 1's MinimaAds tab (`browser_evaluate` worked normally): inserted a `FRAMES` row with a `PUBLISHER_MX` value via the FE's own `sqlQuery`, read it back — round-tripped correctly, no error. Confirmed against an **already-initialized** table (1 pre-existing frame, the built-in one from boot), not just a fresh CREATE, proving the `ADD COLUMN IF NOT EXISTS` migration path works on existing installs too. Test row deleted afterward.
-
-**Files modified**: `dapp/app.js`.
-
-**AGENTS.md updated**: yes — this entry; oldest entry (2026-09-04, Fix #6) moved to `docs/HISTORY.md §17`.
-
-**Open issues**: none new. Remaining Phase 3 items: Fix #8 (block-based expiry — highest-risk item, needs dedicated planning/clock-skew testing), Fix #9 (delete ~700 lines of dead `DO_*` FE builders), Fix #10 (wire `ESCROW_INFO` round-trip).
-
----
 
 > Previous handoff notes (AUD-1, patches 15–25, Security Audit 2, and all earlier) are archived in `docs/HISTORY.md §17`.
 

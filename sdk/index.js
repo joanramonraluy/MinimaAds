@@ -50,6 +50,21 @@
     return String(campaignId || '').toUpperCase();
   }
 
+  // Fix #18: this eventId is what the creator later stores as REWARD_EVENTS.ID
+  // (channel.handler.js passes it straight through as params.id) — a bare
+  // timestamp+random pair can collide when two events are minted in the same
+  // millisecond, silently dropping the second reward as a "duplicate". A
+  // monotonic per-page counter plus a second random segment makes that
+  // practically impossible. Scoped inside this IIFE, so no risk of colliding
+  // with core/rewards.js's own counter even though both load into the same page.
+  var _sdkEventIdCounter = 0;
+  function _generateSdkEventId(prefix) {
+    _sdkEventIdCounter = (_sdkEventIdCounter + 1) % 0xFFFF;
+    var id = Date.now().toString(16) + '-' + _sdkEventIdCounter.toString(16) + '-' +
+      Math.floor(Math.random() * 0xFFFFFFFF).toString(16) + Math.floor(Math.random() * 0xFFFFFFFF).toString(16);
+    return prefix ? (prefix + id) : id;
+  }
+
   function _completeInit(cb) {
     MDS.cmd('maxima action:info', function(mxRes) {
       if (mxRes && mxRes.status && mxRes.response) {
@@ -469,7 +484,7 @@
 
   function _sendPublisherRewardRequest(campaign, channel, frameId, amount, cb) {
     var newCum = (parseFloat(channel.CUMULATIVE_EARNED) || 0) + amount;
-    var evtId = 'pub_' + Date.now().toString(16) + '_' + Math.floor(Math.random() * 0xFFFF).toString(16);
+    var evtId = _generateSdkEventId('pub_');
     var rewardPayload = {
       type: 'REWARD_REQUEST',
       campaign_id: campaign.ID,
@@ -1016,7 +1031,7 @@
           // Existing channels: creator was reachable at open time; reward requests
           // will be queued and flushed when they come back online.
           function doCreateReward() {
-            var eventId = Date.now().toString(16) + '-' + Math.floor(Math.random() * 0xFFFFFFFF).toString(16);
+            var eventId = _generateSdkEventId();
             // Fire-and-forget viewer channel flow.
             _channelFlow(campaign, eventId, amount, function() {}, type);
             // Fire-and-forget publisher reward flow when R_p > 0 and frame is set.

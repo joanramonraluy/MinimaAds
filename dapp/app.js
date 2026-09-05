@@ -75,8 +75,15 @@ var MODE_VIEWS = {
 // Mirrored to keypair (PENDING_CHANNEL_<uid>) so FE reloads don't lose context.
 var _pendingChannelOps = {};
 
+// Fix #18: generateUID() backs several primary keys (CAMPAIGNS.ID, ADS.ID,
+// FRAMES.FRAME_ID, settlement txIds). A bare timestamp+random pair can collide
+// when two are minted in the same millisecond — a monotonic per-page counter
+// plus a second random segment makes that practically impossible.
+var _uidCounter = 0;
 function generateUID() {
-  return Date.now().toString(16) + '-' + Math.floor(Math.random() * 0xFFFFFFFF).toString(16);
+  _uidCounter = (_uidCounter + 1) % 0xFFFF;
+  return Date.now().toString(16) + '-' + _uidCounter.toString(16) + '-' +
+    Math.floor(Math.random() * 0xFFFFFFFF).toString(16) + Math.floor(Math.random() * 0xFFFFFFFF).toString(16);
 }
 
 function currentRoute() {
@@ -346,10 +353,6 @@ function handleMdsComms(parsed) {
     if (typeof onViewerVoucherReceived === 'function') {
       onViewerVoucherReceived(parsed);
     }
-    return;
-  }
-  if (parsed.type === 'AUTO_SETTLE') {
-    if (typeof onAutoSettle === 'function') { onAutoSettle(parsed); }
     return;
   }
   if (parsed.type === 'SETTLE_CONFIRMED') {

@@ -10,6 +10,20 @@
 //   - No channel: sends CHANNEL_OPEN_REQUEST via Maxima to creator
 //   - Channel open: sends REWARD_REQUEST via Maxima to creator
 
+// Fix #18: shared eventId generator for handleTrackView/handleTrackClick. A bare
+// timestamp+random pair can collide when two events land in the same millisecond
+// (rapid clicks) — this eventId becomes REWARD_EVENTS.ID/DEDUP_LOG's primary key
+// downstream, so a collision silently drops the second reward. A monotonic
+// per-worker counter plus a second random segment makes that practically
+// impossible. Named distinctly from core/rewards.js's own counter since both
+// files load into the same SW global scope (var at top level is shared).
+var _commsEventIdCounter = 0;
+function _generateCommsEventId() {
+  _commsEventIdCounter = (_commsEventIdCounter + 1) % 0xFFFF;
+  return Date.now().toString(16) + '-' + _commsEventIdCounter.toString(16) + '-' +
+    Math.floor(Math.random() * 0xFFFFFFFF).toString(16) + Math.floor(Math.random() * 0xFFFFFFFF).toString(16);
+}
+
 function handleGetAd(payload) {
   var userAddress = payload.userAddress || "";
   var interestsRaw = payload.interests || [];
@@ -121,7 +135,7 @@ function handleTrackView(payload) {
         return;
       }
       var amount = parseFloat(campaign.REWARD_VIEW) || 0;
-      var eventId = Date.now().toString(16) + '-' + Math.floor(Math.random() * 0xFFFFFFFF).toString(16);
+      var eventId = _generateCommsEventId();
       // M-4: do NOT debit local budget here. BUDGET_REMAINING is synced from the
       // on-chain escrow coin by processEscrowCoin. See docs/AUDIT_2026-07-18_FABLE.md #7.
       MDS.log("[COMMS] MA_TRACK_VIEW confirmed: campaign=" + campaignId + " amount=" + amount);
@@ -164,7 +178,7 @@ function handleTrackClick(payload) {
         return;
       }
       var amount = parseFloat(campaign.REWARD_CLICK) || 0;
-      var eventId = Date.now().toString(16) + '-' + Math.floor(Math.random() * 0xFFFFFFFF).toString(16);
+      var eventId = _generateCommsEventId();
       // M-4: do NOT debit local budget here. BUDGET_REMAINING is synced from the
       // on-chain escrow coin by processEscrowCoin. See docs/AUDIT_2026-07-18_FABLE.md #7.
       MDS.log("[COMMS] MA_TRACK_CLICK confirmed: campaign=" + campaignId + " amount=" + amount);

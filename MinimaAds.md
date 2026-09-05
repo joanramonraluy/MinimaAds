@@ -482,7 +482,7 @@ var LIMITS = {
 6.  SDK calls createRewardEvent({ type:'view', campaignId, adId, ... })
     — isDuplicate(eventId) check → if duplicate: stop.
     — Persists RewardEvent to REWARD_EVENTS via sqlQuery()
-    — Calls updateBudget(campaignId, reward_view)
+    — BUDGET_REMAINING is kept in sync via the on-chain escrow coin (processEscrowCoin in SW handles discovery; no local debit)
     — Updates USER_PROFILE: TOTAL_EARNED += amount, LAST_REWARD_AT = now
     → callback(RewardEvent) on success
 7.  SDK fires signalFE('REWARD_CONFIRMED', { event_id, amount, reward_type })
@@ -503,7 +503,7 @@ var LIMITS = {
     ├─ Any check fails → navigate anyway, no reward. Stop.
     └─ All pass → continue
 3.  SDK calls createRewardEvent({ type:'click', campaignId, adId, ... })
-    — isDuplicate check, persists RewardEvent, updates budget and USER_PROFILE
+    — isDuplicate check, persists RewardEvent, updates USER_PROFILE; BUDGET_REMAINING is kept in sync via the on-chain escrow coin (processEscrowCoin in SW handles discovery; no local debit)
     → callback(RewardEvent) — SDK fires signalFE('REWARD_CONFIRMED', ...)
 4.  Browser navigates to ad.CTA_URL
 ```

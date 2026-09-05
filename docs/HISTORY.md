@@ -46,6 +46,58 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-05 (regression) — `LIMITS is not defined` crash in `creator.js` channel script builder
+
+**Source**: not a plan item — found live, by chance, while setting up the environment to do Fix #15's live E2E verification (see next entry). First page load of the Creator view threw `ReferenceError: LIMITS is not defined` in the browser console, on every load, before any user interaction.
+
+**Root cause**: introduced by the Fix #13 commit (LIMITS reconciliation, 2026-09-04) earlier this same day. `buildChannelScriptFE()` was evaluated eagerly at script-load time via a top-level `var CHANNEL_SCRIPT_FE = buildChannelScriptFE();`. But `public/index.html` loads `dapp/app.js` (which defines the global `LIMITS`) **after** `dapp/views/creator.js` — so the eager call ran before `LIMITS` existed. The old code (a plain hardcoded string literal, no function call) had zero load-order dependency; wiring it to `LIMITS` for Fix #13 introduced a fresh bug while fixing the original one. Impact was real, not cosmetic: `CHANNEL_SCRIPT_FE` stayed `undefined`, corrupting the one `newscript` call that used it (channel-script address resolution, part of the escrow/channel flow) — `newscript script:"undefined" trackall:true`.
+
+**Fix**: `dapp/views/creator.js` — removed the eager top-level assignment; the one call site (`newscript script:"' + CHANNEL_SCRIPT_FE + '"`) now calls `buildChannelScriptFE()` directly instead, so it always runs after all scripts (including `app.js`) have finished loading, regardless of `<script>` tag order.
+
+**Lesson for future sessions**: `node --check` only validates syntax, not cross-file global availability at runtime — it did not catch this at Fix #13's review time. Any fix that makes previously-static code reference a global defined in a *different* file needs an actual browser page load to verify, not just a syntax check.
+
+**Verification**: redeployed to all 6 nodes via "Zip & Install to Nodes"; reloaded the creator view fresh — zero console errors (previously reproduced the `ReferenceError` on every load, deterministically). Went on to create a real campaign from this same page immediately after, with no errors — confirms the fix holds under real use, not just on load.
+
+**Files modified**: `dapp/views/creator.js`.
+
+**AGENTS.md updated**: yes — this entry.
+
+**Open issues**: none new. Worth a broader look someday at whether any other FE file has a similar eager-eval-at-parse-time dependency on `LIMITS` or another `app.js` global, given `app.js` loads last — not done this session (out of scope, no evidence of another instance found).
+
+---
+
+### Session: 2026-09-05 (Fix #15) — Voucher-loss self-healing on settlement failure
+
+**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 4, Fix #15 — the last item on the audit plan. Complexity MEDIUM, maintainer confirmed Sonnet directly (no delegation). This closes the plan: Phases 1–4 are now all complete.
+
+**Problem**: `_runSettlement`'s failure branches (`txnimport` and `txnsign` failures inside `onError()`; `txnpost` failure in `_postSettleTx`) just showed "Settlement failed: <error>" and stopped. Per MinimaAds.md §6.8/§8.12, the creator already resends its authoritative `REWARD_VOUCHER` on `VOUCHER_SYNC_REQUEST` — the SDK's own `_onReconnect` flow already uses this on reconnect, but nothing triggered it when a settlement attempt with a stale/corrupted `LATEST_TX_HEX` failed.
+
+**Fix**: `dapp/views/earnings.js` — new `_requestVoucherResync(campaignId, viewerKey, role)`, wired into both `onError()` (covers txnimport + txnsign) and the `txnpost` failure branch:
+- Looks up `CHANNEL_STATE.CREATOR_MX` for the pair, then sends `{ type: 'VOUCHER_SYNC_REQUEST', campaign_id, viewer_key }` via `sendChannelMaxima` — the same FE-side send helper already used elsewhere in this file (not the SDK's private `_sendToCreator`, which lives inside `sdk/index.js`'s own IIFE and isn't reachable from the main dapp's view files).
+- Debounced via a module-level `_voucherResyncRequested` map keyed by `campaignId + '|' + viewerKey` — one request per channel per session, so a user mashing "Settle" doesn't hammer the creator.
+- Both failure UI messages changed from `'Settlement failed: ' + msg` to `'Settlement failed — requesting voucher re-sync from creator. Retry in a minute.'` (English, per dapp-language convention).
+
+**This heals well-formed-but-outdated vouchers only** — it cannot manufacture funds the creator never committed to (Fix #1 already closed unauthenticated overwrites of creator-side state).
+
+**Bonus doc fix, found while implementing**: `MinimaAds.md §8.12` claimed `VOUCHER_SYNC_REQUEST` is sent with `poll:true` — contradicted by the actual working implementation (`sdk/index.js`'s `_sendToCreator`, already in production) which correctly uses `poll:false`, and by CLAUDE.md §6's unconditional ban on `poll:true` for outbound Maxima sends. No maintainer decision needed here (unlike Fix #16) — CLAUDE.md's forbidden-actions list makes this unambiguous, code is simply right and the spec had a documentation bug. Corrected the spec text to `poll:false` and noted the new failure-triggered path.
+
+**Verification — UPDATED, full live E2E done later this same session** (see the `LIMITS`/`CHANNEL_SCRIPT_FE` regression entry below for context on why the environment needed rebuilding): `node --check dapp/views/earnings.js` passes. Initial isolated logic test (kept for record): loaded `_requestVoucherResync` straight from the real file source with `sqlQuery`/`sendChannelMaxima` stubbed — confirmed correct SQL/escaping, correct `VOUCHER_SYNC_REQUEST` payload shape, debounce scoping, and safe no-op with no `CREATOR_MX`. Then ran the real thing on live nodes: created a real campaign (node 1, 100 MINIMA/2 days), let a real viewer (node 5) earn a real view reward (0.02 MINIMA, real `REWARD_VOUCHER`, real open channel), corrupted `CHANNEL_STATE.LATEST_TX_HEX` to `0xDEADBEEFCORRUPTED`, clicked Settle:
+1. `txnimport status: false Invalid Data param specified` → `onError()` fired → UI showed the new message → `_requestVoucherResync` sent `VOUCHER_SYNC_REQUEST` (`ok: true`).
+2. Creator responded with a fresh `REWARD_VOUCHER` (`event_id: sync_<ts>`, matching `channel.handler.js`'s `"sync_" + Date.now()` resync-response format) — `LATEST_TX_HEX` restored to a valid 11,058-char tx, `CUMULATIVE_EARNED` unchanged at 0.02.
+3. Clicked Settle again: `txnimport`/`txnsign`/`txnpost` all succeeded, tx posted to L1, UI showed "Settlement posted. Awaiting L1 confirmation…", row moved to "Settling…" (disabled). Zero unexpected console errors (the one logged error was the deliberate first-attempt failure, expected).
+
+Fix #15 is now fully verified live, not just by isolated logic test.
+
+**Files modified**: `dapp/views/earnings.js`, `MinimaAds.md`.
+
+**AGENTS.md updated**: yes — this entry (updated after live verification); oldest entry (2026-09-04, Fix #16 + Fix #13) moved to `docs/HISTORY.md §17`.
+
+**Sections updated**: `MinimaAds.md §8.12`.
+
+**Open issues**: none — live E2E verification is now done. **The implementation plan's Phases 1–4 are complete as of this session**, modulo the two known issues already logged (`docs/KNOWN_ISSUES.md` #51, #52) and the `LIMITS`/`CHANNEL_SCRIPT_FE` regression found and fixed while doing this verification (separate entry, this section).
+
+---
+
 ### Session: 2026-09-05 (Fix #18) — Reward-ID collision resistance across all five generation sites
 
 **Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 4, Fix #18. Complexity LOW (per rubric, though it touches ID-generation logic), maintainer confirmed Sonnet directly (no delegation). Implemented in this same session's context.

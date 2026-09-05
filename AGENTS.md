@@ -174,6 +174,50 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
+### Session: 2026-09-05 (DOC-1) — Stale flow docs describing pre-M-4 SDK reward flow
+
+**Source**: `docs/KNOWN_ISSUES.md` DOC-1, noted at implementation time of prior session fixes but left open as out-of-scope. Complexity LOW (pure documentation rewrite, no code change). Haiku confirmed directly by maintainer.
+
+**Problem**: MinimaAds.md §6.1 step 6 ("Calls updateBudget(campaignId, reward_view)") and §6.2 step 3 ("updates budget and USER_PROFILE") both predate the M-4 fix that already exists in `core/rewards.js:65–71`. The actual behavior since M-4: `createRewardEvent` skips the local `updateBudget()` call entirely for `type === 'view'` and `type === 'click'` reward types; instead, `BUDGET_REMAINING` is kept in sync via on-chain escrow coin discovery (the SW's `processEscrowCoin` function reads the coin amount on each NEWBLOCK).
+
+**Fix**: rewrote both sentences to reflect the real M-4-compliant behavior:
+- §6.1 step 6: "BUDGET_REMAINING is kept in sync via the on-chain escrow coin (processEscrowCoin in SW handles discovery; no local debit)"
+- §6.2 step 3: "updates USER_PROFILE; BUDGET_REMAINING is kept in sync via the on-chain escrow coin (processEscrowCoin in SW handles discovery; no local debit)"
+
+**Rationale for change**: the stale docs could mislead a reader or downstream code generator (e.g. for SDK hosted in a foreign MiniDapp). M-4 was a correctness fix to prevent campaigns from premature 'finished' status when local budget updates raced against on-chain state discovery.
+
+**Files modified**: `MinimaAds.md`, `docs/KNOWN_ISSUES.md`.
+
+**AGENTS.md updated**: yes — this entry; oldest entry (2026-09-05, regression — `LIMITS is not defined`) moved to `docs/HISTORY.md §17` to keep the 3-entry limit (now: DOC-1 + #51 + #52).
+
+**Sections updated**: `docs/KNOWN_ISSUES.md` DOC-1 marked Fixed.
+
+**Open issues**: none — DOC-1 was the last purely-documentation item on the backlog.
+
+---
+
+### Session: 2026-09-05 (Fragility #51) — Escrow split tx dropped state port 2 (campaign expiry block)
+
+**Source**: `docs/KNOWN_ISSUES.md` fragility #51, the last open item from `docs/IMPLEMENTATION_PLAN_2026-07-18.md`'s audit (found while implementing Fix #8, deliberately deferred as its own session — protocol-level change to a live escrow spending tx). Complexity HIGH per CLAUDE.md §2 rubric; maintainer confirmed continuing on Sonnet after an interrupted Opus subagent attempt (see below) rather than relaunching.
+
+**Problem**: `_swBuildAndPostChannelTxInner` (`channel.handler.js`) carried forward state ports 1, 3, 4, 7 (+5, 6 when present) from the input escrow coin into the split tx's `stateCmds`, but never port 2 (the funded expiry block). Since `CAMPAIGNS.ESCROW_COINID` is repointed to the change coin after every channel open, every campaign silently lost its on-chain expiry block from its first channel open onwards, degrading Fix #8's block-based expiry check to the wall-clock fallback (`EXPIRES_AT + 24h`) — not catastrophic (margin already covers it) but defeats Fix #8's precision.
+
+**Session note — mid-task interruption**: an Opus subagent was launched for this task; a UI interruption caused it to be cancelled by the harness (non-resumable) mid-verification. Its code edit had already landed on disk (uncommitted) and was correct; picked up from there directly on Sonnet (maintainer's explicit choice) rather than relaunching, re-verifying the applied diff against the plan before proceeding.
+
+**Fix**: extract `ps2` from `r2.response.transaction.inputs[0].state` (same loop as `ps5`/`ps6`/`ps7`), then `if (ps2) { stateCmds.push("txnstate id:" + txId + " port:2 value:" + ps2); }` — plain decimal, no `0x` prefix, same as ports 10/11. Since `stateCmds` is shared by both split-tx outputs (channel-funding coin + change coin that becomes the new `ESCROW_COINID`), one change point was sufficient — `swBuildAndPostChannelOpenTx` (Tx2, the 2-of-2 channel coin) was correctly left untouched, it isn't the coin Fix #8 tracks. Purely additive: neither ESCROW_SCRIPT_V3 nor V4 reads `PREVSTATE(2)`, so no `ASSERT`/`VERIFYOUT` branch could be affected.
+
+**Verification — live, against the 6-node test harness**: redeployed (`latest-deploy.mds` timestamp confirmed *after* the code edit, so all 6 nodes ran the patched build). Found one pre-existing campaign already degraded by this exact bug (channel opened pre-fix — its escrow coin has no port 2, confirmed via `coins coinid:`, and correctly still falls back to wall-clock post-fix, since the fix cannot retroactively repair a coin that already lost the port). Used a second, untouched campaign (original escrow coin carrying `port:2 = 3589`) as the live test: a real viewer node (different wallet identity, not the creator) opened a real channel against it via the actual UI view flow (`#campaign-detail`, real "watching ad" reward path, not a direct `MDS.cmd` call). Confirmed via `coins coinid:` on the resulting change coin (`0x9039F1D1...`, amount 99.8, i.e. the real post-split coin): **port 2 present, value 3589 — same as the original**, alongside all previously-carried ports (1,3,4,5,6,7,10,11,16) unchanged. Went further than the minimum ask: a second successive spend of that same escrow chain (`0xBAF97DA6...`, after the view reward's own settlement cycle) still carried `port:2 = 3589`, confirming the fix survives more than one hop. `checkExpiredCampaigns` logged `block 222 vs escrow expiry 3589` for this campaign with no "no state port 2" fallback message, confirming Fix #8 now reads a real block-based deadline off a post-patch escrow coin end-to-end.
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`, `docs/KNOWN_ISSUES.md`.
+
+**AGENTS.md updated**: yes — this entry; oldest entry (2026-09-05, Fix #15) moved to `docs/HISTORY.md §17`.
+
+**Sections updated**: `docs/KNOWN_ISSUES.md` #51 marked Fixed.
+
+**Open issues**: none — this was the last open item from `docs/IMPLEMENTATION_PLAN_2026-07-18.md`'s audit. Phases 1–4 plus both fragilities found during Fix #8 (#51, #52) are now all closed.
+
+---
+
 ### Session: 2026-09-05 (Fragility #52) — Dead PREVSTATE(5)/(6) validation on campaign announces
 
 **Source**: `docs/KNOWN_ISSUES.md` fragility #52, found (but out of scope) while implementing Fix #8. Complexity MEDIUM (one-line code change, but activates a previously-dead security check — maintainer confirmed Sonnet directly, no delegation). Picked up after Fix #8/#15/#17/#18/#19 and the LIMITS regression closed out Phases 1–4.
@@ -195,58 +239,6 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 **Sections updated**: `docs/KNOWN_ISSUES.md` #52 marked Fixed.
 
 **Open issues**: fragility #51 (escrow split tx drops state port 2, degrades Fix #8 after first channel open) is the one remaining open item from the audit — HIGH complexity, protocol-level change to a live escrow spending tx, needs its own dedicated session with Opus + plan mode and real split+channel-open verification, same rigor as Fix #8 itself.
-
----
-
-### Session: 2026-09-05 (regression) — `LIMITS is not defined` crash in `creator.js` channel script builder
-
-**Source**: not a plan item — found live, by chance, while setting up the environment to do Fix #15's live E2E verification (see next entry). First page load of the Creator view threw `ReferenceError: LIMITS is not defined` in the browser console, on every load, before any user interaction.
-
-**Root cause**: introduced by the Fix #13 commit (LIMITS reconciliation, 2026-09-04) earlier this same day. `buildChannelScriptFE()` was evaluated eagerly at script-load time via a top-level `var CHANNEL_SCRIPT_FE = buildChannelScriptFE();`. But `public/index.html` loads `dapp/app.js` (which defines the global `LIMITS`) **after** `dapp/views/creator.js` — so the eager call ran before `LIMITS` existed. The old code (a plain hardcoded string literal, no function call) had zero load-order dependency; wiring it to `LIMITS` for Fix #13 introduced a fresh bug while fixing the original one. Impact was real, not cosmetic: `CHANNEL_SCRIPT_FE` stayed `undefined`, corrupting the one `newscript` call that used it (channel-script address resolution, part of the escrow/channel flow) — `newscript script:"undefined" trackall:true`.
-
-**Fix**: `dapp/views/creator.js` — removed the eager top-level assignment; the one call site (`newscript script:"' + CHANNEL_SCRIPT_FE + '"`) now calls `buildChannelScriptFE()` directly instead, so it always runs after all scripts (including `app.js`) have finished loading, regardless of `<script>` tag order.
-
-**Lesson for future sessions**: `node --check` only validates syntax, not cross-file global availability at runtime — it did not catch this at Fix #13's review time. Any fix that makes previously-static code reference a global defined in a *different* file needs an actual browser page load to verify, not just a syntax check.
-
-**Verification**: redeployed to all 6 nodes via "Zip & Install to Nodes"; reloaded the creator view fresh — zero console errors (previously reproduced the `ReferenceError` on every load, deterministically). Went on to create a real campaign from this same page immediately after, with no errors — confirms the fix holds under real use, not just on load.
-
-**Files modified**: `dapp/views/creator.js`.
-
-**AGENTS.md updated**: yes — this entry.
-
-**Open issues**: none new. Worth a broader look someday at whether any other FE file has a similar eager-eval-at-parse-time dependency on `LIMITS` or another `app.js` global, given `app.js` loads last — not done this session (out of scope, no evidence of another instance found).
-
----
-
-### Session: 2026-09-05 (Fix #15) — Voucher-loss self-healing on settlement failure
-
-**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 4, Fix #15 — the last item on the audit plan. Complexity MEDIUM, maintainer confirmed Sonnet directly (no delegation). This closes the plan: Phases 1–4 are now all complete.
-
-**Problem**: `_runSettlement`'s failure branches (`txnimport` and `txnsign` failures inside `onError()`; `txnpost` failure in `_postSettleTx`) just showed "Settlement failed: <error>" and stopped. Per MinimaAds.md §6.8/§8.12, the creator already resends its authoritative `REWARD_VOUCHER` on `VOUCHER_SYNC_REQUEST` — the SDK's own `_onReconnect` flow already uses this on reconnect, but nothing triggered it when a settlement attempt with a stale/corrupted `LATEST_TX_HEX` failed.
-
-**Fix**: `dapp/views/earnings.js` — new `_requestVoucherResync(campaignId, viewerKey, role)`, wired into both `onError()` (covers txnimport + txnsign) and the `txnpost` failure branch:
-- Looks up `CHANNEL_STATE.CREATOR_MX` for the pair, then sends `{ type: 'VOUCHER_SYNC_REQUEST', campaign_id, viewer_key }` via `sendChannelMaxima` — the same FE-side send helper already used elsewhere in this file (not the SDK's private `_sendToCreator`, which lives inside `sdk/index.js`'s own IIFE and isn't reachable from the main dapp's view files).
-- Debounced via a module-level `_voucherResyncRequested` map keyed by `campaignId + '|' + viewerKey` — one request per channel per session, so a user mashing "Settle" doesn't hammer the creator.
-- Both failure UI messages changed from `'Settlement failed: ' + msg` to `'Settlement failed — requesting voucher re-sync from creator. Retry in a minute.'` (English, per dapp-language convention).
-
-**This heals well-formed-but-outdated vouchers only** — it cannot manufacture funds the creator never committed to (Fix #1 already closed unauthenticated overwrites of creator-side state).
-
-**Bonus doc fix, found while implementing**: `MinimaAds.md §8.12` claimed `VOUCHER_SYNC_REQUEST` is sent with `poll:true` — contradicted by the actual working implementation (`sdk/index.js`'s `_sendToCreator`, already in production) which correctly uses `poll:false`, and by CLAUDE.md §6's unconditional ban on `poll:true` for outbound Maxima sends. No maintainer decision needed here (unlike Fix #16) — CLAUDE.md's forbidden-actions list makes this unambiguous, code is simply right and the spec had a documentation bug. Corrected the spec text to `poll:false` and noted the new failure-triggered path.
-
-**Verification — UPDATED, full live E2E done later this same session** (see the `LIMITS`/`CHANNEL_SCRIPT_FE` regression entry below for context on why the environment needed rebuilding): `node --check dapp/views/earnings.js` passes. Initial isolated logic test (kept for record): loaded `_requestVoucherResync` straight from the real file source with `sqlQuery`/`sendChannelMaxima` stubbed — confirmed correct SQL/escaping, correct `VOUCHER_SYNC_REQUEST` payload shape, debounce scoping, and safe no-op with no `CREATOR_MX`. Then ran the real thing on live nodes: created a real campaign (node 1, 100 MINIMA/2 days), let a real viewer (node 5) earn a real view reward (0.02 MINIMA, real `REWARD_VOUCHER`, real open channel), corrupted `CHANNEL_STATE.LATEST_TX_HEX` to `0xDEADBEEFCORRUPTED`, clicked Settle:
-1. `txnimport status: false Invalid Data param specified` → `onError()` fired → UI showed the new message → `_requestVoucherResync` sent `VOUCHER_SYNC_REQUEST` (`ok: true`).
-2. Creator responded with a fresh `REWARD_VOUCHER` (`event_id: sync_<ts>`, matching `channel.handler.js`'s `"sync_" + Date.now()` resync-response format) — `LATEST_TX_HEX` restored to a valid 11,058-char tx, `CUMULATIVE_EARNED` unchanged at 0.02.
-3. Clicked Settle again: `txnimport`/`txnsign`/`txnpost` all succeeded, tx posted to L1, UI showed "Settlement posted. Awaiting L1 confirmation…", row moved to "Settling…" (disabled). Zero unexpected console errors (the one logged error was the deliberate first-attempt failure, expected).
-
-Fix #15 is now fully verified live, not just by isolated logic test.
-
-**Files modified**: `dapp/views/earnings.js`, `MinimaAds.md`.
-
-**AGENTS.md updated**: yes — this entry (updated after live verification); oldest entry (2026-09-04, Fix #16 + Fix #13) moved to `docs/HISTORY.md §17`.
-
-**Sections updated**: `MinimaAds.md §8.12`.
-
-**Open issues**: none — live E2E verification is now done. **The implementation plan's Phases 1–4 are complete as of this session**, modulo the two known issues already logged (`docs/KNOWN_ISSUES.md` #51, #52) and the `LIMITS`/`CHANNEL_SCRIPT_FE` regression found and fixed while doing this verification (separate entry, this section).
 
 ---
 

@@ -2182,10 +2182,16 @@ function _swBuildAndPostChannelTxInner(ctx, txId, campaignHex, contactForState4)
 
       // Carry forward ports 5 (platformKey), 6 (maxPubBudget), 7 (status) so
       // ESCROW_SCRIPT_V3's top-level PREVSTATE reads don't throw on next spend.
+      // Port 2 (campaign expiry block) is carried for a different reason: no
+      // escrow script reads it, but this tx's change coin becomes the campaign's
+      // new ESCROW_COINID, and Fix #8's checkExpiredCampaigns reads the expiry
+      // block off that coin (KNOWN_ISSUES #51). Dropping it silently degraded
+      // every campaign to the wall-clock fallback after its first channel open.
       var inputStates = [];
       try { inputStates = r2.response.transaction.inputs[0].state || []; } catch(e) {}
-      var ps5 = ''; var ps6 = ''; var ps7 = '';
+      var ps2 = ''; var ps5 = ''; var ps6 = ''; var ps7 = '';
       for (var si = 0; si < inputStates.length; si++) {
+        if (inputStates[si].port == 2) { ps2 = inputStates[si].data; }
         if (inputStates[si].port == 5) { ps5 = inputStates[si].data; }
         if (inputStates[si].port == 6) { ps6 = inputStates[si].data; }
         if (inputStates[si].port == 7) { ps7 = inputStates[si].data; }
@@ -2212,6 +2218,8 @@ function _swBuildAndPostChannelTxInner(ctx, txId, campaignHex, contactForState4)
             "txnstate id:" + txId + " port:11 value:0",
             "txnstate id:" + txId + " port:16 value:0"
           ];
+          // Plain decimal block number, like ports 10/11 — no 0x prefix, no encoding.
+          if (ps2) { stateCmds.push("txnstate id:" + txId + " port:2 value:" + ps2); }
           if (ps5) { stateCmds.push("txnstate id:" + txId + " port:5 value:" + ps5); }
           if (ps6) { stateCmds.push("txnstate id:" + txId + " port:6 value:" + ps6); }
           swRunSequential(stateCmds, 0, function(stateOk) {

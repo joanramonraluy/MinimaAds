@@ -519,6 +519,43 @@ function _renderChannelRewardRows(rows, container) {
   container.appendChild(table);
 }
 
+// Fix #15: voucher-loss self-healing. A settlement can fail because
+// LATEST_TX_HEX is stale or malformed (e.g. the creator re-issued a voucher
+// after this one was cached, or local storage got corrupted). Per MinimaAds.md
+// §6.8/§8.12, the creator resends its authoritative REWARD_VOUCHER on
+// VOUCHER_SYNC_REQUEST — this only *heals* a well-formed-but-outdated voucher;
+// it cannot manufacture funds the creator never committed to (Fix #1 already
+// closed that door for authentication of the receiving end).
+// Debounced to one request per channel per session so a user mashing "Settle"
+// doesn't hammer the creator.
+var _voucherResyncRequested = {};
+function _requestVoucherResync(campaignId, viewerKey, role) {
+  var key = campaignId + '|' + viewerKey;
+  if (_voucherResyncRequested[key]) { return; }
+  _voucherResyncRequested[key] = true;
+  sqlQuery(
+    "SELECT CREATOR_MX FROM CHANNEL_STATE" +
+    " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
+    " AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(viewerKey) + "')" +
+    " AND UPPER(ROLE) = UPPER('" + escapeSql(role) + "')",
+    function(err, rows) {
+      var creatorMx = (!err && rows && rows.length > 0) ? (rows[0].CREATOR_MX || '') : '';
+      if (!creatorMx) {
+        console.log('[EARNINGS] voucher resync skipped — no CREATOR_MX for campaign:', campaignId);
+        return;
+      }
+      console.log('[EARNINGS] requesting voucher re-sync from creator. campaign:', campaignId);
+      sendChannelMaxima(creatorMx, {
+        type: 'VOUCHER_SYNC_REQUEST',
+        campaign_id: campaignId,
+        viewer_key: viewerKey
+      }, function(ok) {
+        console.log('[EARNINGS] VOUCHER_SYNC_REQUEST sent ok:', ok, 'campaign:', campaignId);
+      });
+    }
+  );
+}
+
 function _runSettlement(campaignId, viewerKey, role, txHex, btnEl, cumulative) {
   var settleId = 'stl_' + Date.now().toString(16);
   console.log('[EARNINGS] _runSettlement start campaign:', campaignId,
@@ -550,8 +587,9 @@ function _runSettlementInner(campaignId, viewerKey, role, txHex, btnEl, settleId
     console.error('[EARNINGS] _runSettlement error:', msg, 'campaign:', campaignId);
     if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Settle'; }
     var statusEl = document.getElementById('ma-channel-settle-status');
-    if (statusEl) { statusEl.textContent = 'Settlement failed: ' + msg; }
+    if (statusEl) { statusEl.textContent = 'Settlement failed — requesting voucher re-sync from creator. Retry in a minute.'; }
     MDS.cmd('txndelete id:' + settleId, function() {});
+    _requestVoucherResync(campaignId, viewerKey, role);
   }
 
   MDS.keypair.get('VIEWER_WALLET_PK_' + campaignId, function(pkRes) {
@@ -616,8 +654,9 @@ function _postSettleTx(settleId, campaignId, viewerKey, role, btnEl) {
     if (!r3 || !r3.status) {
       console.error('[EARNINGS] txnpost failed — error:', r3 && r3.error, 'campaign:', campaignId, 'role:', role);
       var statusEl = document.getElementById('ma-channel-settle-status');
-      if (statusEl) { statusEl.textContent = 'Settlement failed: ' + ((r3 && r3.error) || 'txnpost failed'); }
+      if (statusEl) { statusEl.textContent = 'Settlement failed — requesting voucher re-sync from creator. Retry in a minute.'; }
       if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Settle'; }
+      _requestVoucherResync(campaignId, viewerKey, role);
       _refreshChannelRewards();
       return;
     }

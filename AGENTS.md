@@ -174,6 +174,33 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent session entries here. Before adding a new entry, move the oldest one to `docs/HISTORY.md §17`. This section is loaded every session — keep keep it short.
 
+### Session: 2026-09-05 (Fix #15) — Voucher-loss self-healing on settlement failure
+
+**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 4, Fix #15 — the last item on the audit plan. Complexity MEDIUM, maintainer confirmed Sonnet directly (no delegation). This closes the plan: Phases 1–4 are now all complete.
+
+**Problem**: `_runSettlement`'s failure branches (`txnimport` and `txnsign` failures inside `onError()`; `txnpost` failure in `_postSettleTx`) just showed "Settlement failed: <error>" and stopped. Per MinimaAds.md §6.8/§8.12, the creator already resends its authoritative `REWARD_VOUCHER` on `VOUCHER_SYNC_REQUEST` — the SDK's own `_onReconnect` flow already uses this on reconnect, but nothing triggered it when a settlement attempt with a stale/corrupted `LATEST_TX_HEX` failed.
+
+**Fix**: `dapp/views/earnings.js` — new `_requestVoucherResync(campaignId, viewerKey, role)`, wired into both `onError()` (covers txnimport + txnsign) and the `txnpost` failure branch:
+- Looks up `CHANNEL_STATE.CREATOR_MX` for the pair, then sends `{ type: 'VOUCHER_SYNC_REQUEST', campaign_id, viewer_key }` via `sendChannelMaxima` — the same FE-side send helper already used elsewhere in this file (not the SDK's private `_sendToCreator`, which lives inside `sdk/index.js`'s own IIFE and isn't reachable from the main dapp's view files).
+- Debounced via a module-level `_voucherResyncRequested` map keyed by `campaignId + '|' + viewerKey` — one request per channel per session, so a user mashing "Settle" doesn't hammer the creator.
+- Both failure UI messages changed from `'Settlement failed: ' + msg` to `'Settlement failed — requesting voucher re-sync from creator. Retry in a minute.'` (English, per dapp-language convention).
+
+**This heals well-formed-but-outdated vouchers only** — it cannot manufacture funds the creator never committed to (Fix #1 already closed unauthenticated overwrites of creator-side state).
+
+**Bonus doc fix, found while implementing**: `MinimaAds.md §8.12` claimed `VOUCHER_SYNC_REQUEST` is sent with `poll:true` — contradicted by the actual working implementation (`sdk/index.js`'s `_sendToCreator`, already in production) which correctly uses `poll:false`, and by CLAUDE.md §6's unconditional ban on `poll:true` for outbound Maxima sends. No maintainer decision needed here (unlike Fix #16) — CLAUDE.md's forbidden-actions list makes this unambiguous, code is simply right and the spec had a documentation bug. Corrected the spec text to `poll:false` and noted the new failure-triggered path.
+
+**Verification**: `node --check dapp/views/earnings.js` passes. Live E2E verification (corrupt a real `LATEST_TX_HEX`, fail a real settlement, confirm resync + successful retry) was **not** done this session — the browser/node session from earlier work had already been torn down, and reconstructing the full campaign+escrow+channel+reward topology from scratch was disproportionate for a MEDIUM, purely-additive fix that reuses an already-proven send path. Instead, ran an isolated logic test loading `_requestVoucherResync` straight from the real file source (not reimplemented) with `sqlQuery`/`sendChannelMaxima` stubbed: confirmed (1) correct SQL construction/escaping and correct `VOUCHER_SYNC_REQUEST` payload shape matching §8.12 exactly, (2) debounce holds across repeated failures on the same campaign+viewer_key, (3) a different `viewer_key` on the same campaign is a distinct debounce key (not globally suppressed), (4) a channel with no resolvable `CREATOR_MX` safely no-ops instead of sending a malformed request. All 4 passed.
+
+**Files modified**: `dapp/views/earnings.js`, `MinimaAds.md`.
+
+**AGENTS.md updated**: yes — this entry; oldest entry (2026-09-04, Fix #16 + Fix #13) moved to `docs/HISTORY.md §17`.
+
+**Sections updated**: `MinimaAds.md §8.12`.
+
+**Open issues**: full live E2E verification of Fix #15 (corrupt-voucher → resync → successful retry) is still outstanding — worth doing before considering Phase 4 fully closed in practice, not just on paper. **The implementation plan's Phases 1–4 are otherwise complete as of this session.**
+
+---
+
 ### Session: 2026-09-05 (Fix #18) — Reward-ID collision resistance across all five generation sites
 
 **Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 4, Fix #18. Complexity LOW (per rubric, though it touches ID-generation logic), maintainer confirmed Sonnet directly (no delegation). Implemented in this same session's context.
@@ -243,27 +270,6 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 
 ---
 
-### Session: 2026-09-04 (Fix #16 + Fix #13) — LIMITS mismatch sync + dynamic channel script timelock
-
-**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #16 and accompanying Fix #13 (bonus discovery). Decisions pre-taken by maintainer via project instructions. Implemented directly by this (Haiku) session, no delegation needed.
-
-**Fix #16** (LIMITS sync across three files):
-- `MinimaAds.md` first LIMITS block (line ~423): corrected `MIN_REWARD_CLICK: 0.001 → 0.005` and `MIN_PUBLISHER_REWARD_VIEW: 0.01 → 0.001` to match actual enforced values in `service.js`; added `MAX_CHANNEL_RESERVATION: 10` and `SETTLEMENT_GRACE_DAYS: 7` (already present in SW, now documented).
-- `MinimaAds.md` table 5.1 Limit Definitions: updated `MIN_REWARD_CLICK` row from 0.001 to 0.005; reordered columns to put `MIN_PUBLISHER_REWARD_VIEW` after `MAX_CAMPAIGN_DAYS` for clarity; added two new rows for `MAX_CHANNEL_RESERVATION` (enforcement point: channel.handler.js / comms.handler.js / SDK) and `SETTLEMENT_GRACE_DAYS` (enforcement point: service.js buildChannelScript() timelock).
-- `MinimaAds.md` second LIMITS block (line ~1456, copy-paste example in §11.1): identical corrections and additions as first block, to maintain parity.
-- `dapp/app.js` LIMITS block: added `MAX_CHANNEL_RESERVATION: 10` and `SETTLEMENT_GRACE_DAYS: 7` (values were already correct for click/view rewards).
-
-**Fix #13** (bonus, discovered during validation): `dapp/views/creator.js` line 1515-1516 had the channel script timelock hardcoded as literal `167616` with a comment claiming it mirrored `service.js buildChannelScript()`. But `buildChannelScript()` computes `(MAX_CAMPAIGN_DAYS + SETTLEMENT_GRACE_DAYS) * 1728` dynamically, so if either constant ever changed, the hardcoded value would silently drift. Refactored: defined `buildChannelScriptFE()` function that mirrors `service.js`'s approach exactly, then assigned `CHANNEL_SCRIPT_FE = buildChannelScriptFE()`. Script output remains `167616` identically (verified: (90+7)*1728 = 167616), no behavioral change — but now the timelock is recomputed from LIMITS at FE startup, preventing silent desync if either constant is updated in the future.
-
-**Verification**: Manual calculation (90+7)*1728 = 97*1728 = 167,616 ✓. Node syntax check passed on both `dapp/app.js` and `dapp/views/creator.js`. Verified that `service.js` was not modified (already correct). Spot-checked `MinimaAds.md` to confirm no other references to these constants in contradictory contexts (Fix #13 bonus: updated §5.1 and §13.2 documentation for `MAX_CAMPAIGNS_PER_SESSION` to note it is deprecated/not enforced).
-
-**Files modified**: `MinimaAds.md`, `dapp/app.js`, `dapp/views/creator.js`.
-
-**AGENTS.md updated**: yes — this entry (new); oldest entry (2026-09-04, Fix #8) moved to `docs/HISTORY.md §17` (see below).
-
-**Open issues**: none new.
-
----
 
 
 > Previous handoff notes (AUD-1, patches 15–25, Security Audit 2, and all earlier) are archived in `docs/HISTORY.md §17`.

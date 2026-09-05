@@ -1176,9 +1176,9 @@ Sent in response to a `REWARD_REQUEST`. Contains the partially-signed transactio
 
 ### 8.12 VOUCHER_SYNC_REQUEST
 
-**Direction**: Viewer FE → Creator FE (unicast via `to:<creator_mx_address>`, `poll:true`)
+**Direction**: Viewer FE → Creator FE (unicast via `publickey:`/`to:<creator_mx_address>`, **`poll:false`** — CLAUDE.md §6 forbids `poll:true` on any outbound Maxima send)
 
-Sent on reconnection when the viewer has a channel open but is missing or unsure of the latest voucher.
+Sent on reconnection when the viewer has a channel open but is missing or unsure of the latest voucher, and now also on a failed settlement attempt (Fix #15, `dapp/views/earnings.js` `_requestVoucherResync`, debounced once per channel per session).
 
 ```json
 {

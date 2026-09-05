@@ -46,6 +46,28 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-04 (Fix #16 + Fix #13) — LIMITS mismatch sync + dynamic channel script timelock
+
+**Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #16 and accompanying Fix #13 (bonus discovery). Decisions pre-taken by maintainer via project instructions. Implemented directly by this (Haiku) session, no delegation needed.
+
+**Fix #16** (LIMITS sync across three files):
+- `MinimaAds.md` first LIMITS block (line ~423): corrected `MIN_REWARD_CLICK: 0.001 → 0.005` and `MIN_PUBLISHER_REWARD_VIEW: 0.01 → 0.001` to match actual enforced values in `service.js`; added `MAX_CHANNEL_RESERVATION: 10` and `SETTLEMENT_GRACE_DAYS: 7` (already present in SW, now documented).
+- `MinimaAds.md` table 5.1 Limit Definitions: updated `MIN_REWARD_CLICK` row from 0.001 to 0.005; reordered columns to put `MIN_PUBLISHER_REWARD_VIEW` after `MAX_CAMPAIGN_DAYS` for clarity; added two new rows for `MAX_CHANNEL_RESERVATION` (enforcement point: channel.handler.js / comms.handler.js / SDK) and `SETTLEMENT_GRACE_DAYS` (enforcement point: service.js buildChannelScript() timelock).
+- `MinimaAds.md` second LIMITS block (line ~1456, copy-paste example in §11.1): identical corrections and additions as first block, to maintain parity.
+- `dapp/app.js` LIMITS block: added `MAX_CHANNEL_RESERVATION: 10` and `SETTLEMENT_GRACE_DAYS: 7` (values were already correct for click/view rewards).
+
+**Fix #13** (bonus, discovered during validation): `dapp/views/creator.js` line 1515-1516 had the channel script timelock hardcoded as literal `167616` with a comment claiming it mirrored `service.js buildChannelScript()`. But `buildChannelScript()` computes `(MAX_CAMPAIGN_DAYS + SETTLEMENT_GRACE_DAYS) * 1728` dynamically, so if either constant ever changed, the hardcoded value would silently drift. Refactored: defined `buildChannelScriptFE()` function that mirrors `service.js`'s approach exactly, then assigned `CHANNEL_SCRIPT_FE = buildChannelScriptFE()`. Script output remains `167616` identically (verified: (90+7)*1728 = 167616), no behavioral change — but now the timelock is recomputed from LIMITS at FE startup, preventing silent desync if either constant is updated in the future.
+
+**Verification**: Manual calculation (90+7)*1728 = 97*1728 = 167,616 ✓. Node syntax check passed on both `dapp/app.js` and `dapp/views/creator.js`. Verified that `service.js` was not modified (already correct). Spot-checked `MinimaAds.md` to confirm no other references to these constants in contradictory contexts (Fix #13 bonus: updated §5.1 and §13.2 documentation for `MAX_CAMPAIGNS_PER_SESSION` to note it is deprecated/not enforced).
+
+**Files modified**: `MinimaAds.md`, `dapp/app.js`, `dapp/views/creator.js`.
+
+**AGENTS.md updated**: yes — this entry (new); oldest entry (2026-09-04, Fix #8) moved to `docs/HISTORY.md §17` (see below).
+
+**Open issues**: none new.
+
+---
+
 ### Session: 2026-09-04 (Fix #9 + Fix #10) — Delete dead `DO_*` FE builders; wire `ESCROW_INFO` round-trip
 
 **Source**: `docs/IMPLEMENTATION_PLAN_2026-07-18.md` Phase 3, Fix #9 and Fix #10 — done together per the plan's own "Track B"/"Track C" parallelism note (independent files: `dapp/app.js` deletions vs `maxima.handler.js` wiring). Implemented directly by this (Sonnet) session, no delegation.

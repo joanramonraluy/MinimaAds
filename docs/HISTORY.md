@@ -46,6 +46,72 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-05 (AUD-2) — Viewer REWARD_EVENTS row never created on the SDK's direct MAXIMA path
+
+**Source**: `docs/KNOWN_ISSUES.md` AUD-2, discovered while fixing AUD-1, left open as out-of-scope. Complexity MEDIUM (single-file bug fix, contained business logic, no schema/Maxima-shape change) — maintainer confirmed Sonnet directly.
+
+**Problem**: `_handleRewardVoucherPayload` (`sdk/index.js`) — the code path a *foreign* MiniDapp hits when it embeds only `sdk/index.js` and decodes raw Maxima `REWARD_VOUCHER` messages itself, with no local copy of our Service Worker — calls `updateChannelVoucher` (writing the new `CUMULATIVE_EARNED` to `CHANNEL_STATE`) *before* calling `_onVoucherReceivedCore`. That function's viewer branch then re-read the channel via `_getMyChannel`, so `oldCumulative` was already the *new* value — `amount = newCumulative - oldCumulative` always computed `0`, and the `amount <= 0` guard silently dropped the reward. Real economic loss for viewers on any host that integrates the SDK without our SW.
+
+**Correction to the original KNOWN_ISSUES.md note**: it claimed "the SW path passes the pre-write oldCumulative and is unaffected" — investigated and that's not quite why. `channel.handler.js` (our own SW) never goes through this SDK code at all: it writes `REWARD_EVENTS`/`USER_PROFILE` directly itself and only fires `VOUCHER_RECEIVED` for FE UI refresh. When our own FE separately polls the same raw Maxima message, `_isDuplicateEvent` already sees the SW's own `DEDUP_LOG` row and returns early, before ever reaching the broken subtraction. So the bug was real but literally unreachable in our fully-integrated dapp — only a bare-SDK host (no local SW) ever depended on this function to persist the reward, and it always failed there.
+
+**Fix**: `_handleRewardVoucherPayload` already captures the pre-write cumulative (`oldCum`, via `_storedCumulative`, for its own monotonicity guard) — now passes it through as `old_cumulative` on the object handed to `_onVoucherReceivedCore`. Extracted the viewer branch's reward-creation logic into a new `_createViewerRewardFromVoucher(parsed, oldCumulative)` helper: uses `parsed.old_cumulative` when present, otherwise falls back to the original `_getMyChannel` read (still correct for the SW-signaled `VOUCHER_RECEIVED` MDSCOMMS path and the exposed `window.onVoucherReceived` public API, neither of which pass a pre-write value or suffer the race). No public function signature changed — `_onVoucherReceivedCore(parsed)` still takes one argument; `old_cumulative` is an optional field on it.
+
+**Verification — isolated logic test, not live E2E (deliberate, discussed with maintainer)**: the 6-node test harness always runs the SW alongside the SDK, so the dedup guard above means the buggy branch is structurally unreachable there regardless of whether the fix is present — a live E2E run would prove nothing about this specific bug. Instead: loaded the real `sdk/index.js` source into a `vm`-sandboxed context with all `core/*.js` externals stubbed (`getCampaign`, `getChannelState`, `isDuplicate`, `updateChannelVoucher` — the stub actually mutates a fake `CHANNEL_STATE.CUMULATIVE_EARNED`, reproducing the real write-then-read race — `createRewardEvent` as a spy), driven through the real public entry point `MinimaAds.handleMdsEvent` with a fabricated raw MAXIMA `REWARD_VOUCHER` event (not a hand-rolled call to the private function). Against the pre-fix source: `createRewardEvent` called 0 times (reward silently dropped, reproducing AUD-2 exactly). Against the fixed source: called exactly once, with the correct amount (0.06 → 0.08 cumulative, delta 0.02).
+
+**Files modified**: `sdk/index.js`, `docs/KNOWN_ISSUES.md`.
+
+**AGENTS.md updated**: yes — short pointer entry; oldest entry (2026-09-05, Fragility #52) removed from `AGENTS.md §6` (already archived here in full).
+
+**Sections updated**: `docs/KNOWN_ISSUES.md` AUD-2 marked Fixed.
+
+**Open issues**: none new. `docs/KNOWN_ISSUES.md`'s audit-findings table (AUD-1 through AUD-5, DOC-1) is now all closed; fragility #51/#52 were closed in prior sessions this same day.
+
+---
+
+### Session: 2026-09-05 (DOC-1) — Stale flow docs describing pre-M-4 SDK reward flow
+
+**Source**: `docs/KNOWN_ISSUES.md` DOC-1, noted at implementation time of prior session fixes but left open as out-of-scope. Complexity LOW (pure documentation rewrite, no code change). Haiku confirmed directly by maintainer.
+
+**Problem**: MinimaAds.md §6.1 step 6 ("Calls updateBudget(campaignId, reward_view)") and §6.2 step 3 ("updates budget and USER_PROFILE") both predate the M-4 fix that already exists in `core/rewards.js:65–71`. The actual behavior since M-4: `createRewardEvent` skips the local `updateBudget()` call entirely for `type === 'view'` and `type === 'click'` reward types; instead, `BUDGET_REMAINING` is kept in sync via on-chain escrow coin discovery (the SW's `processEscrowCoin` function reads the coin amount on each NEWBLOCK).
+
+**Fix**: rewrote both sentences to reflect the real M-4-compliant behavior:
+- §6.1 step 6: "BUDGET_REMAINING is kept in sync via the on-chain escrow coin (processEscrowCoin in SW handles discovery; no local debit)"
+- §6.2 step 3: "updates USER_PROFILE; BUDGET_REMAINING is kept in sync via the on-chain escrow coin (processEscrowCoin in SW handles discovery; no local debit)"
+
+**Rationale for change**: the stale docs could mislead a reader or downstream code generator (e.g. for SDK hosted in a foreign MiniDapp). M-4 was a correctness fix to prevent campaigns from premature 'finished' status when local budget updates raced against on-chain state discovery.
+
+**Files modified**: `MinimaAds.md`, `docs/KNOWN_ISSUES.md`.
+
+**AGENTS.md updated**: yes — short pointer entry; oldest entry (2026-09-05, regression — `LIMITS is not defined`) removed from `AGENTS.md §6` (already archived here in full).
+
+**Sections updated**: `docs/KNOWN_ISSUES.md` DOC-1 marked Fixed.
+
+**Open issues**: none — DOC-1 was the last purely-documentation item on the backlog.
+
+---
+
+### Session: 2026-09-05 (Fragility #51) — Escrow split tx dropped state port 2 (campaign expiry block)
+
+**Source**: `docs/KNOWN_ISSUES.md` fragility #51, the last open item from `docs/IMPLEMENTATION_PLAN_2026-07-18.md`'s audit (found while implementing Fix #8, deliberately deferred as its own session — protocol-level change to a live escrow spending tx). Complexity HIGH per CLAUDE.md §2 rubric; maintainer confirmed continuing on Sonnet after an interrupted Opus subagent attempt (see below) rather than relaunching.
+
+**Problem**: `_swBuildAndPostChannelTxInner` (`channel.handler.js`) carried forward state ports 1, 3, 4, 7 (+5, 6 when present) from the input escrow coin into the split tx's `stateCmds`, but never port 2 (the funded expiry block). Since `CAMPAIGNS.ESCROW_COINID` is repointed to the change coin after every channel open, every campaign silently lost its on-chain expiry block from its first channel open onwards, degrading Fix #8's block-based expiry check to the wall-clock fallback (`EXPIRES_AT + 24h`) — not catastrophic (margin already covers it) but defeats Fix #8's precision.
+
+**Session note — mid-task interruption**: an Opus subagent was launched for this task; a UI interruption caused it to be cancelled by the harness (non-resumable) mid-verification. Its code edit had already landed on disk (uncommitted) and was correct; picked up from there directly on Sonnet (maintainer's explicit choice) rather than relaunching, re-verifying the applied diff against the plan before proceeding.
+
+**Fix**: extract `ps2` from `r2.response.transaction.inputs[0].state` (same loop as `ps5`/`ps6`/`ps7`), then `if (ps2) { stateCmds.push("txnstate id:" + txId + " port:2 value:" + ps2); }` — plain decimal, no `0x` prefix, same as ports 10/11. Since `stateCmds` is shared by both split-tx outputs (channel-funding coin + change coin that becomes the new `ESCROW_COINID`), one change point was sufficient — `swBuildAndPostChannelOpenTx` (Tx2, the 2-of-2 channel coin) was correctly left untouched, it isn't the coin Fix #8 tracks. Purely additive: neither ESCROW_SCRIPT_V3 nor V4 reads `PREVSTATE(2)`, so no `ASSERT`/`VERIFYOUT` branch could be affected.
+
+**Verification — live, against the 6-node test harness**: redeployed (`latest-deploy.mds` timestamp confirmed *after* the code edit, so all 6 nodes ran the patched build). Found one pre-existing campaign already degraded by this exact bug (channel opened pre-fix — its escrow coin has no port 2, confirmed via `coins coinid:`, and correctly still falls back to wall-clock post-fix, since the fix cannot retroactively repair a coin that already lost the port). Used a second, untouched campaign (original escrow coin carrying `port:2 = 3589`) as the live test: a real viewer node (different wallet identity, not the creator) opened a real channel against it via the actual UI view flow (`#campaign-detail`, real "watching ad" reward path, not a direct `MDS.cmd` call). Confirmed via `coins coinid:` on the resulting change coin (`0x9039F1D1...`, amount 99.8, i.e. the real post-split coin): **port 2 present, value 3589 — same as the original**, alongside all previously-carried ports (1,3,4,5,6,7,10,11,16) unchanged. Went further than the minimum ask: a second successive spend of that same escrow chain (`0xBAF97DA6...`, after the view reward's own settlement cycle) still carried `port:2 = 3589`, confirming the fix survives more than one hop. `checkExpiredCampaigns` logged `block 222 vs escrow expiry 3589` for this campaign with no "no state port 2" fallback message, confirming Fix #8 now reads a real block-based deadline off a post-patch escrow coin end-to-end.
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`, `docs/KNOWN_ISSUES.md`.
+
+**AGENTS.md updated**: yes — short pointer entry; oldest entry (2026-09-05, Fix #15) removed from `AGENTS.md §6` (already archived here in full).
+
+**Sections updated**: `docs/KNOWN_ISSUES.md` #51 marked Fixed.
+
+**Open issues**: none — this was the last open item from `docs/IMPLEMENTATION_PLAN_2026-07-18.md`'s audit. Phases 1–4 plus both fragilities found during Fix #8 (#51, #52) are now all closed.
+
+---
+
 ### Session: 2026-09-05 (Fragility #52) — Dead PREVSTATE(5)/(6) validation on campaign announces
 
 **Source**: `docs/KNOWN_ISSUES.md` fragility #52, found (but out of scope) while implementing Fix #8. Complexity MEDIUM (one-line code change, but activates a previously-dead security check — maintainer confirmed Sonnet directly, no delegation). Picked up after Fix #8/#15/#17/#18/#19 and the LIMITS regression closed out Phases 1–4.

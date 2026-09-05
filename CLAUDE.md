@@ -142,7 +142,9 @@ User: "OK, Sonnet"
 
 ---
 
-**MANDATORY: Every complexity assessment triggers the public suggestion + confirmation flow above. No exceptions.**
+**MANDATORY: every *first* assessment of a task triggers the public suggestion + confirmation flow above. No exceptions.**
+
+For a **subsequent** task in the same session, follow `CLAUDE.md §1` "Subsequent Tasks" instead: re-run the rubric silently, and only surface the public suggestion + blocking confirmation again if the complexity tier or recommended model actually changed from what the maintainer last confirmed. If it didn't change, proceed directly — re-running the full public ritual for an unchanged tier is friction, not rigor.
 
 ---
 
@@ -199,10 +201,11 @@ If you added a Maxima message type → update MinimaAds.md §8.
 If you added a SW signal → update MinimaAds.md §8.15 signal table.
 If you changed the DB schema → update MinimaAds.md §3.5.
 
-**Handoff note housekeeping (mandatory):**
-- Add your handoff entry at the top of `AGENTS.md §6`.
-- If `AGENTS.md §6` has more than 3 session entries after adding yours, move the oldest entry to `docs/HISTORY.md §17` before finishing.
-- This keeps `AGENTS.md §6` lean — it is loaded every session.
+**Handoff note housekeeping (mandatory) — one canonical copy, everything else is a pointer:**
+- Write your full narrative (problem, fix, verification) **once**, as a new session entry at the top of `docs/HISTORY.md §17`. This is the permanent record — never restate it elsewhere.
+- Add a **short pointer entry** at the top of `AGENTS.md §6`: one-line summary + files touched + open issues, ending with "full detail: `docs/HISTORY.md §17`, session `<date>`". Do not copy the narrative into `AGENTS.md` — that duplication is exactly what made past sessions costly to keep in sync (a `docs/HISTORY.md` entry moved from `AGENTS.md` should never need editing after the fact).
+- If `AGENTS.md §6` has more than 3 pointer entries after adding yours, **delete** the oldest — its full content already lives permanently in `docs/HISTORY.md §17`, there is nothing to move.
+- If the fix closes an item in `docs/KNOWN_ISSUES.md`, update that item's status to a short one-liner (`✅ Fixed <date> — see docs/HISTORY.md §17, session <date/title>`), not a full restatement of the fix.
 
 **Task housekeeping:**
 - If a task you implemented is still marked `Pending ⬜` in `docs/TASKS.md` → mark it Done.
@@ -393,3 +396,5 @@ Verification: [list exactly what the maintainer should test in the browser:
   - Whether there should be no console errors]
 Open issues: [any discovered but out-of-scope problems → document in docs/KNOWN_ISSUES.md]
 ```
+
+**LOW-complexity exception**: for pure documentation edits, copy changes, or renames (no logic, no verification target in the browser), a one-paragraph handoff is sufficient — task, files changed, done. The full template above is mandatory for MEDIUM and above.

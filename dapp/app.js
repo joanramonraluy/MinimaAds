@@ -538,7 +538,13 @@ function _handleEscrowInfoResponse(parsed) {
   var pubBudgetSpent = parseFloat(data.publisher_budget_spent) || 0;
   var viewerBudgetSpent = parseFloat(data.viewer_budget_spent) || 0;
   var publisherBudgetEarned = parseFloat(data.publisher_budget_earned) || 0;
-  var campaignStatus = (data.campaign_status || 'unknown').toUpperCase();
+  // Audit 2026-09-05 #2 — store STATUS exact-lowercase (every comparator in the
+  // system matches lowercase 'active'/'paused'/'finished'); uppercasing it here
+  // silently broke validateView/selectAd/checkCampaignStatuses with no self-heal.
+  // Only overwrite STATUS when the value is one of the three known states — an
+  // 'unknown'/anything-else value must NOT clobber the existing local status.
+  var campaignStatus = (data.campaign_status || '').toLowerCase();
+  var statusValid = (campaignStatus === 'active' || campaignStatus === 'paused' || campaignStatus === 'finished');
 
   var sql = "UPDATE CAMPAIGNS SET "
     + "BUDGET_TOTAL = " + budgetTotal + ", "
@@ -546,9 +552,9 @@ function _handleEscrowInfoResponse(parsed) {
     + "MAX_PUBLISHER_BUDGET = " + maxPubBudget + ", "
     + "PUBLISHER_BUDGET_SPENT = " + pubBudgetSpent + ", "
     + "VIEWER_BUDGET_SPENT = " + viewerBudgetSpent + ", "
-    + "PUBLISHER_BUDGET_EARNED = " + publisherBudgetEarned + ", "
-    + "STATUS = '" + escapeSql(campaignStatus) + "' "
-    + "WHERE UPPER(ID) = UPPER('" + escapeSql(campaignId) + "')";
+    + "PUBLISHER_BUDGET_EARNED = " + publisherBudgetEarned
+    + (statusValid ? (", STATUS = '" + escapeSql(campaignStatus) + "'") : "")
+    + " WHERE UPPER(ID) = UPPER('" + escapeSql(campaignId) + "')";
 
   sqlQuery(sql, function(err) {
     if (err) {

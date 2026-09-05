@@ -44,7 +44,7 @@ function onMaxima(msg) {
   } else if (payload.type === "REWARD_REQUEST") {
     handleRewardRequest(payload, msg.data.from || '');
   } else if (payload.type === "REWARD_REJECTED") {
-    handleRewardRejected(payload);
+    handleRewardRejected(payload, msg.data.from || '');
   } else if (payload.type === "REWARD_VOUCHER") {
     handleRewardVoucher(payload, msg.data.from || '');
   } else if (payload.type === "VOUCHER_SYNC_REQUEST") {
@@ -54,7 +54,7 @@ function onMaxima(msg) {
   } else if (payload.type === "CREATOR_LIVENESS_PING") {
     handleCreatorLivenessPing(payload, msg.data.from || '');
   } else if (payload.type === "CREATOR_LIVENESS_PONG") {
-    handleCreatorLivenessPong(payload);
+    handleCreatorLivenessPong(payload, msg.data.from || '');
   } else if (payload.type === "PROFILE_REQUEST") {
     handleProfileRequest(payload, msg.data.from || '');
   } else if (payload.type === "PROFILE_RESPONSE") {
@@ -66,12 +66,7 @@ function onMaxima(msg) {
   } else if (payload.type === "ESCROW_INFO_REQUEST") {
     handleEscrowInfoRequest(payload, msg.data.from || '');
   } else if (payload.type === "ESCROW_INFO_RESPONSE") {
-    // Requester's node — relay the creator's response to the FE
-    // (#mycampaigns's escrow-info UI, dapp/app.js _handleEscrowInfoResponse).
-    // signalFE spreads payload's own keys at root (fragility #32); payload
-    // already carries { campaign_id, status, data }, so parsed.data.* on the
-    // FE side reads correctly with no reshaping needed here.
-    signalFE("ESCROW_INFO_RESPONSE", payload);
+    handleEscrowInfoResponse(payload, msg.data.from || '');
   } else {
     MDS.log("[MAXIMA] unknown type: " + payload.type);
   }
@@ -136,6 +131,34 @@ function _doRegisterPermanent(payload, fromRoute, pubkey) {
     } else {
       MDS.log("[MAXIMA] REGISTER_PERMANENT: no requester_contact, skipping response");
     }
+  });
+}
+
+// Requester's node — relay the creator's ESCROW_INFO_RESPONSE to the FE
+// (#mycampaigns's escrow-info UI, dapp/app.js _handleEscrowInfoResponse), but
+// only after authenticating the Maxima sender as the campaign creator.
+//
+// Audit 2026-09-05 #1 — the response side shipped unauthenticated (the request
+// side handleEscrowInfoRequest was gated at N2-6). Without this check any peer
+// that knows a public campaign_id could remotely overwrite the local CAMPAIGNS
+// row's budget/status. Reuse channel.handler.js _assertCampaignCreatorSender
+// (all SW handler files load into one Rhino global scope): it checks
+// CAMPAIGNS.CREATOR_ADDRESS then the on-chain permanent route in
+// keypair CREATOR_MX_<id>, fails CLOSED when the creator identity is known and
+// the sender differs, and fails OPEN only when no creator identity is known
+// locally (legacy rows) — consistent with the other inbound guards.
+function handleEscrowInfoResponse(payload, senderPk) {
+  var campaignId = payload.campaign_id || '';
+  if (!campaignId) {
+    MDS.log("[MAXIMA] ESCROW_INFO_RESPONSE missing campaign_id — dropping");
+    return;
+  }
+  _assertCampaignCreatorSender(campaignId, senderPk, "ESCROW_INFO_RESPONSE", function(allowed) {
+    if (!allowed) { return; }
+    // signalFE spreads payload's own keys at root (fragility #32); payload
+    // already carries { campaign_id, status, data }, so parsed.data.* on the
+    // FE side reads correctly with no reshaping needed here.
+    signalFE("ESCROW_INFO_RESPONSE", payload);
   });
 }
 

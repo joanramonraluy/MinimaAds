@@ -174,6 +174,12 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent sessions here, as **short pointers only** — one-line summary + files touched + open issues, ending with a reference to the full narrative in `docs/HISTORY.md §17`. The full problem/fix/verification write-up is written **once**, directly into `docs/HISTORY.md §17`, never duplicated here. When adding a new entry pushes this past 3, just **delete** the oldest pointer — nothing to move, its full content already lives permanently in `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-09-05 (sender-auth class) — Unauthenticated inbound-Maxima status/budget writes (audit #1–#4 + #19)
+
+Four inbound Maxima types performed local DB writes with no sender check (plus a STATUS-casing regression). Fixed: `_handleEscrowInfoResponse` (`dapp/app.js`) now stores STATUS lowercased + whitelisted (`active|paused|finished`), omitting the column entirely on any other value (#2); the SW dispatcher (`maxima.handler.js`) now gates `ESCROW_INFO_RESPONSE` relay via a new `handleEscrowInfoResponse` behind `_assertCampaignCreatorSender` (#1); `handleCreatorLivenessPong` (`campaign.handler.js`) gates its `setCampaignStatus` write behind a status whitelist + `_assertCreatorThen`, still relaying the FE signal unconditionally (#3); `handleRewardRejected` (`channel.handler.js`) gates the whole handler (event delete + status flip) behind `_assertCampaignCreatorSender` (#4); `msg.data.from` now threaded into PONG and REWARD_REJECTED dispatch. Fail-open only when no creator identity is known locally (consistent with existing guards); PONG fails closed even then. Reused existing helpers, no new one. Spec `MinimaAds.md §8.14`/§8.15 now document the PONG `status` field (#19). Files: `dapp/app.js`, `public/service-workers/handlers/{maxima,campaign,channel}.handler.js`, `MinimaAds.md`, `docs/AUDIT_2026-09-05_FABLE.md`. Open issues: audit #5/#6 (SDK-host mirrors) + #7–#15 still open, out of scope. Full detail: `docs/HISTORY.md §17`, session 2026-09-05 (sender-auth class).
+
+---
+
 ### Session: 2026-09-05 (AUD-2) — Viewer REWARD_EVENTS row never created on the SDK's direct MAXIMA path
 
 `sdk/index.js`: `_handleRewardVoucherPayload` wrote the new cumulative before calling `_onVoucherReceivedCore`, which then re-derived `oldCumulative` from the now-already-updated channel row — `amount` always computed `0`, silently dropping the reward. Only reachable on hosts embedding the SDK without our own SW. Fixed by passing the pre-write cumulative through explicitly. Verified via isolated `vm`-sandboxed logic test (0 calls pre-fix, 1 correct call post-fix) — live E2E deliberately skipped, not meaningful on our SW-integrated test harness. Files: `sdk/index.js`, `docs/KNOWN_ISSUES.md`. `docs/KNOWN_ISSUES.md` AUD-2 marked Fixed. Open issues: none — closes the last open audit-findings entry. Full detail: `docs/HISTORY.md §17`, session 2026-09-05 (AUD-2).
@@ -185,13 +191,6 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 `MinimaAds.md §6.1/§6.2` described a pre-M-4 reward flow (`updateBudget` call) that `core/rewards.js` no longer makes for view/click rewards — reworded both steps to describe the real M-4-compliant behavior (on-chain `BUDGET_REMAINING` sync, no local debit). Files: `MinimaAds.md`, `docs/KNOWN_ISSUES.md`. `docs/KNOWN_ISSUES.md` DOC-1 marked Fixed. Open issues: none. Full detail: `docs/HISTORY.md §17`, session 2026-09-05 (DOC-1).
 
 ---
-
-### Session: 2026-09-05 (Fragility #51) — Escrow split tx dropped state port 2 (campaign expiry block)
-
-`channel.handler.js`'s `_swBuildAndPostChannelTxInner` carried forward state ports 1,3,4,7(+5,6) into the split tx's `stateCmds`, but never port 2 (funded expiry block) — every channel open silently degraded Fix #8's on-chain expiry check to the wall-clock fallback. Fixed by extracting/re-pushing port 2 the same way as the other ports. Verified live on the 6-node harness: a real channel-open's change coin kept `port:2` intact across two successive spends, and `checkExpiredCampaigns` read the correct on-chain expiry block with no fallback. Files: `public/service-workers/handlers/channel.handler.js`, `docs/KNOWN_ISSUES.md`. `docs/KNOWN_ISSUES.md` #51 marked Fixed. Open issues: none — this closed the last open item from `docs/archive/IMPLEMENTATION_PLAN_2026-07-18.md`'s audit. Full detail: `docs/HISTORY.md §17`, session 2026-09-05 (Fragility #51).
-
----
-
 
 
 

@@ -1221,11 +1221,14 @@ Sent immediately by the creator's SW upon receiving a `CREATOR_LIVENESS_PING`. U
 ```json
 {
   "type": "CREATOR_LIVENESS_PONG",
-  "campaign_id": "uuid"
+  "campaign_id": "uuid",
+  "status": "active"
 }
 ```
 
-> The viewer's SW relays this to the FE via `signalFE('CREATOR_LIVENESS_PONG', { campaign_id })`. The SDK resolves the pending liveness callback and caches the result.
+`status` is the creator's authoritative campaign status: `''` (campaign unknown to the creator / no campaign_id in the PING) | `active` | `paused` | `finished`. The viewer's SW uses it to sync the local `CAMPAIGNS.STATUS` (`handleCreatorLivenessPong`) and the SDK uses it to drive the `alive` verdict (a `paused`/`finished` PONG is treated as not-alive). The local status write is applied only when the Maxima sender (`msg.data.from`) matches the campaign creator and `status ∈ {active, paused, finished}` (audit 2026-09-05 #3).
+
+> The viewer's SW relays this to the FE via `signalFE('CREATOR_LIVENESS_PONG', { campaign_id, status })`. The SDK resolves the pending liveness callback and caches the result.
 
 ### 8.16 REWARD_REJECTED
 
@@ -1363,7 +1366,7 @@ Sent when a viewer or publisher's `#mycampaigns`/`#frames` view wants live escro
 | `FRAME_CREATED` | `{ frame_id, label }` | `dapp/views/frames.js` (FE) | New frame persisted — refresh frame list |
 | `PUBLISHER_REWARD_CONFIRMED` | `{ event_id, amount, frame_id, campaign_id }` | `core/rewards.js` (FE) | Publisher reward persisted — update Frame earnings UI |
 | `ESCROW_INFO_RESPONSE` | `{ campaign_id, status, data: {...} }` | `maxima.handler.js` (SW) | ESCROW_INFO_RESPONSE Maxima message received — relayed as-is to `_handleEscrowInfoResponse` (§8.20) |
-| `CREATOR_LIVENESS_PONG` | `{ campaign_id }` | `campaign.handler.js` (SW) | CREATOR_LIVENESS_PONG received — SDK resolves pending liveness check |
+| `CREATOR_LIVENESS_PONG` | `{ campaign_id, status }` | `campaign.handler.js` (SW) | CREATOR_LIVENESS_PONG received — SDK resolves pending liveness check (`status`: '' \| active \| paused \| finished) |
 | `STATUS_TX_PENDING` | `{ campaign_id, status, pending_uid }` | `dapp/views/mycampaigns.js` (FE) | Status-change tx awaiting Hub approval — UI shows "awaiting confirmation" until the V3 change coin is confirmed on-chain |
 | `PROFILE_RECEIVED` | `{ publickey, name, icon }` | `campaign.handler.js` (SW) | PROFILE_RESPONSE received — viewer FE updates creator avatar/name in campaign list |
 

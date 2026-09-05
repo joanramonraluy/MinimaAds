@@ -46,6 +46,47 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-05 (sender-auth class) — Unauthenticated inbound-Maxima status/budget writes (audit 2026-09-05 findings #1–#4 + #19)
+
+**Source**: `docs/AUDIT_2026-09-05_FABLE.md` findings #1, #2, #3, #4 (the HIGH set the July sender-authentication sweep missed), plus #19 (PONG spec drift). Complexity HIGH (multi-layer, security-sensitive: SW dispatcher + 2 SW handlers + FE + spec) — maintainer pre-approved Opus + plan mode. Finding #1+#2 were reproduced live on the 6-node harness before the fix (Test A1: a spoofed `ESCROW_INFO_RESPONSE` with `campaign_status:'active'` turned Node 3's local `CAMPAIGNS.STATUS` into `'ACTIVE'` and zeroed `BUDGET_REMAINING`, after which `validateView` returned `{valid:false, reason:'campaign not active'}` with no self-heal).
+
+**Problem**: four inbound Maxima message types performed local DB writes with no sender authentication (and one with a casing bug):
+- **#2 (functional regression)** — `_handleEscrowInfoResponse` (`dapp/app.js`) wrote `STATUS = (campaign_status||'unknown').toUpperCase()`. Every status comparator in the system is exact-lowercase (`validateView`, `selectAd`, `checkCampaignStatuses` `WHERE STATUS='active'`), so a legitimate creator response permanently broke the viewer's serving/earning for that campaign, with no self-heal (`processEscrowCoin` lowercases before comparing so never rewrites; the ping loop only selects `STATUS='active'`). `'unknown'` also clobbered a real status.
+- **#1 (security)** — the SW dispatcher (`maxima.handler.js`) relayed every `ESCROW_INFO_RESPONSE` to the FE via `signalFE` with no sender check; combined with #2 any peer knowing a public `campaign_id` could remotely overwrite a viewer's local budget/status. The *request* side was authenticated at N2-6; the response side got nothing.
+- **#3 (security)** — `handleCreatorLivenessPong` (`campaign.handler.js`) called `setCampaignStatus(payload.status)` with no sender check and no status whitelist; the dispatcher didn't even pass `msg.data.from`. A spoofed `status:'finished'` is de-facto permanent (ping loop won't re-check it, terminal-state guard #46 won't revert it).
+- **#4 (security)** — `handleRewardRejected` (`channel.handler.js`) did `DELETE FROM REWARD_EVENTS WHERE ID=<event_id>` and `setCampaignStatus(reason)` with no sender check; dispatcher didn't pass `msg.data.from`.
+- **#19 (doc)** — `MinimaAds.md §8.14`/§8.15 omitted the `status` field the PONG code actually sends and depends on.
+
+**Fix**:
+- **#2** — store the status lowercased and whitelist to `active|paused|finished`; when the value is not one of those, the STATUS column is **omitted from the UPDATE** entirely (budget fields still sync), so a bad value never clobbers the existing local status.
+- **#1** — new `handleEscrowInfoResponse(payload, senderPk)` in `maxima.handler.js` gates the `signalFE` relay behind `_assertCampaignCreatorSender` (reused from `channel.handler.js` — all handler files load into one Rhino global at boot in `service.js`, and cross-load-ed-file callbacks are the same proven pattern every handler uses with `getCampaign`). The dispatcher now calls it instead of relaying inline.
+- **#3** — dispatcher threads `msg.data.from`; `handleCreatorLivenessPong(payload, senderPk)` still relays `signalFE('CREATOR_LIVENESS_PONG', …)` unconditionally (harmless in-memory SDK cache resolution) but gates the `setCampaignStatus` DB write behind a status whitelist + `_assertCreatorThen` (same-file helper).
+- **#4** — dispatcher threads `msg.data.from`; `handleRewardRejected(payload, senderPk)` gates the whole handler (both the event delete and the status flip) behind `_assertCampaignCreatorSender`; the body moved into `_handleRewardRejectedInner`.
+- **#19** — `§8.14` JSON + prose and the §8.15 signal table now document `status` ('' | active | paused | finished).
+
+**Fail-open vs fail-closed decisions** (each consistent with the pre-existing guard it reuses):
+- ESCROW_INFO_RESPONSE (#1) and REWARD_REJECTED (#4) reuse `_assertCampaignCreatorSender` → **fail CLOSED** when the creator identity is known and the sender differs; **fail OPEN** only when no creator identity is known locally (legacy/pre-route rows) or the message carries no sender. This mirrors CHANNEL_OPEN/REWARD_VOUCHER (July Fix #1).
+- CREATOR_LIVENESS_PONG (#3) reuses `_assertCreatorThen` → **fail CLOSED** when the sender is not the creator *or* no creator identity is known locally *or* the campaign is unknown (stricter — no ok() call). The `strongSender` flag is ignored here because the action is only `setCampaignStatus` (no forced settlement), for which the fallback-identity (CREATOR_ADDRESS) match is sufficient, same as RESUME.
+
+Chose to **reuse the two existing helpers rather than write a 4th copy**: PONG lives in `campaign.handler.js` alongside `_assertCreatorThen`; REWARD_REJECTED lives in `channel.handler.js` alongside `_assertCampaignCreatorSender`; ESCROW_INFO is in `maxima.handler.js` (has neither) and calls `_assertCampaignCreatorSender` cross-file. No new helper added.
+
+**Verification (live, 6-node harness — run after redeploy)**. Harness has a live campaign on Node 1 (`1a0717cff84-1-d398dc7a97a082c2`) already propagated to Node 3.
+- **#2 happy path**: on Node 3 process a real `ESCROW_INFO_RESPONSE` from the true creator with `campaign_status:'active'` → `SELECT STATUS FROM CAMPAIGNS` on Node 3 stays lowercase `active`; `#viewer` still serves the ad; `validateView` returns valid.
+- **#1**: send Node 3 a spoofed `ESCROW_INFO_RESPONSE` (same `campaign_id`, `campaign_status:'active'`) from a **non-creator** PK → Node 3 `CAMPAIGNS` row does NOT change (SW log `[CHANNEL] ESCROW_INFO_RESPONSE rejected: sender is not the campaign creator`).
+- **#3**: send Node 3 a spoofed `CREATOR_LIVENESS_PONG {campaign_id, status:'finished'}` from a non-creator PK → STATUS must NOT flip to finished (log `[CAMPAIGN] status change rejected: sender is not the creator`); the real creator's PONG with `status:'paused'` DOES sync.
+- **#4**: send Node 3 a spoofed `REWARD_REJECTED {campaign_id, reason:'finished', event_id:<known>}` from a non-creator PK → the REWARD_EVENTS row is NOT deleted and STATUS does not flip (log `[CHANNEL] REWARD_REJECTED rejected: sender is not the campaign creator`).
+- No console errors in FE; no `console.log` added to SW.
+
+**Files modified**: `dapp/app.js`, `public/service-workers/handlers/maxima.handler.js`, `public/service-workers/handlers/campaign.handler.js`, `public/service-workers/handlers/channel.handler.js`, `MinimaAds.md` (§8.14/§8.15), `docs/AUDIT_2026-09-05_FABLE.md` (findings #1–#4, #19 marked fixed).
+
+**AGENTS.md updated**: yes — short pointer entry added; oldest entry (Fragility #51) removed from `AGENTS.md §6` (already archived here in full).
+
+**Sections updated**: `MinimaAds.md §8.14`, §8.15 signal table.
+
+**Open issues**: none new. The remaining audit HIGH items #5, #6 (SDK-host-scope: PAUSE/FINISH and AUD-4 gate never mirrored into `sdk/index.js`) and MEDIUM #7–#15 are still open — out of scope for this SW/FE sender-auth pass. #5/#6 are the natural next batch (all in `sdk/index.js`).
+
+---
+
 ### Session: 2026-09-05 (AUD-2) — Viewer REWARD_EVENTS row never created on the SDK's direct MAXIMA path
 
 **Source**: `docs/KNOWN_ISSUES.md` AUD-2, discovered while fixing AUD-1, left open as out-of-scope. Complexity MEDIUM (single-file bug fix, contained business logic, no schema/Maxima-shape change) — maintainer confirmed Sonnet directly.

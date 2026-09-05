@@ -833,11 +833,29 @@ function checkCampaignStatuses() {
 // Syncs the local campaign STATUS from the creator's authoritative value,
 // then signals the FE so the SDK can resolve the pending liveness check.
 // MinimaAds.md §8.15. Rhino-safe: var, function(), no arrows, no template literals.
-function handleCreatorLivenessPong(payload) {
+function handleCreatorLivenessPong(payload, senderPk) {
   var campaignId = payload.campaign_id || '';
   var status = payload.status || '';
   MDS.log("[LIVENESS] PONG received for campaign: " + campaignId + " status: " + status);
-  if (campaignId && status) {
+
+  // Always relay to the FE so the SDK's pending-liveness check resolves. This
+  // signal only feeds an in-memory cache (never a DB write), so it is harmless
+  // to forward regardless of sender — the authenticated part is the DB write below.
+  signalFE("CREATOR_LIVENESS_PONG", {campaign_id: campaignId, status: status});
+
+  // Audit 2026-09-05 #3 — the local STATUS write must be authenticated. Without
+  // this any peer could send a PONG with status:'finished' and permanently kill
+  // a campaign on the victim node (the ping loop only re-pings STATUS='active'
+  // rows, and processEscrowCoin's terminal-state guard #46 refuses to revert
+  // 'finished'). Whitelist the status and require the Maxima sender to match the
+  // campaign creator via _assertCreatorThen (same file) — which fails CLOSED
+  // when the sender is not the creator or no creator identity is known locally.
+  if (!campaignId || !status) { return; }
+  if (status !== 'active' && status !== 'paused' && status !== 'finished') {
+    MDS.log("[LIVENESS] PONG dropped: invalid status '" + status + "' campaign=" + campaignId);
+    return;
+  }
+  _assertCreatorThen(campaignId, senderPk, function(strongSender) {
     getCampaign(campaignId, function(err, campaign) {
       if (!err && campaign && campaign.STATUS !== status) {
         setCampaignStatus(campaignId, status, function(err2) {
@@ -848,8 +866,7 @@ function handleCreatorLivenessPong(payload) {
         });
       }
     });
-  }
-  signalFE("CREATOR_LIVENESS_PONG", {campaign_id: campaignId, status: status});
+  });
 }
 
 // MA_LOCAL_STATUS — sent by the creator's FE (mycampaigns.js) via MDS.comms.broadcast.

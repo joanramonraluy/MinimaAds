@@ -577,7 +577,7 @@ function handleRewardRequest(payload, senderPk) {
 // the SDK can refresh the liveness cache immediately.
 // Rhino-safe: var, function(), string concat, MDS.log, no trailing commas.
 // ---------------------------------------------------------------------------
-function handleRewardRejected(payload) {
+function handleRewardRejected(payload, senderPk) {
   if (!payload.campaign_id || !payload.reason) {
     MDS.log("[CHANNEL] REWARD_REJECTED missing fields");
     return;
@@ -588,6 +588,20 @@ function handleRewardRejected(payload) {
     MDS.log("[CHANNEL] REWARD_REJECTED unknown reason: " + reason);
     return;
   }
+  // Audit 2026-09-05 #4 — authenticate the sender as the campaign creator before
+  // honouring the message. The legitimate sender is always the creator (rejecting
+  // a viewer's REWARD_REQUEST). Gating the whole handler stops a peer from both
+  // (a) deleting an arbitrary REWARD_EVENTS row by attacker-supplied event_id and
+  // (b) pushing a de-facto permanent 'finished' status flip (same no-heal analysis
+  // as #3). _assertCampaignCreatorSender fails OPEN only when no creator identity
+  // is known locally (legacy rows), consistent with the other channel.handler.js guards.
+  _assertCampaignCreatorSender(campaignId, senderPk, "REWARD_REJECTED", function(allowed) {
+    if (!allowed) { return; }
+    _handleRewardRejectedInner(payload, campaignId, reason);
+  });
+}
+
+function _handleRewardRejectedInner(payload, campaignId, reason) {
   var rejEventId = payload.event_id || '';
   MDS.log("[CHANNEL] REWARD_REJECTED received for campaign: " + campaignId + " reason: " + reason);
   if (rejEventId) {

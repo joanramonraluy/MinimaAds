@@ -46,6 +46,28 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-06 (live verification: audit #7) — real publisher voucher-loss recovery, same 4-node setup
+
+**Source**: direct continuation of the #12 live-verification session, reusing the same still-live 4-node setup before the harness resets again.
+
+**Setup reused from #12's session**: Node 1 (creator), Node 2 (legit publisher, real custom Frame), Node 4 (viewer) — all still live with the same real campaign. Drove one more legitimate (non-attack) view from Node 4 with Node 2's own real `publisherKey`/`publisherMx` this time (had to wait out the campaign's 5-minute cooldown — confirmed via `REWARD_EVENTS.TIMESTAMP` vs `Date.now()` — since the earlier #12 payload had already consumed this campaign's cooldown window for Node 4). This produced a genuine publisher `CHANNEL_OPEN_REQUEST` → real `CHANNEL_STATE` row on both Node 1 and Node 2 (`role=publisher`, real `LATEST_TX_HEX` voucher, `CUMULATIVE_EARNED=0.01` after two accumulated views).
+
+**Simulated the one thing that can't be forced any other way**: voucher loss. There's no way to make a real client actually lose local state on demand, so cleared Node 2's own `CHANNEL_STATE.LATEST_TX_HEX`/`LAST_VOUCHER_AT` directly via `MDS.sql` (`UPDATE ... SET LATEST_TX_HEX = '', LAST_VOUCHER_AT = 0`) — this reproduces exactly the state a real crash/reinstall/corrupted-storage event would leave behind; everything after this point is genuine.
+
+**Recovery**: called the real, unmodified `_requestVoucherResync(campaignId, viewerKey, 'publisher')` (`dapp/views/earnings.js`, the exact function the Settle-tab UI calls) directly from Node 2's console. Confirmed the outgoing `VOUCHER_SYNC_REQUEST` carried `role: 'publisher'` (the #7 fix). Node 1's log: `[CHANNEL] VOUCHER_SYNC_REQUEST: resending voucher... ` then `voucher resent ok=true` — confirming `handleVoucherSyncRequest` correctly resolved the **publisher** row (not the pre-fix default-to-viewer dead end this finding described) and resent the real `REWARD_VOUCHER`. Node 2's `CHANNEL_STATE` afterward: `LATEST_TX_HEX` fully restored (12552 hex chars, matching the original byte-for-byte via length), `LAST_VOUCHER_AT` freshly stamped, `ROLE`/`FRAME_ID` intact.
+
+**Outcome**: #7 verified end-to-end — real creator, real publisher, real Maxima round-trip, only the loss itself simulated (unavoidable — nothing genuinely crashes on demand). This closes every remaining findable-and-testable item from `docs/AUDIT_2026-09-05_FABLE.md`; only #13 (needs an actual boot-time Maxima failure) remains open, and it is not forceable without deeper node-lifecycle control than this harness's browser-level access provides.
+
+**Files modified**: none (verification only).
+
+**AGENTS.md updated**: yes — short pointer entry added; oldest entry (2026-09-06, audit #10/#13/#14) removed from `AGENTS.md §6` (already archived here in full).
+
+**Sections updated**: none.
+
+**Open issues**: only #13 remains open, and only for lack of a way to force a genuine boot-time Maxima failure on this harness — everything else in the 2026-09-05 audit round is now both fixed and live-verified.
+
+---
+
 ### Session: 2026-09-06 (live verification: audit #12) — full real E2E proof of the frame-ownership fix, 4 real nodes
 
 **Source**: follow-up to the "audit #7/#12/#15" batch — the maintainer reset all 6 harness nodes to a clean slate specifically to enable this test, then handed the browser back over.

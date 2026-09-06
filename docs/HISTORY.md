@@ -46,6 +46,28 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-06 (live verification: audit #12) — full real E2E proof of the frame-ownership fix, 4 real nodes
+
+**Source**: follow-up to the "audit #7/#12/#15" batch — the maintainer reset all 6 harness nodes to a clean slate specifically to enable this test, then handed the browser back over.
+
+**Setup (4 distinct real nodes, no mocks)**: Node 1 = creator — published a real campaign via the actual Create Campaign UI (500 MINIMA budget, real on-chain escrow tx, `PUBLISHER_REWARD_VIEW=0.005`). Node 2 = legit publisher — created a real custom Frame via `saveFrame` (console-level call, same function `dapp/views/frames.js` uses), yielding a real `frame_id` bound to Node 2's real Maxima pk. Node 3 = attacker — just its own real Maxima identity (pk + contact), no code changes. Node 4 = viewer — a real campaign-aware node with no prior channel for this campaign.
+
+**The one deliberately-injected step**: seeded Node 1's (creator's) own `FRAMES` table with a row `{frame_id: <Node 2's real frame_id>, publisher_key: <Node 2's real pk>}` via `saveFrame` — i.e. "the creator already locally knows this frame belongs to Node 2." This stands in for a frame-ownership registry this codebase doesn't yet populate automatically (there is no Maxima broadcast that syncs `FRAMES` rows across nodes — confirmed by reading `core/frames.js`/`channel.handler.js`: `saveFrame` is only ever called by a publisher's own FE for its own frames, never by the SW on receipt of anything). Everything downstream of this one seed is genuine, unmodified system behavior.
+
+**Attack payload**: from Node 4 (viewer), broadcast a real `MA_TRACK_VIEW` (`MDS.comms.broadcast`, the exact same call path `dapp/views/frames.js`'s generated snippets use) with `frameId` = Node 2's real frame_id but `publisherKey`/`publisherMx` = Node 3's (attacker's) own real identity — reproducing exactly what a malicious snippet embedding a stolen `frame_id` would send. Everything after this was the live system running unattended: Node 4's SW opened a real viewer channel with Node 1 (real Maxima round-trip), then auto-replayed the pending reward as a real `REWARD_REQUEST` carrying the attacker's `publisher_key`/`publisher_mx` (confirmed: `CHANNEL_STATE.CUMULATIVE_EARNED` on Node 1 went from 0 → 0.05, i.e. the viewer reward really got paid). Node 1 then sent a real `PUBLISHER_REWARD_NOTIFY` to Node 3's route (log: `PUBLISHER_REWARD_NOTIFY sent via route, ok=true`). Node 3 received it, passed `_assertCampaignCreatorSender` (correctly — the notify genuinely came from the real creator), and responded with its own real `CHANNEL_OPEN_REQUEST` (role=publisher, `publisher_mx_key`=its own real pk, `frame_id`=Node 2's stolen frame_id).
+
+**Result**: Node 1's log: `[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): frame_id owned by a different publisher — dropping. frame: <Node 2's frame_id>`. No publisher-role `CHANNEL_STATE` row was ever created (`SELECT * FROM CHANNEL_STATE` on Node 1 still shows only the one viewer row) — the #12 fix's async `getFrame` ownership check caught the frame-ownership conflict exactly as designed, using real inter-node Maxima traffic at every hop except the one deliberate DB seed described above.
+
+**Files modified**: none (verification only).
+
+**AGENTS.md updated**: yes — short pointer entry added; oldest entry (2026-09-06, audit #7/#12/#15) removed from `AGENTS.md §6` (already archived here in full).
+
+**Sections updated**: none.
+
+**Open issues**: #13 still needs a live boot-time-failure repro (unchanged from the previous entries). #7's actual voucher-recovery-after-loss scenario is still open for live verification — this session's 4-node setup (still live) could be reused for it before the harness resets again.
+
+---
+
 ### Session: 2026-09-06 (live verification: audit #10/#14) — real-DB and real-API proof of the SDK-only fixes
 
 **Source**: follow-up to the same session's "audit #10/#13/#14" batch (below) — the maintainer asked to close out the "not live-tested" gap for the two findings that actually could be tested (#10, #14 are pure `sdk/index.js` logic; #13 needs a genuine boot-time Maxima failure, not forceable on demand — still open, see that entry).

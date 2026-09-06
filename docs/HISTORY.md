@@ -46,6 +46,32 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-06 (live verification: audit #10/#14) — real-DB and real-API proof of the SDK-only fixes
+
+**Source**: follow-up to the same session's "audit #10/#13/#14" batch (below) — the maintainer asked to close out the "not live-tested" gap for the two findings that actually could be tested (#10, #14 are pure `sdk/index.js` logic; #13 needs a genuine boot-time Maxima failure, not forceable on demand — still open, see that entry).
+
+**Key discovery first**: attempted to verify via MetaChain (the real third-party host used for #7/#8/#9/#12's live testing) but found — by querying `MDS.sql("SELECT ... FROM CAMPAIGNS")` directly in its own page context — that MetaChain's own MiniDapp DB has **no `CAMPAIGNS`/`CHANNEL_STATE` tables at all**. Cross-checking the console log trail (`"Solo message received from SW: {minidapp: MinimaAds, ...}"`) confirmed MetaChain's snippet talks to the real MinimaAds MiniDapp installed on the same node via `MDS.comms.solo()` → `comms.handler.js`/`channel.handler.js` (the SW) — it never touches `sdk/index.js`. This matches and confirms the scope caveat already recorded in `docs/TESTING_SETUP.md §12`: MetaChain cannot exercise the SDK-direct-MAXIMA path at all, so #10/#14 (and #5/#6 previously) are structurally untestable there.
+
+**Second discovery**: the *regular* installed MinimaAds MiniDapp's own FE also loads `sdk/index.js` (`public/index.html` line 594, alongside the SW) — but `dapp/app.js`'s own `MDS.init` callback deliberately never calls `window.MinimaAds.handleMdsEvent` for raw MAXIMA events (explicit comment: "MAXIMA events ... are persisted by the SW — the FE must ignore them"). So `handleMdsEvent` is loaded but dead code in the regular FE too — it is only ever invoked by a genuine third-party host that embeds the SDK and forwards MAXIMA itself. Since `window.MinimaAds` (with all its `init`/`getAd`/`handleMdsEvent`/etc. exports) is still fully constructed and reachable from the console on any page that loads `sdk/index.js`, this makes it possible to call the *exact real, shipped* function directly — the only unrealistic part is that the event is constructed by hand instead of delivered by genuine Maxima traffic, which the function itself cannot distinguish from the real thing.
+
+**Method**: used Node 6 (10.0.0.16, freshly available this session, already running the just-redeployed code with #10/#13/#14) as the target — its own MinimaAds FE tab already had `sdk/index.js` loaded and had already learned about Node 2's real "Campanya" campaign via `CAMPAIGN_ANNOUNCE` (confirmed via `MDS.sql`), but had zero `CHANNEL_STATE` rows — a clean slate.
+
+**#10 verification**: inserted two real rows into Node 6's live `CHANNEL_STATE` table via `MDS.sql` — one `ROLE='viewer'` (`CUMULATIVE_EARNED=0.05`), one `ROLE='publisher'` for the *same* `campaign_id` (`CUMULATIVE_EARNED=99`, a deliberately implausible value so a wrong pick is unmistakable). Ran the exact fixed query from `_getMyChannel` (`... AND UPPER(ROLE) = 'VIEWER'`): returned exactly 1 row, the viewer one. Ran the exact pre-fix query (no `ROLE` filter) for comparison: returned both rows (`count:2`) — reproducing the ambiguity the finding described (H2 gives no ordering guarantee without `ORDER BY`, so the old `rows[0]` could have been either row). Deleted both test rows afterward.
+
+**#14 verification**: called `window.MinimaAds.handleMdsEvent(event)` directly (the real exported function) with a hand-built but realistically-shaped MAXIMA event: `{event:'MAXIMA', data:{from:<real CREATOR_ADDRESS pk from Node 2's campaign>, application:'minima-ads', data:<hex-encoded {type:'CREATOR_LIVENESS_PONG', campaign_id, status:'paused'}>}}`. Result: console logged `"[SDK] local campaign status synced: ... -> paused"` and `"[SDK] CAMPAIGN_UPDATED campaign:... status:paused alive:false"`, and `SELECT STATUS FROM CAMPAIGNS` confirmed the row actually flipped from `active` to `paused` — proving `status` is no longer dropped (`alive` correctly computed `false`) and the new local-sync logic actually writes. Then repeated with a fake, non-matching sender pk and `status:'finished'`: `_assertCampaignCreatorSender` correctly rejected it (`"CREATOR_LIVENESS_PONG rejected: sender is not the campaign creator"`), and `CAMPAIGNS.STATUS` stayed unchanged — confirming the sender-auth gate holds, not just the status plumbing. Reset `CAMPAIGNS.STATUS` back to `active` afterward to leave the harness clean.
+
+**Outcome**: #10 and #14 are now verified against the real, deployed, production H2 schema and the real exported SDK entrypoint — not mocks or unit tests. #13 remains open for live verification (needs an actual boot-time Maxima failure, not forceable without restarting a node mid-init — a future session could try stopping/restarting a node's Maxima subsystem at just the right moment, or temporarily breaking `maxima action:info` to test the retry path, then reverting).
+
+**Files modified**: none (verification only, no code changes this entry).
+
+**AGENTS.md updated**: yes — short pointer entry added; oldest entry (2026-09-06, audit #8) removed from `AGENTS.md §6` (already archived here in full).
+
+**Sections updated**: none.
+
+**Open issues**: #13 still needs a live boot-time-failure repro. #12's async ownership-conflict branch and #7's actual voucher-recovery scenario (from the earlier batch below) are also still open for live verification.
+
+---
+
 ### Session: 2026-09-06 (audit #10/#13/#14) — SDK channel-role ambiguity, dead SW bootstrap retry, dropped liveness status
 
 **Source**: `docs/AUDIT_2026-09-05_FABLE.md` findings #10, #13, #14 — the last three open items from the audit not already closed in this session's earlier batches. Complexity MEDIUM (same tier as the previous #7/#12/#15 batch, contained single-file fixes) — maintainer confirmed continuing directly with Sonnet in this session without re-running the full confirmation ritual, per CLAUDE.md §1 "Subsequent Tasks" (tier unchanged).

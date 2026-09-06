@@ -46,6 +46,26 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-06 (OPEN-2) — VOUCHER_SYNC_REQUEST rebuilds the voucher instead of replaying stored hex
+
+**Source**: `docs/KNOWN_ISSUES.md` OPEN-2, discovered earlier this session alongside OPEN-1. Complexity MEDIUM (single SW file, reuses an existing tx-building helper, no schema/KissVM changes) — maintainer confirmed Sonnet.
+
+**Problem**: `handleVoucherSyncRequest` (`channel.handler.js`) resent `channel.LATEST_TX_HEX` **verbatim** from the DB whenever a `VOUCHER_SYNC_REQUEST` arrived and a stored hex existed. If that stored hex was itself invalid — e.g. a pre-fragility-#49/#54 dusty voucher, or one whose channel coin had since moved — resyncing just handed back the same broken tx, and the channel stayed stuck forever; in practice it only ever recovered by accident, when a genuinely *new* reward event happened to rebuild a fresh voucher.
+
+**Fix**: when the channel is still `STATUS='open'` and has a `VIEWER_WALLET_ADDR` on file (i.e. its coin still exists to rebuild against), `handleVoucherSyncRequest` now calls `swBuildAndExportVoucherTx` directly — the same tx-building machinery a live reward uses — with `rewardAmount: 0`. That last detail is the one subtlety: `_swDispatchVoucher`/`_continueSwDispatchVoucher` (the normal reward-flow wrapper) always computes a nonzero `rewardAmount` from the campaign's `REWARD_VIEW`/`REWARD_CLICK`/`PUBLISHER_REWARD_VIEW`, which would have created a **phantom duplicate `REWARD_EVENT`** for every resync had that wrapper been reused — so the fix calls `swBuildAndExportVoucherTx` directly with a hand-built `ctx` instead, bypassing that wrapper entirely and explicitly zeroing `rewardAmount` (verified: `swBuildAndExportVoucherTx` only calls `createRewardEvent` when `rewardAmount > 0`, for both the viewer and publisher branches). A new `_resendStoredVoucher` helper (extracted from the original inline code, unchanged behavior) is kept as the fallback for the two cases where a rebuild isn't possible — channel not open, or the campaign/`ESCROW_WALLET_PK` lookup fails — so the resync path never regresses to *worse* than before, only *upgrades* from "always replay" to "rebuild when possible, replay otherwise."
+
+**Verification (live, on the redeployed harness)**: reused the still-live publisher channel from the OPEN-1 verification (Node 2, real open channel, real 12552-hex-char voucher, `CUMULATIVE_EARNED=0.01`). Deliberately corrupted `CHANNEL_STATE.LATEST_TX_HEX` to a nonsense placeholder via `MDS.sql` (simulating a genuinely invalid stored voucher — the exact scenario OPEN-2 describes). Called the real, unmodified `_requestVoucherResync(campaignId, viewerKey, 'publisher')` from Node 2's console. Node 1's log: `VOUCHER_SYNC_REQUEST: rebuilding voucher fresh` → `SW voucher tx: channel: 0x8E25265D... cumulative: 0.01 role: publisher` — confirming a genuine rebuild ran, not a replay. Node 2's `CHANNEL_STATE` afterward: `LATEST_TX_HEX` is a fresh, real tx (12720 hex chars — different length from both the original 12552 and the corrupted placeholder, confirming a new tx was actually built), `CUMULATIVE_EARNED` unchanged at `0.01` (correct — a resync must not alter what's owed). Critically, `REWARD_EVENTS` count stayed at exactly 7 before and after — confirming the `rewardAmount:0` guard works and no phantom duplicate reward was created.
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`.
+
+**AGENTS.md updated**: yes — short pointer entry added; oldest entry (2026-09-06, live verification: fragility #54 / OPEN-1) removed from `AGENTS.md §6` (already archived here in full).
+
+**Sections updated**: `docs/KNOWN_ISSUES.md` OPEN-2 marked fixed (moved to §3's Closed/Fixed table, matching how OPEN-1 was closed out).
+
+**Open issues**: none remaining from `docs/KNOWN_ISSUES.md` §1b — both OPEN-1 and OPEN-2 are now fixed and live-verified. Only audit #13 (from the earlier 2026-09-05 audit round) remains open, and only because it needs an actual boot-time Maxima failure that isn't forceable on this harness.
+
+---
+
 ### Session: 2026-09-06 (live verification: fragility #54 / OPEN-1) — SW-level confirmation on the redeployed harness
 
 **Source**: follow-up to the Opus subagent's fix + `txncheck`-level proof for OPEN-1/fragility #54 (previous entry below). The maintainer redeployed the fixed code to all 6 harness nodes and asked to continue; this session added a genuine SW-to-SW confirmation on top of the subagent's direct-validator proof.

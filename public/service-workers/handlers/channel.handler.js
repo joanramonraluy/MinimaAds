@@ -1026,6 +1026,29 @@ function handleRewardVoucher(payload, senderPk) {
   });
 }
 
+// Fallback path for VOUCHER_SYNC_REQUEST when a fresh rebuild isn't possible
+// (channel not open, or campaign/wallet lookup failed) — resends the stored
+// hex verbatim, i.e. the pre-OPEN-2 behavior. Only heals a stale-but-valid
+// voucher, not a genuinely invalid one; see docs/KNOWN_ISSUES.md OPEN-2.
+function _resendStoredVoucher(campaignId, viewerKey, viewerMx, channel, role) {
+  // Audit 2026-09-05 #7: include role/frame_id so a publisher's resync
+  // resolves against its own (publisher-role) channel row on the
+  // receiving side instead of silently being booked against a
+  // nonexistent/viewer row.
+  sendMaxima(viewerKey, viewerMx, {
+    type:        "REWARD_VOUCHER",
+    campaign_id: campaignId,
+    viewer_key:  viewerKey,
+    event_id:    "sync_" + Date.now(),
+    cumulative:  parseFloat(channel.CUMULATIVE_EARNED),
+    tx_hex:      channel.LATEST_TX_HEX,
+    role:        role,
+    frame_id:    channel.FRAME_ID || ''
+  }, function(ok) {
+    MDS.log("[CHANNEL] VOUCHER_SYNC_REQUEST: stored voucher resent ok=" + ok);
+  });
+}
+
 function handleVoucherSyncRequest(payload, senderPk) {
   if (!payload.campaign_id || !payload.viewer_key) {
     MDS.log("[CHANNEL] VOUCHER_SYNC_REQUEST missing required fields");
@@ -1056,23 +1079,46 @@ function handleVoucherSyncRequest(payload, senderPk) {
     var viewerMx = channel.CREATOR_MX;
 
     if (channel.LATEST_TX_HEX && channel.LATEST_TX_HEX !== '') {
-      MDS.log("[CHANNEL] VOUCHER_SYNC_REQUEST: resending voucher. campaign: " + campaignId);
-      // Audit 2026-09-05 #7: include role/frame_id so a publisher's resync
-      // resolves against its own (publisher-role) channel row on the
-      // receiving side instead of silently being booked against a
-      // nonexistent/viewer row.
-      sendMaxima(viewerKey, viewerMx, {
-        type:        "REWARD_VOUCHER",
-        campaign_id: campaignId,
-        viewer_key:  viewerKey,
-        event_id:    "sync_" + Date.now(),
-        cumulative:  parseFloat(channel.CUMULATIVE_EARNED),
-        tx_hex:      channel.LATEST_TX_HEX,
-        role:        role,
-        frame_id:    channel.FRAME_ID || ''
-      }, function(ok) {
-        MDS.log("[CHANNEL] VOUCHER_SYNC_REQUEST: voucher resent ok=" + ok);
-      });
+      // KNOWN_ISSUES.md OPEN-2: resending the stored hex verbatim can never
+      // heal a voucher that is itself invalid (e.g. a pre-fragility-#49/#54
+      // dusty tx, or one whose channel coin has since moved) — only a
+      // genuinely new reward event ever rebuilt a fresh one, so a stuck
+      // channel only recovered by accident. Rebuild against the real
+      // on-chain channel coin instead, via the same swBuildAndExportVoucherTx
+      // used for a live reward, whenever the channel is still open (its coin
+      // still exists to rebuild against). rewardAmount is deliberately 0 —
+      // this is a resync, not a new view/click, so no REWARD_EVENT is
+      // created (see the rewardAmount>0 guards inside that function).
+      if (channel.STATUS === 'open' && channel.VIEWER_WALLET_ADDR) {
+        MDS.log("[CHANNEL] VOUCHER_SYNC_REQUEST: rebuilding voucher fresh. campaign: " + campaignId);
+        getCampaign(campaignId, function(campErr, campaign) {
+          if (campErr || !campaign || !campaign.ESCROW_WALLET_PK) {
+            MDS.log("[CHANNEL] VOUCHER_SYNC_REQUEST: campaign/ESCROW_WALLET_PK unavailable — resending stored voucher. campaign: " + campaignId);
+            _resendStoredVoucher(campaignId, viewerKey, viewerMx, channel, role);
+            return;
+          }
+          swBuildAndExportVoucherTx({
+            campaignId:      campaignId,
+            viewerKey:       viewerKey,
+            viewerMx:        viewerMx,
+            eventId:         "sync_" + Date.now(),
+            cumulative:      parseFloat(channel.CUMULATIVE_EARNED),
+            maxAmount:       parseFloat(channel.MAX_AMOUNT),
+            channelCoinId:   channel.CHANNEL_COINID,
+            creatorWalletPK: campaign.ESCROW_WALLET_PK,
+            viewerAddr:      channel.VIEWER_WALLET_ADDR,
+            role:            role,
+            frameId:         channel.FRAME_ID || '',
+            rewardAmount:    0,
+            rewardType:      'view'
+          }, function() {
+            MDS.log("[CHANNEL] VOUCHER_SYNC_REQUEST: rebuilt voucher sent. campaign: " + campaignId);
+          });
+        });
+      } else {
+        MDS.log("[CHANNEL] VOUCHER_SYNC_REQUEST: channel status '" + channel.STATUS + "' — resending stored voucher as-is. campaign: " + campaignId);
+        _resendStoredVoucher(campaignId, viewerKey, viewerMx, channel, role);
+      }
     } else {
       MDS.log("[CHANNEL] VOUCHER_SYNC_REQUEST: no voucher yet, resending CHANNEL_OPEN. campaign: " + campaignId);
       sendMaxima(viewerKey, viewerMx, {

@@ -24,8 +24,21 @@ function _generateCommsEventId() {
     Math.floor(Math.random() * 0xFFFFFFFF).toString(16) + Math.floor(Math.random() * 0xFFFFFFFF).toString(16);
 }
 
+// Audit 2026-09-05 #9 — a custom-frame snippet sends userAddress as the full
+// permanent route (MAX#<pk>#<mls>, needed for Maxima routing elsewhere) rather
+// than the raw Maxima public key. REWARD_EVENTS/dedup/cooldown and the
+// creator-self-reward check all compare against the raw key stored by our own
+// handlers — a route-shaped userAddress silently never matches any of them.
+// Normalize on receipt: extract the raw pk when it parses as a route, keep it
+// as-is otherwise (already-correct direct-address callers, e.g. the built-in
+// viewer, are unaffected).
+function _normalizeUserAddress(userAddress) {
+  var parsed = (typeof parseMaximaRoute === 'function') ? parseMaximaRoute(userAddress) : null;
+  return (parsed && parsed.publickey) ? parsed.publickey : userAddress;
+}
+
 function handleGetAd(payload) {
-  var userAddress = payload.userAddress || "";
+  var userAddress = _normalizeUserAddress(payload.userAddress || "");
   var interestsRaw = payload.interests || [];
   var interests = Array.isArray(interestsRaw) ? interestsRaw.join(',') : (interestsRaw || '');
 
@@ -103,7 +116,7 @@ function handleGetAd(payload) {
 
 function handleTrackView(payload) {
   var campaignId   = payload.campaignId || "";
-  var userAddress  = payload.userAddress || "";
+  var userAddress  = _normalizeUserAddress(payload.userAddress || "");
   var publisherKey = payload.publisherKey || "";
   var frameId      = payload.frameId || "";
   var publisherMx  = payload.publisherMx || "";
@@ -148,7 +161,7 @@ function handleTrackView(payload) {
 
 function handleTrackClick(payload) {
   var campaignId   = payload.campaignId || "";
-  var userAddress  = payload.userAddress || "";
+  var userAddress  = _normalizeUserAddress(payload.userAddress || "");
   var publisherKey = payload.publisherKey || "";
   var frameId      = payload.frameId || "";
   var publisherMx  = payload.publisherMx || "";

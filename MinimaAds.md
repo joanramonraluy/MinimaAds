@@ -1184,11 +1184,14 @@ Sent on reconnection when the viewer has a channel open but is missing or unsure
 {
   "type": "VOUCHER_SYNC_REQUEST",
   "campaign_id": "uuid",
-  "viewer_key": "0x..."
+  "viewer_key": "0x...",
+  "role": "viewer | publisher"
 }
 ```
 
-Creator responds with the latest `REWARD_VOUCHER` it has for this pair, or with `CHANNEL_OPEN` if no voucher has been issued yet.
+`role` (audit 2026-09-05 #7, fixed 2026-09-06): identifies which `CHANNEL_STATE` row (`CAMPAIGN_ID, VIEWER_KEY, ROLE`) to resync — defaults to `'viewer'` on the receiving side when absent, so a publisher channel's resync must always set this field or it will silently resolve against a nonexistent viewer row. Sent by all three callers: `earnings.js` `_requestVoucherResync`, `sdk/index.js` `_onReconnect`, and the SW's own retry paths.
+
+Creator responds with the latest `REWARD_VOUCHER` it has for this pair (also carrying `role`/`frame_id` so the receiver books it against the correct channel row), or with `CHANNEL_OPEN` if no voucher has been issued yet.
 
 **Sender authentication**: the creator answers only when the Maxima sender matches `CHANNEL_STATE.OPENER_MX_PK` for that channel (the node that opened it). Fails open when `OPENER_MX_PK` is empty (channels opened before the N2-4 guard).
 

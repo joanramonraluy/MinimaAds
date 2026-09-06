@@ -837,8 +837,13 @@
   // send VOUCHER_SYNC_REQUEST so the creator re-emits the last voucher
   // (§6.8).
   function _onReconnect() {
+    // Audit 2026-09-05 #7: SELECT already covers publisher-role rows (no
+    // ROLE filter), but role/frame_id were never read or forwarded, so a
+    // publisher's resync silently resolved against a nonexistent viewer row
+    // on the creator's handleVoucherSyncRequest (which defaults role to
+    // 'viewer' when the field is absent).
     sqlQuery(
-      "SELECT CAMPAIGN_ID, VIEWER_KEY, STATUS, LATEST_TX_HEX, CREATOR_MX FROM CHANNEL_STATE WHERE STATUS = 'open'",
+      "SELECT CAMPAIGN_ID, VIEWER_KEY, ROLE, FRAME_ID, STATUS, LATEST_TX_HEX, CREATOR_MX FROM CHANNEL_STATE WHERE STATUS = 'open'",
       function(err, rows) {
         if (err || !rows) { return; }
         console.log('[SDK] reconnect: open channels found:' + rows.length);
@@ -850,7 +855,8 @@
               _sendToCreator(row.CREATOR_MX, {
                 type: 'VOUCHER_SYNC_REQUEST',
                 campaign_id: row.CAMPAIGN_ID,
-                viewer_key: row.VIEWER_KEY
+                viewer_key: row.VIEWER_KEY,
+                role: row.ROLE || 'viewer'
               }, function() {});
             }
           })(rows[i]);

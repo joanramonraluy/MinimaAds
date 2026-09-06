@@ -59,13 +59,177 @@ function handleChannelOpenRequest(payload, senderPk) {
           return;
         }
       } else {
-        var publisherMxKey = payload.publisher_mx_key || '';
-        if (publisherMxKey && publisherMxKey.toUpperCase() !== sndrPk.toUpperCase()) {
+        // Audit 2026-09-05 #12: publisher_mx_key must always resolve to an
+        // identity (falling back to the verified sender key when omitted —
+        // previously an omitted field skipped this check entirely, letting
+        // any node claim any custom frame_id) AND must match the sender.
+        var publisherMxKey = payload.publisher_mx_key || sndrPk;
+        if (publisherMxKey.toUpperCase() !== sndrPk.toUpperCase()) {
           MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): publisher_mx_key/sender PK mismatch — dropping");
           return;
         }
+        // Passing the above only proves the sender controls the identity it
+        // claims — not that it owns frameId. Verify against the FRAMES row
+        // when known locally; a frame never seen before falls through
+        // (trust-on-first-use, same policy as campaign discovery elsewhere).
+        getFrame(frameId, function(frErr, frame) {
+          if (!frErr && frame && frame.PUBLISHER_KEY && frame.PUBLISHER_KEY.toUpperCase() !== sndrPk.toUpperCase()) {
+            MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): frame_id owned by a different publisher — dropping. frame: " + frameId);
+            return;
+          }
+          _continuePublisherChannelOpenRequest(campaignId, viewerKey, viewerMx, maxAmount, viewerWalletAddr, viewerWalletPK, frameId, sndrPk);
+        });
+        return;
       }
     }
+    _continuePublisherChannelOpenRequest(campaignId, viewerKey, viewerMx, maxAmount, viewerWalletAddr, viewerWalletPK, frameId, sndrPk);
+    return;
+  } else {
+    getCampaign(campaignId, function(err, campaign) {
+      if (err || !campaign) {
+        MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: campaign not found: " + campaignId);
+        return;
+      }
+      if (campaign.STATUS !== 'active') {
+        MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: campaign not active: " + campaignId + " status: " + campaign.STATUS);
+        if (viewerKey && viewerMx) {
+          var _rejStat = campaign.STATUS;
+          sendMaxima(viewerKey, viewerMx, {
+            type:        "REWARD_REJECTED",
+            campaign_id: campaignId,
+            reason:      _rejStat
+          }, function(ok) {
+            MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: REWARD_REJECTED sent ok=" + ok + " status=" + _rejStat);
+          });
+        }
+        return;
+      }
+      if (parseFloat(campaign.BUDGET_REMAINING) < maxAmount) {
+        MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: insufficient budget. remaining: " + campaign.BUDGET_REMAINING + " requested: " + maxAmount);
+        return;
+      }
+      // Cap reservation so a single channel cannot pre-reserve the entire budget.
+      var reservationCap = LIMITS.MAX_CHANNEL_RESERVATION || 10;
+      if (maxAmount > reservationCap) {
+        MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: capping reservation " + maxAmount + " -> " + reservationCap + " campaign=" + campaignId);
+        maxAmount = reservationCap;
+      }
+
+      if (viewerMx && !isMaximaRoute(viewerMx)) {
+        MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST rejected: malformed viewer_mx");
+        return;
+      }
+      getChannelState(campaignId, viewerKey, 'viewer', function(chErr, existing) {
+        if (!chErr && existing && existing.STATUS === 'open') {
+          var _csAddr = CHANNEL_SCRIPT_ADDRESS || '';
+          MDS.cmd("coins address:" + _csAddr, function(_csRes) {
+            var _csList = (_csRes && _csRes.status && _csRes.response) ? _csRes.response : [];
+            var _coinStillOpen = false;
+            for (var _ci = 0; _ci < _csList.length; _ci++) {
+              if (_csList[_ci].coinid && _csList[_ci].coinid.toUpperCase() === existing.CHANNEL_COINID.toUpperCase()) {
+                _coinStillOpen = true;
+                break;
+              }
+            }
+            if (_coinStillOpen) {
+              if (frameId && (!existing.FRAME_ID || existing.FRAME_ID === '')) {
+                sqlQuery(
+                  "UPDATE CHANNEL_STATE SET FRAME_ID = '" + escapeSql(frameId) + "'" +
+                  " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
+                  " AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(viewerKey) + "')" +
+                  " AND UPPER(ROLE) = 'VIEWER'",
+                  function() {
+                    MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: updated viewer FRAME_ID=" + frameId + " campaign: " + campaignId);
+                  }
+                );
+              }
+              MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: channel already open — resending CHANNEL_OPEN. campaign: " + campaignId + " coinId: " + existing.CHANNEL_COINID);
+              sendMaxima(viewerKey, viewerMx, {
+                type:              "CHANNEL_OPEN",
+                campaign_id:       campaignId,
+                viewer_key:        viewerKey,
+                channel_coinid:    existing.CHANNEL_COINID,
+                max_amount:        parseFloat(existing.MAX_AMOUNT),
+                cumulative_earned: parseFloat(existing.CUMULATIVE_EARNED || 0),
+                latest_tx_hex:     (existing.LATEST_TX_HEX || ''),
+                role:              "viewer"
+              }, function(ok) {
+                MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: CHANNEL_OPEN resent ok=" + ok);
+              });
+            } else {
+              MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: coin spent — settling and opening new channel. campaign: " + campaignId);
+              settleChannel(campaignId, viewerKey, 'viewer', function(settleErr) {
+                if (settleErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: settleChannel failed: " + settleErr); }
+                openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', frameId, viewerWalletAddr, sndrPk, function(openErr) {
+                  if (openErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: openChannel failed: " + openErr); return; }
+                  _signalCampaignUpdated(campaignId);
+                  MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: building channel TX in SW. campaign: " + campaignId + " viewer_mx: " + viewerMx);
+                  _swDispatchChannelOpen(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', frameId, viewerWalletPK, viewerWalletAddr);
+                });
+              });
+            }
+          });
+          return;
+        }
+        if (!chErr && existing && existing.STATUS === 'pending') {
+          var age = Date.now() - parseInt(existing.CREATED_AT || 0);
+          if (age < 300000) {
+            MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: channel pending — tx in progress, skipping. campaign: " + campaignId);
+            return;
+          }
+          MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: stale pending (age=" + age + "ms) — retrying. campaign: " + campaignId);
+          if (existing.SPLIT_COINID && existing.SPLIT_COINID !== '') {
+            MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: split coin known — retrying Tx2 directly. splitCoinId: " + existing.SPLIT_COINID);
+            getCampaign(campaignId, function(campErr, camp) {
+              if (campErr || !camp) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: campaign not found for Tx2 retry"); return; }
+              swBuildAndPostChannelOpenTx({
+                campaignId:    campaignId,
+                viewerKey:     viewerKey,
+                viewerMx:      viewerMx,
+                viewerWalletPK: viewerWalletPK,
+                maxAmount:     maxAmount,
+                splitCoinId:   existing.SPLIT_COINID,
+                walletPK:      camp.ESCROW_WALLET_PK,
+                escrowAddr:    ESCROW_ADDRESS_V3 || ESCROW_ADDRESS,
+                role:          'viewer',
+                frameId:       frameId
+              });
+            });
+            return;
+          }
+          // Stale pending with no split coin — archive to history before retrying fresh.
+          MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: stale pending, no split coin — archiving stale record and opening fresh. campaign: " + campaignId);
+          settleChannel(campaignId, viewerKey, 'viewer', function(staleSettleErr) {
+            if (staleSettleErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: archive stale pending failed: " + staleSettleErr); }
+            openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', frameId, viewerWalletAddr, sndrPk, function(openErr) {
+              if (openErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: openChannel (after stale archive) failed: " + openErr); return; }
+              _signalCampaignUpdated(campaignId);
+              MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: building channel TX after stale archive. campaign: " + campaignId);
+              _swDispatchChannelOpen(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', frameId, viewerWalletPK, viewerWalletAddr);
+            });
+          });
+          return;
+        }
+
+        openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', frameId, viewerWalletAddr, sndrPk, function(openErr) {
+          if (openErr) {
+            MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: openChannel failed: " + openErr);
+            return;
+          }
+          _signalCampaignUpdated(campaignId);
+          MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: building channel TX in SW. campaign: " + campaignId + " viewer_mx: " + viewerMx);
+          _swDispatchChannelOpen(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', frameId, viewerWalletPK, viewerWalletAddr);
+        });
+      });
+    });
+  }
+}
+
+// Body of the role==='publisher' branch of handleChannelOpenRequest, called
+// once the sender has passed the auth/ownership checks above (either
+// synchronously for the builtin-frame/no-sender cases, or from inside the
+// async getFrame ownership check for custom frames — audit 2026-09-05 #12).
+function _continuePublisherChannelOpenRequest(campaignId, viewerKey, viewerMx, maxAmount, viewerWalletAddr, viewerWalletPK, frameId, sndrPk) {
     getCampaign(campaignId, function(err, campaign) {
       if (err || !campaign) {
         MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): campaign not found: " + campaignId);
@@ -209,145 +373,6 @@ function handleChannelOpenRequest(payload, senderPk) {
       });
         }); // end sqlQuery SUM(CUMULATIVE_EARNED) callback
       });   // end getCampaign callback + call
-  } else {
-    getCampaign(campaignId, function(err, campaign) {
-      if (err || !campaign) {
-        MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: campaign not found: " + campaignId);
-        return;
-      }
-      if (campaign.STATUS !== 'active') {
-        MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: campaign not active: " + campaignId + " status: " + campaign.STATUS);
-        if (viewerKey && viewerMx) {
-          var _rejStat = campaign.STATUS;
-          sendMaxima(viewerKey, viewerMx, {
-            type:        "REWARD_REJECTED",
-            campaign_id: campaignId,
-            reason:      _rejStat
-          }, function(ok) {
-            MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: REWARD_REJECTED sent ok=" + ok + " status=" + _rejStat);
-          });
-        }
-        return;
-      }
-      if (parseFloat(campaign.BUDGET_REMAINING) < maxAmount) {
-        MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: insufficient budget. remaining: " + campaign.BUDGET_REMAINING + " requested: " + maxAmount);
-        return;
-      }
-      // Cap reservation so a single channel cannot pre-reserve the entire budget.
-      var reservationCap = LIMITS.MAX_CHANNEL_RESERVATION || 10;
-      if (maxAmount > reservationCap) {
-        MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: capping reservation " + maxAmount + " -> " + reservationCap + " campaign=" + campaignId);
-        maxAmount = reservationCap;
-      }
-
-      if (viewerMx && !isMaximaRoute(viewerMx)) {
-        MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST rejected: malformed viewer_mx");
-        return;
-      }
-      getChannelState(campaignId, viewerKey, 'viewer', function(chErr, existing) {
-        if (!chErr && existing && existing.STATUS === 'open') {
-          var _csAddr = CHANNEL_SCRIPT_ADDRESS || '';
-          MDS.cmd("coins address:" + _csAddr, function(_csRes) {
-            var _csList = (_csRes && _csRes.status && _csRes.response) ? _csRes.response : [];
-            var _coinStillOpen = false;
-            for (var _ci = 0; _ci < _csList.length; _ci++) {
-              if (_csList[_ci].coinid && _csList[_ci].coinid.toUpperCase() === existing.CHANNEL_COINID.toUpperCase()) {
-                _coinStillOpen = true;
-                break;
-              }
-            }
-            if (_coinStillOpen) {
-              if (frameId && (!existing.FRAME_ID || existing.FRAME_ID === '')) {
-                sqlQuery(
-                  "UPDATE CHANNEL_STATE SET FRAME_ID = '" + escapeSql(frameId) + "'" +
-                  " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
-                  " AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(viewerKey) + "')" +
-                  " AND UPPER(ROLE) = 'VIEWER'",
-                  function() {
-                    MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: updated viewer FRAME_ID=" + frameId + " campaign: " + campaignId);
-                  }
-                );
-              }
-              MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: channel already open — resending CHANNEL_OPEN. campaign: " + campaignId + " coinId: " + existing.CHANNEL_COINID);
-              sendMaxima(viewerKey, viewerMx, {
-                type:              "CHANNEL_OPEN",
-                campaign_id:       campaignId,
-                viewer_key:        viewerKey,
-                channel_coinid:    existing.CHANNEL_COINID,
-                max_amount:        parseFloat(existing.MAX_AMOUNT),
-                cumulative_earned: parseFloat(existing.CUMULATIVE_EARNED || 0),
-                latest_tx_hex:     (existing.LATEST_TX_HEX || ''),
-                role:              "viewer"
-              }, function(ok) {
-                MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: CHANNEL_OPEN resent ok=" + ok);
-              });
-            } else {
-              MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: coin spent — settling and opening new channel. campaign: " + campaignId);
-              settleChannel(campaignId, viewerKey, 'viewer', function(settleErr) {
-                if (settleErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: settleChannel failed: " + settleErr); }
-                openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', frameId, viewerWalletAddr, sndrPk, function(openErr) {
-                  if (openErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: openChannel failed: " + openErr); return; }
-                  _signalCampaignUpdated(campaignId);
-                  MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: building channel TX in SW. campaign: " + campaignId + " viewer_mx: " + viewerMx);
-                  _swDispatchChannelOpen(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', frameId, viewerWalletPK, viewerWalletAddr);
-                });
-              });
-            }
-          });
-          return;
-        }
-        if (!chErr && existing && existing.STATUS === 'pending') {
-          var age = Date.now() - parseInt(existing.CREATED_AT || 0);
-          if (age < 300000) {
-            MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: channel pending — tx in progress, skipping. campaign: " + campaignId);
-            return;
-          }
-          MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: stale pending (age=" + age + "ms) — retrying. campaign: " + campaignId);
-          if (existing.SPLIT_COINID && existing.SPLIT_COINID !== '') {
-            MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: split coin known — retrying Tx2 directly. splitCoinId: " + existing.SPLIT_COINID);
-            getCampaign(campaignId, function(campErr, camp) {
-              if (campErr || !camp) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: campaign not found for Tx2 retry"); return; }
-              swBuildAndPostChannelOpenTx({
-                campaignId:    campaignId,
-                viewerKey:     viewerKey,
-                viewerMx:      viewerMx,
-                viewerWalletPK: viewerWalletPK,
-                maxAmount:     maxAmount,
-                splitCoinId:   existing.SPLIT_COINID,
-                walletPK:      camp.ESCROW_WALLET_PK,
-                escrowAddr:    ESCROW_ADDRESS_V3 || ESCROW_ADDRESS,
-                role:          'viewer',
-                frameId:       frameId
-              });
-            });
-            return;
-          }
-          // Stale pending with no split coin — archive to history before retrying fresh.
-          MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: stale pending, no split coin — archiving stale record and opening fresh. campaign: " + campaignId);
-          settleChannel(campaignId, viewerKey, 'viewer', function(staleSettleErr) {
-            if (staleSettleErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: archive stale pending failed: " + staleSettleErr); }
-            openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', frameId, viewerWalletAddr, sndrPk, function(openErr) {
-              if (openErr) { MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: openChannel (after stale archive) failed: " + openErr); return; }
-              _signalCampaignUpdated(campaignId);
-              MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: building channel TX after stale archive. campaign: " + campaignId);
-              _swDispatchChannelOpen(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', frameId, viewerWalletPK, viewerWalletAddr);
-            });
-          });
-          return;
-        }
-
-        openChannel(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', frameId, viewerWalletAddr, sndrPk, function(openErr) {
-          if (openErr) {
-            MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: openChannel failed: " + openErr);
-            return;
-          }
-          _signalCampaignUpdated(campaignId);
-          MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST: building channel TX in SW. campaign: " + campaignId + " viewer_mx: " + viewerMx);
-          _swDispatchChannelOpen(campaignId, viewerKey, viewerMx, maxAmount, 'viewer', frameId, viewerWalletPK, viewerWalletAddr);
-        });
-      });
-    });
-  }
 }
 
 function _signalCampaignUpdated(campaignId) {
@@ -1022,13 +1047,19 @@ function handleVoucherSyncRequest(payload, senderPk) {
 
     if (channel.LATEST_TX_HEX && channel.LATEST_TX_HEX !== '') {
       MDS.log("[CHANNEL] VOUCHER_SYNC_REQUEST: resending voucher. campaign: " + campaignId);
+      // Audit 2026-09-05 #7: include role/frame_id so a publisher's resync
+      // resolves against its own (publisher-role) channel row on the
+      // receiving side instead of silently being booked against a
+      // nonexistent/viewer row.
       sendMaxima(viewerKey, viewerMx, {
         type:        "REWARD_VOUCHER",
         campaign_id: campaignId,
         viewer_key:  viewerKey,
         event_id:    "sync_" + Date.now(),
         cumulative:  parseFloat(channel.CUMULATIVE_EARNED),
-        tx_hex:      channel.LATEST_TX_HEX
+        tx_hex:      channel.LATEST_TX_HEX,
+        role:        role,
+        frame_id:    channel.FRAME_ID || ''
       }, function(ok) {
         MDS.log("[CHANNEL] VOUCHER_SYNC_REQUEST: voucher resent ok=" + ok);
       });
@@ -1372,12 +1403,22 @@ function handlePublisherRewardNotify(payload, senderPk) {
   if (frameId && frameId.indexOf('builtin:') !== 0 && frameId.toUpperCase().indexOf('0X') === 0) {
     frameId = 'builtin:' + frameId.toUpperCase();
   }
-  var creatorKey = senderPk || '';
 
+  // Audit 2026-09-05 #15 — PUBLISHER_REWARD_NOTIFY is creator-authored: an
+  // unverified sender could otherwise redirect this publisher's freshly
+  // minted wallet key/address (sent in the CHANNEL_OPEN_REQUEST below) to
+  // itself via a spoofed notify. Same guard as CHANNEL_OPEN/REWARD_VOUCHER.
+  _assertCampaignCreatorSender(campaignId, senderPk, "PUBLISHER_REWARD_NOTIFY", function(allowed) {
+    if (!allowed) { return; }
+    _doHandlePublisherRewardNotify(campaignId, frameId);
+  });
+}
+
+function _doHandlePublisherRewardNotify(campaignId, frameId) {
   getCampaign(campaignId, function(err, campaign) {
     if (err || !campaign) {
       MDS.log("[CHANNEL] PUBLISHER_REWARD_NOTIFY: campaign not found, deferring: " + campaignId);
-      var deferred = JSON.stringify({ campaign_id: campaignId, frame_id: frameId, creator_key: creatorKey });
+      var deferred = JSON.stringify({ campaign_id: campaignId, frame_id: frameId });
       MDS.keypair.set("PENDING_PUB_NOTIFY_" + campaignId, deferred, function() {});
       return;
     }
@@ -1397,7 +1438,7 @@ function handlePublisherRewardNotify(payload, senderPk) {
       }
       MDS.keypair.get("VIEWER_WALLET_PK_" + campaignId, function(pkRes) {
         if (pkRes && pkRes.status && pkRes.value) {
-          _doSendPublisherChannelOpenRequest(campaignId, campaign, frameId, creatorKey, pkRes.value);
+          _doSendPublisherChannelOpenRequest(campaignId, campaign, frameId, pkRes.value);
         } else {
           MDS.cmd("keys action:new", function(keysRes) {
             if (!keysRes || !keysRes.status || !keysRes.response || !keysRes.response.publickey) {
@@ -1406,7 +1447,7 @@ function handlePublisherRewardNotify(payload, senderPk) {
             }
             var walletPK = keysRes.response.publickey;
             MDS.keypair.set("VIEWER_WALLET_PK_" + campaignId, walletPK, function() {
-              _doSendPublisherChannelOpenRequest(campaignId, campaign, frameId, creatorKey, walletPK);
+              _doSendPublisherChannelOpenRequest(campaignId, campaign, frameId, walletPK);
             });
           });
         }
@@ -1415,7 +1456,7 @@ function handlePublisherRewardNotify(payload, senderPk) {
   });
 }
 
-function _doSendPublisherChannelOpenRequest(campaignId, campaign, frameId, creatorKey, walletPK) {
+function _doSendPublisherChannelOpenRequest(campaignId, campaign, frameId, walletPK) {
   MDS.cmd("getaddress", function(gaRes) {
     var walletAddr = (gaRes && gaRes.status && gaRes.response && gaRes.response.address)
       ? gaRes.response.address : '';
@@ -1431,7 +1472,10 @@ function _doSendPublisherChannelOpenRequest(campaignId, campaign, frameId, creat
       // Do NOT use MAX_PUBLISHER_BUDGET here — that is the total campaign budget,
       // not a per-channel cap. Using it would reserve the entire budget for one publisher.
       var maxAmount   = pubView * 10;
-      var targetKey   = creatorKey || campaign.CREATOR_ADDRESS;
+      // Audit #15: always route to the campaign's known creator identity,
+      // never to the notify's sender — a spoofed notify's sendMaxima target
+      // must not be attacker-controlled.
+      var targetKey   = campaign.CREATOR_ADDRESS;
       var payload = {
         type:               "CHANNEL_OPEN_REQUEST",
         campaign_id:        campaignId,
@@ -1513,26 +1557,15 @@ function _maybeGeneratePublisherVoucher(campaignId, frameId, eventId, publisherK
     }
     sqlQuery(sql, function(err, rows) {
       if (err || !rows || rows.length === 0) {
-        // Fall back to any open publisher channel (handles stale frame_id from old snippets).
-        sqlQuery(
-          "SELECT * FROM CHANNEL_STATE WHERE " +
-          "UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "') AND " +
-          "ROLE = 'publisher' AND STATUS = 'open' LIMIT 1",
-          function(err2, rows2) {
-            if (err2 || !rows2 || rows2.length === 0) {
-              MDS.log("[CHANNEL] _maybeGeneratePublisherVoucher: no open publisher channel — DEFERRING. campaign: " + campaignId + " frame: " + resolvedFrameId);
-              _deferPublisherReward(campaignId, resolvedFrameId, eventId, publisherMx || '');
-              _maybeNotifyPublisher(campaignId, resolvedFrameId);
-              return;
-            }
-            MDS.log("[CHANNEL] _maybeGeneratePublisherVoucher: fallback to open publisher channel. campaign: " + campaignId + " frame: " + resolvedFrameId);
-            var targetFrameId = rows2[0].FRAME_ID || resolvedFrameId;
-            if (targetFrameId && targetFrameId.indexOf('builtin:') !== 0 && targetFrameId.toUpperCase().indexOf('0X') === 0) {
-              targetFrameId = 'builtin:' + targetFrameId.toUpperCase();
-            }
-            _doGeneratePublisherVoucher(campaignId, targetFrameId, eventId, rows2[0]);
-          }
-        );
+        // Audit 2026-09-05 #12: this used to fall back to "any open publisher
+        // channel for this campaign" (ROLE='publisher' AND STATUS='open' LIMIT 1,
+        // no frame/key match at all) to handle a stale frame_id from an old
+        // snippet — but with no frame ownership check, a squatter's channel for
+        // an unrelated custom frame_id would be picked up here and paid someone
+        // else's publisher reward. Defer instead, same as the no-channel path.
+        MDS.log("[CHANNEL] _maybeGeneratePublisherVoucher: no open publisher channel for this frame/key — DEFERRING (no any-channel fallback). campaign: " + campaignId + " frame: " + resolvedFrameId);
+        _deferPublisherReward(campaignId, resolvedFrameId, eventId, publisherMx || '');
+        _maybeNotifyPublisher(campaignId, resolvedFrameId);
         return;
       }
       _doGeneratePublisherVoucher(campaignId, resolvedFrameId, eventId, rows[0]);

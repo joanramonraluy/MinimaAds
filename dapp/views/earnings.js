@@ -545,10 +545,15 @@ function _requestVoucherResync(campaignId, viewerKey, role) {
         return;
       }
       console.log('[EARNINGS] requesting voucher re-sync from creator. campaign:', campaignId);
+      // Audit 2026-09-05 #7: role was already used above to look up this
+      // node's own CHANNEL_STATE row, but never sent to the creator — whose
+      // handleVoucherSyncRequest defaults to 'viewer', so a publisher's
+      // resync silently resolved against a nonexistent viewer row.
       sendChannelMaxima(creatorMx, {
         type: 'VOUCHER_SYNC_REQUEST',
         campaign_id: campaignId,
-        viewer_key: viewerKey
+        viewer_key: viewerKey,
+        role: role
       }, function(ok) {
         console.log('[EARNINGS] VOUCHER_SYNC_REQUEST sent ok:', ok, 'campaign:', campaignId);
       });

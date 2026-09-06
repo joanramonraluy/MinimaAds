@@ -255,9 +255,19 @@ function _continuePublisherChannelOpenRequest(campaignId, viewerKey, viewerMx, m
           var pubEarned    = (earnRows && earnRows.length > 0) ? parseFloat(earnRows[0].EARNED) : 0;
           var pubMaxBudget = parseFloat(campaign.MAX_PUBLISHER_BUDGET || 0) || 0;
           var pubView      = parseFloat(campaign.PUBLISHER_REWARD_VIEW || 0) || 0;
-          var pubRemaining = pubMaxBudget - pubEarned;
+          // Quantise to micro-units (the schema's DECIMAL(20,6) precision) before
+          // comparing or reserving: `pubMaxBudget - pubEarned` is a raw JS float
+          // subtraction and lands on dust for ordinary values (10 - 9.9 ===
+          // 0.09999999999999964). Un-quantised, that dust reaches the escrow
+          // split tx, where ESCROW_SCRIPT's VERIFYOUT(@AMOUNT-STATE(10)) can
+          // never match the rounded change output and the channel silently never
+          // opens (KNOWN_ISSUES OPEN-1 / fragility #49 class). Round to NEAREST
+          // micro so a remaining budget of exactly 0.1 is not shaved below the
+          // one-view threshold; the escrow coin still bounds the tx downstream.
+          var pubRemaining = swMicroToAmount(swAmtToMicro(pubMaxBudget) - swAmtToMicro(pubEarned));
+          pubRemaining     = parseFloat(pubRemaining);
           // Cap the channel max at remaining budget (publisher may request more than is left)
-          var effectiveCap = Math.min(maxAmount, pubRemaining);
+          var effectiveCap = parseFloat(swMicroToAmount(Math.min(swAmtToMicro(maxAmount), swAmtToMicro(pubRemaining))));
           // Cap reservation so a single channel cannot pre-reserve the entire budget.
           var reservationCap = LIMITS.MAX_CHANNEL_RESERVATION || 10;
           if (effectiveCap > reservationCap) {
@@ -2080,6 +2090,30 @@ function swMicroToAmount(zMicro) {
   return (zMicro / SW_MICRO).toFixed(6);
 }
 
+// The fractional digits of a Minima amount string BEYOND micro precision, as a
+// digit string ("" when the amount fits in 6 decimals). Needed only by the
+// escrow-split builder: ESCROW_SCRIPT_V3/V4 assert
+// VERIFYOUT(... @AMOUNT-STATE(10) ...) with exact MiniNumber equality, so when
+// the input coin itself carries sub-micro dust the STATE(10) payout must carry
+// the *same* trailing digits or the change output can never match. Appending
+// this residual to a 6-decimal payout makes @AMOUNT-payout land exactly on a
+// clean 6-decimal change. See swBuildAndPostChannelTx.
+function swAmountResidual(zStr) {
+  var s   = String((zStr === undefined || zStr === null) ? "0" : zStr);
+  var dot = s.indexOf(".");
+  if (dot < 0) { return ""; }
+  var frac = s.substring(dot + 1);
+  if (frac.length <= 6) { return ""; }
+  var rest = frac.substring(6);
+  // All-zero residual carries no value — drop it and keep the payout clean.
+  var nonZero = false;
+  for (var i = 0; i < rest.length; i++) {
+    if (rest.charAt(i) !== "0") { nonZero = true; break; }
+  }
+  if (!nonZero) { return ""; }
+  return rest;
+}
+
 function swWaitForCoin(coinId, maxRetries, delay, cb) {
   MDS.cmd("coins coinid:" + coinId + " relevant:true", function(res) {
     if (res && res.status && res.response && res.response.length > 0) {
@@ -2303,12 +2337,38 @@ function _swBuildAndPostChannelTxInner(ctx, txId, campaignHex, contactForState4)
       }
       if (!ps7) { ps7 = '0x' + utf8ToHex('active').toUpperCase(); }
 
-      var actualAmount = 0;
-      try { actualAmount = parseFloat(r2.response.transaction.inputs[0].amount); } catch(e) {}
-      var change = parseFloat((actualAmount - ctx.maxAmount).toFixed(6));
-      MDS.log("[CHANNEL] SW split: actual=" + actualAmount + " max=" + ctx.maxAmount + " change=" + change);
+      // Budget this split against the escrow coin's ACTUAL on-chain amount (the
+      // exact decimal string echoed back by txninput), never the DB-cached
+      // maxAmount/budget figures — only the real coin bounds the outputs, and
+      // the two can disagree by float dust. Derive BOTH sibling outputs from one
+      // integer micro-unit budget so they can never round to inconsistent
+      // totals (fragility #49/#53 class; KNOWN_ISSUES OPEN-1).
+      var coinAmtStr = "";
+      try { coinAmtStr = r2.response.transaction.inputs[0].amount; } catch(e) { coinAmtStr = ""; }
+      if (coinAmtStr === "" || coinAmtStr === undefined || coinAmtStr === null) { coinAmtStr = String(ctx.maxAmount); }
+      var coinMicro  = swCoinAmountToMicro(coinAmtStr);
+      var splitMicro = swAmtToMicro(ctx.maxAmount);
+      if (splitMicro <= 0) { fail("split amount not positive"); return; }
+      if (splitMicro > coinMicro) {
+        MDS.log("[CHANNEL] swBuildAndPostChannelTx: split " + splitMicro
+          + " micro exceeds escrow coin " + coinMicro + " micro — capping. campaign: " + ctx.campaignId);
+        splitMicro = coinMicro;
+      }
+      var changeMicro = coinMicro - splitMicro;
+      var splitAmt    = swMicroToAmount(splitMicro);
+      var changeAmt   = swMicroToAmount(changeMicro);
+      // ESCROW_SCRIPT_V3/V4 compute change = @AMOUNT - STATE(10) and assert
+      // VERIFYOUT on it with exact MiniNumber equality. If the escrow coin
+      // itself carries sub-micro dust, STATE(10) must carry the same trailing
+      // digits so the difference lands exactly on the clean 6-decimal change
+      // output emitted below. Any such residual (< 1 micro) is burned.
+      var residual    = swAmountResidual(coinAmtStr);
+      var payoutState = (residual === "") ? splitAmt : (splitAmt + residual);
+      var change      = parseFloat(changeAmt);
+      MDS.log("[CHANNEL] SW split: coin=" + coinAmtStr + " requested=" + ctx.maxAmount
+        + " split=" + splitAmt + " change=" + changeAmt + " payoutState=" + payoutState);
 
-      MDS.cmd("txnoutput id:" + txId + " storestate:true amount:" + ctx.maxAmount + " address:" + coinAddr, function(r3) {
+      MDS.cmd("txnoutput id:" + txId + " storestate:true amount:" + splitAmt + " address:" + coinAddr, function(r3) {
         if (!r3 || !r3.status) { fail("txnoutput[split]"); return; }
 
         function afterChange(r4) {
@@ -2319,7 +2379,7 @@ function _swBuildAndPostChannelTxInner(ctx, txId, campaignHex, contactForState4)
             "txnstate id:" + txId + " port:3 value:" + campaignHex,
             "txnstate id:" + txId + " port:4 value:" + creatorMxHex,
             "txnstate id:" + txId + " port:7 value:" + ps7,
-            "txnstate id:" + txId + " port:10 value:" + ctx.maxAmount,
+            "txnstate id:" + txId + " port:10 value:" + payoutState,
             "txnstate id:" + txId + " port:11 value:0",
             "txnstate id:" + txId + " port:16 value:0"
           ];
@@ -2383,7 +2443,9 @@ function _swBuildAndPostChannelTxInner(ctx, txId, campaignHex, contactForState4)
                   viewerKey:     ctx.viewerKey,
                   viewerMx:      ctx.viewerMx,
                   viewerWalletPK: ctx.viewerWalletPK,
-                  maxAmount:     ctx.maxAmount,
+                  // Quantised split amount, not the (possibly dusty) request —
+                  // Tx2 must reserve exactly what the split coin holds.
+                  maxAmount:     parseFloat(splitAmt),
                   splitCoinId:   splitCoinId,
                   walletPK:      ctx.walletPK,
                   escrowAddr:    coinAddr,
@@ -2396,8 +2458,8 @@ function _swBuildAndPostChannelTxInner(ctx, txId, campaignHex, contactForState4)
           });
         }
 
-        if (change > 0) {
-          MDS.cmd("txnoutput id:" + txId + " storestate:true amount:" + change + " address:" + coinAddr, afterChange);
+        if (changeMicro > 0) {
+          MDS.cmd("txnoutput id:" + txId + " storestate:true amount:" + changeAmt + " address:" + coinAddr, afterChange);
         } else {
           afterChange(null);
         }
@@ -2447,7 +2509,31 @@ function swBuildAndPostChannelOpenTx(ctx) {
       MDS.cmd("txninput id:" + txId + " coinid:" + ctx.splitCoinId + " scriptmmr:true", function(r2) {
         if (!r2 || !r2.status) { fail("txninput"); return; }
 
-        MDS.cmd("txnoutput id:" + txId + " storestate:true amount:" + ctx.maxAmount + " address:" + channelAddr, function(r3) {
+        // The split coin is itself escrow-scripted, so this spend is subject to
+        // ESCROW_SCRIPT's change rule: change = @AMOUNT - STATE(10), and any
+        // change GT 0 demands a VERIFYOUT'd change output this tx never emits.
+        // The whole coin therefore moves into the channel, and STATE(10) must be
+        // the coin's EXACT on-chain amount — a DB-cached maxAmount carrying float
+        // dust (e.g. 0.09999999999999964 against a 0.100000 coin) leaves a
+        // residual change the script cannot satisfy, and the channel silently
+        // never opens (KNOWN_ISSUES OPEN-1). The channel output itself is
+        // quantised to canonical micro precision, which every consumer of
+        // CHANNEL_STATE.MAX_AMOUNT / the voucher builder already assumes.
+        var coinAmtStr = "";
+        try { coinAmtStr = r2.response.transaction.inputs[0].amount; } catch(e) { coinAmtStr = ""; }
+        if (coinAmtStr === "" || coinAmtStr === undefined || coinAmtStr === null) {
+          coinAmtStr = swMicroToAmount(swAmtToMicro(ctx.maxAmount));
+          MDS.log("[CHANNEL] swBuildAndPostChannelOpenTx: split coin amount unavailable from txninput — falling back to requested "
+            + coinAmtStr + ". campaign: " + ctx.campaignId);
+        }
+        var chanMicro = swCoinAmountToMicro(coinAmtStr);
+        if (chanMicro <= 0) { fail("channel amount not positive"); return; }
+        var chanAmt   = swMicroToAmount(chanMicro);
+        var maxAmount = parseFloat(chanAmt);
+        MDS.log("[CHANNEL] SW channel open: splitCoin=" + coinAmtStr + " channelAmount=" + chanAmt
+          + " requested=" + ctx.maxAmount + " campaign: " + ctx.campaignId);
+
+        MDS.cmd("txnoutput id:" + txId + " storestate:true amount:" + chanAmt + " address:" + channelAddr, function(r3) {
           if (!r3 || !r3.status) { fail("txnoutput[channel]"); return; }
 
           var port2Key  = ctx.viewerWalletPK || ctx.viewerKey;
@@ -2456,7 +2542,7 @@ function swBuildAndPostChannelOpenTx(ctx) {
             "txnstate id:" + txId + " port:2 value:" + port2Key,
             "txnstate id:" + txId + " port:3 value:" + campHex,
             "txnstate id:" + txId + " port:4 value:" + viewerMxHex,
-            "txnstate id:" + txId + " port:10 value:" + ctx.maxAmount,
+            "txnstate id:" + txId + " port:10 value:" + coinAmtStr,
             "txnstate id:" + txId + " port:11 value:0",
             "txnstate id:" + txId + " port:16 value:0"
           ];
@@ -2498,7 +2584,9 @@ function swBuildAndPostChannelOpenTx(ctx) {
                     campaign_id:    ctx.campaignId,
                     viewer_key:     ctx.viewerKey,
                     channel_coinid: channelCoinId,
-                    max_amount:     ctx.maxAmount,
+                    // Announce what the channel coin actually holds, so the
+                    // peer's CHANNEL_STATE.MAX_AMOUNT can never exceed it.
+                    max_amount:     maxAmount,
                     role:           ctx.role || "viewer"
                   };
                   if (ctx.role === "publisher" && ctx.frameId) {

@@ -46,6 +46,48 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-06 (OPEN-1 / fragility #54) — publisher channel-open tx silently rejected by the escrow script on float dust
+
+**Source**: `docs/KNOWN_ISSUES.md` OPEN-1, logged (deliberately unfixed) by the fragility #53 session. Complexity HIGH (L1 tx path, KissVM script semantics, two tx builders) — maintainer confirmed Opus + plan mode.
+
+**Root cause**: `_continuePublisherChannelOpenRequest` (`channel.handler.js`) sizes a publisher reservation as `pubRemaining = pubMaxBudget - pubEarned`, then `effectiveCap = Math.min(maxAmount, pubRemaining)` — raw JS float subtraction. This produces dust for *ordinary* values, not exotic ones: `10 - 9.9 === 0.09999999999999964`, `1 - 0.9 === 0.09999999999999998`, `2 - 1.1 === 0.8999999999999999`, `0.03 - 0.01 === 0.019999999999999997`. That value became `maxAmount` and travelled unrounded into both escrow tx builders.
+
+The failure is sharper than fragility #53's "Inputs LESS than Outputs", because both builders spend **escrow-scripted** coins, and `ESCROW_SCRIPT_V3/V4` do not merely require inputs ≥ outputs — they *derive* the change: `LET payout=STATE(10) LET change=@AMOUNT-payout IF change GT 0 THEN ASSERT VERIFYOUT(INC(@INPUT) @ADDRESS change @TOKENID TRUE)`. `VERIFYOUT` compares amounts with exact `MiniNumber.isEqual` (`refs/…/kissvm/functions/txn/output/VERIFYOUT.java`), and `MiniNumber` keeps up to 44 decimals, so the dust is real, not absorbed. Two distinct instances:
+
+1. **Tx1, `swBuildAndPostChannelTx` (escrow split)** — emitted `txnoutput … amount:ctx.maxAmount` and `txnstate port:10 value:ctx.maxAmount` unrounded, with the sibling change output independently rounded as `parseFloat((actualAmount - ctx.maxAmount).toFixed(6))`. The script then demands a change output of `@AMOUNT - 0.019999999999999997` while the tx carries the 6-decimal rounding → `VERIFYOUT` fails.
+2. **Tx2, `swBuildAndPostChannelOpenTx` (channel open)** — spends the split coin, which is *also* escrow-scripted, and emits a single output with no change. Port 10 came from the DB-cached `ctx.maxAmount`. Whenever that disagrees with the split coin by dust (the stale-pending retry path recomputes the cap independently of the coin already on chain), the script computes `change GT 0`, demands a change output this tx never emits, and fails. If instead the cached value is dust-*above* the coin, `checkValid` rejects it as well.
+
+Either way `txnpost` performs no validation and returns `status:true`, so the SW logs a successful open and the publisher channel silently never exists.
+
+**Why the naive fix was unsafe** (as flagged in OPEN-1): simply rounding `ctx.maxAmount` up to 6 decimals would over-spend an input coin that itself sits fractionally below — creating a new instance of the bug being fixed.
+
+**Fix** (`public/service-workers/handlers/channel.handler.js` only): mirror fragility #53 — derive every output from the *real* input coin, in integer micro-units.
+- Reused #53's existing helpers (`swAmtToMicro` round-to-nearest, `swCoinAmountToMicro` truncate-never-round-up, `swMicroToAmount`); added one new helper, `swAmountResidual(str)`, returning an amount's fractional digits *beyond* micro precision.
+- `_continuePublisherChannelOpenRequest`: `pubRemaining` and `effectiveCap` are now computed in micro-units (round-to-nearest, so a remaining budget of exactly `0.1` is not shaved below the one-view threshold; the escrow coin still bounds the tx downstream).
+- Tx1: reads the escrow coin's exact amount string from the `txninput` response (never the DB budget figures), truncates it to `coinMicro`, and derives `splitMicro` (capped at `coinMicro`) and `changeMicro = coinMicro - splitMicro` from that one integer budget, so the siblings sum to the coin by construction. `BUDGET_REMAINING` and the `maxAmount` handed to Tx2 use the same quantised values.
+- The `swAmountResidual` subtlety: if the escrow coin *itself* carries sub-micro dust (a legacy pre-fix coin), a clean 6-decimal `STATE(10)` could never satisfy `VERIFYOUT`, because the script's `@AMOUNT - payout` would inherit the residual. So `STATE(10)` is emitted as the 6-decimal split amount **with the coin's residual digits appended** — making `@AMOUNT - STATE(10)` land exactly on the clean change output. The residual (< 1 micro) is burned.
+- Tx2: takes the channel amount and `STATE(10)` from the split coin's actual on-chain amount, not from `ctx.maxAmount`, so `change` is always exactly 0 and no VERIFYOUT is required. The `CHANNEL_OPEN` message now announces the quantised coin amount, so the peer's `CHANNEL_STATE.MAX_AMOUNT` can never exceed the coin backing it.
+
+**Note on shared scope**: both builders are shared with the *viewer* path. The viewer clamp (`Math.min(maxAmount, LIMITS.MAX_CHANNEL_RESERVATION)`) does not itself generate dust, but `payload.max_amount` arrives from a peer and can (the requesting side computes `pubView * 10`). Fixing the shared builders therefore fixes the viewer path too; this is stated explicitly rather than expanded silently. Fragility #53's `swBuildAndExportVoucherTx` was not touched.
+
+**Verification**:
+1. `node --check` clean; no Rhino violations (`var`/`function()`/string concat/`MDS.log`; the one regex first drafted was replaced with a character loop, since no other SW handler uses regex).
+2. Standalone oracle replicating `ESCROW_SCRIPT`'s change rule and `Transaction.checkValid` with exact BigInt decimal arithmetic, over 11 scenarios × both builders (all the dust cases above, clean amounts, split-takes-whole-coin, a legacy dust-carrying escrow coin, a 7-decimal coin, cap-exceeds-coin, and the stale-pending Tx2 retry). Every pre-fix dusty case is rejected; **0 post-fix failures**.
+3. **Live, on the running 6-node harness** — decisive, and without posting anything: `txncheck` (`refs/…/system/commands/txn/txncheck.java`) reports `validamounts` (i.e. `checkValid`) *and* `valid.scripts` (it actually runs the KissVM script against the current MMR tip). Built both variants on Node 1 against the real campaign `1a07818f84b-1-b7ddc0c5499f880b` and its real unspent **499.45** escrow coin `0x893CAC12…`, signed with the real `ESCROW_WALLET_PK`, then `txndelete`d both:
+   - **Pre-fix** (`MAX_PUBLISHER_BUDGET` temporarily set to `0.03`, publisher earned `0.01` → cap `0.019999999999999997`): `validamounts: true` but **`valid.scripts: false`**, outputs summing to `499.449999999999999997` against a `499.45` input, `burn: 0.000000000000000003`. This is the silent-failure state OPEN-1 predicted.
+   - **Post-fix** (`0.020000` split + `499.430000` change, `STATE(10)=0.020000`): **`valid.scripts: true`**, `validamounts: true`, `burn: 0`, input `499.45` == output `499.45`.
+   - **Tx2 shape**, same real coin: dusty/stale `STATE(10)` with a single output → **`valid.scripts: false`**; exact coin amount → **`valid.scripts: true`**.
+   Harness restored afterwards: `MAX_PUBLISHER_BUDGET` back to `2.0`, `txnlist` empty, escrow coin still unspent at 499.45.
+4. Not deployed to the nodes — verification used Minima's own validator directly, so a redeploy adds nothing to the proof. The maintainer should run "Zip & Install to Nodes" when convenient to bring the harness to current code.
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`.
+
+**AGENTS.md updated**: yes — short pointer entry added; oldest entry (2026-09-06, live verification audit #10/#14) removed from `AGENTS.md §6` (already archived here in full).
+
+**Sections updated**: none — no schema, Maxima-shape or core-API signature change (`CHANNEL_OPEN.max_amount` keeps its type and meaning; it is merely quantised). `docs/KNOWN_ISSUES.md`: OPEN-1 closed, fragility #54 recorded.
+
+**Open issues**: OPEN-2 (stale/invalid cached vouchers are not recoverable via `VOUCHER_SYNC_REQUEST` — the creator replays stored hex instead of rebuilding) remains open, untouched. Noted but out of scope: the creator's own `CHANNEL_STATE.MAX_AMOUNT` is still written from the requested cap before the split tx runs; H2's `DECIMAL(20,6)` rounds it on store and the voucher builder caps payouts by the real coin, so it cannot produce an invalid tx — but it is a second copy of a number the coin now owns.
+
 ### Session: 2026-09-06 (live verification: audit #7) — real publisher voucher-loss recovery, same 4-node setup
 
 **Source**: direct continuation of the #12 live-verification session, reusing the same still-live 4-node setup before the harness resets again.

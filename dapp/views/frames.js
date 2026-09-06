@@ -550,16 +550,44 @@ function _onFrameSubmit(e) {
   MDS.cmd('maxima action:info', function(mxRes) {
     var publisherMx = (mxRes && mxRes.status && mxRes.response && mxRes.response.contact)
       ? mxRes.response.contact : '';
-    var frame = {
-      frame_id:         frameId,
-      publisher_key:    MY_ADDRESS,
-      publisher_wallet: MY_ADDRESS,
-      publisher_mx:     publisherMx,
-      label:            label,
-      is_builtin:       false,
-      created_at:       Date.now()
-    };
-    _doSaveFrame(frame, submitBtn, msgEl, frameId, form);
+    // Audit 2026-09-05 #11 — PUBLISHER_WALLET must be a spendable coinbase
+    // wallet address (via getaddress), not the Maxima public key MY_ADDRESS.
+    // A publisher settlement txnoutput paid to the raw Maxima PK is
+    // unspendable (fragility #33's "getaddress, not newscript" rule applies
+    // here too). Same resolve+cache pattern as the SW's
+    // _resolveViewerAddrAndSend (comms.handler.js).
+    _resolvePublisherWalletAddr(function(walletAddr) {
+      var frame = {
+        frame_id:         frameId,
+        publisher_key:    MY_ADDRESS,
+        publisher_wallet: walletAddr,
+        publisher_mx:     publisherMx,
+        label:            label,
+        is_builtin:       false,
+        created_at:       Date.now()
+      };
+      _doSaveFrame(frame, submitBtn, msgEl, frameId, form);
+    });
+  });
+}
+
+function _resolvePublisherWalletAddr(cb) {
+  MDS.keypair.get('PUBLISHER_WALLET_ADDR', function(addrRes) {
+    if (addrRes && addrRes.status && addrRes.value) {
+      cb(addrRes.value);
+      return;
+    }
+    MDS.cmd('getaddress', function(gaRes) {
+      if (!gaRes || !gaRes.status || !gaRes.response || !gaRes.response.address) {
+        console.log('[FRAMES] getaddress failed — falling back to MY_ADDRESS (unspendable) for publisher_wallet');
+        cb(MY_ADDRESS);
+        return;
+      }
+      var walletAddr = gaRes.response.address;
+      MDS.keypair.set('PUBLISHER_WALLET_ADDR', walletAddr, function() {
+        cb(walletAddr);
+      });
+    });
   });
 }
 

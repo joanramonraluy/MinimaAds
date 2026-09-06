@@ -471,13 +471,34 @@
       });
     }
 
-    if (frameId.toLowerCase().indexOf('builtin:') === 0) {
-      proceed(frameId.substring(8).toUpperCase());
+    function startProceed() {
+      if (frameId.toLowerCase().indexOf('builtin:') === 0) {
+        proceed(frameId.substring(8).toUpperCase());
+      } else {
+        MDS.cmd('maxima action:info', function(mxRes) {
+          var pk = (mxRes && mxRes.status && mxRes.response && mxRes.response.publickey)
+            ? mxRes.response.publickey.toUpperCase() : '';
+          proceed(pk);
+        });
+      }
+    }
+
+    // Audit 2026-09-05 #11 defensive fallback — a custom frame's
+    // PUBLISHER_WALLET may be the Maxima public key instead of a spendable
+    // wallet address (dapp/views/frames.js was the actual bug, now fixed;
+    // this guard covers frame rows saved before that fix, or by any other
+    // future writer of FRAMES). Only a proper 66-char (0x + 64 hex) wallet
+    // address is trusted as-is; anything else resolves via getaddress
+    // (fragility #33's "getaddress, not the raw key" rule).
+    if (/^0[xX][0-9A-Fa-f]{64}$/.test(publisherWalletAddr)) {
+      startProceed();
     } else {
-      MDS.cmd('maxima action:info', function(mxRes) {
-        var pk = (mxRes && mxRes.status && mxRes.response && mxRes.response.publickey)
-          ? mxRes.response.publickey.toUpperCase() : '';
-        proceed(pk);
+      MDS.cmd('getaddress', function(gaRes) {
+        if (gaRes && gaRes.status && gaRes.response && gaRes.response.address) {
+          console.log('[SDK] _openNewPublisherChannel: PUBLISHER_WALLET was not a wallet address — resolved via getaddress fallback. frame:' + frameId);
+          publisherWalletAddr = gaRes.response.address;
+        }
+        startProceed();
       });
     }
   }
@@ -1084,7 +1105,19 @@
     _trackEvent('click', campaignId, userAddress, cb);
   }
 
-  function _persistCampaignPayload(payload) {
+  // audit 2026-09-05 #6 — SDK mirror of the SW's AUD-4 identity-pinning gate
+  // (public/service-workers/handlers/campaign.handler.js). saveCampaign MERGEs
+  // CREATOR_ADDRESS/CREATOR_MX straight from the payload, so an unauthenticated
+  // CAMPAIGN_ANNOUNCE/CAMPAIGN_DATA_RESPONSE could re-point an already-known
+  // campaign row at an attacker's public key — the poisoning step that lets a
+  // forged sender later pass _assertCampaignCreatorSender's CREATOR_ADDRESS
+  // check (#5, AUD-1). Once a row has an established strong identity (a
+  // permanent route MAX#<pk>#<mls>, from CAMPAIGNS.CREATOR_MX or keypair
+  // CREATOR_MX_<id> — neither settable by a payload), only that creator may
+  // rewrite creator_address/creator_mx; everything else in the row still syncs
+  // normally. First discovery and rows with no strong identity yet keep
+  // trust-on-first-use, same as the SW.
+  function _persistCampaignPayload(payload, senderPk) {
     if (!payload || !payload.campaign || !payload.ad || !payload.campaign.id) { return; }
     // Payload-based platform_key check is removed. It's spoofable and breaks cross-node
     // discovery when nodes have different PLATFORM_KEY overrides. The authoritative check
@@ -1095,10 +1128,51 @@
     var maxViewerReward = (payload.max_viewer_reward !== undefined && payload.max_viewer_reward !== null)
       ? parseFloat(payload.max_viewer_reward) : null;
     payload.campaign.max_viewer_reward = maxViewerReward;
+    var campaignId = payload.campaign.id;
+    getCampaign(campaignId, function(err, existing) {
+      if (err || !existing) {
+        // No existing row — first discovery, trust-on-first-use (unchanged MVP behavior).
+        _savePersistedCampaign(payload);
+        return;
+      }
+      _resolveStrongCampaignCreatorPk(existing, campaignId, function(strongPk) {
+        if (!strongPk || !senderPk || strongPk.toUpperCase() === senderPk.toUpperCase()) {
+          // No established strong identity yet, no sender to check, or sender
+          // IS the strongly-verified creator — trust the payload as before.
+          _savePersistedCampaign(payload);
+          return;
+        }
+        // Sender not strongly verified — pin identity fields to the existing DB
+        // values so budget/status/ad content still sync, but creator identity cannot.
+        payload.campaign.creator_address = existing.CREATOR_ADDRESS;
+        payload.campaign.creator_mx = existing.CREATOR_MX;
+        console.log('[SDK] CAMPAIGN persist identity fields pinned (sender not strongly verified). campaign=' + campaignId);
+        _savePersistedCampaign(payload);
+      });
+    });
+  }
+
+  function _savePersistedCampaign(payload) {
     saveCampaign(payload.campaign, payload.ad, function(err) {
       if (err) {
         console.log('[SDK] CAMPAIGN persist failed:', err);
       }
+    });
+  }
+
+  // Same two sources/precedence as _assertCampaignCreatorSender below. cb('')
+  // when the row has no strong identity yet.
+  function _resolveStrongCampaignCreatorPk(existing, campaignId, cb) {
+    var storedRoute = (typeof parseMaximaRoute === 'function') ? parseMaximaRoute(existing.CREATOR_MX || '') : null;
+    if (storedRoute && storedRoute.publickey) {
+      cb(storedRoute.publickey);
+      return;
+    }
+    MDS.keypair.get('CREATOR_MX_' + campaignId, function(kpRes) {
+      var onChainRoute = (typeof parseMaximaRoute === 'function')
+        ? parseMaximaRoute((kpRes && kpRes.status && kpRes.value) ? kpRes.value : '')
+        : null;
+      cb((onChainRoute && onChainRoute.publickey) ? onChainRoute.publickey : '');
     });
   }
 
@@ -1303,19 +1377,29 @@
 
     var payload = _decodeMaximaPayload(event);
     if (!payload || !payload.type) { return; }
+    var senderPk = (event.data && event.data.from) ? event.data.from : '';
     if (payload.type === 'CAMPAIGN_ANNOUNCE' || payload.type === 'CAMPAIGN_DATA_RESPONSE') {
-      _persistCampaignPayload(payload);
+      _persistCampaignPayload(payload, senderPk);
     } else if (payload.type === 'CAMPAIGN_PAUSE') {
-      setCampaignStatus(payload.campaign_id, 'paused', function() {});
-      _onCampaignUpdatedCore({ campaign_id: payload.campaign_id, status: 'paused' });
+      // audit 2026-09-05 #5 — SDK mirror of AUD-3's SW guard: only the campaign
+      // creator may flip local status on this path (no auto-settle exists here
+      // to gate separately, unlike the SW's strong/weak split).
+      _assertCampaignCreatorSender(payload.campaign_id, senderPk, 'CAMPAIGN_PAUSE', function(allowed) {
+        if (!allowed) { return; }
+        setCampaignStatus(payload.campaign_id, 'paused', function() {});
+        _onCampaignUpdatedCore({ campaign_id: payload.campaign_id, status: 'paused' });
+      });
     } else if (payload.type === 'CAMPAIGN_FINISH') {
-      setCampaignStatus(payload.campaign_id, 'finished', function() {});
-      _onCampaignUpdatedCore({ campaign_id: payload.campaign_id, status: 'finished' });
+      _assertCampaignCreatorSender(payload.campaign_id, senderPk, 'CAMPAIGN_FINISH', function(allowed) {
+        if (!allowed) { return; }
+        setCampaignStatus(payload.campaign_id, 'finished', function() {});
+        _onCampaignUpdatedCore({ campaign_id: payload.campaign_id, status: 'finished' });
+      });
     } else if (payload.type === 'CHANNEL_OPEN') {
-      // event.data.from is the Maxima-verified sender pk (audit Fix #1).
-      _handleChannelOpenPayload(payload, (event.data && event.data.from) ? event.data.from : '');
+      // senderPk is the Maxima-verified sender pk (audit Fix #1).
+      _handleChannelOpenPayload(payload, senderPk);
     } else if (payload.type === 'REWARD_VOUCHER') {
-      _handleRewardVoucherPayload(payload, (event.data && event.data.from) ? event.data.from : '');
+      _handleRewardVoucherPayload(payload, senderPk);
     } else if (payload.type === 'PUBLISHER_REWARD_NOTIFY') {
       getCampaign(payload.campaign_id, function(err, campaign) {
         if (!err && campaign) {

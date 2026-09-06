@@ -2009,6 +2009,44 @@ function swRunSequential(cmds, idx, cb) {
   });
 }
 
+// --- Amount quantisation ---------------------------------------------------
+// Every amount column in the schema is DECIMAL(20,6), so 6 decimals is this
+// system's canonical precision. JS float accumulation (0.1 + 0.2 ===
+// 0.30000000000000004) leaks binary-float dust into tx output amounts. When one
+// output carries that dust and its sibling output is rounded, the outputs sum to
+// MORE than the input coin, and Minima's Transaction.checkValid() rejects the
+// whole tx with "Inputs LESS than Outputs". txnpost does NO validation and still
+// returns status:true, so the tx is silently never mined and the channel coin
+// stays unspent forever. Do all output arithmetic in integer micro-units.
+var SW_MICRO = 1000000;
+
+// Round a JS number to the NEAREST micro-unit. Use for amounts we owe someone,
+// so accumulated float dust does not cost them a micro.
+function swAmtToMicro(zNum) {
+  return Math.round((parseFloat(zNum) || 0) * SW_MICRO);
+}
+
+// TRUNCATE a decimal string as returned by Minima to micro-units. Never rounds
+// up, so a coin whose on-chain amount itself carries float dust can never be
+// over-spent. Must be given Minima's raw exact string, not a JS number.
+function swCoinAmountToMicro(zStr) {
+  var s     = String((zStr === undefined || zStr === null) ? "0" : zStr);
+  var dot   = s.indexOf(".");
+  var whole = (dot < 0) ? s : s.substring(0, dot);
+  var frac  = (dot < 0) ? "" : s.substring(dot + 1);
+  while (frac.length < 6) { frac = frac + "0"; }
+  frac = frac.substring(0, 6);
+  var w = parseInt(whole, 10);
+  var f = parseInt(frac, 10);
+  if (isNaN(w) || isNaN(f)) { return swAmtToMicro(s); }
+  return (w * SW_MICRO) + f;
+}
+
+// Micro-units back to a fixed 6-decimal string for MDS.cmd "amount:" params.
+function swMicroToAmount(zMicro) {
+  return (zMicro / SW_MICRO).toFixed(6);
+}
+
 function swWaitForCoin(coinId, maxRetries, delay, cb) {
   MDS.cmd("coins coinid:" + coinId + " relevant:true", function(res) {
     if (res && res.status && res.response && res.response.length > 0) {
@@ -2022,7 +2060,6 @@ function swWaitForCoin(coinId, maxRetries, delay, cb) {
 
 function swBuildAndExportVoucherTx(ctx, afterSend) {
   var txId   = "rv_" + swGenerateUID();
-  var refund = parseFloat((ctx.maxAmount - ctx.cumulative).toFixed(6));
   var role   = ctx.role || "viewer";
   var fid    = ctx.frameId || "";
 
@@ -2038,7 +2075,27 @@ function swBuildAndExportVoucherTx(ctx, afterSend) {
     MDS.cmd("txninput id:" + txId + " coinid:" + ctx.channelCoinId + " scriptmmr:true", function(r2) {
       if (!r2 || !r2.status) { fail("txninput"); return; }
 
-      MDS.cmd("txnoutput id:" + txId + " storestate:false amount:" + ctx.cumulative + " address:" + ctx.viewerAddr, function(r3) {
+      // Budget this tx against the channel coin's ACTUAL on-chain amount (exact
+      // decimal string echoed back by txninput), not the DB MAX_AMOUNT copy —
+      // the two can differ by float dust and only the real coin bounds outputs.
+      var coinAmtStr = "";
+      try { coinAmtStr = r2.response.transaction.inputs[0].amount; } catch (e) { coinAmtStr = ""; }
+      var coinMicro   = swCoinAmountToMicro(coinAmtStr !== "" ? coinAmtStr : String(ctx.maxAmount));
+      var payoutMicro = swAmtToMicro(ctx.cumulative);
+      if (payoutMicro <= 0) { fail("payout not positive"); return; }
+      if (payoutMicro > coinMicro) {
+        MDS.log("[CHANNEL] swBuildAndExportVoucherTx: payout " + payoutMicro
+          + " micro exceeds channel coin " + coinMicro + " micro — capping. campaign: " + ctx.campaignId);
+        payoutMicro = coinMicro;
+      }
+      var refundMicro = coinMicro - payoutMicro;
+      var payoutAmt   = swMicroToAmount(payoutMicro);
+      var refundAmt   = swMicroToAmount(refundMicro);
+      // Canonical cumulative: exactly what this tx pays out, so the voucher
+      // message, the CHANNEL_STATE row and the on-chain output cannot disagree.
+      var cumulative  = parseFloat(payoutAmt);
+
+      MDS.cmd("txnoutput id:" + txId + " storestate:false amount:" + payoutAmt + " address:" + ctx.viewerAddr, function(r3) {
         if (!r3 || !r3.status) { fail("txnoutput[viewer]"); return; }
 
         function afterRefund(r4) {
@@ -2063,7 +2120,7 @@ function swBuildAndExportVoucherTx(ctx, afterSend) {
 
               MDS.cmd("txndelete id:" + txId, function() {});
 
-              updateChannelVoucher(ctx.campaignId, ctx.viewerKey, role, ctx.cumulative, txHex, function(err) {
+              updateChannelVoucher(ctx.campaignId, ctx.viewerKey, role, cumulative, txHex, function(err) {
                 if (err) { MDS.log("[CHANNEL] swBuildAndExportVoucherTx: updateChannelVoucher failed: " + err); }
               }, ctx.rewardType);
 
@@ -2072,7 +2129,7 @@ function swBuildAndExportVoucherTx(ctx, afterSend) {
                 campaign_id: ctx.campaignId,
                 viewer_key:  ctx.viewerKey,
                 event_id:    ctx.eventId,
-                cumulative:  ctx.cumulative,
+                cumulative:  cumulative,
                 tx_hex:      txHex,
                 reward_type: ctx.rewardType || 'view'
               };
@@ -2081,7 +2138,8 @@ function swBuildAndExportVoucherTx(ctx, afterSend) {
                 voucherMsg.frame_id = fid;
               }
               sendMaxima(ctx.viewerKey, ctx.viewerMx, voucherMsg, function(ok) {
-                MDS.log("[CHANNEL] SW REWARD_VOUCHER sent cumulative: " + ctx.cumulative + " role: " + role + " ok=" + ok);
+                MDS.log("[CHANNEL] SW REWARD_VOUCHER sent cumulative: " + cumulative + " payout: " + payoutAmt
+                  + " refund: " + refundAmt + " role: " + role + " ok=" + ok);
                 if (role === 'viewer' && ctx.rewardAmount > 0) {
                   sqlQuery(
                     "SELECT ID FROM ADS WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(ctx.campaignId) + "')",
@@ -2132,8 +2190,8 @@ function swBuildAndExportVoucherTx(ctx, afterSend) {
           });
         }
 
-        if (refund > 0) {
-          MDS.cmd("txnoutput id:" + txId + " storestate:false amount:" + refund + " address:" + MY_ADDRESS, afterRefund);
+        if (refundMicro > 0) {
+          MDS.cmd("txnoutput id:" + txId + " storestate:false amount:" + refundAmt + " address:" + MY_ADDRESS, afterRefund);
         } else {
           afterRefund(null);
         }

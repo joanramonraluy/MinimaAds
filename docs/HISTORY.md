@@ -46,6 +46,92 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-06 (audit #11) — Custom Frame `PUBLISHER_WALLET` stored the Maxima public key instead of a spendable wallet address
+
+**Source**: `docs/AUDIT_2026-09-05_FABLE.md` finding #11, confirmed live during Tier B3 (publisher flow) of the E2E test plan. Complexity MEDIUM (contained UI+SDK fix, no schema/protocol change) — maintainer confirmed Sonnet.
+
+**Problem**: `dapp/views/frames.js` `_onFrameSubmit` set `publisher_wallet: MY_ADDRESS` when creating a custom Frame — `MY_ADDRESS` in the FE is the node's Maxima public key (~270 hex chars), not a spendable wallet address. Confirmed live: creating a Frame ("test-site") on Node 2 and querying `FRAMES` showed `PUBLISHER_WALLET` byte-for-byte identical to `PUBLISHER_KEY`, while the built-in Frame's row correctly held a 66-char (`0x` + 64 hex) wallet address. The SDK's `_openNewPublisherChannel` (`sdk/index.js`) sends this value verbatim as `viewer_wallet_addr` in the publisher `CHANNEL_OPEN_REQUEST`; the creator would build a settlement `txnoutput` to that "address" — unspendable (fragility #33's "getaddress, not the raw key" rule applies here too).
+
+**Fix**:
+- `dapp/views/frames.js`: new `_resolvePublisherWalletAddr(cb)` resolves a real coinbase wallet address via `MDS.cmd('getaddress', …)`, cached in keypair (`PUBLISHER_WALLET_ADDR`) — same resolve+cache pattern as the SW's `_resolveViewerAddrAndSend` (`comms.handler.js`). `_onFrameSubmit` now calls this before building the `frame` object; `publisher_key` still correctly uses `MY_ADDRESS` (that field is supposed to be the Maxima PK), only `publisher_wallet` changes. Falls back to `MY_ADDRESS` (logged) only if `getaddress` itself fails, so frame creation is never hard-blocked.
+- `sdk/index.js` `_openNewPublisherChannel`: added a defensive fallback — if `frame.PUBLISHER_WALLET` doesn't match `/^0[xX][0-9A-Fa-f]{64}$/` (a proper wallet address), resolves one via `getaddress` before sending the `CHANNEL_OPEN_REQUEST`. This covers Frame rows saved before the `frames.js` fix, or by any other future writer of `FRAMES`.
+
+**Verification (live, 6-node harness)**: redeployed via Build Pipeline → Zip & Install to Nodes (workspace clean, no stray `.playwright-mcp/` files this time). Created a second custom Frame ("test-site-2") on Node 2 post-deploy; `SELECT FRAME_ID, PUBLISHER_WALLET, IS_BUILTIN FROM FRAMES` showed the new row's `PUBLISHER_WALLET` = `0x648792F5…CB4BB`, a proper 66-character wallet address, distinct from `PUBLISHER_KEY` — confirmed via `len(value) == 66` check. The pre-fix "test-site" row (created before the redeploy) still holds the bad value, as expected — this fix is forward-only, existing bad rows aren't migrated (acceptable: `docs/KNOWN_ISSUES.md §4` already documents that dev-cycle DB resets are the standard remediation, and this is a non-schema data-quality issue, not tracked as a new open item).
+
+**Files modified**: `dapp/views/frames.js`, `sdk/index.js`.
+
+**AGENTS.md updated**: yes — short pointer entry added; oldest entry (2026-09-05, AUD-2) removed from `AGENTS.md §6` (already archived here in full).
+
+**Sections updated**: `docs/AUDIT_2026-09-05_FABLE.md` finding #11 marked fixed.
+
+**Open issues**: none new. Audit #7–#10, #12–#15 (MEDIUM) still open, out of scope for this pass.
+
+---
+
+### Session: 2026-09-06 (Fragility #53) — Settlement tx accepted by `txnpost` but never mined: float dust made outputs exceed the channel coin
+
+**Source**: live 6-node harness bug report — a viewer's channel settlement posted "successfully" client-side but never confirmed on L1. The Earnings UI sat on "Settlement posted. Awaiting L1 confirmation…" for ~8 minutes / ~25 blocks with no progress. Complexity HIGH (protocol/L1 tx path, multi-layer investigation) — maintainer confirmed Opus + plan mode.
+
+**Symptom / reproduction**: Node 1 = creator (campaign `1a0764518ef-1-ce9488f6aa8568c8`, budget 1000, `reward_view=0.1`, `reward_click=0.2`). Node 3 = viewer, channel coin `0x6B2AF4F7…` amount `1`, `CUMULATIVE_EARNED=0.300000` after a view (0.1) + a click (0.2). Clicking "Settle" logged `txnimport status: true`, `txnsign status: true`, `txnpost result — status: true pending: false error: undefined` — and then nothing. Direct RPC on Node 3 confirmed the expected payout coin did not exist and the channel coin was **still unspent** many blocks later. Same *shape* as fragility #42 (locally accepted, peer-rejected) but a different root cause.
+
+**Root cause**: JS binary-float dust in a tx output amount. `_sendRewardRequest` (`sdk/index.js`) computes `newCum = CUMULATIVE_EARNED + amount`; after a 0.1 view and a 0.2 click that is `0.1 + 0.2 === 0.30000000000000004`. That raw float travelled through `REWARD_REQUEST` → `ctx.cumulative` → `swBuildAndExportVoucherTx` (`channel.handler.js`) and was interpolated verbatim into `txnoutput … amount:` for the viewer payout, while its sibling refund output was computed as `parseFloat((ctx.maxAmount - ctx.cumulative).toFixed(6))` → `0.7`. The two outputs therefore summed to `1.00000000000000004` against a `1` MINIMA input coin. Minima's `MiniNumber` is BigDecimal-backed, so that 1e-17 excess is *real*, not absorbed: `Transaction.checkValid()` (`refs/Minima-1.0.45/src/org/minima/objects/Transaction.java:158`) rejects it.
+
+The reason this looked like a success client-side: **`txnpost` performs no validation whatsoever** (`refs/…/system/commands/txn/txnpost.java`) — it sets the CoinID, generates the TxPoW and calls `mineTxPoWAsync`, then returns `status:true`. The tx is only checked later, during TxPoW processing, where it is dropped silently. Confirmed live in Node 3's raw log: `Transaction error : Inputs LESS than Outputs 1/1.00000000000000004`. Node 1 (creator) had zero occurrences — the tx never propagated at all. The accrual guard in `handleRewardRequest` already tolerates this dust (`epsilon = 0.000001`), which is why the voucher was issued in the first place and the defect only surfaced at settlement.
+
+**Fix** (`public/service-workers/handlers/channel.handler.js`, `swBuildAndExportVoucherTx` only): do all output arithmetic in integer micro-units (1e-6 — the canonical precision, since every amount column in the schema is `DECIMAL(20,6)`). Three small Rhino-safe helpers added next to `swGenerateUID`/`swRunSequential`:
+- `swAmtToMicro(n)` — `Math.round(n * 1e6)`, **round to nearest**, used for the payout (accumulated dust must not cost the viewer a micro).
+- `swCoinAmountToMicro(str)` — string-based **truncation**, never rounds up, used for the input coin so a coin that itself carries dust can never be over-spent. Must be fed Minima's exact decimal string, not a JS number.
+- `swMicroToAmount(micro)` — back to a fixed 6-decimal string for `amount:` params.
+
+The builder now budgets against the channel coin's **actual on-chain amount**, read from the `txninput` response (`r2.response.transaction.inputs[0].amount` — free, no extra RPC round-trip), rather than the DB `MAX_AMOUNT` copy, since the two can disagree by dust and only the real coin bounds the outputs. It then derives `refundMicro = coinMicro - payoutMicro`, so `payout + refund === coin amount` exactly, by construction. The quantised value is also used for the `REWARD_VOUCHER` `cumulative` field and the `updateChannelVoucher` write, so the voucher message, the `CHANNEL_STATE` row and the on-chain output can never disagree. A payout exceeding the coin is capped and logged (upstream `MAX_AMOUNT` guard should already prevent it); a non-positive payout fails the build.
+
+**Verification**:
+1. `node --check` clean; helper arithmetic unit-tested standalone across 7 cases (clean amounts, the exact `0.1+0.2` dust case, a dust-carrying *input* coin, boundary payout == coin) — invariant `payout + refund <= coin` held in all.
+2. Deployed to all 6 nodes via "Zip & Install to Nodes"; presence of the new code confirmed on each node's installed copy.
+3. Fresh live cycle on the *same stuck channel*, deliberately choosing a sequence that reproduces the dust: view (→ 0.4) then click (→ `0.4 + 0.2 === 0.6000000000000001`). Node 1's log shows the fix engaging on exactly that input: `SW voucher tx: … cumulative: 0.6000000000000001` → `SW REWARD_VOUCHER sent cumulative: 0.6 payout: 0.600000 refund: 0.400000`. Under the old code this is precisely the `0.6000000000000001 + 0.4 = 1.0000000000000001 > 1` failure.
+4. "Settle" on Node 3 → `settle output[0]: 0.6`, `output[1]: 0.4` (was `0.30000000000000004` / `0.7`). Both outputs mined at block 151: Node 3 log `NEW Unspent Coin … "amount":"0.6"`, Node 1 log `NEW Unspent Coin … "amount":"0.4"`. The channel coin `0x6B2AF4F7…` is now spent. No new `Inputs LESS than Outputs` on any of the 6 nodes.
+5. Node 3 `#earnings`: `CHANNEL_STATE.STATUS = 'settled'`, UI reads "Reward channel settled. Received: 0,600000 MINIMA", Pending settlements (0) → Settled channels (1). No console errors.
+
+**Note on the pre-existing stuck voucher**: the broken `LATEST_TX_HEX` already cached on a viewer is *not* self-healing — `_requestVoucherResync` makes the creator resend `vData.latest_tx_hex` from its own DB, i.e. the same invalid hex, not a rebuilt tx. Any channel stuck from before this fix recovers only once a *new* reward event causes a fresh voucher to be built (which is how this session's re-test recovered the stuck 0.3 channel). Logged as an open issue below.
+
+**Files modified**: `public/service-workers/handlers/channel.handler.js`.
+
+**AGENTS.md updated**: yes — short pointer entry added; oldest entry (2026-09-05, DOC-1) removed from `AGENTS.md §6` (already archived here in full).
+
+**Sections updated**: none — no schema, Maxima-shape or core-API signature change. `docs/KNOWN_ISSUES.md` §1 gains fragility #53 (this bug class) and two new open issues.
+
+**Open issues** (all documented in `docs/KNOWN_ISSUES.md`, out of scope per CLAUDE.md §8):
+- The same unquantised-float-into-`txnoutput` class exists in the **publisher channel-open** path: `handleChannelOpenRequest` computes `effectiveCap = Math.min(maxAmount, pubRemaining)` where `pubRemaining = pubMaxBudget - pubEarned` (float subtraction), and `reservationCap` similarly; that value reaches `swBuildAndPostChannelTx`'s `txnoutput … amount:ctx.maxAmount` alongside a `toFixed(6)`-rounded change output. Not fixed here because blanket-rounding those builders is *unsafe* without also accounting for their input coin amounts (rounding a payout up above a dust-carrying input coin would create the very bug being fixed).
+- Stale/invalid cached vouchers are not recoverable via `VOUCHER_SYNC_REQUEST` (see note above) — the creator replays stored hex rather than rebuilding.
+
+---
+
+### Session: 2026-09-06 (SDK sender-auth mirror) — audit #5/#6: SDK direct-MAXIMA path never got the AUD-3/AUD-4 guards
+
+**Source**: `docs/AUDIT_2026-09-05_FABLE.md` findings #5 and #6, the two remaining HIGH items after the 2026-09-05 sender-auth pass — both scoped entirely to `sdk/index.js` (the code path a host MiniDapp hits when it embeds only the SDK and decodes raw Maxima itself, with no local copy of our Service Worker). Complexity MEDIUM (single file, reuses existing helpers, no new contract) — maintainer confirmed Sonnet.
+
+**Problem**:
+- **#5** — `handleMdsEvent`'s `CAMPAIGN_PAUSE`/`CAMPAIGN_FINISH` branches called `setCampaignStatus(...)` unconditionally. `event.data.from` was already available at the call site (used two branches below for CHANNEL_OPEN/REWARD_VOUCHER) but never consulted. Any Maxima peer could pause/finish any locally-known campaign on an SDK host — same spoofing shape AUD-3 closed on the SW side, just never mirrored.
+- **#6** — `_persistCampaignPayload` called `saveCampaign(payload.campaign, payload.ad, …)` wholesale on every `CAMPAIGN_ANNOUNCE`/`CAMPAIGN_DATA_RESPONSE`, and `saveCampaign` MERGEs `CREATOR_ADDRESS`/`CREATOR_MX` straight from the payload. A crafted `CAMPAIGN_DATA_RESPONSE` re-pointing `creator_address` at an attacker's PK would pass on an SDK host, then let that same attacker's messages pass `_assertCampaignCreatorSender`'s `CREATOR_ADDRESS` check for CHANNEL_OPEN/REWARD_VOUCHER (the AUD-1 guard) — reopening the exact chain AUD-4 closed on the SW.
+
+**Fix**:
+- **#5** — both branches now wrap the status change in `_assertCampaignCreatorSender(payload.campaign_id, senderPk, label, cb)` (the same helper AUD-1 already added to this file for CHANNEL_OPEN/REWARD_VOUCHER) before calling `setCampaignStatus`. No strong/weak split like the SW's `_assertCreatorThen` — there is no SDK-side auto-settle to gate separately, so a single allow/deny check (matching the audit's own suggested fix) is sufficient. Also introduced a `senderPk` local in `handleMdsEvent` (was three separate `(event.data && event.data.from) ? event.data.from : ''` inline expressions across CAMPAIGN_PAUSE/FINISH/CHANNEL_OPEN/REWARD_VOUCHER — collapsed to one).
+- **#6** — ported the SW's AUD-4 identity-pinning gate into `_persistCampaignPayload(payload, senderPk)`: reads the existing row via `getCampaign`; if none exists, trust-on-first-use (unchanged); otherwise resolves the row's *strong* creator pk via a new `_resolveStrongCampaignCreatorPk` helper (same two sources/precedence as the SW's `_resolveStrongCreatorPk`: `CREATOR_MX` column parsed as a `MAX#<pk>#<mls>` route, falling back to keypair `CREATOR_MX_<id>` — neither settable by a payload); if the row has no strong identity yet, or the sender matches it, the payload is trusted as before; otherwise `creator_address`/`creator_mx` are pinned back to the existing DB values before `saveCampaign` (budget/status/ad content still sync normally). Extracted the actual `saveCampaign` call into `_savePersistedCampaign(payload)` since it's now called from three places.
+
+**Fail-open vs fail-closed**: identical policy to the SW originals — `_assertCampaignCreatorSender` (#5) fails open only when the message carries no sender or no creator identity is known locally; the #6 gate fails open (trusts the payload) when the row has no strong identity yet, matching the SW's documented MVP trade-off (first discovery and legacy rows keep first-write-wins).
+
+**Verification**: `node --check sdk/index.js` (syntax only — this SDK code targets a browser/host-MiniDapp runtime, not Rhino, so no SW constraints apply). Live E2E deliberately deferred: reproducing either bug requires an SDK-only host with no local SW (the 6-node harness always runs both together, same reasoning as AUD-2's verification note) — out of scope for this pass; flagged as an open gap below.
+
+**Files modified**: `sdk/index.js`.
+
+**AGENTS.md updated**: yes — short pointer entry added; oldest entry (2026-09-05, sender-auth class) removed from `AGENTS.md §6` (already archived here in full).
+
+**Sections updated**: none (no schema/Maxima-shape/contract changes).
+
+**Open issues**: MEDIUM audit findings #7–#15 (`dapp/views/frames.js`, `channel.handler.js`, `sdk/index.js` other spots, §8.12 schema) still open, out of scope for this pass. No live/E2E harness currently exercises an SDK-only host (no local SW) — the exact configuration #5/#6 (and AUD-2) apply to; worth a dedicated test rig before mainnet if third-party SDK embedding is a real target, per the audit's own note.
+
+---
+
 ### Session: 2026-09-05 (sender-auth class) — Unauthenticated inbound-Maxima status/budget writes (audit 2026-09-05 findings #1–#4 + #19)
 
 **Source**: `docs/AUDIT_2026-09-05_FABLE.md` findings #1, #2, #3, #4 (the HIGH set the July sender-authentication sweep missed), plus #19 (PONG spec drift). Complexity HIGH (multi-layer, security-sensitive: SW dispatcher + 2 SW handlers + FE + spec) — maintainer pre-approved Opus + plan mode. Finding #1+#2 were reproduced live on the 6-node harness before the fix (Test A1: a spoofed `ESCROW_INFO_RESPONSE` with `campaign_status:'active'` turned Node 3's local `CAMPAIGNS.STATUS` into `'ACTIVE'` and zeroed `BUDGET_REMAINING`, after which `validateView` returned `{valid:false, reason:'campaign not active'}` with no self-heal).

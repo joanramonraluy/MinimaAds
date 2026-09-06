@@ -46,6 +46,26 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-06 (live verification: fragility #54 / OPEN-1) — SW-level confirmation on the redeployed harness
+
+**Source**: follow-up to the Opus subagent's fix + `txncheck`-level proof for OPEN-1/fragility #54 (previous entry below). The maintainer redeployed the fixed code to all 6 harness nodes and asked to continue; this session added a genuine SW-to-SW confirmation on top of the subagent's direct-validator proof.
+
+**Method**: reused the live 4+ node setup from the #7/#12 verifications. Directly manipulated `CAMPAIGNS.MAX_PUBLISHER_BUDGET`/`PUBLISHER_BUDGET_SPENT` via `MDS.sql` on the creator (Node 1) to engineer values whose raw JS subtraction dusts (e.g. `10 - 9.9 === 0.09999999999999964`, `0.03 - 0.01 === 0.019999999999999997`), then drove real publisher `CHANNEL_OPEN_REQUEST`s end-to-end for three separate fresh publisher identities (Node 3, then Node 6 via a fresh viewer on Node 5) by broadcasting real `MA_TRACK_VIEW`s with the target publisher's real key/route.
+
+**Result**: all three publisher channels opened successfully (`STATUS='open'`, real `CHANNEL_COINID`, real vouchers) — no failures, despite deliberately dust-prone budget inputs. Reading the currently-deployed code confirmed why: `pubRemaining` is now computed as `swMicroToAmount(swAmtToMicro(pubMaxBudget) - swAmtToMicro(pubEarned))` — the fix converts to integer micro-units *before* subtracting, so no raw-float dust can ever reach `effectiveCap` regardless of the input values, by construction. Confirmed directly in Node 1's own log: `budget — max=0.03 earned=0.015 remaining=0.015 requestedCap=0.05 effectiveCap=0.015` — a clean value where the pre-fix code would have carried `0.014999999999999999`-style dust forward.
+
+**Outcome**: this is a second, independent confirmation layer (real SW-to-SW Maxima traffic + real on-chain channel-open txs) on top of the subagent's already-rigorous `txncheck`-based proof — belt and braces, not required to trust the fix, but removes any doubt that the deployed code (as opposed to just the reasoning) behaves correctly.
+
+**Files modified**: none (verification only; campaign budget fields were left in their engineered test state — cosmetic only, does not affect further testing).
+
+**AGENTS.md updated**: yes — short pointer entry added; oldest entry (2026-09-06, live verification: audit #12) removed from `AGENTS.md §6` (already archived here in full).
+
+**Sections updated**: none.
+
+**Open issues**: OPEN-2 remains the only open item from `docs/KNOWN_ISSUES.md` §1b.
+
+---
+
 ### Session: 2026-09-06 (OPEN-1 / fragility #54) — publisher channel-open tx silently rejected by the escrow script on float dust
 
 **Source**: `docs/KNOWN_ISSUES.md` OPEN-1, logged (deliberately unfixed) by the fragility #53 session. Complexity HIGH (L1 tx path, KissVM script semantics, two tx builders) — maintainer confirmed Opus + plan mode.

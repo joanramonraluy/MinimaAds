@@ -199,7 +199,7 @@ function onInited() {
 function _initAfterDb() {
   MDS.cmd("maxima action:info", function(resp) {
     if (!resp.status || !resp.response) {
-      MDS.log("[ADS] maxima action:info failed: " + (resp.error || "no response") + " — retrying in 10s");
+      MDS.log("[ADS] maxima action:info failed: " + (resp.error || "no response") + " — will retry on next NEWBLOCK");
       return;
     }
     MY_MAXIMA_PK  = resp.response.publickey ? normalizePublicKey(resp.response.publickey) : "";
@@ -412,6 +412,14 @@ MDS.init(function(msg) {
   if (msg.event === "inited")   { onInited(); }
   if (msg.event === "MAXIMA")   { onMaxima(msg); }
   if (msg.event === "NEWBLOCK") {
+    // Audit 2026-09-05 #13: _initAfterDb's "maxima action:info failed —
+    // retrying in 10s" log was never backed by an actual retry (no timer, no
+    // re-entry) — a single failed call at boot left MY_MAXIMA_PK empty forever,
+    // registerEscrowScript never ran, and every NEWBLOCK path below silently
+    // no-ops on empty addresses. Re-attempt here on every block until it
+    // succeeds; cheap (one MDS.cmd call) and self-heals within ~1 block once
+    // the underlying maxima subsystem is up.
+    if (!MY_MAXIMA_PK) { _initAfterDb(); }
     // Fix #8 — campaign expiry is driven by chain height, not wall clock.
     // NEWBLOCK data is the TxPoW of the new tip; height at header.block.
     var tipBlock = 0;

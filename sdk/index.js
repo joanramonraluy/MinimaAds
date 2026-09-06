@@ -320,12 +320,16 @@
     });
   }
 
-  // On the viewer node the SDK is always the only consumer of CHANNEL_STATE
-  // for a given campaign (creator-is-viewer trackEvent is blocked upstream),
-  // so a campaign_id lookup is unambiguous.
+  // Audit 2026-09-05 #10: a campaign_id-only lookup is NOT unambiguous — this
+  // same SDK also inserts a role='publisher' row for the same campaign on the
+  // same node via _openNewPublisherChannel (the standard custom-frame host
+  // scenario). Without the ROLE filter, H2 can return either row; the viewer
+  // flow reading the publisher's VIEWER_KEY/CUMULATIVE_EARNED silently fails
+  // the creator's channel lookup and drops the viewer's reward.
   function _getMyChannel(campaignId, cb) {
     sqlQuery(
-      "SELECT * FROM CHANNEL_STATE WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')",
+      "SELECT * FROM CHANNEL_STATE WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
+      " AND UPPER(ROLE) = 'VIEWER'",
       function(err, rows) {
         if (err) { cb(err, null); return; }
         cb(null, (rows && rows.length > 0) ? rows[0] : null);
@@ -1414,7 +1418,29 @@
       });
     } else if (payload.type === 'CREATOR_LIVENESS_PONG') {
       // Host MiniDapp path: MAXIMA arrives directly (app.js path uses MDSCOMMS signal instead).
-      _onCreatorLivenessPong(payload.campaign_id || '');
+      // Audit 2026-09-05 #14: payload.status was dropped here — _onCreatorLivenessPong
+      // treats a missing status as "alive", so a paused/finished campaign's PONG kept
+      // the host serving/tracking it as active. Also replicate the SW's local
+      // STATUS sync (campaign.handler.js handleCreatorLivenessPong) since this
+      // direct-MAXIMA path never goes through the SW.
+      var pongCampaignId = payload.campaign_id || '';
+      var pongStatus = payload.status || '';
+      _onCreatorLivenessPong(pongCampaignId, pongStatus);
+      if (pongCampaignId && (pongStatus === 'active' || pongStatus === 'paused' || pongStatus === 'finished')) {
+        _assertCampaignCreatorSender(pongCampaignId, senderPk, 'CREATOR_LIVENESS_PONG', function(allowed) {
+          if (!allowed) { return; }
+          getCampaign(pongCampaignId, function(err, campaign) {
+            if (!err && campaign && campaign.STATUS !== pongStatus) {
+              setCampaignStatus(pongCampaignId, pongStatus, function(err2) {
+                if (!err2) {
+                  console.log('[SDK] local campaign status synced:', pongCampaignId, '->', pongStatus);
+                  _onCampaignUpdatedCore({ campaign_id: pongCampaignId, status: pongStatus });
+                }
+              });
+            }
+          });
+        });
+      }
     }
   }
 

@@ -138,7 +138,7 @@ Either way `txnpost` performs no validation and returns `status:true`, so the SW
 
 **Recovery**: called the real, unmodified `_requestVoucherResync(campaignId, viewerKey, 'publisher')` (`dapp/views/earnings.js`, the exact function the Settle-tab UI calls) directly from Node 2's console. Confirmed the outgoing `VOUCHER_SYNC_REQUEST` carried `role: 'publisher'` (the #7 fix). Node 1's log: `[CHANNEL] VOUCHER_SYNC_REQUEST: resending voucher... ` then `voucher resent ok=true` — confirming `handleVoucherSyncRequest` correctly resolved the **publisher** row (not the pre-fix default-to-viewer dead end this finding described) and resent the real `REWARD_VOUCHER`. Node 2's `CHANNEL_STATE` afterward: `LATEST_TX_HEX` fully restored (12552 hex chars, matching the original byte-for-byte via length), `LAST_VOUCHER_AT` freshly stamped, `ROLE`/`FRAME_ID` intact.
 
-**Outcome**: #7 verified end-to-end — real creator, real publisher, real Maxima round-trip, only the loss itself simulated (unavoidable — nothing genuinely crashes on demand). This closes every remaining findable-and-testable item from `docs/AUDIT_2026-09-05_FABLE.md`; only #13 (needs an actual boot-time Maxima failure) remains open, and it is not forceable without deeper node-lifecycle control than this harness's browser-level access provides.
+**Outcome**: #7 verified end-to-end — real creator, real publisher, real Maxima round-trip, only the loss itself simulated (unavoidable — nothing genuinely crashes on demand). This closes every remaining findable-and-testable item from `docs/archive/AUDIT_2026-09-05_FABLE.md`; only #13 (needs an actual boot-time Maxima failure) remains open, and it is not forceable without deeper node-lifecycle control than this harness's browser-level access provides.
 
 **Files modified**: none (verification only).
 
@@ -200,7 +200,7 @@ Either way `txnpost` performs no validation and returns `status:true`, so the SW
 
 ### Session: 2026-09-06 (audit #10/#13/#14) — SDK channel-role ambiguity, dead SW bootstrap retry, dropped liveness status
 
-**Source**: `docs/AUDIT_2026-09-05_FABLE.md` findings #10, #13, #14 — the last three open items from the audit not already closed in this session's earlier batches. Complexity MEDIUM (same tier as the previous #7/#12/#15 batch, contained single-file fixes) — maintainer confirmed continuing directly with Sonnet in this session without re-running the full confirmation ritual, per CLAUDE.md §1 "Subsequent Tasks" (tier unchanged).
+**Source**: `docs/archive/AUDIT_2026-09-05_FABLE.md` findings #10, #13, #14 — the last three open items from the audit not already closed in this session's earlier batches. Complexity MEDIUM (same tier as the previous #7/#12/#15 batch, contained single-file fixes) — maintainer confirmed continuing directly with Sonnet in this session without re-running the full confirmation ritual, per CLAUDE.md §1 "Subsequent Tasks" (tier unchanged).
 
 **#10 — `_getMyChannel` selected by campaign only, no `ROLE` filter**: the same SDK instance can hold both a `role='viewer'` and a `role='publisher'` `CHANNEL_STATE` row for the same campaign (the standard custom-frame host scenario, where the SDK opens a publisher channel via `_openNewPublisherChannel`). A campaign-only lookup left H2 free to return either row; when it returned the publisher row, the viewer flow's `REWARD_REQUEST` carried the publisher's `VIEWER_KEY`/`CUMULATIVE_EARNED`, which the creator rejects (`channel not found` for role viewer) — silently dropping the viewer's reward. Fixed by adding `AND UPPER(ROLE) = 'VIEWER'` to the query. Confirmed safe: `CHANNEL_STATE.ROLE` is `VARCHAR(16) NOT NULL DEFAULT 'viewer'` in both DB-init schemas (`public/service-workers/db-init.js`), so no pre-existing row can have a NULL `ROLE` that the new filter would silently exclude.
 
@@ -214,15 +214,15 @@ Either way `txnpost` performs no validation and returns `status:true`, so the SW
 
 **AGENTS.md updated**: yes — short pointer entry added; oldest entry (2026-09-06, audit #9) removed from `AGENTS.md §6` (already archived here in full).
 
-**Sections updated**: none in `MinimaAds.md` (no schema/protocol change); `docs/AUDIT_2026-09-05_FABLE.md` findings #10, #13, #14 marked fixed.
+**Sections updated**: none in `MinimaAds.md` (no schema/protocol change); `docs/archive/AUDIT_2026-09-05_FABLE.md` findings #10, #13, #14 marked fixed.
 
-**Open issues**: this closes every open item in `docs/AUDIT_2026-09-05_FABLE.md` from this audit round. Live verification of all three fixes (per the specific reproduction setups described above) is still pending — worth prioritizing at the start of a future session, alongside the #12 async-branch and #7 recovery-scenario live reproductions already flagged as open in the previous session entry below.
+**Open issues**: this closes every open item in `docs/archive/AUDIT_2026-09-05_FABLE.md` from this audit round. Live verification of all three fixes (per the specific reproduction setups described above) is still pending — worth prioritizing at the start of a future session, alongside the #12 async-branch and #7 recovery-scenario live reproductions already flagged as open in the previous session entry below.
 
 ---
 
 ### Session: 2026-09-06 (audit #7/#12/#15) — Publisher channel batch: sender-auth gaps and dropped `role` in voucher-sync
 
-**Source**: `docs/AUDIT_2026-09-05_FABLE.md` findings #7, #12, #15 — three remaining MEDIUM items in the publisher-channel path of `channel.handler.js`, done as one batch (maintainer-approved order: #15 → #12 → #7). Complexity MEDIUM (contained fixes, one requiring a structural extraction) — maintainer confirmed Sonnet.
+**Source**: `docs/archive/AUDIT_2026-09-05_FABLE.md` findings #7, #12, #15 — three remaining MEDIUM items in the publisher-channel path of `channel.handler.js`, done as one batch (maintainer-approved order: #15 → #12 → #7). Complexity MEDIUM (contained fixes, one requiring a structural extraction) — maintainer confirmed Sonnet.
 
 **#15 — `handlePublisherRewardNotify` trusted the sender as the campaign creator**: no check that `senderPk` matched the campaign's creator before minting a wallet key and routing the resulting `CHANNEL_OPEN_REQUEST` (with `viewer_wallet_addr`/`viewer_wallet_pk`) to `creatorKey || campaign.CREATOR_ADDRESS` — i.e. to the message's own sender. Fixed by gating the whole handler behind the existing `_assertCampaignCreatorSender` (same helper #1–#6 already reuse this session) and by always routing to `campaign.CREATOR_ADDRESS`, dropping the `creatorKey` parameter entirely (`_doSendPublisherChannelOpenRequest` no longer accepts it).
 
@@ -236,7 +236,7 @@ Either way `txnpost` performs no validation and returns `status:true`, so the SW
 
 **AGENTS.md updated**: yes — short pointer entry added; oldest entry (2026-09-06, audit #11) removed from `AGENTS.md §6` (already archived here in full).
 
-**Sections updated**: `MinimaAds.md §8.12`; `docs/AUDIT_2026-09-05_FABLE.md` findings #7, #12, #15 marked fixed.
+**Sections updated**: `MinimaAds.md §8.12`; `docs/archive/AUDIT_2026-09-05_FABLE.md` findings #7, #12, #15 marked fixed.
 
 **Open issues**: audit #10 (SDK-only, not live-testable on this harness per earlier session notes), #13, #14 (SDK-only) still open. A dedicated live repro for #12's async ownership-conflict branch and for #7's actual voucher-recovery-after-loss scenario would need a fresh (non-cooldown-blocked) campaign/node pairing — worth prioritizing at the start of a future session before cooldowns accumulate again.
 
@@ -244,7 +244,7 @@ Either way `txnpost` performs no validation and returns `status:true`, so the SW
 
 ### Session: 2026-09-06 (audit #8) — Embedded publisher snippet's inline ad renderer skipped renderAd.js's CSS/URL validators
 
-**Source**: `docs/AUDIT_2026-09-05_FABLE.md` finding #8, confirmed live against the same real third-party host used for #9 (MetaChain, running MinimaAds' generated snippet via its Help → MinimaAds paste-and-run panel). Complexity MEDIUM (contained fix in the snippet generator, reuses existing validator logic) — maintainer confirmed Sonnet.
+**Source**: `docs/archive/AUDIT_2026-09-05_FABLE.md` finding #8, confirmed live against the same real third-party host used for #9 (MetaChain, running MinimaAds' generated snippet via its Help → MinimaAds paste-and-run panel). Complexity MEDIUM (contained fix in the snippet generator, reuses existing validator logic) — maintainer confirmed Sonnet.
 
 **Problem**: `dapp/views/frames.js` `_buildSnippet`'s inline `_render` function copies `renderer/renderAd.js`'s layout but not its validators. `renderer/renderAd.js` gates `bg_color`/`text_color` (hex-only), `image_position` (enum), and `cta_url` (http/https/mailto scheme whitelist) before using them in `style.cssText`/`href` — because these fields arrive from third-party campaign creators via Maxima. The snippet used `ad.bg_color`/`ad.text_color`/`ad.image_position` raw in `cssText`, and only blocked `javascript:` URLs for `cta_url` (not a real whitelist). A malicious campaign could inject arbitrary CSS (e.g. a `background-image` beacon) or other declarations into the *host* page — in this case MetaChain's own site, not MinimaAds' own origin, the exact vector `safeColor` was added to close in `renderAd.js`. `image_data` was already correctly regex-gated; text fields already used `textContent` (no XSS there).
 
@@ -256,7 +256,7 @@ Either way `txnpost` performs no validation and returns `status:true`, so the SW
 
 **AGENTS.md updated**: yes — short pointer entry added; oldest entry (2026-09-06, Fragility #53) removed from `AGENTS.md §6` (already archived here in full).
 
-**Sections updated**: `docs/AUDIT_2026-09-05_FABLE.md` finding #8 marked fixed.
+**Sections updated**: `docs/archive/AUDIT_2026-09-05_FABLE.md` finding #8 marked fixed.
 
 **Open issues**: none new. Audit #7, #10, #12–#15 (MEDIUM) still open, out of scope for this pass.
 
@@ -264,7 +264,7 @@ Either way `txnpost` performs no validation and returns `status:true`, so the SW
 
 ### Session: 2026-09-06 (audit #9) — Custom-frame snippet sent the full Maxima route as `userAddress` instead of the raw public key
 
-**Source**: `docs/AUDIT_2026-09-05_FABLE.md` finding #9, confirmed live for the first time this session against a real third-party host MiniDapp (MetaChain, running on the same physical node as our own SW-integrated MinimaAds install) embedding a MinimaAds Frame snippet generated by `dapp/views/frames.js`. Complexity MEDIUM (single normalization point, reuses an existing helper) — maintainer confirmed Sonnet.
+**Source**: `docs/archive/AUDIT_2026-09-05_FABLE.md` finding #9, confirmed live for the first time this session against a real third-party host MiniDapp (MetaChain, running on the same physical node as our own SW-integrated MinimaAds install) embedding a MinimaAds Frame snippet generated by `dapp/views/frames.js`. Complexity MEDIUM (single normalization point, reuses an existing helper) — maintainer confirmed Sonnet.
 
 **Problem**: the snippet's `_getMxContact` deliberately constructs the full permanent route `MAX#<pk>#<mls>@host:port` (needed for Maxima routing fields like `publisherMx`), but the same value was also being sent as `userAddress` in `MA_GET_AD`/`MA_TRACK_VIEW`/`MA_TRACK_CLICK`. Confirmed live in the browser console: `[MA-PUBLISHER] ADDRESS FORMAT: PERMANENT_ROUTE`, `ADDRESS: MAX#0x30819F30...`, immediately followed by `sending MA_GET_AD` with that value as `userAddress`.
 
@@ -278,7 +278,7 @@ Either way `txnpost` performs no validation and returns `status:true`, so the SW
 
 **AGENTS.md updated**: yes — short pointer entry added; oldest entry (2026-09-06, SDK sender-auth mirror #5/#6) removed from `AGENTS.md §6` (already archived here in full).
 
-**Sections updated**: `docs/AUDIT_2026-09-05_FABLE.md` finding #9 marked fixed.
+**Sections updated**: `docs/archive/AUDIT_2026-09-05_FABLE.md` finding #9 marked fixed.
 
 **Open issues**: none new. Audit #7, #8, #10, #12–#15 (MEDIUM) still open, out of scope for this pass.
 
@@ -286,7 +286,7 @@ Either way `txnpost` performs no validation and returns `status:true`, so the SW
 
 ### Session: 2026-09-06 (audit #11) — Custom Frame `PUBLISHER_WALLET` stored the Maxima public key instead of a spendable wallet address
 
-**Source**: `docs/AUDIT_2026-09-05_FABLE.md` finding #11, confirmed live during Tier B3 (publisher flow) of the E2E test plan. Complexity MEDIUM (contained UI+SDK fix, no schema/protocol change) — maintainer confirmed Sonnet.
+**Source**: `docs/archive/AUDIT_2026-09-05_FABLE.md` finding #11, confirmed live during Tier B3 (publisher flow) of the E2E test plan. Complexity MEDIUM (contained UI+SDK fix, no schema/protocol change) — maintainer confirmed Sonnet.
 
 **Problem**: `dapp/views/frames.js` `_onFrameSubmit` set `publisher_wallet: MY_ADDRESS` when creating a custom Frame — `MY_ADDRESS` in the FE is the node's Maxima public key (~270 hex chars), not a spendable wallet address. Confirmed live: creating a Frame ("test-site") on Node 2 and querying `FRAMES` showed `PUBLISHER_WALLET` byte-for-byte identical to `PUBLISHER_KEY`, while the built-in Frame's row correctly held a 66-char (`0x` + 64 hex) wallet address. The SDK's `_openNewPublisherChannel` (`sdk/index.js`) sends this value verbatim as `viewer_wallet_addr` in the publisher `CHANNEL_OPEN_REQUEST`; the creator would build a settlement `txnoutput` to that "address" — unspendable (fragility #33's "getaddress, not the raw key" rule applies here too).
 
@@ -300,7 +300,7 @@ Either way `txnpost` performs no validation and returns `status:true`, so the SW
 
 **AGENTS.md updated**: yes — short pointer entry added; oldest entry (2026-09-05, AUD-2) removed from `AGENTS.md §6` (already archived here in full).
 
-**Sections updated**: `docs/AUDIT_2026-09-05_FABLE.md` finding #11 marked fixed.
+**Sections updated**: `docs/archive/AUDIT_2026-09-05_FABLE.md` finding #11 marked fixed.
 
 **Open issues**: none new. Audit #7–#10, #12–#15 (MEDIUM) still open, out of scope for this pass.
 
@@ -346,7 +346,7 @@ The builder now budgets against the channel coin's **actual on-chain amount**, r
 
 ### Session: 2026-09-06 (SDK sender-auth mirror) — audit #5/#6: SDK direct-MAXIMA path never got the AUD-3/AUD-4 guards
 
-**Source**: `docs/AUDIT_2026-09-05_FABLE.md` findings #5 and #6, the two remaining HIGH items after the 2026-09-05 sender-auth pass — both scoped entirely to `sdk/index.js` (the code path a host MiniDapp hits when it embeds only the SDK and decodes raw Maxima itself, with no local copy of our Service Worker). Complexity MEDIUM (single file, reuses existing helpers, no new contract) — maintainer confirmed Sonnet.
+**Source**: `docs/archive/AUDIT_2026-09-05_FABLE.md` findings #5 and #6, the two remaining HIGH items after the 2026-09-05 sender-auth pass — both scoped entirely to `sdk/index.js` (the code path a host MiniDapp hits when it embeds only the SDK and decodes raw Maxima itself, with no local copy of our Service Worker). Complexity MEDIUM (single file, reuses existing helpers, no new contract) — maintainer confirmed Sonnet.
 
 **Problem**:
 - **#5** — `handleMdsEvent`'s `CAMPAIGN_PAUSE`/`CAMPAIGN_FINISH` branches called `setCampaignStatus(...)` unconditionally. `event.data.from` was already available at the call site (used two branches below for CHANNEL_OPEN/REWARD_VOUCHER) but never consulted. Any Maxima peer could pause/finish any locally-known campaign on an SDK host — same spoofing shape AUD-3 closed on the SW side, just never mirrored.
@@ -372,7 +372,7 @@ The builder now budgets against the channel coin's **actual on-chain amount**, r
 
 ### Session: 2026-09-05 (sender-auth class) — Unauthenticated inbound-Maxima status/budget writes (audit 2026-09-05 findings #1–#4 + #19)
 
-**Source**: `docs/AUDIT_2026-09-05_FABLE.md` findings #1, #2, #3, #4 (the HIGH set the July sender-authentication sweep missed), plus #19 (PONG spec drift). Complexity HIGH (multi-layer, security-sensitive: SW dispatcher + 2 SW handlers + FE + spec) — maintainer pre-approved Opus + plan mode. Finding #1+#2 were reproduced live on the 6-node harness before the fix (Test A1: a spoofed `ESCROW_INFO_RESPONSE` with `campaign_status:'active'` turned Node 3's local `CAMPAIGNS.STATUS` into `'ACTIVE'` and zeroed `BUDGET_REMAINING`, after which `validateView` returned `{valid:false, reason:'campaign not active'}` with no self-heal).
+**Source**: `docs/archive/AUDIT_2026-09-05_FABLE.md` findings #1, #2, #3, #4 (the HIGH set the July sender-authentication sweep missed), plus #19 (PONG spec drift). Complexity HIGH (multi-layer, security-sensitive: SW dispatcher + 2 SW handlers + FE + spec) — maintainer pre-approved Opus + plan mode. Finding #1+#2 were reproduced live on the 6-node harness before the fix (Test A1: a spoofed `ESCROW_INFO_RESPONSE` with `campaign_status:'active'` turned Node 3's local `CAMPAIGNS.STATUS` into `'ACTIVE'` and zeroed `BUDGET_REMAINING`, after which `validateView` returned `{valid:false, reason:'campaign not active'}` with no self-heal).
 
 **Problem**: four inbound Maxima message types performed local DB writes with no sender authentication (and one with a casing bug):
 - **#2 (functional regression)** — `_handleEscrowInfoResponse` (`dapp/app.js`) wrote `STATUS = (campaign_status||'unknown').toUpperCase()`. Every status comparator in the system is exact-lowercase (`validateView`, `selectAd`, `checkCampaignStatuses` `WHERE STATUS='active'`), so a legitimate creator response permanently broke the viewer's serving/earning for that campaign, with no self-heal (`processEscrowCoin` lowercases before comparing so never rewrites; the ping loop only selects `STATUS='active'`). `'unknown'` also clobbered a real status.
@@ -401,7 +401,7 @@ Chose to **reuse the two existing helpers rather than write a 4th copy**: PONG l
 - **#4**: send Node 3 a spoofed `REWARD_REJECTED {campaign_id, reason:'finished', event_id:<known>}` from a non-creator PK → the REWARD_EVENTS row is NOT deleted and STATUS does not flip (log `[CHANNEL] REWARD_REJECTED rejected: sender is not the campaign creator`).
 - No console errors in FE; no `console.log` added to SW.
 
-**Files modified**: `dapp/app.js`, `public/service-workers/handlers/maxima.handler.js`, `public/service-workers/handlers/campaign.handler.js`, `public/service-workers/handlers/channel.handler.js`, `MinimaAds.md` (§8.14/§8.15), `docs/AUDIT_2026-09-05_FABLE.md` (findings #1–#4, #19 marked fixed).
+**Files modified**: `dapp/app.js`, `public/service-workers/handlers/maxima.handler.js`, `public/service-workers/handlers/campaign.handler.js`, `public/service-workers/handlers/channel.handler.js`, `MinimaAds.md` (§8.14/§8.15), `docs/archive/AUDIT_2026-09-05_FABLE.md` (findings #1–#4, #19 marked fixed).
 
 **AGENTS.md updated**: yes — short pointer entry added; oldest entry (Fragility #51) removed from `AGENTS.md §6` (already archived here in full).
 

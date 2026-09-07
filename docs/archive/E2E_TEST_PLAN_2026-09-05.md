@@ -1,6 +1,6 @@
 # MinimaAds Live E2E Test Plan — 2026-09-05
 
-**Prioritized from**: `docs/AUDIT_2026-09-05_FABLE.md` (Step 1 findings) + `docs/TESTING_SETUP.md §10` (never-covered gaps).
+**Prioritized from**: `docs/archive/AUDIT_2026-09-05_FABLE.md` (Step 1 findings) + `docs/TESTING_SETUP.md §10` (never-covered gaps).
 **Harness**: 6 real nodes via MinimaNodeManager (`localhost:3000`) + Playwright, per `TESTING_SETUP.md`. Read `§11` gotchas before starting; check nodes are already up before rebuilding.
 
 **Topology** (6 nodes; extends the standard 5-node map with a 2nd viewer for multi-viewer tests):

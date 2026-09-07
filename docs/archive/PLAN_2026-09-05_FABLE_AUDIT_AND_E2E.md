@@ -17,7 +17,7 @@ Abast de l'auditoria:
 - Creuar-ho contra `MinimaAds.md` (contractes, schemas) i `docs/KNOWN_ISSUES.md` (per no reobrir res ja tancat — però SÍ assenyalar-ho si trobes que un fix ja tancat té una regressió o un cas no cobert).
 - Especial atenció a les mateixes categories que l'auditoria anterior ja va trobar rendibles: autenticació de remitent en handlers Maxima inbound, races de UTXO/indexació, monotonicitat de vouchers, dedup, coherència entre validació SW i FE/SDK.
 
-Output: desa els resultats a `docs/AUDIT_2026-09-05_FABLE.md` (mateix format que l'anterior). NO apliquis cap fix encara — aquest pas és només de detecció.
+Output: desa els resultats a `docs/archive/AUDIT_2026-09-05_FABLE.md` (mateix format que l'anterior). NO apliquis cap fix encara — aquest pas és només de detecció.
 
 Un cop tens els resultats, fes-ne un resum breu abans de continuar al pas 2 (no cal esperar confirmació del mantenidor per continuar als passos 2/3, ja estan pre-aprovats com a seqüència, però sí que has d'exposar el resum de troballes abans de dissenyar el pla de proves).
 

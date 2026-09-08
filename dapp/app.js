@@ -485,9 +485,16 @@ function _autoSettleOpenChannels(campaignId) {
               var role       = row.ROLE        || 'viewer';
               var txHex      = row.LATEST_TX_HEX || '';
               var cumulative = parseFloat(row.CUMULATIVE_EARNED || 0);
-              // Fix #12: publisher channels settle through their own reward-voucher
-              // flow (frames.js), not this viewer-campaign-finish path.
-              if (role === 'publisher') { return; }
+              // Fix #12 (2026-07-18) excluded publisher channels here because
+              // PUBLISHER_REWARD_NOTIFY delivery reliability was unconfirmed at the
+              // time. Re-included 2026-09-08 after OPEN-3's propagateStatusToChannelPeers
+              // was confirmed to send an authenticated CAMPAIGN_FINISH to publisher rows
+              // too (docs/KNOWN_ISSUES.md §1b proposal), and a live re-test of
+              // PUBLISHER_REWARD_NOTIFY delivery came back reliable (3/3 real sends
+              // confirmed both by Minima's own delivered:true and by the publisher's
+              // CHANNEL_STATE actually populating, within ~25s each time — see
+              // docs/HISTORY.md §17, session 2026-09-08). _runSettlement below is
+              // already role-agnostic; only this early-return was viewer-specific.
               if (!viewerKey || !txHex) { return; }
               // _runSettlement: checks channel status (passes if 'open'), gets
               // VIEWER_WALLET_PK_<campaignId> from local keypairs, then imports,

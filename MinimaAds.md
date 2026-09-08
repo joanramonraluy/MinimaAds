@@ -356,7 +356,8 @@ Once registered, all future campaigns use `MAX#<pk>#<mls>` in escrow STATE(4), e
 ### 4.5 Publisher Reward Economics
 
 - **Per-event publisher payout**: `R_p` MINIMA for every viewer view that is validated AND originates from a registered Frame (`frameId` set in SDK `init()`).
-- **Single channel per (campaign, frame)**: the publisher node opens a `ROLE='publisher'` channel with the same campaign escrow used by viewers. Off-chain accumulation and settlement mirror the viewer flow (§6.5–§6.7).
+- **Single channel per (campaign, frame)**: the publisher node opens a `ROLE='publisher'` channel with the same campaign escrow used by viewers. Off-chain accumulation mirrors the viewer flow (§6.5–§6.6), and so does the *mechanism* of settlement (§6.7 steps 1–5: import the stored `LATEST_TX_HEX`, co-sign, post).
+- **Publisher settlement is manual, not auto-settled on campaign finish**: unlike viewer-role channels, `ROLE='publisher'` rows are deliberately excluded from the campaign-finish auto-settle path — `dapp/app.js` `_autoSettleOpenChannels` skips them (audit 2026-07-18 Fix #12), and there is no equivalent automatic trigger elsewhere. A publisher settles by opening `#earnings` and clicking Settle. This is by design (a publisher channel's lifecycle is driven by its own reward-voucher flow, not by the advertiser's campaign lifecycle), but it does mean an unsettled publisher channel stays open indefinitely after a campaign is finished until the publisher acts. Verified live 2026-09-07 (`docs/E2E_LIVE_RUN_2026-09-07.md` row 7f).
 - **Atomicity**: when a viewer view is rewarded, the SDK fires both events sequentially: first viewer reward, then publisher reward (if `frameId` is set and `R_p > 0`). The publisher reward produces a `REWARD_REQUEST` with `role='publisher'` to the creator's node.
 - **Fee enforcement**: the escrow contract verifies that the platform fee output goes to `PLATFORM_KEY`. Network nodes silently reject any campaign whose escrow coin does not embed a valid `PLATFORM_KEY` at PREVSTATE(5). See §4.6 and Appendix B.
 
@@ -633,13 +634,30 @@ Runs after every successful `createRewardEvent` call for a campaign with an open
 Settlement turns the off-chain accumulated `LATEST_TX_HEX` into an on-chain transaction. Runs automatically when a campaign finishes and optionally on manual user request.
 
 ```
-Automatic trigger:
-  SW detects campaign STATUS = 'finished' with settling:true (via CAMPAIGN_FINISH Maxima,
-  CAMPAIGN_PAUSE, or NEWBLOCK expiry check)
-  → creator's SW: autoSettleChannelsForCampaign() emits signalFE('CAMPAIGN_AUTOSETTLE_REQUEST',
-    { campaign_id, channels: [{ viewer_key, role, tx_hex, cumulative }…] })
-  → viewer's FE: CAMPAIGN_UPDATED (status='finished', settling:true) triggers
-    _autoSettleOpenChannels(campaign_id), which posts each open channel's latest_tx_hex
+Automatic trigger — applyStatusChange(campaign_id, 'finished') runs on a node.
+Reached from: CAMPAIGN_FINISH Maxima (§8.5, strong sender), MA_LOCAL_STATUS from the
+creator's own FE, a CREATOR_LIVENESS_PONG reporting 'finished' from a strongly-verified
+creator (§8.14), or the NEWBLOCK expiry check (checkExpiredCampaigns).
+NOT reached from: 'paused' (a pause may still resume — its channels stay open),
+budget exhaustion via updateBudget (a bare DB write), or processEscrowCoin's on-chain
+STATE(7) reconciliation (bare setCampaignStatus — see OPEN-4 for why it must stay that way).
+
+  applyStatusChange splits two decisions:
+  → creator's own node only (CAMPAIGNS.CREATOR_ADDRESS == this node's Maxima PK):
+    autoSettleChannelsForCampaign() marks local channels 'settling' and emits
+    signalFE('CAMPAIGN_AUTOSETTLE_REQUEST',
+      { campaign_id, channels: [{ viewer_key, role, tx_hex, cumulative }…] }).
+    The creator cannot post these txs itself (viewer co-sign required) — the signal
+    only drives creator-side UI progress.
+  → every node: signalFE('CAMPAIGN_UPDATED', { …, settling: true }).
+    On a viewer's node this triggers _autoSettleOpenChannels(campaign_id), which posts
+    each still-open channel's latest_tx_hex. Publisher-role rows are skipped (§4.5).
+
+  For a remote node to reach this at all, the creator must actually tell it: the FE
+  broadcasts MA_STATUS_PROPAGATE on real on-chain confirmation (finalizeStatusUpdate)
+  and the SW sends the corresponding CAMPAIGN_FINISH to every channel counterparty
+  (propagateStatusToChannelPeers). The liveness ping loop is the backstop when that
+  message is not delivered (creator or peer offline at the time).
 
 Manual trigger:
   Viewer clicks "Settle rewards" button in UI
@@ -758,6 +776,23 @@ Triggered when the creator changes a campaign's status (Pause / Resume / Finish)
     selectAd filters out non-active campaigns and stops serving the ad. Open
     payment channels remain unchanged on-chain; settlement still works via the
     existing voucher held by each viewer (see §6.7).
+
+7.  Fast path, in parallel with steps 4-6 (OPEN-3 fix, 2026-09-07): on the same
+    on-chain confirmation, finalizeStatusUpdate also broadcasts MA_STATUS_PROPAGATE
+    { campaign_id, status } to the creator's own SW, which runs
+    propagateStatusToChannelPeers: for every local CHANNEL_STATE row of this
+    campaign with STATUS in ('open','settling'), it sends a real CAMPAIGN_PAUSE /
+    CAMPAIGN_FINISH Maxima message (§8.5) to that counterparty, using the same
+    (VIEWER_KEY, CREATOR_MX) routing pair REWARD_VOUCHER uses. 'active' is never
+    propagated (CAMPAIGN_RESUME is deprecated — §8.5).
+
+    This is what makes remote auto-settle work at all: the on-chain path of steps
+    4-6 calls the bare setCampaignStatus, which never sets settling:true, so before
+    this existed a remote viewer's channel stayed open indefinitely after a manual
+    Finish. The message is authenticated on receipt exactly as before
+    (_assertCreatorThen), and it is emitted on *confirmation*, never on the
+    optimistic local write — a status the chain later refuses must not be
+    advertised to peers (see fragility #55).
 ```
 
 **Failure handling**: if the status-update tx is rejected at the Hub or fails to confirm, the local DB still reflects the new status (applied at step 2). The creator may retry the tx; until a new change coin appears at `ESCROW_ADDRESS_V3`, other nodes do not see the change. Manual reversal (Pause then Resume) is supported because each status change posts a fresh tx — the latest confirmed change coin wins.
@@ -1020,7 +1055,9 @@ Reward processing (view and click events) is handled entirely within the FE runt
 
 ### 8.5 CAMPAIGN_PAUSE / CAMPAIGN_FINISH / CAMPAIGN_RESUME
 
-**Direction**: Creator FE → all Maxima contacts (via `broadcastMaxima` / `sendall`) — **fast-path only, optional**.
+**Direction**: Creator SW → each of the campaign's channel counterparties (unicast `sendMaxima`, `poll:false`) — **fast-path only, not required for correctness**.
+
+**Who actually sends these (updated 2026-09-07, OPEN-3)**: `campaign.handler.js` `propagateStatusToChannelPeers`, triggered by the `MA_STATUS_PROPAGATE` comms broadcast the creator's FE fires from `finalizeStatusUpdate` (`dapp/app.js`) when the on-chain status-update tx confirms. Recipients are the rows of `CHANNEL_STATE` for that campaign with `STATUS IN ('open','settling')` — i.e. exactly the peers with money at stake — addressed by `(VIEWER_KEY, CREATOR_MX)`, the same routing pair `REWARD_VOUCHER` uses. Both `viewer` and `publisher` role rows are notified. It is **not** a `sendall` broadcast: an unbounded fan-out of a status change is noise, and every other node reconciles from the chain anyway. Before this, nothing in the codebase sent these messages at all — only the receive handlers existed.
 
 ```json
 { "type": "CAMPAIGN_PAUSE",   "campaign_id": "uuid" }
@@ -1044,10 +1081,19 @@ A sender matching neither is rejected and no status change is applied.
 
 Resulting rule (audit 2026-07-18 Fix #3, extended to `CAMPAIGN_PAUSE` by AUD-3):
 
-- **Strong match** → full fast-path: status is updated and, for `finished`/`paused`, `autoSettleChannelsForCampaign` runs as before.
+- **Strong match** → full fast-path: status is updated and, **for `finished` only**, the settling escalation runs (see the two sub-decisions below).
 - **Fallback match** → **local status change only**. The `CAMPAIGNS.STATUS` row is updated (recoverable, and overwritten by `PREVSTATE(7)` reconciliation on V3 escrows), but settlement is **not** forced: `autoSettleChannelsForCampaign` is skipped and the `CAMPAIGN_UPDATED` signal omits `settling:true`. The handler logs `[CAMPAIGN] FINISH via fallback creator check — deferring auto-settle to on-chain confirmation` (or the `PAUSE` equivalent). Settlement then falls back to the viewer-initiated path (`CAMPAIGN_AUTOSETTLE_REQUEST`).
 
-Rationale: a crafted `CAMPAIGN_FINISH` or `CAMPAIGN_PAUSE` from a third party must not be able to force on-chain settlement of channels on a campaign it does not control. A spoofed *status* is recoverable; a spoofed *settlement* is an irreversible L1 transaction. V1/V2 campaigns cannot verify the sender on-chain (no `PREVSTATE(7)`), so the fast-path privilege is withheld from them unless the permanent route matches. `CAMPAIGN_RESUME` is unaffected — `applyStatusChange`'s `isSettling` gate only covers `finished`/`paused`, and RESUME is deprecated as an inbound Maxima trigger anyway (see above).
+**`applyStatusChange`'s two sub-decisions (updated 2026-09-07, OPEN-3)** — previously one conflated flag:
+
+| Decision | Condition | Effect |
+|---|---|---|
+| `isSettling` | `status === 'finished'` **and** not the fallback path | `CAMPAIGN_UPDATED` carries `settling: true` — the FE gate for a viewer node settling its own open channel |
+| `runCreatorAutoSettle` | `isSettling` **and** `CAMPAIGNS.CREATOR_ADDRESS` == this node's `MY_MAXIMA_PK` (both `.toUpperCase()`d) | `autoSettleChannelsForCampaign` runs, marking local rows `'settling'` and emitting `CAMPAIGN_AUTOSETTLE_REQUEST` |
+
+`'paused'` no longer escalates at all: a paused campaign may resume, so its channels must stay open. And `autoSettleChannelsForCampaign` is now creator-node-only — running it on a *receiving* node marked that node's own channel `'settling'` before the `CAMPAIGN_UPDATED` signal was emitted, so the FE's `WHERE STATUS = 'open'` auto-settle query matched nothing and the channel stuck forever. That ordering bug is why OPEN-3 would not have been fixed by adding the missing send alone.
+
+Rationale: a crafted `CAMPAIGN_FINISH` or `CAMPAIGN_PAUSE` from a third party must not be able to force on-chain settlement of channels on a campaign it does not control. A spoofed *status* is recoverable; a spoofed *settlement* is an irreversible L1 transaction. V1/V2 campaigns cannot verify the sender on-chain (no `PREVSTATE(7)`), so the fast-path privilege is withheld from them unless the permanent route matches. `CAMPAIGN_RESUME` is unaffected — it is deprecated as an inbound Maxima trigger anyway (see above) and `'active'` never sets `isSettling`.
 
 **FE-side consumption of `settling` (audit 2026-07-18 AUD-5 / Fix #12)** — the `CAMPAIGNS.STATUS` update above is one thing; a viewer's own dapp UI acting on it is another. `dapp/app.js`'s `_autoSettleOpenChannels(campaignId)` runs client-side on the viewer's node when it sees a `CAMPAIGN_UPDATED` signal for a finished campaign, and posts the viewer's own settlement tx for any open channel it holds. It is gated on **`parsed.settling === true`** in addition to `status === 'finished'` — since `applyStatusChange` only sets `settling:true` on a *strong* sender match (never on the fallback path above), a spoofed `CAMPAIGN_FINISH`/`CAMPAIGN_PAUSE` can no longer trigger this FE path either, closing the client-side counterpart of the same vector. `_autoSettleOpenChannels` additionally: skips entirely when the local node is itself the campaign creator (`CAMPAIGNS.CREATOR_ADDRESS` matches `MY_ADDRESS`, both `.toUpperCase()`d — creator-opened channels settle through the SW's `autoSettleChannelsForCampaign` / `CAMPAIGN_AUTOSETTLE_REQUEST` flow instead, not this one); and skips `CHANNEL_STATE` rows with `ROLE = 'publisher'` (publisher channels settle through their own reward-voucher flow, not the viewer-campaign-finish path).
 
@@ -1233,6 +1279,10 @@ Sent immediately by the creator's SW upon receiving a `CREATOR_LIVENESS_PING`. U
 
 > The viewer's SW relays this to the FE via `signalFE('CREATOR_LIVENESS_PONG', { campaign_id, status })`. The SDK resolves the pending liveness callback and caches the result.
 
+**Settling escalation on a strong sender (2026-09-07, OPEN-3)** — when `_assertCreatorThen` resolves the sender as **strong** (permanent route, not the weak `CREATOR_ADDRESS` fallback) *and* the reported status is `'finished'`, `handleCreatorLivenessPong` calls the full `applyStatusChange(campaign_id, 'finished')` instead of the bare `setCampaignStatus` write. That is the same trust level `handleCampaignFinish` requires for its own fast path, so it grants the same privilege: `CAMPAIGN_UPDATED` carries `settling:true` and a viewer's FE can finally settle its open channel. `'paused'` never escalates, and a fallback-verified sender keeps the plain DB write.
+
+This is the **backstop** for the §8.5 `CAMPAIGN_FINISH` fast path: if the creator's node was offline, or the peer was, when `propagateStatusToChannelPeers` fired, the ping loop re-asks every ~20 blocks and settles then. For that backstop to exist, `checkCampaignStatuses` selects campaigns that are locally `'active'` **or** on which this node still holds a `CHANNEL_STATE` row with `STATUS='open'` — without the second clause the on-chain reconciliation (which usually wins the race and flips the local row to `'finished'` first) would silently stop the ping loop for exactly the campaigns that still need an answer. The escalation is deliberately **not** gated on `campaign.STATUS !== status` for the same reason.
+
 ### 8.16 REWARD_REJECTED
 
 **Direction**: Creator SW → Viewer node (unicast Maxima, `publickey:` routing, `poll:false`)
@@ -1359,7 +1409,7 @@ Sent when a viewer or publisher's `#mycampaigns`/`#frames` view wants live escro
 |---|---|---|---|
 | `DB_READY` | `{}` | `db-init.js` (SW) | All tables created — FE may begin DB access |
 | `REWARD_CONFIRMED` | `{ event_id, amount, reward_type }` | `core/rewards.js` (FE) | Successful reward persisted in callback chain |
-| `CAMPAIGN_UPDATED` | `{ campaign_id, status, budget_remaining? }` | `campaign.handler.js` / `channel.handler.js` (SW) | Status changed via MA_LOCAL_STATUS, CAMPAIGN_PAUSE/FINISH Maxima, or REWARD_REJECTED |
+| `CAMPAIGN_UPDATED` | `{ campaign_id, status, budget_remaining?, settling? }` | `campaign.handler.js` / `channel.handler.js` (SW), `dapp/app.js` (FE) | Status changed via MA_LOCAL_STATUS, CAMPAIGN_PAUSE/FINISH Maxima, CREATOR_LIVENESS_PONG, escrow-coin discovery, or REWARD_REJECTED. `settling: true` is set **only** by `applyStatusChange` for `status === 'finished'` on a strongly-verified trigger — it is the FE's gate for posting a viewer's own settlement tx (§8.5, AUD-5/Fix #12) and is absent on every other path |
 | `NEW_CAMPAIGN` | `{ campaign_id }` | `campaign.handler.js` (SW) | CAMPAIGN_ANNOUNCE received and persisted |
 | `CHANNEL_OPENED` | `{ campaign_id, channel_coinid, max_amount }` | `channel.handler.js` (SW) | Channel coin confirmed on-chain, viewer can earn |
 | `VOUCHER_RECEIVED` | `{ campaign_id, cumulative }` | `channel.handler.js` (SW) | New REWARD_VOUCHER stored; viewer balance updated |

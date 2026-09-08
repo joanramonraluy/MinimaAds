@@ -1604,6 +1604,27 @@ function resolveChannelScriptAddress(cb) {
   });
 }
 
+// Trims an MDS 'send' result down to the fields worth reading in a console log.
+// The full object (witness signatures, MMR proofs) can run tens of KB per tx —
+// fine for the app's own logic, but expensive to read back afterward.
+function _summarizeSendRes(sendRes) {
+  var outputs = [];
+  try {
+    var outs = sendRes.response.body.txn.outputs;
+    for (var i = 0; i < outs.length; i++) {
+      outputs.push({ address: outs[i].address, amount: outs[i].amount, coinid: outs[i].coinid });
+    }
+  } catch (ex) { /* response shape unexpected — outputs stays empty, caller still gets the rest */ }
+  return {
+    status: sendRes && sendRes.status,
+    pending: sendRes && sendRes.pending,
+    error: sendRes && sendRes.error,
+    txpowid: sendRes && sendRes.response && sendRes.response.txpowid,
+    block: sendRes && sendRes.response && sendRes.response.header && sendRes.response.header.block,
+    outputs: outputs
+  };
+}
+
 function fundEscrowAndPublish(campaign, ad, form, submitBtn, msgEl, campaignDurationBlocks) {
   function fail(reason) {
     console.error('[CREATOR] fail:', reason);
@@ -1721,7 +1742,7 @@ function _fundEscrowWithRoute(campaign, ad, form, submitBtn, msgEl, campaignDura
           campaign.escrow_wallet_pk = walletPK;
 
           function onSendResult(sendRes) {
-            console.log('[CREATOR] send response:', JSON.stringify(sendRes));
+            console.log('[CREATOR] send response:', _summarizeSendRes(sendRes));
 
             if (sendRes && sendRes.pending) {
               console.log('[CREATOR] send is pending approval, uid:', sendRes.pendinguid, 'campaignId:', campaign.id);
@@ -1752,7 +1773,7 @@ function _fundEscrowWithRoute(campaign, ad, form, submitBtn, msgEl, campaignDura
               }
               if (!coinId) { coinId = outs[0].coinid; }
             } catch (ex) {
-              console.error('[CREATOR] coinId extraction failed. Full response:', JSON.stringify(sendRes));
+              console.error('[CREATOR] coinId extraction failed. Response summary:', _summarizeSendRes(sendRes));
               fail('Could not read escrow coinId from send response.');
               return;
             }

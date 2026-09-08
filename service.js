@@ -358,6 +358,13 @@ function onComms(msg) {
     handleTrackClick(payload);
   } else if (payload.type === "MA_LOCAL_STATUS") {
     handleLocalStatusChange(payload);
+  } else if (payload.type === "MA_STATUS_PROPAGATE") {
+    // OPEN-3: the creator's FE fires this from finalizeStatusUpdate once the
+    // on-chain status-update tx has actually confirmed. Sends the real
+    // CAMPAIGN_FINISH / CAMPAIGN_PAUSE Maxima message to this campaign's channel
+    // counterparties. Read-and-send only — the local status was already applied by
+    // MA_LOCAL_STATUS above.
+    propagateStatusToChannelPeers(payload.campaign_id, payload.status);
   } else if (payload.type === "DO_REGISTER_PERMANENT") {
     handleRegisterPermanent(payload);
   }

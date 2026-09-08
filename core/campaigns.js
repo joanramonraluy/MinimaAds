@@ -177,6 +177,12 @@ function encodeStatusForTx(status) {
 // coinAmount    = current escrow coin amount (sets port 10 = coinAmount so change = 0,
 //                 bypassing the VERIFYOUT(INC(@INPUT) @ADDRESS change ...) check in
 //                 ESCROW_SCRIPT_V3 — required because a status-update TX has only 1 output)
+// port 16 (foundationfeeflag) is read unconditionally by ESCROW_SCRIPT_V4
+// (LET foundationfeeflag=STATE(16)) — omitting it throws in KissVM and the spend
+// is silently dropped by TxPoW processing (txnpost reports status:true regardless,
+// see fragility #53). V3 coins simply don't read port 16, so setting it is harmless
+// there too. Found live 2026-09-07 — Pause on a V4 campaign reported "confirmed"
+// but the escrow coin never actually spent.
 function buildStatusUpdateStatePorts(currentEscrow, newStatusHex, coinAmount) {
   return [
     { port: 1,  value: currentEscrow.walletPk },
@@ -186,6 +192,7 @@ function buildStatusUpdateStatePorts(currentEscrow, newStatusHex, coinAmount) {
     { port: 6,  value: currentEscrow.maxPubBudget },
     { port: 7,  value: newStatusHex },
     { port: 10, value: coinAmount ? coinAmount.toString() : '0' },
-    { port: 11, value: '0' }
+    { port: 11, value: '0' },
+    { port: 16, value: '0' }
   ];
 }

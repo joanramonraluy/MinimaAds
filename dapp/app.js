@@ -863,6 +863,19 @@ function finalizeStatusUpdate(txpowResponse, ctx, done) {
   sqlQuery(sql, function(err) {
     if (err) { console.error('[STATUS-TX] CAMPAIGNS escrow update failed:', err); }
     signalFE('CAMPAIGN_UPDATED', { campaign_id: ctx.campaignId, status: ctx.newStatus });
+    // OPEN-3: fast-path notification to this campaign's channel counterparties.
+    // Fired here — on real on-chain confirmation — rather than in mycampaigns.js
+    // _applyStatusChange, so a peer is never told about a status change that the
+    // chain later refuses (fragility #55 was exactly that failure mode). The SW
+    // (service.js onComms → propagateStatusToChannelPeers) does the sending; every
+    // path that reaches a confirmed status tx converges on finalizeStatusUpdate
+    // (synchronous success, status_update_sign resume, status_update_post resume),
+    // so all three are covered by this single call site.
+    MDS.comms.broadcast(JSON.stringify({
+      type:        'MA_STATUS_PROPAGATE',
+      campaign_id: ctx.campaignId,
+      status:      ctx.newStatus
+    }), function() {});
     console.log('[STATUS-TX] confirmed. campaign:', ctx.campaignId, 'status:', ctx.newStatus, 'new coinId:', newCoinId);
     if (typeof done === 'function') { done({ ok: true, new_coinid: newCoinId }); }
   });

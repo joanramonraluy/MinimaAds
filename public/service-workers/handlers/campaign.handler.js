@@ -720,6 +720,30 @@ function onPending(msg) {
 // CAMPAIGN_UPDATED signal must not carry settling:true either — the FE uses that
 // flag to defer its re-render until onCampaignClosed arrives, and no settlement
 // events will follow here.
+//
+// OPEN-3 (2026-09-07) — two separate decisions, previously conflated into one flag:
+//
+//   isSettling            → does the CAMPAIGN_UPDATED signal carry settling:true?
+//                           This is the FE's gate (dapp/app.js
+//                           _autoSettleOpenChannels, AUD-5/Fix #12) for a *viewer*
+//                           node posting its own settlement tx. Now 'finished'
+//                           only: a Pause is not the end of a channel's life, so
+//                           it must never escalate to settlement (maintainer
+//                           decision, OPEN-3 fix session).
+//
+//   runCreatorAutoSettle  → does *this node* run autoSettleChannelsForCampaign?
+//                           That function marks every local CHANNEL_STATE row for
+//                           the campaign as 'settling' and emits
+//                           CAMPAIGN_AUTOSETTLE_REQUEST. That is only meaningful on
+//                           the creator's own node. Run unconditionally (as before)
+//                           it actively broke remote settlement: a viewer node
+//                           receiving the status change marked its *own* channel
+//                           'settling' before signalling the FE, so the FE's
+//                           "WHERE STATUS = 'open'" auto-settle query matched
+//                           nothing and the channel stayed stuck forever.
+//                           Gated on the local node being the campaign creator
+//                           (same Maxima-pk identity space Fix #12 compares in the
+//                           FE, .toUpperCase() on both sides).
 function applyStatusChange(campaignId, status, skipAutoSettle) {
   setCampaignStatus(campaignId, status, function(err) {
     if (err) {
@@ -727,16 +751,22 @@ function applyStatusChange(campaignId, status, skipAutoSettle) {
       return;
     }
     MDS.log("[CAMPAIGN] status updated to " + status + ", id: " + campaignId);
-    var isSettling = (status === 'finished' || status === 'paused') && !skipAutoSettle;
-    if (isSettling) {
-      if (typeof autoSettleChannelsForCampaign === 'function') {
-        autoSettleChannelsForCampaign(campaignId);
-      }
-    }
     getCampaign(campaignId, function(err2, campaign) {
       var budget = (campaign && campaign.BUDGET_REMAINING !== undefined)
         ? parseFloat(campaign.BUDGET_REMAINING)
         : 0;
+      var isSettling = (status === 'finished') && !skipAutoSettle;
+      var creatorAddr = (campaign && campaign.CREATOR_ADDRESS) ? campaign.CREATOR_ADDRESS : '';
+      var isLocalCreator = !!(MY_MAXIMA_PK && creatorAddr
+        && MY_MAXIMA_PK.toUpperCase() === creatorAddr.toUpperCase());
+      var runCreatorAutoSettle = isSettling && isLocalCreator;
+      if (runCreatorAutoSettle) {
+        if (typeof autoSettleChannelsForCampaign === 'function') {
+          autoSettleChannelsForCampaign(campaignId);
+        }
+      } else if (isSettling) {
+        MDS.log("[CAMPAIGN] settling signalled without local auto-settle (not creator node): " + campaignId);
+      }
       var updatePayload = {
         campaign_id: campaignId,
         status: status,
@@ -746,6 +776,89 @@ function applyStatusChange(campaignId, status, skipAutoSettle) {
         updatePayload.settling = true;
       }
       signalFE("CAMPAIGN_UPDATED", updatePayload);
+    });
+  });
+}
+
+// OPEN-3 Step B — creator-side fast-path notification to channel counterparties.
+//
+// Called from service.js onComms on MA_STATUS_PROPAGATE, which the creator's FE
+// broadcasts from finalizeStatusUpdate (dapp/app.js) once the on-chain
+// status-update tx has actually confirmed. Until this existed, nothing in the
+// codebase ever *sent* a CAMPAIGN_PAUSE / CAMPAIGN_FINISH — only the receive-side
+// handlers were implemented (see MinimaAds.md §8.5) — so a remote node learned the
+// new status exclusively through processEscrowCoin's on-chain reconciliation,
+// which calls the bare setCampaignStatus and therefore never set settling:true.
+//
+// This function only READS and SENDS. It never writes to the DB and never calls
+// autoSettleChannelsForCampaign: applying the status (and deciding whether to
+// escalate to settlement) is the *receiving* node's job, through the existing
+// handleCampaignFinish / handleCampaignPause → _assertCreatorThen →
+// applyStatusChange path, which authenticates the sender exactly as before.
+//
+// Both 'viewer' and 'publisher' role rows are notified — status sync is useful for
+// either. Only viewer rows can escalate to settlement, and that exclusion already
+// lives on the receive side (dapp/app.js _autoSettleOpenChannels skips
+// ROLE='publisher', Fix #12), so no extra role guard is needed here.
+//
+// Rhino-safe: var, function(), string concat, MDS.log, no trailing commas.
+function propagateStatusToChannelPeers(campaignId, status) {
+  if (!campaignId || !status) {
+    MDS.log("[CAMPAIGN] MA_STATUS_PROPAGATE missing fields");
+    return;
+  }
+  // Same whitelist shape as handleLocalStatusChange. 'active' is deliberately not
+  // propagated: CAMPAIGN_RESUME is deprecated as an outbound message
+  // (MinimaAds.md §8.5) — resume is on-chain only.
+  if (status !== 'paused' && status !== 'finished') {
+    MDS.log("[CAMPAIGN] MA_STATUS_PROPAGATE not propagated for status: " + status);
+    return;
+  }
+  getCampaign(campaignId, function(err, campaign) {
+    if (err || !campaign) {
+      MDS.log("[CAMPAIGN] MA_STATUS_PROPAGATE: campaign not found: " + campaignId);
+      return;
+    }
+    var creatorAddr = campaign.CREATOR_ADDRESS || '';
+    if (!MY_MAXIMA_PK || !creatorAddr
+        || MY_MAXIMA_PK.toUpperCase() !== creatorAddr.toUpperCase()) {
+      // Not our campaign — nothing to propagate. Silent by design: any node may
+      // hold a row for a campaign it did not create.
+      return;
+    }
+    var sql = "SELECT VIEWER_KEY, CREATOR_MX, ROLE FROM CHANNEL_STATE" +
+      " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
+      " AND STATUS IN ('open', 'settling')";
+    sqlQuery(sql, function(sqlErr, rows) {
+      if (sqlErr) {
+        MDS.log("[CAMPAIGN] MA_STATUS_PROPAGATE SELECT failed: " + sqlErr);
+        return;
+      }
+      if (!rows || rows.length === 0) {
+        MDS.log("[CAMPAIGN] MA_STATUS_PROPAGATE: no channel peers for: " + campaignId);
+        return;
+      }
+      var msgType = (status === 'finished') ? "CAMPAIGN_FINISH" : "CAMPAIGN_PAUSE";
+      MDS.log("[CAMPAIGN] MA_STATUS_PROPAGATE: sending " + msgType + " to " + rows.length
+        + " channel peer(s) for: " + campaignId);
+      for (var i = 0; i < rows.length; i++) {
+        (function(row) {
+          // On the creator's own node CHANNEL_STATE.VIEWER_KEY is the counterparty's
+          // Maxima public key and CREATOR_MX is its route address — the exact pair
+          // swBuildAndExportVoucherTx passes to sendMaxima for REWARD_VOUCHER.
+          var peerPk = row.VIEWER_KEY || '';
+          var peerMx = row.CREATOR_MX || '';
+          if (!peerPk && !peerMx) { return; }
+          var payload = {
+            type:        msgType,
+            campaign_id: campaignId
+          };
+          sendMaxima(peerPk, peerMx, payload, function(ok) {
+            MDS.log("[CAMPAIGN] " + msgType + " sent to " + (row.ROLE || 'viewer')
+              + " peer ok=" + ok + " campaign=" + campaignId);
+          });
+        })(rows[i]);
+      }
     });
   });
 }
@@ -803,8 +916,16 @@ function checkCampaignStatuses() {
   // to detect 'finished' status. After the creator finishes and auto-settle posts
   // L1 txs, the viewer's channel transitions to 'settling'; the ping delivers the
   // 'finished' PONG which triggers CAMPAIGN_UPDATED so the UI refreshes.
+  // OPEN-3 Step C: also ping for any campaign this node still holds an OPEN channel
+  // on, whatever the local CAMPAIGNS.STATUS says. Without this, the on-chain
+  // reconciliation flipping the local row to 'finished' first (it usually wins the
+  // race) permanently stops the ping loop for exactly the campaigns that still need
+  // an answer — the channel is open, unsettled, and the PONG escalation in
+  // handleCreatorLivenessPong is what would settle it.
   var sql = "SELECT DISTINCT c.ID, c.CREATOR_ADDRESS FROM CAMPAIGNS c" +
-    " WHERE c.STATUS = 'active'";
+    " WHERE c.STATUS = 'active'" +
+    " OR EXISTS (SELECT 1 FROM CHANNEL_STATE ch" +
+    " WHERE UPPER(ch.CAMPAIGN_ID) = UPPER(c.ID) AND ch.STATUS = 'open')";
   sqlQuery(sql, function(err, rows) {
     if (err || !rows || rows.length === 0) { return; }
     for (var i = 0; i < rows.length; i++) {
@@ -856,6 +977,29 @@ function handleCreatorLivenessPong(payload, senderPk) {
     return;
   }
   _assertCreatorThen(campaignId, senderPk, function(strongSender) {
+    // OPEN-3 Step C — a PONG from a *strongly* verified creator (permanent route
+    // MAX#<pk>#<mls>, from CAMPAIGNS.CREATOR_MX or the on-chain escrow STATE(4)
+    // cache — neither settable by a payload) reporting 'finished' is exactly the
+    // trust level handleCampaignFinish requires for the full fast-path, so it gets
+    // the full applyStatusChange rather than the bare DB write below. That is what
+    // puts settling:true on the CAMPAIGN_UPDATED signal and lets a remote viewer's
+    // FE actually settle its open channel.
+    //
+    // Deliberately NOT gated on campaign.STATUS !== status: the on-chain
+    // reconciliation (processEscrowCoin → setCampaignStatus) frequently wins the
+    // race and flips the local row to 'finished' first; a "!=" guard here would
+    // then skip the escalation and the channel would stay open forever — the exact
+    // OPEN-3 failure mode. applyStatusChange is idempotent (setCampaignStatus is a
+    // plain UPDATE) so re-running it is safe.
+    //
+    // 'paused' deliberately does not escalate (maintainer decision, OPEN-3): a
+    // paused campaign may still resume, so its channels must stay open.
+    // Weak/fallback-verified senders keep the pre-existing non-escalating write.
+    if (strongSender && status === 'finished') {
+      MDS.log("[LIVENESS] PONG from strongly-verified creator reports finished — applying full status change: " + campaignId);
+      applyStatusChange(campaignId, 'finished');
+      return;
+    }
     getCampaign(campaignId, function(err, campaign) {
       if (!err && campaign && campaign.STATUS !== status) {
         setCampaignStatus(campaignId, status, function(err2) {

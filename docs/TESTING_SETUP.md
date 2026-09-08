@@ -676,3 +676,44 @@ harness; don't spend time trying to reach them via MetaChain.
    and zero errors, and take a screenshot to confirm the ad banner actually
    rendered in MetaChain's own page (not just that the network round-trip
    succeeded).
+
+---
+
+## 13) Token-efficiency for long live-testing sessions
+
+A full multi-node regression pass (6 nodes, many `browser_*` calls over an
+hour+) burns context fast — not from inefficiency, but structurally: every
+Playwright response repeats the full open-tab list (each URL carries a long
+MDS session UID), full accessibility snapshots of an SPA, and real Minima
+tx JSON (witness signatures + MMR proofs are tens of KB per tx) end up
+duplicated across console-log dumps. Found this the hard way in the
+2026-09-07 session (>50% of a usage window on one conversation). Rules for
+next time:
+
+- **Prefer `browser_evaluate` over `browser_snapshot`/UI-clicking whenever
+  you just need a data point.** `MDS.sql(...)`/`MDS.cmd(...)` wrapped in a
+  `Promise` and returned as JSON is the cheapest way to read ground truth
+  (campaign/channel state, coin existence) — no accessibility tree, no
+  screenshot. Reserve real clicks for the action you're actually testing
+  (Pause, Settle, Publish...), not for verification.
+- **`browser_snapshot` accepts a `filename` param** — save to a file and
+  `Read`/`grep` only the part you need instead of letting the whole page
+  dump into context.
+- **Close tabs you're done with** (`browser_tabs action: close`). Every open
+  tab lengthens the tab list repeated in *every subsequent* tool response,
+  for the rest of the session.
+- **Don't call `browser_console_messages` on a tab that's been open a long
+  time without reloading it first.** The tool has no filtering — it returns
+  the tab's entire accumulated history; one call exceeded the tool's own
+  output limit (75k+ chars) in this session. Reload the tab (fresh, short
+  history) before checking console, or go straight to grepping the
+  overflow file the tool saves on hitting its limit.
+- **Batch multiple SQL/cmd checks into one `browser_evaluate` call** (chain
+  callbacks, resolve one combined object) instead of one round trip per
+  query.
+- **If `MinimaNodeManager` grows an HTTP API** (proposed but not yet built
+  as of this writing — see the maintainer's 2026-09-07 session for the
+  design) for reading node logs and running raw RPC commands, prefer
+  `curl`/`Bash` over the browser for anything that doesn't require a real
+  click. It won't cover MinimaAds' own SQL console (that's inside the MDS
+  session, browser-only) but it would replace most raw chain-state checks.

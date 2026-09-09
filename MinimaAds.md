@@ -767,9 +767,11 @@ Triggered when the creator changes a campaign's status (Pause / Resume / Finish)
       to ESCROW_ADDRESS_V3 with storestate:true.
     - Sets txnstate port:7 value:<status_hex> to the new UTF-8-hex of "active",
       "paused" or "finished".
-    - Carries ports 1, 3, 4, 5, 6, 11 forward (creator key, campaign id, creator
-      mx, platform key, max publisher budget, fee flag = 0). Ports 10 = 0 and
-      11 = 0 so the V3 script reads payout=0 and skips the fee branch.
+    - Carries ports 1, 2, 3, 4, 5, 6, 11 forward (creator key, expiry block,
+      campaign id, creator mx, platform key, max publisher budget, fee flag =
+      0) — port 2 only when the current coin carries it (fragility #56).
+      Ports 10 = 0 and 11 = 0 so the V3 script reads payout=0 and skips the
+      fee branch.
     - Posts the tx via txnpost mine:true auto:true; the FE marks the campaign
       as STATUS_TX_PENDING and signals STATUS_TX_PENDING { campaign_id, status,
       pending_uid } to mycampaigns.js for "awaiting confirmation" UX.
@@ -1880,7 +1882,7 @@ RETURN TRUE
 | Port | Read by | Value | Type | Purpose |
 |---|---|---|---|---|
 | 1 | `PREVSTATE(1)` | Creator wallet public key | `0x` hex (64 chars) | Required signer — frozen at coin creation |
-| 2 | `PREVSTATE(2)` | Campaign expiry block | integer string | Not enforced by the script, but authoritative off-chain: `checkExpiredCampaigns` (§11.2, Fix #8) finishes a campaign only once the chain tip reaches this height. Read from the coin's own `state` array — a coin JSON has no `prevstate` key. **Not carried forward by the escrow split tx** — see KNOWN_ISSUES #51 |
+| 2 | `PREVSTATE(2)` | Campaign expiry block | integer string | Not enforced by the script, but authoritative off-chain: `checkExpiredCampaigns` (§11.2, Fix #8) finishes a campaign only once the chain tip reaches this height. Read from the coin's own `state` array — a coin JSON has no `prevstate` key. Carried forward by both escrow-respending tx builders — the channel-open split tx (fragility #51, fixed 2026-09-05) and the status-update tx (fragility #56, fixed 2026-09-09) — whenever the coin being spent already carries it; never invented when absent |
 | 3 | `PREVSTATE(3)` | Campaign ID (hex-encoded UTF-8) | `0x` hex | Links on-chain coin to H2 campaign record |
 | 4 | `PREVSTATE(4)` | Creator Mx address | `Mx...` string | Enables on-chain discovery: viewer nodes send REQUEST_CAMPAIGN_DATA to this address |
 | **5** | `PREVSTATE(5)` | **PLATFORM_KEY** | `0x` hex or `0x00` | Fee recipient — validated by network; `0x00` = fee disabled (MVP) |
@@ -1985,6 +1987,7 @@ txncreate id:<txnid>
 txninput  id:<txnid> coinid:<ESCROW_COINID_V3> scriptmmr:true
 txnoutput id:<txnid> storestate:true amount:<full_amount> address:<ESCROW_ADDRESS_V3>
 txnstate  id:<txnid> port:1  value:<creator_wallet_pk>
+txnstate  id:<txnid> port:2  value:<expiry_block>          (only if the current coin carries it)
 txnstate  id:<txnid> port:3  value:<campaign_id_hex>
 txnstate  id:<txnid> port:4  value:<creator_mx_hex>
 txnstate  id:<txnid> port:5  value:<platform_key_or_0x00>
@@ -2001,7 +2004,7 @@ Notes:
 - `STATE(10) = 0` so the V3 script reads `payout = 0` → `change = @AMOUNT - 0 = @AMOUNT > 0` → the `IF change GT 0` branch fires and asserts that the change output goes back to `@ADDRESS` (= `ESCROW_ADDRESS_V3`) with `keepstate:true`. The single output[0] satisfies this assertion.
 - `STATE(11) = 0` so the fee branch is skipped — no fee output is required.
 - `STATE(7) = <new_status_hex>` is the UTF-8 hex of `"active"`, `"paused"` or `"finished"`. The script reads it (`LET status = PREVSTATE(7)`) but does not assert on its value — see §B.2.1.
-- Ports 1, 3, 4, 5, 6 are carried forward unchanged from the prior coin's `PREVSTATE` values so the new change coin remains discoverable and validates against the receiving node's `PLATFORM_KEY` check.
+- Ports 1, 2, 3, 4, 5, 6 are carried forward unchanged from the prior coin's `PREVSTATE` values so the new change coin remains discoverable and validates against the receiving node's `PLATFORM_KEY` check. Port 2 (expiry block) is not read by the script — it is carried forward purely so `checkExpiredCampaigns` (Fix #8) can keep reading an accurate on-chain deadline off the campaign's `ESCROW_COINID` after a status change; it is set only when the coin being spent actually carries it, never invented (fragility #56, fixed 2026-09-09).
 - After confirmation: update `CAMPAIGNS.ESCROW_COINID` to the new change coinid on the creator's node (the existing `processEscrowCoin` discovery path also handles this on every other node). The status-tx-pending marker (FE-only) is cleared on `CAMPAIGN_UPDATED` signal for this campaign.
 
 #### Campaign Close / Refund

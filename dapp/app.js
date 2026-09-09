@@ -633,9 +633,9 @@ function runSequential(cmds, idx, cb) {
 //
 // Creator-side: spends the current V3 escrow coin and produces a same-amount
 // change coin at ESCROW_ADDRESS_V3 carrying STATE(7) = <new_status_hex>.
-// Ports 1,3,4,5,6 are carried forward from the prior coin; port 10=0 (full
-// change-back); port 11=0 (no fee on status update). See MinimaAds.md §6.10
-// and Appendix B.5.
+// Ports 1,2,3,4,5,6 are carried forward from the prior coin (port 2 only
+// when present — fragility #56); port 10=0 (full change-back); port 11=0
+// (no fee on status update). See MinimaAds.md §6.10 and Appendix B.5.
 //
 // Fire-and-forget: never blocks the UI. The caller's onResult fires
 // asynchronously with { ok, skipped?, error?, new_coinid? } once the tx
@@ -722,6 +722,12 @@ function buildAndPostStatusUpdateTx(campaignId, newStatus, onResult) {
         // Carry forward ports 1, 3, 4, 5, 6 from the current escrow coin's state.
         // Fallback to the campaign DB row / current FE identity when a port is
         // missing (defensive — V3 coins set them at funding time).
+        // Port 2 (campaign expiry block) is carried forward the same way, but
+        // with NO fallback: it has no DB-derivable equivalent (EXPIRES_AT is a
+        // wall-clock timestamp, not a block height) and inventing one would
+        // reintroduce the exact inaccuracy this port exists to avoid. An empty
+        // ps(2) here means buildStatusUpdateStatePorts omits port 2 entirely
+        // rather than guessing (fragility #56).
         var creatorMxHex = '0x' + utf8ToHex(MY_MX_ADDRESS).toUpperCase();
         var campaignIdHex = '0x' + utf8ToHex(campaign.ID || campaignId).toUpperCase();
         var currentEscrow = {
@@ -730,6 +736,7 @@ function buildAndPostStatusUpdateTx(campaignId, newStatus, onResult) {
           creatorMxHex:   ps(4) || creatorMxHex,
           platformKeyHex: ps(5) || '0x00',
           maxPubBudget:   ps(6) || '0',
+          expiryBlock:    ps(2),
           feeflag:        '0'
         };
 

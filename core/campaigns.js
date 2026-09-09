@@ -172,7 +172,7 @@ function encodeStatusForTx(status) {
 }
 
 // Builds the ordered array of { port, value } pairs for a status-update tx.
-// currentEscrow = { walletPk, campaignIdHex, creatorMxHex, platformKeyHex, maxPubBudget, feeflag }
+// currentEscrow = { walletPk, campaignIdHex, creatorMxHex, platformKeyHex, maxPubBudget, feeflag, expiryBlock }
 // newStatusHex  = encodeStatusForTx(newStatus)
 // coinAmount    = current escrow coin amount (sets port 10 = coinAmount so change = 0,
 //                 bypassing the VERIFYOUT(INC(@INPUT) @ADDRESS change ...) check in
@@ -184,7 +184,7 @@ function encodeStatusForTx(status) {
 // there too. Found live 2026-09-07 — Pause on a V4 campaign reported "confirmed"
 // but the escrow coin never actually spent.
 function buildStatusUpdateStatePorts(currentEscrow, newStatusHex, coinAmount) {
-  return [
+  var ports = [
     { port: 1,  value: currentEscrow.walletPk },
     { port: 3,  value: currentEscrow.campaignIdHex },
     { port: 4,  value: currentEscrow.creatorMxHex },
@@ -195,6 +195,17 @@ function buildStatusUpdateStatePorts(currentEscrow, newStatusHex, coinAmount) {
     { port: 11, value: '0' },
     { port: 16, value: '0' }
   ];
+  // Port 2 (campaign expiry block) is not read by the escrow script itself,
+  // but the change coin this tx produces becomes the campaign's new
+  // ESCROW_COINID, and checkExpiredCampaigns (Fix #8) reads the expiry block
+  // off of it. Dropping it silently degrades the campaign to the wall-clock
+  // fallback for the rest of its life (fragility #56 — same class as #51,
+  // which fixed the same omission in the channel-open split tx). Only push
+  // it when the current coin actually carries it — never invent a value.
+  if (currentEscrow.expiryBlock) {
+    ports.push({ port: 2, value: currentEscrow.expiryBlock });
+  }
+  return ports;
 }
 
 // ---------------------------------------------------------------------------

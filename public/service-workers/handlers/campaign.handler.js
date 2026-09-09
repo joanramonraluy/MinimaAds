@@ -22,6 +22,11 @@
 // keep syncing exactly as before — but creator_address / creator_mx are pinned
 // back to the stored values before they reach saveCampaign.
 //
+// OPEN-4 (2026-09-08) extends the pinned set to escrow_coinid / escrow_wallet_pk,
+// which are now security-relevant: processEscrowCoin gates every on-chain action on
+// the coin being on the lineage of CAMPAIGNS.ESCROW_COINID, so that column has to be
+// as hard to move as CREATOR_ADDRESS is. Same three exemptions.
+//
 // Deliberately unchanged (documented MVP trade-off, MinimaAds.md §8.5):
 //   - first discovery of a campaign_id → trust-on-first-use, payload wins;
 //   - a row with no strong identity yet → first-write-wins preserved, so legacy
@@ -80,6 +85,17 @@ function handleCampaignAnnounce(payload, senderPk) {
       // syncs normally, but CREATOR_ADDRESS/CREATOR_MX cannot be overwritten.
       payload.campaign.creator_address = existing.CREATOR_ADDRESS;
       payload.campaign.creator_mx = existing.CREATOR_MX;
+      // OPEN-4 / F3 — the escrow anchor is an identity field too. processEscrowCoin
+      // now decides what an on-chain coin may do by comparing it against
+      // CAMPAIGNS.ESCROW_COINID, so leaving that column freely writable from any
+      // Maxima payload would make the lineage gate decorative: an attacker would
+      // simply re-point the anchor at their own forged coin first. ESCROW_WALLET_PK
+      // is pinned with it because it is the genesis binding
+      // (_processUnknownCampaignCoin checks the coin's STATE(1) against it).
+      // Same three exemptions as above: first discovery, no strong identity yet,
+      // or the sender IS the strong creator.
+      payload.campaign.escrow_coinid = existing.ESCROW_COINID || '';
+      payload.campaign.escrow_wallet_pk = existing.ESCROW_WALLET_PK || '';
       MDS.log("[CAMPAIGN] ANNOUNCE identity fields pinned (sender not strongly verified). campaign=" + campaignId);
       _continueCampaignAnnounce(payload, campaignId);
     });
@@ -362,10 +378,22 @@ function _sendRequestCampaignData(campaignId, creatorPk, creatorMx, cb) {
   });
 }
 
-// Called from main.js scanEscrowCoins for each coin at ESCROW_ADDRESS.
+// How many generations of forward escrow lineage a coin may be away from the
+// campaign's stored anchor and still be accepted (OPEN-4). Two covers the realistic
+// gap between two scans of this node (e.g. a status-update tx plus a channel-open
+// split that both confirmed while the node was busy or offline), at a worst case of
+// 6 local `hash` calls per anchor — memoised per campaign in _escrowDescendants.
+var ESCROW_LINEAGE_MAX_DEPTH = 2;
+
+// Called from service.js scanEscrowCoins for each coin at an ESCROW_ADDRESS.
 // Reads STATE(3)=campaign_id_hex, STATE(4)=creator_mx_address.
 // If campaign is unknown locally, sends REQUEST_CAMPAIGN_DATA to creator.
-// _knownEscrowCoins and MY_MX_ADDRESS are globals defined in main.js.
+// _knownEscrowCoins and MY_MX_ADDRESS are globals defined in service.js.
+//
+// OPEN-4 (2026-09-08) — this function is reached for ANY coin anyone pays to the
+// public escrow script address, so it is split into a pure parse stage, a trust
+// gate (_resolveEscrowCoinTrust), and the state-changing body
+// (_applyTrustedEscrowCoin) which only the gate can reach.
 function processEscrowCoin(coin) {
   var coinId = coin.coinid;
   // Only skip if the campaign is already confirmed in the local DB.
@@ -412,127 +440,374 @@ function processEscrowCoin(coin) {
 
   MDS.log("[DISCOVERY] coin: " + coinId + " campaignId: " + campaignId + " creatorContact: " + (creatorPkRoute ? ("PK:" + creatorPkRoute.substring(0, 10) + "...") : creatorMxAddr));
 
-  // Always refresh routing keypair from on-chain STATE(4) — ensures stale values are overwritten.
+  // OPEN-4 — nothing above this point writes anything. Parsing STATE(3)/STATE(4)
+  // off a coin found at the *public* escrow script address proves nothing about who
+  // created that coin, so every state-changing action now sits behind the lineage
+  // gate below.
+  getCampaign(campaignId, function(err, campaign) {
+    if (!campaign) {
+      _processUnknownCampaignCoin(coin, coinId, campaignId, states, creatorPkRoute, creatorMxAddr);
+      return;
+    }
+    _resolveEscrowCoinTrust(coin, coinId, campaignId, campaign, function(verdict) {
+      if (verdict === 'trusted') {
+        _applyTrustedEscrowCoin(coin, coinId, campaignId, states, campaign, creatorPkRoute, creatorMxAddr);
+        return;
+      }
+      if (verdict === 'skip') {
+        // Split-transient sibling rule (fragility #41) — the real continuation is
+        // the index-1 change coin, handled in this same scan pass or the next one.
+        return;
+      }
+      // 'rejected' — off-lineage coin, or no usable anchor to compare against.
+      // No state-changing action of any kind; ask the *stored* creator identity for
+      // fresh campaign data so a genuinely stale anchor can still self-heal.
+      _requestReanchorFromStoredCreator(campaign, campaignId);
+    });
+  });
+}
+
+// OPEN-4 — resolves whether a coin found at an escrow address may act on a campaign
+// this node already knows. cb('trusted' | 'skip' | 'rejected').
+//
+// The anchor is CAMPAIGNS.ESCROW_COINID: the coin the campaign was funded with (or
+// the last successor this node accepted). A legitimate successor is always produced
+// by a tx that spends the current escrow coin as its single input, so it is exactly
+// escrowChildCoinId(anchor, 0 | 1) — see core/campaigns.js for the derivation and
+// why the check has to be a forward closure rather than a backward walk.
+function _resolveEscrowCoinTrust(coin, coinId, campaignId, campaign, cb) {
+  var anchor = campaign.ESCROW_COINID || '';
+  if (!(/^0[xX][0-9A-Fa-f]{64}$/).test(anchor)) {
+    MDS.log("[DISCOVERY] no anchor for campaign=" + campaignId + " — coin " + coinId + " not trusted");
+    cb('rejected');
+    return;
+  }
+  if (coinId && coinId.toUpperCase() === anchor.toUpperCase()) {
+    cb('trusted');
+    return;
+  }
+  // Keyed on the anchor so the memo self-invalidates the moment the anchor advances
+  // (preserves the self-heal property of fragility #43).
+  var rejectKey = campaignId + '|' + anchor.toUpperCase() + '|' + (coinId || '').toUpperCase();
+  if (_offLineageEscrowCoins[rejectKey]) {
+    cb('rejected');
+    return;
+  }
+  if (!_isEscrowAddress(coin.address)) {
+    _offLineageEscrowCoins[rejectKey] = true;
+    MDS.log("[DISCOVERY] REJECTED off-lineage escrow coin " + coinId + " campaign=" + campaignId + " anchor=" + anchor);
+    cb('rejected');
+    return;
+  }
+  _getEscrowDescendants(campaignId, anchor, function(memo) {
+    var key = (coinId || '').toUpperCase();
+    var entry = memo.set[key];
+    if (!entry) {
+      // Fragility #41, second half: once the anchor has advanced to the change coin
+      // of a split tx, that tx's *other* output (the short-lived split coin, still
+      // unspent at the escrow address until the channel-open tx confirms) is no
+      // longer derivable from the new anchor. It is not an attack, it is the coin we
+      // deliberately skipped a block ago — recognise it through the superseded
+      // anchor's closure and skip it again instead of logging a false rejection.
+      if (memo.prevSet && memo.prevSet[key]) {
+        MDS.log("[DISCOVERY] split-transient: skipping " + coinId
+          + " (superseded lineage branch). campaign=" + campaignId);
+        cb('skip');
+        return;
+      }
+      _offLineageEscrowCoins[rejectKey] = true;
+      MDS.log("[DISCOVERY] REJECTED off-lineage escrow coin " + coinId + " campaign=" + campaignId + " anchor=" + anchor);
+      cb('rejected');
+      return;
+    }
+    var path = entry.path || [];
+    if (path.length === 0 || path[path.length - 1] !== 0) {
+      cb('trusted');
+      return;
+    }
+    // Fragility #41 — an escrow *split* tx (channel open) emits the split coin at
+    // output 0 and the escrow continuation (change) at output 1, because the script
+    // asserts VERIFYOUT(INC(@INPUT) @ADDRESS change …) and there is one input. A
+    // status-update tx emits a single output at index 0 and has no such sibling.
+    // So an index-0 descendant is only the real continuation when no unspent
+    // escrow-addressed sibling exists at index 1; otherwise skip it entirely and let
+    // the sibling advance the anchor, which removes the old budget ping-pong.
+    _escrowPathParent(anchor, path, function(parentId) {
+      if (!parentId) { cb('trusted'); return; }
+      escrowChildCoinId(parentId, 1, function(siblingId) {
+        if (!siblingId) { cb('trusted'); return; }
+        MDS.cmd("coins coinid:" + siblingId, function(res) {
+          var sibling = (res && res.status && res.response && res.response.length > 0) ? res.response[0] : null;
+          if (sibling && _isEscrowAddress(sibling.address)) {
+            MDS.log("[DISCOVERY] split-transient: skipping " + coinId + " (sibling " + siblingId
+              + " is the escrow continuation). campaign=" + campaignId);
+            cb('skip');
+            return;
+          }
+          cb('trusted');
+        });
+      });
+    });
+  });
+}
+
+// Re-derives the parent of a descendant reached by `path` from `anchor`.
+// path.length <= 1 → the parent is the anchor itself; otherwise walk the leading
+// branches (at most ESCROW_LINEAGE_MAX_DEPTH - 1 extra hash calls). cb('') on failure.
+function _escrowPathParent(anchor, path, cb) {
+  if (!path || path.length <= 1) { cb(anchor); return; }
+  var cur = anchor;
+  var i = 0;
+  function step() {
+    if (i >= path.length - 1) { cb(cur); return; }
+    escrowChildCoinId(cur, path[i], function(childId) {
+      if (!childId) { cb(''); return; }
+      cur = childId;
+      i++;
+      step();
+    });
+  }
+  step();
+}
+
+// Memoised forward hash closure of the campaign's anchor. Recomputed only when the
+// anchor changes; the superseded closure is kept as prevSet so the split coin of the
+// tx that advanced the anchor can still be recognised (see _resolveEscrowCoinTrust).
+// cb({ anchor, set, prevAnchor, prevSet }).
+// _escrowDescendants is a global map defined in service.js.
+function _getEscrowDescendants(campaignId, anchor, cb) {
+  var memo = _escrowDescendants[campaignId];
+  if (memo && memo.set && memo.anchor && memo.anchor.toUpperCase() === anchor.toUpperCase()) {
+    cb(memo);
+    return;
+  }
+  var prevAnchor = (memo && memo.anchor) ? memo.anchor : '';
+  var prevSet    = (memo && memo.set)    ? memo.set    : null;
+  escrowDescendantSet(anchor, ESCROW_LINEAGE_MAX_DEPTH, function(set) {
+    var fresh = { anchor: anchor, set: set, prevAnchor: prevAnchor, prevSet: prevSet };
+    _escrowDescendants[campaignId] = fresh;
+    cb(fresh);
+  });
+}
+
+// True when addr is one of this node's registered escrow script addresses.
+// ESCROW_ADDRESS / _V3 / _V4 are globals defined in service.js.
+function _isEscrowAddress(addr) {
+  if (!addr) { return false; }
+  var a = addr.toUpperCase();
+  if (ESCROW_ADDRESS_V4 && a === ESCROW_ADDRESS_V4.toUpperCase()) { return true; }
+  if (ESCROW_ADDRESS_V3 && a === ESCROW_ADDRESS_V3.toUpperCase()) { return true; }
+  if (ESCROW_ADDRESS    && a === ESCROW_ADDRESS.toUpperCase())    { return true; }
+  return false;
+}
+
+// OPEN-4 — a rejected (or unanchorable) coin must never steer discovery traffic.
+// The re-anchor request is routed with the identity already stored on the campaign
+// row, never with the rejected coin's STATE(4): routing by the attacker's own route
+// would hand them the follow-up conversation. Rate-limited through the same 30 s
+// _pendingCampaignRequests map the unknown-campaign path uses.
+function _requestReanchorFromStoredCreator(campaign, campaignId) {
+  var storedPk = campaign.CREATOR_ADDRESS || '';
+  var storedMx = campaign.CREATOR_MX || '';
+  if (!storedPk && !storedMx) {
+    MDS.log("[DISCOVERY] re-anchor skipped: no stored creator identity. campaign=" + campaignId);
+    return;
+  }
+  // On the creator's own node the row IS the source of truth — there is nothing to
+  // re-anchor from. Found live 2026-09-08: without this the creator addressed the
+  // request to its own Maxima PK, Maxima looped it back, and the node answered its
+  // own CAMPAIGN_DATA_RESPONSE — a self-message that passes the AUD-4 strong-sender
+  // check and therefore overwrote CAMPAIGNS.CREATOR_MX with the response's (absent)
+  // value.
+  if (MY_MAXIMA_PK && storedPk && MY_MAXIMA_PK.toUpperCase() === storedPk.toUpperCase()) {
+    MDS.log("[DISCOVERY] re-anchor skipped: this node is the campaign creator. campaign=" + campaignId);
+    return;
+  }
+  var now = Date.now();
+  var lastSent = (_pendingCampaignRequests && _pendingCampaignRequests[campaignId]) ? _pendingCampaignRequests[campaignId] : 0;
+  if (now - lastSent < 30000) {
+    MDS.log("[DISCOVERY] re-anchor REQUEST_CAMPAIGN_DATA rate-limited for: " + campaignId
+      + " (retry in " + Math.round((30000 - (now - lastSent)) / 1000) + "s)");
+    return;
+  }
+  if (_pendingCampaignRequests) { _pendingCampaignRequests[campaignId] = now; }
+  _sendRequestCampaignData(campaignId, storedPk ? storedPk : null, storedMx ? storedMx : null, function(ok) {
+    MDS.log("[DISCOVERY] re-anchor REQUEST_CAMPAIGN_DATA sent for: " + campaignId + " ok: " + ok);
+    if (!ok) {
+      if (_pendingCampaignRequests) { _pendingCampaignRequests[campaignId] = 0; }
+    }
+  });
+}
+
+// The full effect of a *trusted* escrow coin: routing keypair refresh, publisher
+// budget patch, budget + anchor sync, and on-chain status reconciliation. Body
+// unchanged from before the OPEN-4 gate existed — only reachability changed.
+function _applyTrustedEscrowCoin(coin, coinId, campaignId, states, campaign, creatorPkRoute, creatorMxAddr) {
+  // Campaign is in local DB — mark coin as fully processed, no further action needed.
+  _knownEscrowCoins[coinId] = true;
+
+  // OPEN-4 / F1 — refresh the routing keypair from on-chain STATE(4).
+  // This used to run unconditionally, above getCampaign, for EVERY coin found at the
+  // public escrow address. CREATOR_MX_<campaignId> is read by _assertCreatorThen
+  // (this file) and _assertCampaignCreatorSender (channel.handler.js) as a *strong
+  // identity* source, so writing it from an unverified coin let anyone who paid dust
+  // to the escrow address impersonate the campaign creator over Maxima — enough to
+  // force a CAMPAIGN_FINISH (real L1 settlement) or clobber CHANNEL_STATE.
+  // LATEST_TX_HEX. It is now reached only for a coin on the campaign's own escrow
+  // lineage.
   MDS.keypair.set("CREATOR_MX_" + campaignId, creatorMxAddr ? creatorMxAddr : creatorPkRoute, function() {});
 
-  getCampaign(campaignId, function(err, campaign) {
-    if (campaign) {
-      // Campaign is in local DB — mark coin as fully processed, no further action needed.
-      _knownEscrowCoins[coinId] = true;
-      // Detect stale publisher data: on-chain STATE(6) has a publisher budget
-      // but local DB has MAX_PUBLISHER_BUDGET = 0 (saved with pre-fix code).
-      var onChainPubBudget = parseFloat(getStateVar(states, 6) || 0);
-      if (onChainPubBudget > 0 && parseFloat(campaign.MAX_PUBLISHER_BUDGET || 0) <= 0) {
-        MDS.log("[DISCOVERY] stale MAX_PUBLISHER_BUDGET for: " + campaignId + " — patching DB from on-chain state(" + onChainPubBudget + ")");
-        sqlQuery(
-          "UPDATE CAMPAIGNS SET MAX_PUBLISHER_BUDGET = " + onChainPubBudget +
-          " WHERE UPPER(ID) = UPPER('" + escapeSql(campaignId) + "')",
-          function(patchErr) {
-            if (patchErr) {
-              MDS.log("[DISCOVERY] patch failed: " + patchErr + " — falling back to REQUEST_CAMPAIGN_DATA");
-              _sendRequestCampaignData(campaignId, creatorPkRoute, creatorMxAddr, function(ok) {
-                MDS.log("[DISCOVERY] refresh REQUEST_CAMPAIGN_DATA sent for: " + campaignId + " ok: " + ok);
-              });
-            } else {
-              MDS.log("[DISCOVERY] MAX_PUBLISHER_BUDGET patched: " + campaignId + " = " + onChainPubBudget);
-              // Fix #5: include status so the SDK's _livenessCache can refresh
-              // directly from this signal instead of falling back to a delete
-              // (see sdk/index.js _onCampaignUpdatedCore).
-              signalFE("CAMPAIGN_UPDATED", { campaign_id: campaignId, status: campaign.STATUS });
-            }
-          }
-        );
-      }
-      // Sync BUDGET_REMAINING when coinId changed (new change coin) or when the
-      // on-chain amount differs from the DB value (stale record from old code that
-      // updated ESCROW_COINID but not BUDGET_REMAINING). Runs once per coin per session.
-      var onChainAmount = parseFloat(coin.amount || 0);
-      var dbRemaining = parseFloat(campaign.BUDGET_REMAINING || 0);
-      if (coinId !== (campaign.ESCROW_COINID || '') || Math.abs(onChainAmount - dbRemaining) > 0.000001) {
-        MDS.log("[DISCOVERY] budget sync: " + campaignId + " coinId " + (campaign.ESCROW_COINID || '(none)') + " -> " + coinId + " amount=" + onChainAmount + " dbRemaining=" + dbRemaining);
-        sqlQuery(
-          "UPDATE CAMPAIGNS SET BUDGET_REMAINING = " + onChainAmount +
-          ", ESCROW_COINID = '" + escapeSql(coinId) + "'" +
-          " WHERE UPPER(ID) = UPPER('" + escapeSql(campaignId) + "')",
-          function(syncErr) {
-            if (syncErr) {
-              MDS.log("[DISCOVERY] budget sync failed: " + syncErr);
-            } else {
-              MDS.log("[DISCOVERY] budget synced: " + campaignId + " remaining=" + onChainAmount);
-              // Fix #5: include status (see note above).
-              signalFE("CAMPAIGN_UPDATED", { campaign_id: campaignId, status: campaign.STATUS });
-            }
-          }
-        );
-      }
-      // V3 only — sync local STATUS from PREVSTATE(7). Silently skipped for V1/V2
-      // coins (no port 7). Terminal-state guard prevents re-activating a finished
-      // campaign from an older coin read. Runs once per coinId per session.
-      var onChainStatusHex = getStateVar(states, 7);
-      if (onChainStatusHex) {
-        var onChainStatus = '';
-        try { onChainStatus = hexToUtf8(onChainStatusHex); } catch (ex) {
-          MDS.log("[DISCOVERY] could not decode PREVSTATE(7) for " + campaignId + ": " + ex);
-        }
-        if (onChainStatus === 'active' || onChainStatus === 'paused' || onChainStatus === 'finished') {
-          var localStatus = (campaign.STATUS || '').toLowerCase();
-          if (localStatus === 'finished' && onChainStatus !== 'finished') {
-            MDS.log("[DISCOVERY] ignoring on-chain status " + onChainStatus + " for finished campaign: " + campaignId);
-          } else if (onChainStatus !== localStatus) {
-            MDS.log("[DISCOVERY] on-chain status sync: " + campaignId + " " + localStatus + " -> " + onChainStatus);
-            setCampaignStatus(campaignId, onChainStatus, function(stErr) {
-              if (stErr) {
-                MDS.log("[DISCOVERY] setCampaignStatus failed: " + stErr);
-                return;
-              }
-              signalFE("CAMPAIGN_UPDATED", { campaign_id: campaignId, status: onChainStatus });
-            });
-          }
+  // Log-only sanity check. Deliberately NOT a gate: escrow coins legitimately shrink
+  // to sub-cent (and, per fragility #54, sub-micro) values as a campaign's budget is
+  // consumed, so any amount floor would break real campaigns near exhaustion.
+  var coinAmt = parseFloat(coin.amount);
+  if (!isFinite(coinAmt) || coinAmt < 0) {
+    MDS.log("[DISCOVERY] implausible escrow coin amount '" + coin.amount + "' on trusted coin "
+      + coinId + " campaign=" + campaignId);
+  }
+
+  // Detect stale publisher data: on-chain STATE(6) has a publisher budget
+  // but local DB has MAX_PUBLISHER_BUDGET = 0 (saved with pre-fix code).
+  var onChainPubBudget = parseFloat(getStateVar(states, 6) || 0);
+  if (onChainPubBudget > 0 && parseFloat(campaign.MAX_PUBLISHER_BUDGET || 0) <= 0) {
+    MDS.log("[DISCOVERY] stale MAX_PUBLISHER_BUDGET for: " + campaignId + " — patching DB from on-chain state(" + onChainPubBudget + ")");
+    sqlQuery(
+      "UPDATE CAMPAIGNS SET MAX_PUBLISHER_BUDGET = " + onChainPubBudget +
+      " WHERE UPPER(ID) = UPPER('" + escapeSql(campaignId) + "')",
+      function(patchErr) {
+        if (patchErr) {
+          MDS.log("[DISCOVERY] patch failed: " + patchErr + " — falling back to REQUEST_CAMPAIGN_DATA");
+          _sendRequestCampaignData(campaignId, creatorPkRoute, creatorMxAddr, function(ok) {
+            MDS.log("[DISCOVERY] refresh REQUEST_CAMPAIGN_DATA sent for: " + campaignId + " ok: " + ok);
+          });
         } else {
-          MDS.log("[DISCOVERY] unknown on-chain status value '" + onChainStatus + "' for " + campaignId);
+          MDS.log("[DISCOVERY] MAX_PUBLISHER_BUDGET patched: " + campaignId + " = " + onChainPubBudget);
+          // Fix #5: include status so the SDK's _livenessCache can refresh
+          // directly from this signal instead of falling back to a delete
+          // (see sdk/index.js _onCampaignUpdatedCore).
+          signalFE("CAMPAIGN_UPDATED", { campaign_id: campaignId, status: campaign.STATUS });
         }
       }
+    );
+  }
+
+  // Sync BUDGET_REMAINING when coinId changed (new change coin) or when the
+  // on-chain amount differs from the DB value (stale record from old code that
+  // updated ESCROW_COINID but not BUDGET_REMAINING). Runs once per coin per session.
+  // This is also what advances the lineage anchor — hence the gate above.
+  var onChainAmount = parseFloat(coin.amount || 0);
+  var dbRemaining = parseFloat(campaign.BUDGET_REMAINING || 0);
+  if (coinId !== (campaign.ESCROW_COINID || '') || Math.abs(onChainAmount - dbRemaining) > 0.000001) {
+    MDS.log("[DISCOVERY] budget sync: " + campaignId + " coinId " + (campaign.ESCROW_COINID || '(none)') + " -> " + coinId + " amount=" + onChainAmount + " dbRemaining=" + dbRemaining);
+    sqlQuery(
+      "UPDATE CAMPAIGNS SET BUDGET_REMAINING = " + onChainAmount +
+      ", ESCROW_COINID = '" + escapeSql(coinId) + "'" +
+      " WHERE UPPER(ID) = UPPER('" + escapeSql(campaignId) + "')",
+      function(syncErr) {
+        if (syncErr) {
+          MDS.log("[DISCOVERY] budget sync failed: " + syncErr);
+        } else {
+          MDS.log("[DISCOVERY] budget synced: " + campaignId + " remaining=" + onChainAmount);
+          // Fix #5: include status (see note above).
+          signalFE("CAMPAIGN_UPDATED", { campaign_id: campaignId, status: campaign.STATUS });
+        }
+      }
+    );
+  }
+
+  // V3 only — sync local STATUS from PREVSTATE(7). Silently skipped for V1/V2
+  // coins (no port 7). Terminal-state guard prevents re-activating a finished
+  // campaign from an older coin read. Runs once per coinId per session.
+  var onChainStatusHex = getStateVar(states, 7);
+  if (onChainStatusHex) {
+    var onChainStatus = '';
+    try { onChainStatus = hexToUtf8(onChainStatusHex); } catch (ex) {
+      MDS.log("[DISCOVERY] could not decode PREVSTATE(7) for " + campaignId + ": " + ex);
+    }
+    if (onChainStatus === 'active' || onChainStatus === 'paused' || onChainStatus === 'finished') {
+      var localStatus = (campaign.STATUS || '').toLowerCase();
+      if (localStatus === 'finished' && onChainStatus !== 'finished') {
+        MDS.log("[DISCOVERY] ignoring on-chain status " + onChainStatus + " for finished campaign: " + campaignId);
+      } else if (onChainStatus !== localStatus) {
+        MDS.log("[DISCOVERY] on-chain status sync: " + campaignId + " " + localStatus + " -> " + onChainStatus);
+        setCampaignStatus(campaignId, onChainStatus, function(stErr) {
+          if (stErr) {
+            MDS.log("[DISCOVERY] setCampaignStatus failed: " + stErr);
+            return;
+          }
+          signalFE("CAMPAIGN_UPDATED", { campaign_id: campaignId, status: onChainStatus });
+        });
+      }
+    } else {
+      MDS.log("[DISCOVERY] unknown on-chain status value '" + onChainStatus + "' for " + campaignId);
+    }
+  }
+}
+
+// Discovery path for a coin whose campaign this node has never seen. There is no
+// anchor to compare against yet, so this branch may only ADOPT a campaign the local
+// node itself already staged (PENDING_CAMPAIGN_<id>, written by the creator's own FE
+// before funding) or ask the network for the campaign data. It never writes
+// CREATOR_MX_<id>, never touches STATUS and never touches an existing row.
+function _processUnknownCampaignCoin(coin, coinId, campaignId, states, creatorPkRoute, creatorMxAddr) {
+  MDS.keypair.get("PENDING_CAMPAIGN_" + campaignId, function(kpRes) {
+    var val = kpRes && kpRes.status ? kpRes.value : "";
+    MDS.log("[DISCOVERY] keypair check for " + campaignId + ": found=" + (val ? "YES" : "NO"));
+    if (val) {
+      var data;
+      try { data = JSON.parse(val); } catch (ex) {
+        MDS.log("[DISCOVERY] keypair parse failed for: " + campaignId);
+        return;
+      }
+      // OPEN-4 genesis binding — this is where the whole lineage is anchored, so it
+      // must not adopt just any coin carrying the right STATE(3). Require the coin to
+      // carry the escrow wallet key the pending campaign was built for (STATE(1),
+      // frozen at coin creation and enforced by the script's SIGNEDBY(creatorkey))
+      // and to actually hold the funded budget. A dust coin racing the real funding
+      // tx would otherwise become the campaign's permanent anchor.
+      var onChainWalletPk = (getStateVar(states, 1) || '');
+      var expectedWalletPk = (data.campaign && data.campaign.escrow_wallet_pk) ? data.campaign.escrow_wallet_pk : '';
+      if (!onChainWalletPk || !expectedWalletPk
+          || onChainWalletPk.toUpperCase() !== expectedWalletPk.toUpperCase()) {
+        MDS.log("[DISCOVERY] genesis binding failed (STATE(1) != escrow_wallet_pk) — not adopting coin "
+          + coinId + " for: " + campaignId);
+        return;
+      }
+      var coinAmount = parseFloat(coin.amount);
+      var funded = parseFloat(data.campaign.budget_total);
+      if (!isFinite(coinAmount) || !isFinite(funded) || coinAmount < funded) {
+        MDS.log("[DISCOVERY] genesis binding failed (amount " + coin.amount + " < budget_total "
+          + funded + ") — not adopting coin " + coinId + " for: " + campaignId);
+        return;
+      }
+      data.campaign.escrow_coinid = coin.coinid;
+      MDS.log("[DISCOVERY] found pending campaign in keypair, saving: " + campaignId);
+      saveCampaign(data.campaign, data.ad, function(saveErr) {
+        if (saveErr) {
+          MDS.log("[DISCOVERY] saveCampaign failed: " + saveErr);
+          return;
+        }
+        MDS.log("[DISCOVERY] pending campaign saved: " + campaignId);
+        signalFE("NEW_CAMPAIGN", { campaign_id: campaignId });
+        MDS.keypair.set("PENDING_CAMPAIGN_" + campaignId, "", function() {});
+      });
       return;
     }
 
-    MDS.keypair.get("PENDING_CAMPAIGN_" + campaignId, function(kpRes) {
-      var val = kpRes && kpRes.status ? kpRes.value : "";
-      MDS.log("[DISCOVERY] keypair check for " + campaignId + ": found=" + (val ? "YES" : "NO"));
-      if (val) {
-        var data;
-        try { data = JSON.parse(val); } catch (ex) {
-          MDS.log("[DISCOVERY] keypair parse failed for: " + campaignId);
-          return;
-        }
-        data.campaign.escrow_coinid = coin.coinid;
-        MDS.log("[DISCOVERY] found pending campaign in keypair, saving: " + campaignId);
-        saveCampaign(data.campaign, data.ad, function(saveErr) {
-          if (saveErr) {
-            MDS.log("[DISCOVERY] saveCampaign failed: " + saveErr);
-            return;
-          }
-          MDS.log("[DISCOVERY] pending campaign saved: " + campaignId);
-          signalFE("NEW_CAMPAIGN", { campaign_id: campaignId });
-          MDS.keypair.set("PENDING_CAMPAIGN_" + campaignId, "", function() {});
-        });
-        return;
+    // Rate-limit retries: send at most once every 30 s per campaign.
+    // _pendingCampaignRequests is a global map defined in service.js.
+    var now = Date.now();
+    var lastSent = (_pendingCampaignRequests && _pendingCampaignRequests[campaignId]) ? _pendingCampaignRequests[campaignId] : 0;
+    if (now - lastSent < 30000) {
+      MDS.log("[DISCOVERY] REQUEST_CAMPAIGN_DATA rate-limited for: " + campaignId + " (retry in " + Math.round((30000 - (now - lastSent)) / 1000) + "s)");
+      return;
+    }
+    if (_pendingCampaignRequests) { _pendingCampaignRequests[campaignId] = now; }
+    _sendRequestCampaignData(campaignId, creatorPkRoute, creatorMxAddr, function(ok) {
+      MDS.log("[DISCOVERY] REQUEST_CAMPAIGN_DATA sent for: " + campaignId + " ok: " + ok);
+      if (!ok) {
+        if (_pendingCampaignRequests) { _pendingCampaignRequests[campaignId] = 0; }
       }
-
-      // Rate-limit retries: send at most once every 30 s per campaign.
-      // _pendingCampaignRequests is a global map defined in service.js.
-      var now = Date.now();
-      var lastSent = (_pendingCampaignRequests && _pendingCampaignRequests[campaignId]) ? _pendingCampaignRequests[campaignId] : 0;
-      if (now - lastSent < 30000) {
-        MDS.log("[DISCOVERY] REQUEST_CAMPAIGN_DATA rate-limited for: " + campaignId + " (retry in " + Math.round((30000 - (now - lastSent)) / 1000) + "s)");
-        return;
-      }
-      if (_pendingCampaignRequests) { _pendingCampaignRequests[campaignId] = now; }
-      _sendRequestCampaignData(campaignId, creatorPkRoute, creatorMxAddr, function(ok) {
-        MDS.log("[DISCOVERY] REQUEST_CAMPAIGN_DATA sent for: " + campaignId + " ok: " + ok);
-        if (!ok) {
-          if (_pendingCampaignRequests) { _pendingCampaignRequests[campaignId] = 0; }
-        }
-      });
     });
   });
 }
@@ -601,6 +876,17 @@ function handleRequestCampaignData(payload) {
           status: c.STATUS,
           created_at: parseInt(c.CREATED_AT),
           expires_at: (c.EXPIRES_AT !== null && c.EXPIRES_AT !== undefined) ? parseInt(c.EXPIRES_AT) : null,
+          // OPEN-4 — the escrow anchor must travel with the campaign data.
+          // CAMPAIGN_DATA_RESPONSE is the ONLY way a remote node ever learns a
+          // campaign (nothing in the codebase sends CAMPAIGN_ANNOUNCE), and since
+          // processEscrowCoin now refuses to act on any coin that is not on the
+          // campaign's escrow lineage, a row discovered without an anchor could never
+          // acquire one. Omitting these two columns used to be harmless only because
+          // the unauthenticated budget-sync wrote ESCROW_COINID itself — which is
+          // exactly the hole OPEN-4 closes. Both fields are protected on receipt by
+          // the AUD-4 identity pin (handleCampaignAnnounce).
+          escrow_coinid: c.ESCROW_COINID || '',
+          escrow_wallet_pk: c.ESCROW_WALLET_PK || '',
           max_viewer_reward: (c.MAX_VIEWER_REWARD !== null && c.MAX_VIEWER_REWARD !== undefined) ? parseFloat(c.MAX_VIEWER_REWARD) : null,
           publisher_reward_view: (c.PUBLISHER_REWARD_VIEW !== null && c.PUBLISHER_REWARD_VIEW !== undefined) ? parseFloat(c.PUBLISHER_REWARD_VIEW) : 0,
           max_publisher_budget: (c.MAX_PUBLISHER_BUDGET !== null && c.MAX_PUBLISHER_BUDGET !== undefined) ? parseFloat(c.MAX_PUBLISHER_BUDGET) : 0,

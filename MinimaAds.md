@@ -640,7 +640,20 @@ creator's own FE, a CREATOR_LIVENESS_PONG reporting 'finished' from a strongly-v
 creator (§8.14), or the NEWBLOCK expiry check (checkExpiredCampaigns).
 NOT reached from: 'paused' (a pause may still resume — its channels stay open),
 budget exhaustion via updateBudget (a bare DB write), or processEscrowCoin's on-chain
-STATE(7) reconciliation (bare setCampaignStatus — see OPEN-4 for why it must stay that way).
+STATE(7) reconciliation (a bare setCampaignStatus).
+
+> **OPEN-4 update (2026-09-09):** processEscrowCoin's STATE(7) reconciliation was
+> historically forced to stay a *bare* setCampaignStatus (never the full
+> applyStatusChange with `settling:true`) because the on-chain read was
+> unauthenticated — any dust coin at the public escrow address could forge a
+> status. OPEN-4 closed that hole: processEscrowCoin now gates every on-chain
+> action behind a lineage check against `CAMPAIGNS.ESCROW_COINID` (§8.5,
+> Appendix B.3), so a forged coin can no longer reach setCampaignStatus at all.
+> The "Phase 3" escalation (letting an on-chain-discovered finish also carry
+> `settling: true`) is therefore **no longer blocked** — but it remains a
+> separate, deliberately-unbuilt future change; do not implement it as part of
+> OPEN-4. This reconciliation stays a bare setCampaignStatus until that change
+> is designed on its own.
 
   applyStatusChange splits two decisions:
   → creator's own node only (CAMPAIGNS.CREATOR_ADDRESS == this node's Maxima PK):
@@ -766,10 +779,12 @@ Triggered when the creator changes a campaign's status (Pause / Resume / Finish)
 
 5.  All nodes — including viewers/publishers that were offline at the time —
     pick up the change coin on their next NEWBLOCK discovery scan
-    (campaign.handler.js scanEscrowCoins → processEscrowCoin reads PREVSTATE(7)
-    and calls setCampaignStatus when it differs from the local row). The
-    creator's own node also re-reads PREVSTATE(7) on confirmation and clears
-    the pending marker.
+    (service.js scanEscrowCoins → campaign.handler.js processEscrowCoin reads
+    PREVSTATE(7) and calls setCampaignStatus when it differs from the local
+    row — but only after the coin passes the OPEN-4 lineage gate, i.e. it is
+    the campaign's stored ESCROW_COINID anchor or a forward-derivable
+    descendant of it; see §8.5 and Appendix B.3). The creator's own node also
+    re-reads PREVSTATE(7) on confirmation and clears the pending marker.
 
 6.  Each node signals CAMPAIGN_UPDATED { campaign_id, status } to its FE.
     Viewer SDKs invalidate _livenessCache[campaign_id] so the next getAd ->
@@ -848,6 +863,20 @@ updateBudget(campaignId, deductAmount, callback)
 
 setCampaignStatus(campaignId, status, callback)
 // Returns: callback(boolean)
+
+// --- OPEN-4 escrow lineage helpers (2026-09-09) ---
+
+escrowChildCoinId(parentCoinId, index, callback)
+// Derives the CoinID of output `index` of the tx that spent parentCoinId, via a
+// local `hash type:sha3` call: child = SHA3-256(0x00000020 || parent[32] || 0x0001<index>).
+// index must be an integer 0..15. Returns: callback('0x'+UPPERCASE hex id), or
+// callback('') on malformed input / hash failure. See KNOWN_ISSUES #59.
+
+escrowDescendantSet(anchorCoinId, maxDepth, callback)
+// Breadth-first forward closure over output branches {0,1} up to maxDepth
+// generations (maxDepth 2 = 6 hash calls). Returns: callback(map) keyed by the
+// UPPERCASED descendant coin id, each value { depth: <1-based gen>, path: [branches] }.
+// Callers memoise the result per anchor (SW: _escrowDescendants).
 ```
 
 ### 7.2 selection.js
@@ -1097,7 +1126,9 @@ Rationale: a crafted `CAMPAIGN_FINISH` or `CAMPAIGN_PAUSE` from a third party mu
 
 **FE-side consumption of `settling` (audit 2026-07-18 AUD-5 / Fix #12)** — the `CAMPAIGNS.STATUS` update above is one thing; a viewer's own dapp UI acting on it is another. `dapp/app.js`'s `_autoSettleOpenChannels(campaignId)` runs client-side on the viewer's node when it sees a `CAMPAIGN_UPDATED` signal for a finished campaign, and posts the viewer's own settlement tx for any open channel it holds. It is gated on **`parsed.settling === true`** in addition to `status === 'finished'` — since `applyStatusChange` only sets `settling:true` on a *strong* sender match (never on the fallback path above), a spoofed `CAMPAIGN_FINISH`/`CAMPAIGN_PAUSE` can no longer trigger this FE path either, closing the client-side counterpart of the same vector. `_autoSettleOpenChannels` additionally: skips entirely when the local node is itself the campaign creator (`CAMPAIGNS.CREATOR_ADDRESS` matches `MY_ADDRESS`, both `.toUpperCase()`d — creator-opened channels settle through the SW's `autoSettleChannelsForCampaign` / `CAMPAIGN_AUTOSETTLE_REQUEST` flow instead, not this one); and skips `CHANNEL_STATE` rows with `ROLE = 'publisher'` (publisher channels settle through their own reward-voucher flow, not the viewer-campaign-finish path).
 
-**Protection of the identity fields themselves (audit 2026-07-18 AUD-4)** — the trust table above is only meaningful if `CAMPAIGNS.CREATOR_ADDRESS` / `CREATOR_MX` cannot be rewritten by an attacker in the first place. `CAMPAIGN_ANNOUNCE` (§8.3) and `CAMPAIGN_DATA_RESPONSE` (§8.7) share one handler (`campaign.handler.js` `handleCampaignAnnounce`) whose `saveCampaign` MERGE writes both columns straight from the payload, so an unauthenticated response for a campaign the sender does not own could re-point an existing row at the attacker's public key — the enabling step that made the Fix #3 vector reachable. Both message types now receive `msg.data.from` and apply the same strong/fallback distinction to the *identity fields only*: once a row has an **established strong identity** (a permanent route resolvable from `CAMPAIGNS.CREATOR_MX` or from keypair `CREATOR_MX_<campaign_id>`), only a sender matching that route may rewrite `creator_address` / `creator_mx`. A message from any other sender is still processed in full — budget, status, ad content and every other column keep syncing exactly as before — but the two identity fields are pinned back to their stored values before reaching `saveCampaign`, and the handler logs `[CAMPAIGN] ANNOUNCE identity fields pinned (sender not strongly verified). campaign=<id>`.
+**Protection of the identity fields themselves (audit 2026-07-18 AUD-4)** — the trust table above is only meaningful if `CAMPAIGNS.CREATOR_ADDRESS` / `CREATOR_MX` cannot be rewritten by an attacker in the first place. `CAMPAIGN_ANNOUNCE` (§8.3) and `CAMPAIGN_DATA_RESPONSE` (§8.7) share one handler (`campaign.handler.js` `handleCampaignAnnounce`) whose `saveCampaign` MERGE writes both columns straight from the payload, so an unauthenticated response for a campaign the sender does not own could re-point an existing row at the attacker's public key — the enabling step that made the Fix #3 vector reachable. Both message types now receive `msg.data.from` and apply the same strong/fallback distinction to the *identity fields only*: once a row has an **established strong identity** (a permanent route resolvable from `CAMPAIGNS.CREATOR_MX` or from keypair `CREATOR_MX_<campaign_id>`), only a sender matching that route may rewrite `creator_address` / `creator_mx`. A message from any other sender is still processed in full — budget, status, ad content and every other column keep syncing exactly as before — but the pinned identity fields are reset to their stored values before reaching `saveCampaign`, and the handler logs `[CAMPAIGN] ANNOUNCE identity fields pinned (sender not strongly verified). campaign=<id>`.
+
+**OPEN-4 (2026-09-09) extends the pinned set to `escrow_coinid` / `escrow_wallet_pk`.** Once `processEscrowCoin` decides what an on-chain coin may do by comparing it against `CAMPAIGNS.ESCROW_COINID` (the lineage gate — a coin is trusted only if it equals the stored anchor or is a forward-derivable descendant of it within `ESCROW_LINEAGE_MAX_DEPTH` = 2 generations; Appendix B.3), that column becomes an identity field: leaving it freely writable from any Maxima payload would make the gate decorative, since an attacker could simply re-point the anchor at their own forged coin first. `escrow_wallet_pk` is pinned alongside it because it is the genesis binding checked by `_processUnknownCampaignCoin` (the coin's `STATE(1)` must match it before an unknown campaign's first coin is adopted). Both fields obey the same three exemptions as `creator_address`/`creator_mx`: first discovery of a campaign, a row with no strong identity yet, or a sender that IS the row's strong creator. `CAMPAIGN_DATA_RESPONSE` (§8.7) now also carries `escrow_coinid`/`escrow_wallet_pk` in its payload — it is the only way a remote node ever learns a campaign, and with the unauthenticated budget-sync that used to set the anchor now removed, a newly-discovered row could otherwise never acquire an anchor at all.
 
 Two cases deliberately still trust the payload, as a documented MVP trade-off: the **first discovery** of a `campaign_id` (trust-on-first-use — there is nothing yet to compare against), and a row that has **no strong identity yet** (first-write-wins is preserved so legacy rows discovered before permanent routes existed keep syncing). The security property gained is narrower but sufficient: an already-strongly-anchored row can no longer be re-pointed at an attacker's public key by a later unauthenticated announce or response, so the follow-up spoofed `CAMPAIGN_PAUSE` / `CAMPAIGN_FINISH` is rejected outright by `_assertCreatorThen` rather than reaching its fallback path.
 
@@ -1862,6 +1893,13 @@ RETURN TRUE
 | **13** | `STATE(13)` | Fee output index | integer string | Which tx output carries the platform fee |
 
 `PREVSTATE(port)` reads state frozen at coin creation. `STATE(port)` reads state provided by the spending transaction. Port 10 is the only one provided by the spender — it must match the actual payout output amount or the script will fail to validate correctly.
+
+**Normative lineage property (OPEN-4, 2026-09-09).** Every legitimate successor of a campaign's escrow coin is deterministically derivable from the coin it replaced. Minima computes an output coin's id as `outputCoinID(i) = SHA3-256(hashObjects(basecoinid, MiniNumber(i)))`, where `basecoinid` is the CoinID of the transaction's **first** spent input; serialised, that is exactly `SHA3-256(0x00000020 || parentCoinId[32 bytes] || 0x0001<i>)` for a small integer `i`. Both escrow-respending transactions in this system spend exactly one input — the current escrow coin — so:
+
+- the **status-update tx** (B.5) emits a single output → the next escrow coin is always `child(previous, 0)`;
+- the **channel-open split tx** (§6.6, Appendix C) emits the split coin at output 0 and the escrow continuation (change) at output 1 → the next escrow coin is `child(previous, 1)`, and `child(previous, 0)` is the short-lived split coin that lands transiently at the escrow address (fragility #41).
+
+Therefore the escrow lineage is **forward-derivable with local `hash` calls alone**, and `processEscrowCoin` trusts a coin found at the public escrow script address only if it is the stored `CAMPAIGNS.ESCROW_COINID` anchor or a forward descendant within `ESCROW_LINEAGE_MAX_DEPTH` = 2 generations of it (`core/campaigns.js` `escrowChildCoinId`/`escrowDescendantSet`, §7.1). A backward walk is impossible: `coins coinid:X` returns `X` only while it is unspent, and a coin JSON carries no parent/lineage field (KNOWN_ISSUES #59). This lineage relation is what makes the anchor a security-relevant identity field (§8.5).
 
 ### B.4 DB Schema Addition
 

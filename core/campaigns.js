@@ -196,3 +196,113 @@ function buildStatusUpdateStatePorts(currentEscrow, newStatusHex, coinAmount) {
     { port: 16, value: '0' }
   ];
 }
+
+// ---------------------------------------------------------------------------
+// OPEN-4 (2026-09-08) — escrow coin lineage derivation.
+//
+// Minima derives an output coin's CoinID deterministically from the transaction
+// it was created in (refs/Minima-1.0.45/src/org/minima/objects/TxBlock.java:144-161
+// + Transaction.java:382):
+//
+//   basecoinid       = CoinID of the transaction's FIRST spent input
+//   outputCoinID(i)  = SHA3-256( hashObjects(basecoinid, MiniNumber(i)) )
+//
+// Serialised, hashObjects(MiniData(32 bytes), MiniNumber(i)) for a small integer
+// i is exactly the byte string:
+//
+//   0x00000020 || <32 parent bytes> || 0x0001 || <i as one byte>
+//
+// Both escrow-respending tx builders (the channel-open split in
+// channel.handler.js and the status-update tx in dapp/app.js) spend exactly one
+// input — the current escrow coin — so every legitimate successor escrow coin is
+// child(previousEscrowCoin, 0) or child(previousEscrowCoin, 1). That makes the
+// escrow lineage forward-derivable without any network round trip beyond a local
+// `hash` call, which is what processEscrowCoin uses to decide whether a coin found
+// at the public escrow address really belongs to the campaign it claims.
+//
+// Verified live on the 6-node harness 2026-09-08 against a real 1-input/2-output
+// transaction: both index 0 and index 1 reproduced the node's own CoinIDs exactly.
+//
+// A blind forward closure is the only option available: `coins coinid:X` returns X
+// only while it is UNSPENT (TxPoWSearcher.java:185-205) and a coin JSON carries no
+// parent/lineage field, so intermediate generations are invisible and the anchor
+// cannot be walked backwards. See KNOWN_ISSUES fragility #59.
+//
+// Rhino-safe: var, function(), string concat, no template literals.
+// ---------------------------------------------------------------------------
+
+// escrowChildCoinId(parentCoinId, index, cb)
+// cb(childCoinId) with a '0x' + UPPERCASE hex id, or cb('') when the inputs are
+// malformed or the local `hash` command fails. index must be an integer 0..15
+// (transactions in this codebase never emit more outputs than that).
+function escrowChildCoinId(parentCoinId, index, cb) {
+  if (!parentCoinId || typeof parentCoinId !== 'string'
+      || !(/^0[xX][0-9A-Fa-f]{64}$/).test(parentCoinId)) {
+    cb('');
+    return;
+  }
+  var idx = parseFloat(index);
+  if (!isFinite(idx) || idx < 0 || idx > 15 || Math.floor(idx) !== idx) {
+    cb('');
+    return;
+  }
+  var parentHex = parentCoinId.substring(2).toUpperCase();
+  var idxHex = '0' + idx.toString(16).toUpperCase();
+  MDS.cmd("hash type:sha3 data:0x00000020" + parentHex + "0001" + idxHex, function(res) {
+    if (!res || !res.status || !res.response || !res.response.hash) {
+      cb('');
+      return;
+    }
+    cb('0x' + res.response.hash.substring(2).toUpperCase());
+  });
+}
+
+// escrowDescendantSet(anchorCoinId, maxDepth, cb)
+// Breadth-first forward closure over output branches {0, 1} up to maxDepth
+// generations. cb(map) where map is keyed by the UPPERCASED coin id ('0X…') and
+// each value is { depth: <1-based generation>, path: [<branch indexes>] }.
+// maxDepth 2 costs 6 `hash` calls; callers memoise the result per anchor.
+function escrowDescendantSet(anchorCoinId, maxDepth, cb) {
+  var out = {};
+  var depthLimit = parseInt(maxDepth, 10);
+  if (!isFinite(depthLimit) || depthLimit < 1) { depthLimit = 1; }
+  if (depthLimit > 4) { depthLimit = 4; }
+  if (!anchorCoinId || typeof anchorCoinId !== 'string'
+      || !(/^0[xX][0-9A-Fa-f]{64}$/).test(anchorCoinId)) {
+    cb(out);
+    return;
+  }
+
+  var frontier = [ { id: anchorCoinId, path: [] } ];
+
+  function expandLevel(level) {
+    if (level > depthLimit || frontier.length === 0) { cb(out); return; }
+    var current = frontier;
+    frontier = [];
+    var tasks = [];
+    for (var i = 0; i < current.length; i++) {
+      tasks.push({ node: current[i], branch: 0 });
+      tasks.push({ node: current[i], branch: 1 });
+    }
+    var taskIdx = 0;
+    function nextTask() {
+      if (taskIdx >= tasks.length) { expandLevel(level + 1); return; }
+      var t = tasks[taskIdx];
+      taskIdx++;
+      escrowChildCoinId(t.node.id, t.branch, function(childId) {
+        if (childId) {
+          var key = childId.toUpperCase();
+          if (!out[key]) {
+            var childPath = t.node.path.concat([t.branch]);
+            out[key] = { depth: level, path: childPath };
+            frontier.push({ id: childId, path: childPath });
+          }
+        }
+        nextTask();
+      });
+    }
+    nextTask();
+  }
+
+  expandLevel(1);
+}

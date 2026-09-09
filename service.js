@@ -53,6 +53,18 @@ var CHANNEL_SCRIPT_ADDRESS = '';
 // here so REQUEST_CAMPAIGN_DATA can be retried on subsequent NEWBLOCKs.
 var _knownEscrowCoins = {};
 
+// OPEN-4 — coins seen at an escrow address that are NOT on the campaign's escrow
+// lineage. Key: campaignId + '|' + anchorCoinId + '|' + coinId. Keying on the anchor
+// (not on the coinId alone) is deliberate: the entry self-invalidates the moment the
+// anchor advances, so a coin rejected against a stale anchor is re-evaluated against
+// the new one and the self-heal property of fragility #43 is preserved.
+var _offLineageEscrowCoins = {};
+
+// OPEN-4 — memoised forward hash closure of each campaign's escrow anchor.
+// campaignId -> { anchor: '0x…', set: { '0X…': { depth, path } } }.
+// Recomputed only when that campaign's anchor changes.
+var _escrowDescendants = {};
+
 // Per-session escrow address scan flags (Change #3 perf).
 // _escrowHasCoins[addr]=true  → coins were found at this address at some point this session.
 // _escrowScanned[addr]=true   → at least one scan completed for this address this session.

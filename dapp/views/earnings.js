@@ -529,6 +529,53 @@ function _renderChannelRewardRows(rows, container) {
 // Debounced to one request per channel per session so a user mashing "Settle"
 // doesn't hammer the creator.
 var _voucherResyncRequested = {};
+
+// Fragility #58: a resync request alone never fixed a stuck settlement —
+// nothing retried the settlement once the creator's fresh voucher actually
+// arrived. _registerSettleRetry/_retrySettlementAfterVoucher close that gap:
+// every call to _requestVoucherResync (genuine tx failure OR a detected-stale
+// voucher, see the txncheck gate in _runSettlementInner below) registers a
+// one-shot pending entry here; dapp/app.js's VOUCHER_RECEIVED handler consumes
+// it and re-invokes _runSettlement with a freshly DB-read LATEST_TX_HEX.
+// Bounded to one retry per channel per session by the same
+// _voucherResyncRequested dedup guard above — a second stale voucher falls
+// through to the ordinary failure UI instead of looping.
+var _pendingSettleRetry = {};
+function _registerSettleRetry(campaignId, viewerKey, role, btnEl) {
+  _pendingSettleRetry[campaignId + '|' + viewerKey + '|' + role] = { btnEl: btnEl || null };
+}
+
+// Consumed by dapp/app.js on VOUCHER_RECEIVED. Matches by campaign_id (the
+// signal doesn't carry viewer_key/role) against every pending entry for that
+// campaign — in practice at most one, this node's own channel.
+function _retrySettlementAfterVoucher(campaignId) {
+  var prefix = campaignId + '|';
+  for (var key in _pendingSettleRetry) {
+    if (!_pendingSettleRetry.hasOwnProperty(key)) { continue; }
+    if (key.indexOf(prefix) !== 0) { continue; }
+    var entry = _pendingSettleRetry[key];
+    delete _pendingSettleRetry[key];
+    (function(pendingKey, btnEl) {
+      var parts = pendingKey.split('|');
+      var viewerKey = parts[1];
+      var role = parts[2];
+      sqlQuery(
+        "SELECT LATEST_TX_HEX, CUMULATIVE_EARNED, STATUS FROM CHANNEL_STATE" +
+        " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
+        " AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(viewerKey) + "')" +
+        " AND UPPER(ROLE) = UPPER('" + escapeSql(role) + "')",
+        function(err, rows) {
+          if (err || !rows || rows.length === 0) { return; }
+          var row = rows[0];
+          if (row.STATUS !== 'open' || !row.LATEST_TX_HEX) { return; }
+          console.log('[EARNINGS] retrying settlement after voucher resync. campaign:', campaignId);
+          _runSettlement(campaignId, viewerKey, role, row.LATEST_TX_HEX, btnEl, parseFloat(row.CUMULATIVE_EARNED || 0));
+        }
+      );
+    })(key, entry.btnEl);
+  }
+}
+
 function _requestVoucherResync(campaignId, viewerKey, role) {
   var key = campaignId + '|' + viewerKey;
   if (_voucherResyncRequested[key]) { return; }
@@ -594,6 +641,7 @@ function _runSettlementInner(campaignId, viewerKey, role, txHex, btnEl, settleId
     var statusEl = document.getElementById('ma-channel-settle-status');
     if (statusEl) { statusEl.textContent = 'Settlement failed — requesting voucher re-sync from creator. Retry in a minute.'; }
     MDS.cmd('txndelete id:' + settleId, function() {});
+    _registerSettleRetry(campaignId, viewerKey, role, btnEl);
     _requestVoucherResync(campaignId, viewerKey, role);
   }
 
@@ -604,24 +652,40 @@ function _runSettlementInner(campaignId, viewerKey, role, txHex, btnEl, settleId
       console.log('[EARNINGS] txnimport status:', r1 && r1.status, r1 && r1.error);
       if (!r1 || !r1.status) { onError((r1 && r1.error) || 'txnimport failed'); return; }
 
-      MDS.cmd('txnsign id:' + settleId + ' publickey:' + signKey, function(r2) {
-        console.log('[EARNINGS] txnsign status:', r2 && r2.status, 'pending:', r2 && r2.pending, r2 && r2.error);
-        if (r2 && r2.pending) {
-          savePendingChannelOp(r2.pendinguid, {
-            kind:       'settlement',
-            settleId:   settleId,
-            campaignId: campaignId,
-            viewerKey:  viewerKey,
-            role:       role,
-            signKey:    signKey
-          });
-          console.log('[EARNINGS] txnsign pending, uid:', r2.pendinguid);
-          if (btnEl) { btnEl.textContent = 'Awaiting approval…'; }
+      // Fragility #58: txnimport succeeding proves nothing about whether the
+      // voucher's embedded MMR proof is still valid against the CURRENT chain
+      // tip — only txncheck actually re-executes the proof against it (same
+      // primitive fragility #54 uses to test a tx without spending anything).
+      // Left undetected, a stale proof lets txnimport/txnsign/txnpost all
+      // report status:true while the coin never actually spends — the exact
+      // silent-failure shape docs/KNOWN_ISSUES.md #58 describes.
+      MDS.cmd('txncheck id:' + settleId, function(rc) {
+        var mmrOk = !!(rc && rc.status && rc.response && rc.response.valid && rc.response.valid.mmrproofs === true);
+        if (!mmrOk) {
+          console.warn('[EARNINGS] txncheck: stale voucher (mmrproofs invalid) — requesting fresh voucher. campaign:', campaignId);
+          onError('stale voucher (mmrproofs invalid)');
           return;
         }
-        if (!r2 || !r2.status) { onError((r2 && r2.error) || 'txnsign failed'); return; }
 
-        _postSettleTx(settleId, campaignId, viewerKey, role, btnEl);
+        MDS.cmd('txnsign id:' + settleId + ' publickey:' + signKey, function(r2) {
+          console.log('[EARNINGS] txnsign status:', r2 && r2.status, 'pending:', r2 && r2.pending, r2 && r2.error);
+          if (r2 && r2.pending) {
+            savePendingChannelOp(r2.pendinguid, {
+              kind:       'settlement',
+              settleId:   settleId,
+              campaignId: campaignId,
+              viewerKey:  viewerKey,
+              role:       role,
+              signKey:    signKey
+            });
+            console.log('[EARNINGS] txnsign pending, uid:', r2.pendinguid);
+            if (btnEl) { btnEl.textContent = 'Awaiting approval…'; }
+            return;
+          }
+          if (!r2 || !r2.status) { onError((r2 && r2.error) || 'txnsign failed'); return; }
+
+          _postSettleTx(settleId, campaignId, viewerKey, role, btnEl);
+        });
       });
     });
   });

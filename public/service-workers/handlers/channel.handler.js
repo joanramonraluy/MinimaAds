@@ -1085,11 +1085,19 @@ function handleVoucherSyncRequest(payload, senderPk) {
       // genuinely new reward event ever rebuilt a fresh one, so a stuck
       // channel only recovered by accident. Rebuild against the real
       // on-chain channel coin instead, via the same swBuildAndExportVoucherTx
-      // used for a live reward, whenever the channel is still open (its coin
-      // still exists to rebuild against). rewardAmount is deliberately 0 —
-      // this is a resync, not a new view/click, so no REWARD_EVENT is
-      // created (see the rewardAmount>0 guards inside that function).
-      if (channel.STATUS === 'open' && channel.VIEWER_WALLET_ADDR) {
+      // used for a live reward, whenever the channel coin still exists to
+      // rebuild against. rewardAmount is deliberately 0 — this is a resync,
+      // not a new view/click, so no REWARD_EVENT is created (see the
+      // rewardAmount>0 guards inside that function).
+      //
+      // Fragility #58: 'settling' is included alongside 'open' because this
+      // is exactly the state a channel is in on the creator's own node right
+      // after Finish (autoSettleChannelsForCampaign) — the moment a resync
+      // matters most is also the moment the coin is just as available to
+      // rebuild against as when it was 'open'. Without this, the resync that
+      // a stale-voucher settlement failure asks for fell through to
+      // _resendStoredVoucher, which just replays the same stale hex verbatim.
+      if ((channel.STATUS === 'open' || channel.STATUS === 'settling') && channel.VIEWER_WALLET_ADDR) {
         MDS.log("[CHANNEL] VOUCHER_SYNC_REQUEST: rebuilding voucher fresh. campaign: " + campaignId);
         getCampaign(campaignId, function(campErr, campaign) {
           if (campErr || !campaign || !campaign.ESCROW_WALLET_PK) {

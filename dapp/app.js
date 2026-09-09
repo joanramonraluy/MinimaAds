@@ -353,6 +353,13 @@ function handleMdsComms(parsed) {
     if (typeof onViewerVoucherReceived === 'function') {
       onViewerVoucherReceived(parsed);
     }
+    // Fragility #58: a fresh voucher arriving here may be the resync reply to
+    // a stale-MMR-proof settlement failure — retry once, whether or not the
+    // earnings view is even open (covers the unattended _autoSettleOpenChannels
+    // path fired right after Finish, not just the manual "Settle" button).
+    if (typeof _retrySettlementAfterVoucher === 'function' && parsed.campaign_id) {
+      _retrySettlementAfterVoucher(parsed.campaign_id);
+    }
     return;
   }
   if (parsed.type === 'SETTLE_CONFIRMED') {

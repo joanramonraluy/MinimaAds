@@ -664,7 +664,8 @@ STATE(7) reconciliation (a bare setCampaignStatus).
     only drives creator-side UI progress.
   → every node: signalFE('CAMPAIGN_UPDATED', { …, settling: true }).
     On a viewer's node this triggers _autoSettleOpenChannels(campaign_id), which posts
-    each still-open channel's latest_tx_hex. Publisher-role rows are skipped (§4.5).
+    each still-open channel's latest_tx_hex — viewer and publisher rows alike, both
+    settle through the same role-agnostic _runSettlement mechanics (§4.5).
 
   For a remote node to reach this at all, the creator must actually tell it: the FE
   broadcasts MA_STATUS_PROPAGATE on real on-chain confirmation (finalizeStatusUpdate)
@@ -678,6 +679,19 @@ Manual trigger:
 
 Settlement steps (FE):
 1.  FE calls MDS.cmd('txnimport data:' + tx_hex) → imports partial tx
+1a. FE calls MDS.cmd('txncheck txnid:X') and requires response.valid.mmrproofs
+    === true before continuing (fragility #58, fixed 2026-09-09). A voucher's
+    embedded MMR proof goes stale after enough blocks pass; txnimport/txnsign/
+    txnpost all report status:true regardless (txnpost validates nothing —
+    fragility #53), so without this check the coin silently never spends. On
+    a stale proof: abort (txndelete), register a one-shot retry
+    (_registerSettleRetry), and request a fresh voucher (VOUCHER_SYNC_REQUEST
+    → _requestVoucherResync, §6.8). The creator's handleVoucherSyncRequest now
+    rebuilds fresh for a 'settling' channel row too, not just 'open' — the
+    exact state a channel is in right after Finish. When the fresh
+    REWARD_VOUCHER arrives (VOUCHER_RECEIVED), _retrySettlementAfterVoucher
+    re-invokes settlement once with the freshly DB-read tx_hex — covers both
+    the manual "Settle" button and the unattended _autoSettleOpenChannels path.
 2.  FE calls MDS.cmd('txnsign txnid:X key:' + viewer_key) → viewer co-signs
 3.  FE calls MDS.cmd('txnpost txnid:X') → broadcasts to Minima network
 4.  On success: UPDATE CHANNEL_STATE SET STATUS = 'settled'
@@ -702,7 +716,12 @@ Viewer reconnects (app opens):
 
 Creator receives VOUCHER_SYNC_REQUEST:
 4.  Read CHANNEL_STATE for (campaign_id, viewer_key)
-5.  If latest_tx_hex exists → resend REWARD_VOUCHER with stored tx_hex
+5.  If latest_tx_hex exists AND channel STATUS is 'open' or 'settling' (fragility
+    #58, fixed 2026-09-09) → rebuild a fresh REWARD_VOUCHER against the real
+    on-chain channel coin (same path as a live reward, rewardAmount:0) rather
+    than resending the stored hex verbatim — a resent stale hex can never heal
+    a genuinely stale/invalid voucher. Falls back to resending the stored hex
+    for any other status (e.g. already 'settled').
     If no tx yet → respond with CHANNEL_OPEN (re-confirm channel is open)
 ```
 

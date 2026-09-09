@@ -46,6 +46,22 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-09 (Fragility #60) — docs-only: reconciled STATE(10) status-update-tx notes to match the shipped code
+
+**Source**: `docs/KNOWN_ISSUES.md` fragility #60, found incidentally during the fragility #56 session and deliberately left as out-of-scope doc/code drift. LOW complexity per `CLAUDE.md §2` (pure documentation edit, no logic, nothing to verify in-browser) — done under the doc's own short-handoff exception, at the tail of a session with little budget left.
+
+**The drift**: `MinimaAds.md` Appendix B.5's status-update transaction template documented `STATE(10) = 0`, on the assumption that leaves `change GT 0` and lets the V3 script's `VERIFYOUT` branch enforce the change output. The shipped code (`buildStatusUpdateStatePorts`, `core/campaigns.js`) has always set `STATE(10)` to the coin's full amount instead, making `change = 0` and skipping the `VERIFYOUT` branch (and any exact-equality risk per fragility #54) entirely. Both are script-safe for this tx shape — always exactly one output at `ESCROW_ADDRESS` — so this was never a live bug, just the doc lagging the code.
+
+**The fix**: updated the Appendix B.5 template (`port:10 value:<full_amount>`) and its accompanying note to describe the actual `change=0`/no-`VERIFYOUT` path, with a pointer back to why that's the safer of the two encodings. No code touched. Closed fragility #60 in `docs/KNOWN_ISSUES.md` (moved to §3 Closed/Fixed).
+
+**Files modified**: `MinimaAds.md` (Appendix B.5), `docs/KNOWN_ISSUES.md`.
+
+**Verification**: none needed — pure prose reconciliation against already-shipped, already-tested code (the `STATE(10)=full_amount` behavior itself was exercised live in every status-update tx test across the fragility #56/#58/OPEN-4 sessions this same day).
+
+**Open issues**: fragility #61 (creator liveness ping/pong reliability post-redeploy — unchanged, needs its own session).
+
+---
+
 ### Session: 2026-09-09 (OPEN-5) — SDK-hosted viewers get their own self-contained campaign-finish auto-settle
 
 **Source**: `docs/KNOWN_ISSUES.md` OPEN-5, "deferred, low priority" — a viewer whose channel lives on an SDK-hosted node (`sdk/index.js` embedded directly in a third-party host, no MinimaAds Service Worker installed) never auto-settled on campaign Finish; the SDK's `CAMPAIGN_UPDATED` handling only refreshed `_livenessCache`. Complexity assessed HIGH per `CLAUDE.md §2` (new tx-building logic, external API contract constraint — `AGENTS.md`: "SDK public API is an external publisher contract, treat any change as breaking unless explicitly approved") — offered Opus vs continuing on Sonnet, maintainer left it to the agent, proceeded on Sonnet as a same-session continuation of the fragility #56/#58 work (warm harness, `channel.handler.js`/`earnings.js` context already loaded).

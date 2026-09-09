@@ -2016,7 +2016,7 @@ txnstate  id:<txnid> port:4  value:<creator_mx_hex>
 txnstate  id:<txnid> port:5  value:<platform_key_or_0x00>
 txnstate  id:<txnid> port:6  value:<max_pub_budget_or_0>
 txnstate  id:<txnid> port:7  value:<new_status_hex>
-txnstate  id:<txnid> port:10 value:0
+txnstate  id:<txnid> port:10 value:<full_amount>
 txnstate  id:<txnid> port:11 value:0
 txnsign   id:<txnid> publickey:<creator_wallet_pk>
 txnpost   id:<txnid> mine:true auto:false
@@ -2024,7 +2024,7 @@ txndelete id:<txnid>
 ```
 
 Notes:
-- `STATE(10) = 0` so the V3 script reads `payout = 0` → `change = @AMOUNT - 0 = @AMOUNT > 0` → the `IF change GT 0` branch fires and asserts that the change output goes back to `@ADDRESS` (= `ESCROW_ADDRESS_V3`) with `keepstate:true`. The single output[0] satisfies this assertion.
+- `STATE(10) = <full_amount>` (the coin's exact on-chain amount, same value as the sole output) so the V3 script reads `payout = @AMOUNT` → `change = @AMOUNT - payout = 0` → the `IF change GT 0` branch never fires and `VERIFYOUT` is skipped entirely — the single output[0] satisfies the spend without any exact-equality check to get wrong (fragility #60, reconciled 2026-09-09: an earlier draft of this doc had `STATE(10) = 0`, relying on the `change GT 0` branch firing instead; the shipped code takes the no-`VERIFYOUT` path, which is the safer of the two per the fragility-#54 exact-equality lesson — this doc now matches the code).
 - `STATE(11) = 0` so the fee branch is skipped — no fee output is required.
 - `STATE(7) = <new_status_hex>` is the UTF-8 hex of `"active"`, `"paused"` or `"finished"`. The script reads it (`LET status = PREVSTATE(7)`) but does not assert on its value — see §B.2.1.
 - Ports 1, 2, 3, 4, 5, 6 are carried forward unchanged from the prior coin's `PREVSTATE` values so the new change coin remains discoverable and validates against the receiving node's `PLATFORM_KEY` check. Port 2 (expiry block) is not read by the script — it is carried forward purely so `checkExpiredCampaigns` (Fix #8) can keep reading an accurate on-chain deadline off the campaign's `ESCROW_COINID` after a status change; it is set only when the coin being spent actually carries it, never invented (fragility #56, fixed 2026-09-09).

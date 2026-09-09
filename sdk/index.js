@@ -1341,6 +1341,12 @@
               console.log('[SDK] REWARD_VOUCHER update failed:', err);
               return;
             }
+            // Fragility #58 class: this voucher may be the resync reply a
+            // stale-MMR-proof settlement failure asked for — retry once if
+            // so. No-op when nothing is pending. Runs for every voucher
+            // receipt (including plain reward vouchers), not just resyncs —
+            // harmless, mirrors dapp/app.js's VOUCHER_RECEIVED handler.
+            _retrySettlementAfterVoucher(payload.campaign_id);
             // The voucher itself is always stored (sync replays must be able to
             // restore LATEST_TX_HEX), but a replayed event_id must never credit
             // a reward a second time: the publisher branch of
@@ -1371,8 +1377,231 @@
     });
   }
 
+  // --- Settlement (OPEN-5) -------------------------------------------------
+  // A bare SDK embed has no Service Worker, so unlike dapp/app.js's
+  // _autoSettleOpenChannels (dapp/views/earnings.js), settlement here is
+  // fully self-contained: no MDSCOMMS signal round-trip needed (this is all
+  // one JS process), no earnings.js to call into. Mirrors that file's design
+  // 1:1 — including the fragility #58 txncheck gate and resync/retry — so
+  // this path doesn't reintroduce a bug already fixed there.
+
+  var _voucherResyncRequested = {};
+  var _pendingSettleRetry = {};
+
+  function _registerSettleRetry(campaignId, viewerKey, role) {
+    _pendingSettleRetry[campaignId + '|' + viewerKey + '|' + role] = true;
+  }
+
+  // Debounced to one request per channel per session, same as earnings.js.
+  function _requestVoucherResync(campaignId, viewerKey, role, creatorMx) {
+    var key = campaignId + '|' + viewerKey;
+    if (_voucherResyncRequested[key]) { return; }
+    _voucherResyncRequested[key] = true;
+    if (!creatorMx) {
+      console.log('[SDK] voucher resync skipped — no CREATOR_MX for campaign:' + campaignId);
+      return;
+    }
+    console.log('[SDK] requesting voucher re-sync from creator. campaign:' + campaignId);
+    _sendToCreator(creatorMx, {
+      type: 'VOUCHER_SYNC_REQUEST',
+      campaign_id: campaignId,
+      viewer_key: viewerKey,
+      role: role
+    }, function(ok) {
+      console.log('[SDK] VOUCHER_SYNC_REQUEST sent ok:' + ok + ' campaign:' + campaignId);
+    });
+  }
+
+  // Called from _handleRewardVoucherPayload on every voucher receipt.
+  // Consumes any pending retry for this campaign (registered by
+  // _runSettlementInner's onError), re-reading LATEST_TX_HEX fresh from DB —
+  // never reuses the stale hex from the original closure. Bounded to one
+  // retry per channel per session by _voucherResyncRequested above: if the
+  // re-fetched voucher is stale too, the second _requestVoucherResync call
+  // is a no-op, so there is no second retry — falls through silently rather
+  // than looping.
+  function _retrySettlementAfterVoucher(campaignId) {
+    var prefix = campaignId + '|';
+    for (var key in _pendingSettleRetry) {
+      if (!_pendingSettleRetry.hasOwnProperty(key)) { continue; }
+      if (key.indexOf(prefix) !== 0) { continue; }
+      delete _pendingSettleRetry[key];
+      (function(pendingKey) {
+        var parts = pendingKey.split('|');
+        var viewerKey = parts[1];
+        var role = parts[2];
+        sqlQuery(
+          "SELECT LATEST_TX_HEX, CUMULATIVE_EARNED, STATUS, CREATOR_MX FROM CHANNEL_STATE" +
+          " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
+          " AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(viewerKey) + "')" +
+          " AND UPPER(ROLE) = UPPER('" + escapeSql(role) + "')",
+          function(err, rows) {
+            if (err || !rows || rows.length === 0) { return; }
+            var row = rows[0];
+            if (row.STATUS !== 'open' || !row.LATEST_TX_HEX) { return; }
+            console.log('[SDK] retrying settlement after voucher resync. campaign:' + campaignId);
+            _runSettlement(campaignId, viewerKey, role, row.LATEST_TX_HEX, row.CREATOR_MX);
+          }
+        );
+      })(key);
+    }
+  }
+
+  function _runSettlement(campaignId, viewerKey, role, txHex, creatorMx) {
+    var settleId = 'stl_' + Date.now().toString(16);
+    console.log('[SDK] _runSettlement start campaign:' + campaignId + ' settleId:' + settleId);
+    sqlQuery(
+      "SELECT STATUS FROM CHANNEL_STATE" +
+      " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
+      " AND UPPER(VIEWER_KEY) = UPPER('" + escapeSql(viewerKey) + "')" +
+      " AND UPPER(ROLE) = UPPER('" + escapeSql(role) + "')",
+      function(stErr, stRows) {
+        var status = (!stErr && stRows && stRows.length > 0) ? (stRows[0].STATUS || '') : '';
+        if (status !== 'open') {
+          console.log('[SDK] _runSettlement aborted — channel status:' + status + ' campaign:' + campaignId);
+          return;
+        }
+        _runSettlementInner(campaignId, viewerKey, role, txHex, creatorMx, settleId);
+      }
+    );
+  }
+
+  function _runSettlementInner(campaignId, viewerKey, role, txHex, creatorMx, settleId) {
+    function onError(msg) {
+      console.warn('[SDK] settlement failed: ' + msg + '. campaign:' + campaignId);
+      MDS.cmd('txndelete id:' + settleId, function() {});
+      _registerSettleRetry(campaignId, viewerKey, role);
+      _requestVoucherResync(campaignId, viewerKey, role, creatorMx);
+    }
+
+    MDS.keypair.get('VIEWER_WALLET_PK_' + campaignId, function(pkRes) {
+      var signKey = (pkRes && pkRes.status && pkRes.value) ? pkRes.value : viewerKey;
+      MDS.cmd('txnimport id:' + settleId + ' data:' + txHex, function(r1) {
+        if (!r1 || !r1.status) { onError((r1 && r1.error) || 'txnimport failed'); return; }
+
+        // Fragility #58: txnimport succeeding proves nothing about whether
+        // the voucher's embedded MMR proof is still valid against the
+        // CURRENT chain tip — only txncheck actually re-executes the proof
+        // against it. Same gate as dapp/views/earnings.js.
+        MDS.cmd('txncheck id:' + settleId, function(rc) {
+          var mmrOk = !!(rc && rc.status && rc.response && rc.response.valid && rc.response.valid.mmrproofs === true);
+          if (!mmrOk) {
+            console.warn('[SDK] txncheck: stale voucher (mmrproofs invalid). campaign:' + campaignId);
+            onError('stale voucher (mmrproofs invalid)');
+            return;
+          }
+
+          MDS.cmd('txnsign id:' + settleId + ' publickey:' + signKey, function(r2) {
+            if (r2 && r2.pending) {
+              // No write-mode approval resume path exists in the SDK context
+              // (no UI, no savePendingChannelOp) — same as every other SDK
+              // flow today (e.g. channel-open doesn't resume MDS_PENDING
+              // either), so this isn't a new gap. Log and abandon cleanly.
+              console.warn('[SDK] settlement txnsign pending (write-mode) — cannot auto-approve. campaign:' + campaignId);
+              MDS.cmd('txndelete id:' + settleId, function() {});
+              return;
+            }
+            if (!r2 || !r2.status) { onError((r2 && r2.error) || 'txnsign failed'); return; }
+
+            MDS.cmd('txnpost id:' + settleId, function(r3) {
+              MDS.cmd('txndelete id:' + settleId, function() {});
+              if (r3 && r3.pending) {
+                console.warn('[SDK] settlement txnpost pending (write-mode) — cannot auto-approve. campaign:' + campaignId);
+                return;
+              }
+              if (!r3 || !r3.status) { onError((r3 && r3.error) || 'txnpost failed'); return; }
+              console.log('[SDK] settlement tx posted. Awaiting L1 confirmation. campaign:' + campaignId);
+              // Do NOT mark STATUS='settled' here — _checkOpenChannelsSettled
+              // (driven by NEWBLOCK) confirms it once the coin is verifiably
+              // spent on-chain, same discipline as the SW's own
+              // checkOpenChannelsSettled.
+            });
+          });
+        });
+      });
+    });
+  }
+
+  // Called from handleMdsEvent's CAMPAIGN_FINISH branch only (the one path
+  // that exists purely for a no-SW SDK embed — see the comment there for why
+  // this can't double-fire with dapp/app.js's own auto-settle). Role-agnostic,
+  // matching dapp/app.js's current (post-fragility-#58) symmetric behavior.
+  function _autoSettleOpenChannels(campaignId) {
+    if (!campaignId) { return; }
+    sqlQuery(
+      "SELECT VIEWER_KEY, ROLE, LATEST_TX_HEX, CREATOR_MX FROM CHANNEL_STATE" +
+      " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
+      " AND STATUS = 'open' AND LATEST_TX_HEX != ''",
+      function(err, rows) {
+        if (err || !rows || rows.length === 0) { return; }
+        console.log('[SDK] auto-settle: ' + rows.length + ' channel(s) for campaign:' + campaignId);
+        for (var i = 0; i < rows.length; i++) {
+          (function(row) {
+            _runSettlement(campaignId, row.VIEWER_KEY, row.ROLE || 'viewer', row.LATEST_TX_HEX, row.CREATOR_MX);
+          })(rows[i]);
+        }
+      }
+    );
+  }
+
+  // Driven by NEWBLOCK (see handleMdsEvent). Mirrors channel.handler.js's
+  // checkOpenChannelsSettled, but uses only its per-coin fallback query
+  // (coins coinid:<X> relevant:true) — the address-sweep optimization there
+  // needs CHANNEL_SCRIPT_ADDRESS, which is only ever cached by service.js
+  // (SW-only, never present in a no-SW context). Fine at SDK scale: a
+  // handful of open channels per viewer, not a whole address scan.
+  function _checkOpenChannelsSettled() {
+    sqlQuery(
+      "SELECT CAMPAIGN_ID, VIEWER_KEY, ROLE, CHANNEL_COINID, CREATED_AT, CUMULATIVE_EARNED FROM CHANNEL_STATE WHERE STATUS = 'open'",
+      function(err, rows) {
+        if (err || !rows || rows.length === 0) { return; }
+        var now = Date.now();
+        for (var i = 0; i < rows.length; i++) {
+          (function(row) {
+            if (!row.CHANNEL_COINID) { return; }
+            // Grace period: the channel coin may not be locally indexed yet
+            // even though the TX was mined this block — same 60s grace as
+            // channel.handler.js's checkOpenChannelsSettled (fragility #48).
+            var age = now - parseInt(row.CREATED_AT || 0);
+            if (age < 60000) { return; }
+            MDS.cmd('coins coinid:' + row.CHANNEL_COINID + ' relevant:true', function(vRes) {
+              var coins = (vRes && vRes.status && vRes.response) ? vRes.response : [];
+              if (coins.length > 0) { return; } // still unspent
+              console.log('[SDK] channel coin confirmed spent on-chain, settling locally. campaign:' + row.CAMPAIGN_ID);
+              settleChannel(row.CAMPAIGN_ID, row.VIEWER_KEY, row.ROLE || 'viewer', function(settleErr) {
+                if (settleErr) {
+                  console.warn('[SDK] settleChannel failed: ' + settleErr + '. campaign:' + row.CAMPAIGN_ID);
+                  return;
+                }
+                if (typeof MDS !== 'undefined' && MDS.comms) {
+                  MDS.comms.solo(JSON.stringify({
+                    type: 'SETTLE_CONFIRMED',
+                    campaign_id: row.CAMPAIGN_ID,
+                    amount: parseFloat(row.CUMULATIVE_EARNED || 0)
+                  }));
+                }
+              });
+            });
+          })(rows[i]);
+        }
+      }
+    );
+  }
+
   function handleMdsEvent(event) {
     if (!event || !event.event) { return; }
+
+    // OPEN-5: a bare SDK embed has no Service Worker, so nothing else on the
+    // host node ever confirms a posted settlement tx on-chain and flips
+    // CHANNEL_STATE.STATUS to 'settled' (channel.handler.js's
+    // checkOpenChannelsSettled is SW-only). MinimaAds.md §13 already
+    // documents forwarding *every* MDS callback message here, not just
+    // MAXIMA/MDSCOMMS, so any host following the integration doc is already
+    // sending NEWBLOCK — this just starts consuming it.
+    if (event.event === 'NEWBLOCK') {
+      _checkOpenChannelsSettled();
+      return;
+    }
 
     if (event.event === 'MDSCOMMS') {
       var raw = event.data && event.data.message ? event.data.message : event.data;
@@ -1404,6 +1633,12 @@
         if (!allowed) { return; }
         setCampaignStatus(payload.campaign_id, 'finished', function() {});
         _onCampaignUpdatedCore({ campaign_id: payload.campaign_id, status: 'finished' });
+        // OPEN-5: this raw-Maxima branch is the *only* Finish signal a bare
+        // SDK embed (no SW) ever sees — dapp/app.js has its own
+        // _autoSettleOpenChannels wired to the MDSCOMMS CAMPAIGN_UPDATED
+        // signal instead and never calls handleMdsEvent at all, so this
+        // can't double-fire with that path on an ordinary full-dapp node.
+        _autoSettleOpenChannels(payload.campaign_id);
       });
     } else if (payload.type === 'CHANNEL_OPEN') {
       // senderPk is the Maxima-verified sender pk (audit Fix #1).

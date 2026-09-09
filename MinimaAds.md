@@ -1771,10 +1771,14 @@ MinimaAds.handleMdsEvent(msg)
 // MDS.init. Handles MinimaAds MAXIMA messages and MDSCOMMS channel signals.
 // The host MUST forward the raw MDS event object (not just the decoded
 // payload): the SDK reads msg.data.from to authenticate inbound CHANNEL_OPEN
-// and REWARD_VOUCHER messages — see below.
+// and REWARD_VOUCHER messages — see below. The host should forward EVERY MDS
+// callback message, not just MAXIMA/MDSCOMMS — since OPEN-5 (fixed
+// 2026-09-09), NEWBLOCK is also consumed (see below).
 ```
 
 **Sender authentication (SDK path)**: `handleMdsEvent` applies the same guards as the Service Worker handlers (§8.9 / §8.11). `CHANNEL_OPEN` and `REWARD_VOUCHER` are accepted only when `msg.data.from` matches the campaign creator — `CAMPAIGNS.CREATOR_ADDRESS`, or the public key embedded in the on-chain permanent route cached in `CREATOR_MX_<campaign_id>` — failing open only when no creator identity is known locally or the message carries no sender. A `REWARD_VOUCHER` whose `cumulative` is lower than the stored `CHANNEL_STATE.CUMULATIVE_EARNED` is rejected before `LATEST_TX_HEX` is overwritten (equality accepted, for §8.12 sync replays), and a duplicate `event_id` stores the voucher but does not credit the reward a second time.
+
+**Campaign-finish auto-settle (SDK path, OPEN-5, fixed 2026-09-09)**: a bare SDK embed has no Service Worker, so `handleMdsEvent`'s own `CAMPAIGN_FINISH` branch is the only Finish signal it ever sees — after `_assertCampaignCreatorSender` accepts it, the SDK runs its own self-contained settlement flow (`_autoSettleOpenChannels` → `_runSettlement`), reusing the same `txnimport`→`txncheck`(mmrproofs gate, fragility #58)→`txnsign`→`txnpost` sequence and resync/retry logic as `dapp/views/earnings.js`, role-agnostic. Since there is no SW to confirm the posted tx on-chain, `handleMdsEvent` now also consumes `NEWBLOCK` (`_checkOpenChannelsSettled`) to detect the spent channel coin and flip `CHANNEL_STATE.STATUS` to `'settled'`, emitting `SETTLE_CONFIRMED` via `MDS.comms.solo`. This is entirely disjoint from `dapp/app.js`'s own `_autoSettleOpenChannels` (triggered by the MDSCOMMS `CAMPAIGN_UPDATED{settling:true}` signal, which `dapp/app.js` never routes through `handleMdsEvent`) — a full-dapp node is unaffected and does not double-settle. No public API changes.
 
 ### 13.3 Publisher Responsibilities
 

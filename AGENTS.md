@@ -174,6 +174,12 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent sessions here, as **short pointers only** — one-line summary + files touched + open issues, ending with a reference to the full narrative in `docs/HISTORY.md §17`. The full problem/fix/verification write-up is written **once**, directly into `docs/HISTORY.md §17`, never duplicated here. When adding a new entry pushes this past 3, just **delete** the oldest pointer — nothing to move, its full content already lives permanently in `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-09-10 (OPEN-3 adversarial regression probe) — live-verified: spoofed CAMPAIGN_FINISH/PAUSE still rejected outright
+
+Closed the last open caveat on `docs/KNOWN_ISSUES.md` OPEN-3: sent a forged `CAMPAIGN_FINISH` and `CAMPAIGN_PAUSE` from a real, non-creator Maxima identity (Node 4) directly to a clean campaign row (Node 2) on the live 6-node harness. Both were rejected outright by `_assertCreatorThen` (fail-closed — no `ok()` call), logged `status change rejected: sender is not the creator`, and left `CAMPAIGNS.STATUS` unchanged. Confirms OPEN-3's new send path (`propagateStatusToChannelPeers`) didn't weaken the pre-existing AUD-3 authentication gate it reuses unchanged. Verification only, no code change. Files: none. Open issues: OPEN-4's "Phase 3" escalation remains deliberately deferred (discussed, not implemented). Full detail: `docs/HISTORY.md §17`, session 2026-09-10 (OPEN-3 adversarial regression probe).
+
+---
+
 ### Session: 2026-09-10 (Fragility #61) — root cause found and fixed: SDK creator-route detection never recognized `MAX#pk#mls` routes
 
 Closed `docs/KNOWN_ISSUES.md` fragility #61. Not a relay/MLS staleness issue as originally hypothesized — ruled that out live first (6/6 raw `sendMaxima` PING/PONG round-trips succeeded immediately post-redeploy). Root cause: `sdk/index.js`'s `_sendLivenessPing`/`_sendToCreator` checked `creatorRoute.substring(0,2) === 'MX'` to pick `to:` vs `publickey:` routing, which never matches a `MAX#<pk>#<mls>` permanent route (`"MAX#..."` → `"MA"`, not `"MX"`) — exactly what `campaign.handler.js` normally stores in keypair `CREATOR_MX_<campaignId>`. Every such route got sent as a malformed `publickey:MAX#...` value, deterministically failing `"No Contact found"`. Fixed with a new shared `_isMaximaRouteString()` helper recognizing both prefixes. Live-verified: `MinimaAds.trackView()` now succeeds where it always failed before; this also unblocked OPEN-5's deferred live E2E verification (real channel, real voucher, real settlement tx mined on-chain, reward paid — see full detail). Files: `sdk/index.js`. Open issues: none new — `_checkOpenChannelsSettled`'s own NEWBLOCK path wasn't directly observed firing (the SW's identical logic won the race on the SW-installed test tab used), flagged for a future no-SW-tab session if it matters. Full detail: `docs/HISTORY.md §17`, session 2026-09-10 (Fragility #61).
@@ -186,11 +192,5 @@ Closed `docs/KNOWN_ISSUES.md` fragility #60: `MinimaAds.md` Appendix B.5 documen
 
 ---
 
-### Session: 2026-09-09 (OPEN-5) — SDK-hosted viewers get their own self-contained campaign-finish auto-settle
-
-Closed `docs/KNOWN_ISSUES.md` OPEN-5: a viewer on a bare `sdk/index.js` embed (no Service Worker) never auto-settled on campaign Finish. Fixed entirely within `sdk/index.js` (no public API changes): `handleMdsEvent`'s raw-Maxima `CAMPAIGN_FINISH` branch (the only Finish signal a no-SW SDK ever sees, structurally disjoint from `dapp/app.js`'s own auto-settle — confirmed `dapp/app.js` never calls `handleMdsEvent`) now runs its own self-contained settlement flow, porting fragility #58's `txnimport`→`txncheck`→`txnsign`→`txnpost` + resync/retry sequence, plus a new `NEWBLOCK`-driven `_checkOpenChannelsSettled` (no SW confirmation path exists in this mode either). Verification was **partial**: `node --check` clean, API surface diffed unchanged, no-double-fire verified structurally — but live E2E (real channel + voucher + settlement) was blocked by a newly-found, pre-existing, unrelated issue: creator liveness ping/pong unreliable across multiple viewer nodes post-redeploy (recorded as new **fragility #61**), so `_runSettlementInner`/`_checkOpenChannelsSettled` are verified by code-reading only, not by observing them run. Files: `sdk/index.js`, `MinimaAds.md` §13. Open issues: fragility #60 (unchanged), new fragility #61 (creator liveness reliability — needs its own session). Full detail: `docs/HISTORY.md §17`, session 2026-09-09 (OPEN-5).
-
----
-
-> Previous handoff notes (2026-09-09 Fragility #58, 2026-09-07 OPEN-3, AUD-1, patches 15–25, Security Audit 2, and all earlier) are archived in `docs/HISTORY.md §17`.
+> Previous handoff notes (2026-09-09 OPEN-5, 2026-09-09 Fragility #58, 2026-09-07 OPEN-3, AUD-1, patches 15–25, Security Audit 2, and all earlier) are archived in `docs/HISTORY.md §17`.
 

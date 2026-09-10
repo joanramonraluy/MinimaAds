@@ -46,6 +46,28 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-10 (OPEN-3 adversarial regression probe) — live-verified: a genuinely spoofed CAMPAIGN_FINISH/PAUSE is still rejected outright after OPEN-3's send-path changes
+
+**Source**: `docs/KNOWN_ISSUES.md` OPEN-3's own residual note — the one check its 2026-09-07 fix and 2026-09-08 live verification never completed: "an adversarial AUD-3 regression probe (a genuinely spoofed `CAMPAIGN_FINISH` from an untrusted sender)". Complexity assessed MEDIUM per `CLAUDE.md §2` (live security verification across SW handler layer, no protocol change) — confirmed with the maintainer, proceeded on Sonnet, no plan mode. The maintainer asked first whether OPEN-3's and OPEN-4's remaining items were worth doing at all; OPEN-3's probe was agreed as worth doing now (it re-tests an existing security gate after adjacent code changed), OPEN-4's "Phase 3" escalation was agreed to stay deliberately deferred (no code touched).
+
+**Why this mattered**: OPEN-3 (2026-09-07) added `propagateStatusToChannelPeers`, the first code in the entire codebase that ever *sends* `CAMPAIGN_FINISH`/`CAMPAIGN_PAUSE`. It reuses the pre-existing receive-side `handleCampaignFinish`/`handleCampaignPause` → `_assertCreatorThen` → `applyStatusChange` path unchanged, but the fix session that added the sender never re-ran AUD-3's original attack (a forged status message from a sender who is not the creator) against the *receiving* side to confirm nothing about the ordering fix (fragility #57, same file, same function `applyStatusChange`) had weakened the gate. Code review before the live test confirmed `propagateStatusToChannelPeers` only reads and sends — it does not touch `_assertCreatorThen` — so the residual risk was specifically "does the unchanged gate still behave correctly at runtime", not a suspected code defect.
+
+**Test design**: used the already-running 6-node harness (5 MinimaAds nodes + Node Manager, campaign `1a08a44898e-1-85bfce2386a63c13`, creator = Node 1). Chose Node 4 as attacker (a real, cryptographically-verified Maxima identity, confirmed distinct from the campaign's `CREATOR_ADDRESS` by direct comparison) and Node 2 as victim (clean `CAMPAIGNS.STATUS = 'active'` row, no confounding channel state). Added Node 2 as a Maxima contact on Node 4 (`maxcontacts action:add`, required before direct `action:send` even between nodes sharing the same relay), then sent two hand-crafted payloads directly from Node 4's own browser console via `MDS.cmd('maxima action:send publickey:<node2> application:minima-ads data:<hex> poll:false')` — `{type:'CAMPAIGN_FINISH', campaign_id:...}` and `{type:'CAMPAIGN_PAUSE', campaign_id:...}` — both delivered (`delivered:true`) but with **content forged and sender identity genuinely Node 4's own**, i.e. exactly the "spoofed message, untrusted real sender" shape OPEN-3 left unverified. This is a stronger test than a same-node unit check: `msg.data.from` is Maxima-transport-verified, so this exercises the actual cryptographic identity boundary `_assertCreatorThen` relies on, not a mocked one.
+
+**Result**: both messages were rejected outright on Node 2. Its own SW log recorded, for each: `[CAMPAIGN] status change rejected: sender is not the creator. campaign=1a08a44898e-1-85bfce2386a63c13 sender=0x30819F300D0609...` — the fail-closed branch of `_assertCreatorThen` (no `ok()` call at all, since Node 4's pk matched neither the strong `CREATOR_MX` route nor the fallback `CREATOR_ADDRESS`). `CAMPAIGNS.STATUS` on Node 2 was confirmed unchanged (`'active'`) both before and after each send. No `CAMPAIGN_UPDATED` settling escalation, no channel-state mutation (Node 2 held no channel rows at all, so channel-forcing wasn't separately observable here, but the identity gate that would have prevented it fired correctly regardless of channel presence).
+
+**Files modified**: none — verification only, no code change.
+
+**Verification summary, stated plainly**:
+- ✅ Forged `CAMPAIGN_FINISH` from a real, non-creator Maxima identity: rejected, logged, no state change.
+- ✅ Forged `CAMPAIGN_PAUSE` from the same identity: rejected, logged, no state change.
+- ✅ Confirmed via code reading that `propagateStatusToChannelPeers` (OPEN-3's new send path) does not bypass or alter `_assertCreatorThen` — the same function AUD-3 originally hardened.
+- ⚠️ Not covered by this probe: the "fallback-verified" attack shape (a sender matching only the weak `CREATOR_ADDRESS` column, e.g. via a pre-AUD-4 poisoned announce) — that specific path was already live-tested in the 2026-09-04 AUD-3/AUD-4 sessions and is architecturally unchanged by OPEN-3; not re-run here since neither this session's code review nor OPEN-3's diff touches it.
+
+**Open issues**: none new. OPEN-3's residual note in `docs/KNOWN_ISSUES.md` §1b is now fully closed — no caveat remains. OPEN-4's "Phase 3" escalation remains a deliberately-unbuilt future item, untouched by this session.
+
+---
+
 ### Session: 2026-09-10 (Fragility #61) — root cause found and fixed: SDK's creator-route detection never recognized `MAX#pk#mls` routes; unblocked OPEN-5's live verification
 
 **Source**: `docs/KNOWN_ISSUES.md` fragility #61, opened 2026-09-09 with a leading hypothesis of "stale MLS relay registration". Complexity assessed MEDIUM per `CLAUDE.md §2` (single-layer investigation + bug fix in an existing SDK function) — confirmed with the maintainer, proceeded on Sonnet, no plan mode.

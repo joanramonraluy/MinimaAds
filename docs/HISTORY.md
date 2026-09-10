@@ -46,6 +46,38 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-11 (AUD-6 / T-REP0) — PROFILE_RESPONSE spoofing closed; first step of the auth/reputation roadmap item
+
+**Source**: maintainer chose "User authentication & reputation" as the roadmap item to prioritize among the four listed in `docs/TASKS.md` (auth/reputation, advanced analytics, cross-dApp settlement, governance). Assessed XHIGH per `CLAUDE.md §2` (new trust model) — confirmed with the maintainer, delegated the design phase to an Opus subagent running in plan mode. No code was written during the design phase; the subagent read `docs/DOCUMENTATION_INDEX.md`, `MinimaAds.md`, `AGENTS.md`, and `docs/KNOWN_ISSUES.md` before proposing an approach.
+
+**Design outcome (informational, recorded here for continuity — not itself a code change)**: the proposal splits the roadmap item into four stageable tasks instead of one XHIGH block, because only its Phase 3 (signed cross-node attestations) is actually a new trust model — Phases 1–2 add pure local/on-chain evidence with **zero new Maxima messages and zero new fields on `Campaign`/`Ad`/`RewardEvent`/`UserProfile`**, which keeps them at MEDIUM/HIGH:
+- **T-REP0** (LOW) — this session's fix, below.
+- **T-REP1** (MEDIUM, ~400 lines, not yet started) — new `REPUTATION_EVENTS`/`PEER_REPUTATION` tables + `core/reputation.js`, first-party evidence only (channels this node has itself settled), no UI.
+- **T-REP2** (MEDIUM–HIGH, ~500 lines, not yet started) — on-chain evidence gated through the existing OPEN-4 lineage check, negative signals from existing rejection points (`_assertCreatorThen`, AUD-4 pinning, frame-ownership conflicts), UI badges.
+- **T-REP3** (XHIGH, ~600+ lines, not started, needs its own separate approval) — signed peer attestations (`maxsign`/`maxverify`), a genuine new trust model with network effects and Sybil-weighting concerns; deliberately left out of this roadmap pass.
+
+The maintainer approved the recommended defaults for the four open design questions: new tables (not an extension of `UserProfile`), Phase 1 stays purely informational (no `selectAd` weighting), Phase 3 stays out of scope for now, and T-REP0 goes first. The design also flagged three pre-existing documentation conflicts per `CLAUDE.md §3` (not resolved, reported for the maintainer to decide): `CLAUDE.md §5`'s Stable Core API listing is stale against `MinimaAds.md §7`/the actual code (missing the `role` parameter, `saveFrame` rename); `docs/KNOWN_ISSUES.md §4` says never add `ALTER TABLE` migrations while `AGENTS.md §2.2`'s checklist requires `ADD COLUMN IF NOT EXISTS`; `MinimaAds.md §10.1`'s prose says `MAX_VIEWS_PER_CAMPAIGN_PER_DAY = 1` while §5/§5.1 and the code say `100`.
+
+**T-REP0 finding and fix**: while surveying the existing profile-exchange flow (`PROFILE_REQUEST`/`PROFILE_RESPONSE`, `MinimaAds.md §8.17`/§8.18) as groundwork for later reputation badges, the design pass found `PROFILE_RESPONSE` was unauthenticated. `maxima.handler.js`'s dispatcher called `handleProfileResponse(payload)` with no sender argument at all, and `campaign.handler.js`'s handler cached `payload.publickey` — a field from the message body, not the Maxima transport — directly into `MDS.keypair` as `CREATOR_PROFILE_<PK>`. Any node could send a `PROFILE_RESPONSE` claiming to be a third party's public key, poisoning that party's cached name/avatar on the receiving node (rendered in the campaign list by `dapp/views/viewer.js` `_applyProfileToRow`). Not a fund-loss or RCE vector — XSS-1 already restricts the icon field to `data:image/...` URIs — but a direct visual-impersonation vector, and specifically the wrong foundation to build a reputation badge on top of: a badge next to a spoofable name inherits the impersonation's credibility.
+
+Fixed the same way the codebase already authenticates every other inbound Maxima type (`_assertCreatorThen`, AUD-3/AUD-4's sender checks): pass the transport-level `msg.data.from` into the handler and require it to match the claimed `publickey` before trusting anything in the payload.
+- `maxima.handler.js`: dispatcher now calls `handleProfileResponse(payload, msg.data.from || '')`.
+- `campaign.handler.js`: `handleProfileResponse(payload, senderPk)` drops the message (logs `"[PROFILE] RESPONSE publickey mismatch, dropping"`) unless `payload.publickey.toUpperCase() === senderPk.toUpperCase()`, matching the `.toUpperCase()`-both-sides convention used everywhere else in the file.
+
+**Files modified**:
+- `public/service-workers/handlers/maxima.handler.js` — pass `senderPk` to `handleProfileResponse`.
+- `public/service-workers/handlers/campaign.handler.js` — `handleProfileResponse` signature + sender/publickey match check.
+- `MinimaAds.md §8.18` — documented the new `senderPk` parameter and the match requirement.
+- `docs/KNOWN_ISSUES.md §3` — new Closed/Fixed row `AUD-6`.
+
+**Verification**: live-tested the same session on the running 5-node harness, after a `Zip & Install to Nodes` redeploy (all 5 nodes updated cleanly, no SW load errors). Two real cross-node tests, same adversarial-probe pattern as OPEN-3's 2026-09-10 session (real `maxima action:send` from a genuinely distinct node, not a same-node unit test):
+1. **Attack**: Node 4 (attacker) sent a hand-crafted `PROFILE_RESPONSE` directly to Node 2 (victim) claiming `publickey` = Node 1's real Maxima key, `name:'FAKE-HACKED-NAME'` (`delivered:true`). Node 2's own SW log recorded `[PROFILE] RESPONSE publickey mismatch, dropping (claimed 0X30819F30...)` at the exact send time, and `MDS.keypair.get('CREATOR_PROFILE_<NODE1_PK>')` on Node 2 returned `value: null` both before and after — confirmed not poisoned.
+2. **Legitimate round-trip, same victim node**: Node 2 sent a real `PROFILE_REQUEST` to Node 1 (`delivered:true`); Node 1's SW responded with a genuine `PROFILE_RESPONSE` (sender matches claimed key); Node 2's keypair then read back `{"name":"user1","icon":""}` — the correct cached profile, proving the sender-match check doesn't break the normal flow it was added to guard.
+
+**Open issues**: T-REP1/T-REP2/T-REP3 remain to be implemented, each as its own session per `docs/TASKS.md` task-per-session convention. The three documentation conflicts above remain unresolved, awaiting maintainer decision.
+
+---
+
 ### Session: 2026-09-10 (OPEN-3 adversarial regression probe) — live-verified: a genuinely spoofed CAMPAIGN_FINISH/PAUSE is still rejected outright after OPEN-3's send-path changes
 
 **Source**: `docs/KNOWN_ISSUES.md` OPEN-3's own residual note — the one check its 2026-09-07 fix and 2026-09-08 live verification never completed: "an adversarial AUD-3 regression probe (a genuinely spoofed `CAMPAIGN_FINISH` from an untrusted sender)". Complexity assessed MEDIUM per `CLAUDE.md §2` (live security verification across SW handler layer, no protocol change) — confirmed with the maintainer, proceeded on Sonnet, no plan mode. The maintainer asked first whether OPEN-3's and OPEN-4's remaining items were worth doing at all; OPEN-3's probe was agreed as worth doing now (it re-tests an existing security gate after adjacent code changed), OPEN-4's "Phase 3" escalation was agreed to stay deliberately deferred (no code touched).

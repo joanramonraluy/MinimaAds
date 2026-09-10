@@ -1482,14 +1482,21 @@ function handleProfileRequest(payload, senderPk) {
 // Caches full profile (including large icon) to keypair, then signals FE with
 // only publickey + name to avoid MDS.comms.solo size limits on large icons.
 // FE reads the icon from keypair when applying the profile to the DOM.
-// MinimaAds.md §8.18. Rhino-safe: var, function(), no arrows, no template literals.
+// senderPk (transport-level msg.data.from) must match payload.publickey —
+// otherwise any node could impersonate a third party's name/icon by sending
+// PROFILE_RESPONSE with someone else's publickey. MinimaAds.md §8.18.
+// Rhino-safe: var, function(), no arrows, no template literals.
 // ---------------------------------------------------------------------------
-function handleProfileResponse(payload) {
+function handleProfileResponse(payload, senderPk) {
   if (!payload.publickey) {
     MDS.log("[PROFILE] RESPONSE missing publickey — ignoring");
     return;
   }
   var pk = payload.publickey.toUpperCase();
+  if (!senderPk || pk !== senderPk.toUpperCase()) {
+    MDS.log("[PROFILE] RESPONSE publickey mismatch, dropping (claimed " + pk.substring(0, 10) + "...)");
+    return;
+  }
   MDS.log("[PROFILE] RESPONSE received from " + pk.substring(0, 10) + "...");
   var profileStr = JSON.stringify({name: payload.name || "", icon: payload.icon || ""});
   // Cache full profile in keypair; signal FE with name only (icon read from keypair by FE)

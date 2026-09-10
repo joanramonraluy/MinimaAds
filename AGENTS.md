@@ -174,6 +174,12 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent sessions here, as **short pointers only** — one-line summary + files touched + open issues, ending with a reference to the full narrative in `docs/HISTORY.md §17`. The full problem/fix/verification write-up is written **once**, directly into `docs/HISTORY.md §17`, never duplicated here. When adding a new entry pushes this past 3, just **delete** the oldest pointer — nothing to move, its full content already lives permanently in `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-09-11 (AUD-6 / T-REP0) — PROFILE_RESPONSE spoofing closed, first step of the auth/reputation roadmap item
+
+Maintainer prioritized "auth/reputation" (of the 4 `docs/TASKS.md` roadmap items) over analytics/cross-dApp settlement/governance. Opus design pass (plan mode, no code) split it into T-REP0 (this session) / T-REP1 / T-REP2 (MEDIUM/HIGH, not started) / T-REP3 (XHIGH signed attestations, separate future approval) — Phases 1–2 add zero new Maxima messages and zero new fields on protected entities, so only Phase 3 is a genuine new trust model. Along the way found `PROFILE_RESPONSE` was unauthenticated: `handleProfileResponse` trusted `payload.publickey` with no check against the real Maxima sender, letting any node poison a third party's cached name/avatar (`CREATOR_PROFILE_<PK>`) — fixed by requiring `payload.publickey.toUpperCase() === msg.data.from.toUpperCase()`. Live-verified on the redeployed 5-node harness (same adversarial pattern as the 2026-09-10 OPEN-3 probe): a forged `PROFILE_RESPONSE` from Node 4 claiming Node 1's key was dropped by Node 2 (logged mismatch, `CREATOR_PROFILE_<PK>` stayed `null`), while a real `PROFILE_REQUEST`→`PROFILE_RESPONSE` round-trip between the same two nodes still cached the correct name. Files: `public/service-workers/handlers/maxima.handler.js`, `public/service-workers/handlers/campaign.handler.js`, `MinimaAds.md §8.18`, `docs/KNOWN_ISSUES.md` (new row AUD-6). Open issues: T-REP1/2/3 not started; 3 pre-existing doc conflicts flagged during design (`CLAUDE.md §5` stale API list, `KNOWN_ISSUES.md §4` vs `AGENTS.md §2.2` on `ALTER TABLE`, `MinimaAds.md §10.1` vs §5/§5.1 on `MAX_VIEWS_PER_CAMPAIGN_PER_DAY`) remain unresolved. Full detail: `docs/HISTORY.md §17`, session 2026-09-11 (AUD-6 / T-REP0).
+
+---
+
 ### Session: 2026-09-10 (OPEN-3 adversarial regression probe) — live-verified: spoofed CAMPAIGN_FINISH/PAUSE still rejected outright
 
 Closed the last open caveat on `docs/KNOWN_ISSUES.md` OPEN-3: sent a forged `CAMPAIGN_FINISH` and `CAMPAIGN_PAUSE` from a real, non-creator Maxima identity (Node 4) directly to a clean campaign row (Node 2) on the live 6-node harness. Both were rejected outright by `_assertCreatorThen` (fail-closed — no `ok()` call), logged `status change rejected: sender is not the creator`, and left `CAMPAIGNS.STATUS` unchanged. Confirms OPEN-3's new send path (`propagateStatusToChannelPeers`) didn't weaken the pre-existing AUD-3 authentication gate it reuses unchanged. Verification only, no code change. Files: none. Open issues: OPEN-4's "Phase 3" escalation remains deliberately deferred (discussed, not implemented). Full detail: `docs/HISTORY.md §17`, session 2026-09-10 (OPEN-3 adversarial regression probe).
@@ -186,11 +192,5 @@ Closed `docs/KNOWN_ISSUES.md` fragility #61. Not a relay/MLS staleness issue as 
 
 ---
 
-### Session: 2026-09-09 (Fragility #60) — docs-only: reconciled STATE(10) status-update-tx notes to the shipped code
-
-Closed `docs/KNOWN_ISSUES.md` fragility #60: `MinimaAds.md` Appendix B.5 documented `STATE(10) = 0` for the status-update tx, but the shipped code (`buildStatusUpdateStatePorts`) has always set it to the coin's full amount instead (both script-safe, doc just lagged the code). Reconciled the doc to the code — no code change. Files: `MinimaAds.md`. Full detail: `docs/HISTORY.md §17`, session 2026-09-09 (Fragility #60).
-
----
-
-> Previous handoff notes (2026-09-09 OPEN-5, 2026-09-09 Fragility #58, 2026-09-07 OPEN-3, AUD-1, patches 15–25, Security Audit 2, and all earlier) are archived in `docs/HISTORY.md §17`.
+> Previous handoff notes (2026-09-09 Fragility #60, 2026-09-09 OPEN-5, 2026-09-09 Fragility #58, 2026-09-07 OPEN-3, AUD-1, patches 15–25, Security Audit 2, and all earlier) are archived in `docs/HISTORY.md §17`.
 

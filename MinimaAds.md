@@ -1406,7 +1406,7 @@ Sent by the viewer's FE when building the campaign list and the campaign creator
 | `name` | string | Creator's Maxima display name (empty string if not set) |
 | `icon` | string | Creator's avatar as a data URL (empty string if not set) |
 
-**Handler (viewer node)**: `handleProfileResponse(payload)` in `campaign.handler.js`
+**Handler (viewer node)**: `handleProfileResponse(payload, senderPk)` in `campaign.handler.js`. `senderPk` is the transport-level `msg.data.from` — the handler drops the message unless `payload.publickey.toUpperCase() === senderPk.toUpperCase()`, so a node cannot claim a third party's `publickey` to poison that party's cached name/icon.
 
 **Effect**: Viewer's SW signals FE with `PROFILE_RECEIVED { publickey, name, icon }`. FE caches the profile in keypair (`CREATOR_PROFILE_<PK>`) and updates the campaign list row in-place (avatar image + creator name). Cached profiles are reused on subsequent list renders without re-requesting.
 

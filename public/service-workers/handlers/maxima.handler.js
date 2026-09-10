@@ -58,7 +58,7 @@ function onMaxima(msg) {
   } else if (payload.type === "PROFILE_REQUEST") {
     handleProfileRequest(payload, msg.data.from || '');
   } else if (payload.type === "PROFILE_RESPONSE") {
-    handleProfileResponse(payload);
+    handleProfileResponse(payload, msg.data.from || '');
   } else if (payload.type === "REGISTER_PERMANENT_REQUEST") {
     handleRegisterPermanentRequest(payload, msg.data.from || '');
   } else if (payload.type === "REGISTER_PERMANENT_RESPONSE") {

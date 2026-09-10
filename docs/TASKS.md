@@ -100,14 +100,19 @@ Tags are created by the **maintainer**, not the agent. The agent's job is to not
 | **T-SC5** | **Core** | `core/campaigns.js` | ✅ Done |
 | **T-SC6** | **FE** | `dapp/app.js`, `dapp/views/mycampaigns.js` | ✅ Done |
 | **T-SC7** | **Docs** | `docs/KNOWN_ISSUES.md`, `docs/VERIFICATION.md`, `AGENTS.md` | ✅ Done |
+| **T-REP0** | **SW** | `maxima.handler.js`, `campaign.handler.js` | ✅ Done |
+| **T-REP1** | **DB + Core** | `db-init.js` (×2 runtimes), `core/reputation.js` (new) | ⬜ Pending |
+| **T-REP2** | **SW + FE** | `campaign.handler.js`, `channel.handler.js`, `dapp/views/*.js` | ⬜ Pending |
+| **T-REP3** | **Protocol** | `maxima.handler.js`, `campaign.handler.js`, `MinimaAds.md §8` | ⬜ Pending — **XHIGH, needs separate approval** |
 
 ---
 
 ## Next Task
 
-When all current blocks (T1–T-SC7) are complete and verified on Minima, the next phase would include:
+Auth/reputation (chosen 2026-09-11 as the roadmap item to prioritize) is staged into T-REP0–T-REP3 above per the Opus design proposal — see `docs/HISTORY.md §17`, session 2026-09-11 (AUD-6 / T-REP0), for the full design (data model, evidence sources, per-layer impact, abuse vectors). T-REP1 is the next task to pick up.
 
-- **User authentication & reputation** — trusted publisher/creator accounts
+The other three roadmap candidates remain unstarted:
+
 - **Advanced analytics** — cohort analysis, fraud detection
 - **Cross-dApp settlement** — MinimaAds as a settlement layer for other dApps
 - **Governance** — community-driven parameter tuning

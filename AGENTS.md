@@ -174,6 +174,12 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent sessions here, as **short pointers only** — one-line summary + files touched + open issues, ending with a reference to the full narrative in `docs/HISTORY.md §17`. The full problem/fix/verification write-up is written **once**, directly into `docs/HISTORY.md §17`, never duplicated here. When adding a new entry pushes this past 3, just **delete** the oldest pointer — nothing to move, its full content already lives permanently in `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-09-10 (Fragility #61) — root cause found and fixed: SDK creator-route detection never recognized `MAX#pk#mls` routes
+
+Closed `docs/KNOWN_ISSUES.md` fragility #61. Not a relay/MLS staleness issue as originally hypothesized — ruled that out live first (6/6 raw `sendMaxima` PING/PONG round-trips succeeded immediately post-redeploy). Root cause: `sdk/index.js`'s `_sendLivenessPing`/`_sendToCreator` checked `creatorRoute.substring(0,2) === 'MX'` to pick `to:` vs `publickey:` routing, which never matches a `MAX#<pk>#<mls>` permanent route (`"MAX#..."` → `"MA"`, not `"MX"`) — exactly what `campaign.handler.js` normally stores in keypair `CREATOR_MX_<campaignId>`. Every such route got sent as a malformed `publickey:MAX#...` value, deterministically failing `"No Contact found"`. Fixed with a new shared `_isMaximaRouteString()` helper recognizing both prefixes. Live-verified: `MinimaAds.trackView()` now succeeds where it always failed before; this also unblocked OPEN-5's deferred live E2E verification (real channel, real voucher, real settlement tx mined on-chain, reward paid — see full detail). Files: `sdk/index.js`. Open issues: none new — `_checkOpenChannelsSettled`'s own NEWBLOCK path wasn't directly observed firing (the SW's identical logic won the race on the SW-installed test tab used), flagged for a future no-SW-tab session if it matters. Full detail: `docs/HISTORY.md §17`, session 2026-09-10 (Fragility #61).
+
+---
+
 ### Session: 2026-09-09 (Fragility #60) — docs-only: reconciled STATE(10) status-update-tx notes to the shipped code
 
 Closed `docs/KNOWN_ISSUES.md` fragility #60: `MinimaAds.md` Appendix B.5 documented `STATE(10) = 0` for the status-update tx, but the shipped code (`buildStatusUpdateStatePorts`) has always set it to the coin's full amount instead (both script-safe, doc just lagged the code). Reconciled the doc to the code — no code change. Files: `MinimaAds.md`. Full detail: `docs/HISTORY.md §17`, session 2026-09-09 (Fragility #60).
@@ -186,11 +192,5 @@ Closed `docs/KNOWN_ISSUES.md` OPEN-5: a viewer on a bare `sdk/index.js` embed (n
 
 ---
 
-### Session: 2026-09-09 (Fragility #58) — stale voucher MMR proof no longer silently breaks settlement
-
-Closed `docs/KNOWN_ISSUES.md` fragility #58: a settlement voucher's embedded MMR proof goes stale after enough blocks pass; `txnimport`/`txnsign`/`txnpost` all reported `status:true` regardless (txnpost validates nothing), so the channel coin silently never spent — hit twice already, both times right after a campaign Finish. Fixed with three parts: (1) a `txncheck` gate in `_runSettlementInner` (earnings.js) requiring `valid.mmrproofs === true` before signing/posting; (2) `handleVoucherSyncRequest` (channel.handler.js) now rebuilds fresh for a `'settling'` channel row too, not just `'open'` — the exact state right after Finish; (3) a one-shot retry (`_registerSettleRetry`/`_retrySettlementAfterVoucher`) that re-invokes settlement with a freshly DB-read voucher once a resync reply arrives, covering both the manual Settle button and the unattended auto-settle path. Live-verified on the 6-node harness: the `'settling'` recovery confirmed via raw node log (`rebuilding voucher fresh`, not the old resend path); the retry confirmed via a real end-to-end settlement driven entirely by the new retry hook, reaching `CHANNEL_STATE.STATUS='settled'`. The `txncheck` detection gate itself was confirmed not to false-positive on a healthy voucher, but a genuine ~60-block staleness repro (the actual failure case) was not reproduced live this session — judged acceptable given the gate is a narrow, source-verified read of `txncheck`'s response shape, but flagged as the one open loose end. Files: `dapp/views/earnings.js`, `dapp/app.js`, `channel.handler.js`, `MinimaAds.md`. Open issues: OPEN-5 (unchanged), fragility #60 (informational, unchanged). Full detail: `docs/HISTORY.md §17`, session 2026-09-09 (Fragility #58).
-
----
-
-> Previous handoff notes (2026-09-07 OPEN-3, AUD-1, patches 15–25, Security Audit 2, and all earlier) are archived in `docs/HISTORY.md §17`.
+> Previous handoff notes (2026-09-09 Fragility #58, 2026-09-07 OPEN-3, AUD-1, patches 15–25, Security Audit 2, and all earlier) are archived in `docs/HISTORY.md §17`.
 

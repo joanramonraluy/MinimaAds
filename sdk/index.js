@@ -289,24 +289,38 @@
     return _myMx;
   }
 
+  // Fragility #61 (2026-09-10): creatorRoute may be a bare Mx contact string
+  // (starts with "Mx"/"MX"), a MAX#<pk>#<mls> permanent route (starts with
+  // "MAX#" — this is what campaign.handler.js actually stores in keypair
+  // CREATOR_MX_<campaignId> once on-chain discovery resolves it, per its own
+  // comment at that keypair.set call), or a bare Maxima public key (starts
+  // with "0x"). Both Mx and MAX# forms are full routes and must use `to:`
+  // routing; only a bare pk needs `publickey:` routing (which additionally
+  // requires the peer to already be in the local contacts list). Checking
+  // only for the "Mx" prefix here mistook every MAX# route for a bare pk and
+  // sent the whole "MAX#..." string as a malformed publickey value — this
+  // always failed with "No Contact found for publickey : MAX#...", which is
+  // exactly what surfaced as "creator offline" for any campaign whose route
+  // had already been resolved (the normal case, not an edge case).
+  function _isMaximaRouteString(s) {
+    if (!s) { return false; }
+    var upper = s.toUpperCase();
+    return upper.substring(0, 2) === 'MX' || upper.substring(0, 4) === 'MAX#';
+  }
+
   // Unicast Maxima send with poll:false (poll:true blocks the event loop ~77s when peer is offline).
-  // creatorRoute may be an Mx contact string (starts with "Mx" or "MX") or a
-  // Maxima public key (starts with "0x"). Mx uses `to:` routing; pk uses
-  // `publickey:` routing (requires the peer to be in the contacts list).
-  // campaign.handler.js stores the Mx in keypair CREATOR_MX_<campaignId>
-  // during on-chain discovery — that value is preferred; pk is the fallback.
   function _sendToCreator(creatorRoute, payload, cb) {
     if (!creatorRoute) { if (cb) { cb(false); } return; }
     var hex = '0x' + utf8ToHex(JSON.stringify(payload)).toUpperCase();
-    var isMx = (creatorRoute.substring(0, 2).toUpperCase() === 'MX');
-    var routeParam = isMx ? ('to:' + creatorRoute) : ('publickey:' + creatorRoute);
+    var isRoute = _isMaximaRouteString(creatorRoute);
+    var routeParam = isRoute ? ('to:' + creatorRoute) : ('publickey:' + creatorRoute);
     var cmd = 'maxima action:send ' + routeParam
             + ' application:' + APP_NAME
             + ' data:' + hex
             + ' poll:false';
     MDS.cmd(cmd, function(res) {
       var ok = !!(res && res.status);
-      console.log('[SDK] sendToCreator type:' + payload.type + ' route:' + (isMx ? 'Mx' : 'pk') + ' ok:' + ok + (ok ? '' : ' err:' + (res && res.error)));
+      console.log('[SDK] sendToCreator type:' + payload.type + ' route:' + (isRoute ? 'route' : 'pk') + ' ok:' + ok + (ok ? '' : ' err:' + (res && res.error)));
       if (cb) { cb(ok); }
     });
   }
@@ -576,8 +590,8 @@
     if (!creatorRoute) { if (cb) { cb(false); } return; }
     var payload = { type: 'CREATOR_LIVENESS_PING', campaign_id: campaignId, viewer_mx: _myMxAddress() };
     var hex = '0x' + utf8ToHex(JSON.stringify(payload)).toUpperCase();
-    var isMx = (creatorRoute.substring(0, 2).toUpperCase() === 'MX');
-    var routeParam = isMx ? ('to:' + creatorRoute) : ('publickey:' + creatorRoute);
+    var isRoute = _isMaximaRouteString(creatorRoute);
+    var routeParam = isRoute ? ('to:' + creatorRoute) : ('publickey:' + creatorRoute);
     var cmd = 'maxima action:send ' + routeParam
             + ' application:' + APP_NAME
             + ' data:' + hex

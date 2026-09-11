@@ -24,26 +24,46 @@ var LIMITS = {
   SETTLEMENT_GRACE_DAYS:           7
 };
 
-// T-REP1 reputation scoring constants — MinimaAds.md §7.8. Separate from
-// LIMITS (a protocol contract) since these are pure local-scoring tuning,
-// never referenced by any Maxima schema or KissVM script.
+// T-REP1/T-REP2 reputation scoring constants — MinimaAds.md §7.8. Separate
+// from LIMITS (a protocol contract) since these are pure local-scoring
+// tuning, never referenced by any Maxima schema or KissVM script.
 var REPUTATION = {
   HALFLIFE_MS:               7776000000, // 90 days — evidence weight halves this often
   RETENTION_MS:              15552000000, // 180 days — 2x halflife; older rows are pruned
-  WEIGHT_SETTLED_CHANNEL:    10,
-  WEIGHT_PUBLISHER_SETTLED:  10,
+  WEIGHT_SETTLED_CHANNEL:            10,
+  WEIGHT_PUBLISHER_SETTLED:          10,
+  WEIGHT_ESCROW_FUNDED:               5, // on-chain fact, weaker signal than an actual settlement
+  WEIGHT_CAMPAIGN_FINISHED_CLEAN:    15, // finished with no abandoned channel at grace deadline
+  WEIGHT_ABANDONED_CHANNEL:         -25, // finished, grace period elapsed, still owed money
+  WEIGHT_CREATOR_ASSERT_FAILED:     -20, // _assertCreatorThen rejected a forged status-change sender
+  WEIGHT_IDENTITY_PIN_VIOLATION:    -20, // AUD-4 pinning fired — sender tried to rewrite identity fields
+  WEIGHT_FRAME_OWNERSHIP_CONFLICT:  -15, // claimed a frame_id owned by a different publisher
   WEIGHT_ACCOUNT_AGE_CAP:    5,
   ACCOUNT_AGE_FULL_MS:       2592000000, // 30 days to reach the full age bonus
   CAP_DEFAULT:               40,
   CAP_BY_KIND: {
-    settled_channel:   60,
-    publisher_settled: 60
+    settled_channel:          60,
+    publisher_settled:        60,
+    escrow_funded:            30,
+    campaign_finished_clean:  45,
+    abandoned_channel:        80,
+    creator_assert_failed:    60,
+    identity_pin_violation:   60,
+    frame_ownership_conflict: 45
   },
+  // "Hard" negative kinds are proof of an active attempt to spoof/impersonate,
+  // observed only via the transport-verified sender (never a payload field —
+  // see recordSettlementReputationEvidence/campaign.handler.js/channel.handler.js
+  // for the never-self / real-sender rule). Any single occurrence forces
+  // TIER 'flagged' regardless of decay, unlike abandoned_channel which is a
+  // purely economic negative and only affects the numeric score.
+  HARD_NEGATIVE_KINDS: ['creator_assert_failed', 'identity_pin_violation', 'frame_ownership_conflict'],
   TIER_OK_SCORE:              10,
   TIER_OK_MIN_AGE_MS:         604800000, // 7 days
   TIER_TRUSTED_SCORE:         40,
   TIER_TRUSTED_MIN_EVIDENCE:  3,
-  TIER_TRUSTED_MIN_AGE_MS:    2592000000 // 30 days
+  TIER_TRUSTED_MIN_AGE_MS:    2592000000, // 30 days
+  TIER_FLAGGED_SCORE:        -30
 };
 
 // Node identity — set once in onInited after maxima action:info
@@ -466,7 +486,7 @@ MDS.init(function(msg) {
     // NEWBLOCK data is the TxPoW of the new tip; height at header.block.
     var tipBlock = 0;
     try { tipBlock = parseInt(msg.data.txpow.header.block, 10); } catch (e) { tipBlock = 0; }
-    scanEscrowCoins(); checkPendingChannelOpens(); checkExpiredCampaigns(tipBlock); _checkChannelCoinsOnBlock(); pruneDedupLog(); pruneReputationEvents();
+    scanEscrowCoins(); checkPendingChannelOpens(); checkExpiredCampaigns(tipBlock); _checkChannelCoinsOnBlock(); pruneDedupLog(); pruneReputationEvents(); sweepFinishedCampaignReputation();
     processMaximaOutbox();
     _livenessCheckBlock++;
     if (_livenessCheckBlock % 20 === 0) { checkCampaignStatuses(); }

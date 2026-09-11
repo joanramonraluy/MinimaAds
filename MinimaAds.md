@@ -287,15 +287,17 @@ CREATE TABLE IF NOT EXISTS CHANNEL_STATE (
   PRIMARY KEY (CAMPAIGN_ID, VIEWER_KEY, ROLE)
 );
 
--- T-REP1 — first-party reputation. See §7.8 for the API and scoring rules.
+-- T-REP1/T-REP2 — first-party reputation. See §7.8 for the API and scoring rules.
 CREATE TABLE IF NOT EXISTS REPUTATION_EVENTS (
   ID           VARCHAR(1024) PRIMARY KEY, -- deterministic: KIND:SUBJECT_ROLE:SUBJECT_KEY:SCOPE_ID (idempotent MERGE)
   SUBJECT_KEY  VARCHAR(512)  NOT NULL,     -- Maxima public key of the scored party (0x...)
   SUBJECT_ROLE VARCHAR(16)   NOT NULL,     -- 'creator' | 'publisher'
-  KIND         VARCHAR(32)   NOT NULL,     -- 'settled_channel' | 'publisher_settled' (T-REP1)
-  WEIGHT       DECIMAL(20,6) NOT NULL,     -- signed contribution before time-decay
-  SCOPE_ID     VARCHAR(256)  DEFAULT '',   -- usually CAMPAIGN_ID; caps double-counting of the same fact
-  SOURCE       VARCHAR(16)   NOT NULL,     -- 'local' (T-REP1) | 'chain' (T-REP2) — never 'peer' derived from a Maxima payload
+  KIND         VARCHAR(32)   NOT NULL,     -- settled_channel/publisher_settled (T-REP1); escrow_funded/
+                                            -- campaign_finished_observed/campaign_finished_clean/abandoned_channel/
+                                            -- creator_assert_failed/identity_pin_violation/frame_ownership_conflict (T-REP2)
+  WEIGHT       DECIMAL(20,6) NOT NULL,     -- signed contribution before time-decay; 0 for campaign_finished_observed (clock only)
+  SCOPE_ID     VARCHAR(256)  DEFAULT '',   -- usually CAMPAIGN_ID (or FRAME_ID for frame_ownership_conflict); caps double-counting
+  SOURCE       VARCHAR(16)   NOT NULL,     -- 'local' | 'chain' — never 'peer' derived from a Maxima payload
   OBSERVED_AT  BIGINT        NOT NULL
 );
 
@@ -303,7 +305,7 @@ CREATE TABLE IF NOT EXISTS PEER_REPUTATION (
   SUBJECT_KEY   VARCHAR(512)  NOT NULL,
   SUBJECT_ROLE  VARCHAR(16)   NOT NULL,
   SCORE         DECIMAL(20,6) NOT NULL DEFAULT 0,  -- clamped [-100, 100]; derived cache, safe to recompute from REPUTATION_EVENTS
-  TIER          VARCHAR(16)   NOT NULL DEFAULT 'unknown', -- 'unknown' | 'new' | 'ok' | 'trusted' (§7.8)
+  TIER          VARCHAR(16)   NOT NULL DEFAULT 'unknown', -- 'unknown' | 'new' | 'ok' | 'trusted' | 'flagged' (§7.8)
   EV_POSITIVE   INT           NOT NULL DEFAULT 0,
   EV_NEGATIVE   INT           NOT NULL DEFAULT 0,
   FIRST_SEEN_AT BIGINT        NOT NULL,
@@ -1043,12 +1045,13 @@ signalFE(type, data)
 // Fire-and-forget. No second argument.
 ```
 
-### 7.8 reputation.js (T-REP1)
+### 7.8 reputation.js (T-REP1/T-REP2)
 
 First-party reputation: an append-only evidence log (`REPUTATION_EVENTS`) plus
-a derived score cache (`PEER_REPUTATION`), §3.5. No UI yet, no on-chain
-evidence yet (T-REP2), no cross-node attestations (T-REP3, separate approval
-— a real new trust model, unlike this phase).
+a derived score cache (`PEER_REPUTATION`), §3.5. UI badges as of T-REP2
+(`dapp/views/campaigns.js` creator badge, `dapp/views/mycampaigns.js`
+publisher badge in both nested tables). Still no cross-node attestations
+(T-REP3, separate approval — a real new trust model, unlike this phase).
 
 **Invariant R1 (mandatory for every future extension of this module)**: a
 reputation weight can never derive from an inbound Maxima payload field.
@@ -1095,10 +1098,46 @@ recordSettlementReputationEvidence(creatorMx, role, frameId, campaignId)
 // handleFePending 'settlement_post' branch (FE) — both are the only places
 // in the codebase where a channel settlement is confirmed post-on-chain-spend.
 
+recordOnChainEscrowEvidence(creatorPkRoute, creatorMxAddr, campaignId)
+// T-REP2 — 'escrow_funded' evidence about the creator. Call ONLY from
+// _applyTrustedEscrowCoin (campaign.handler.js), i.e. only for a coin that
+// has already passed the OPEN-4 forward-lineage trust gate
+// (_resolveEscrowCoinTrust) — never from processEscrowCoin's unverified
+// branches, or this reintroduces OPEN-4's forged-coin attack against
+// reputation instead of campaign state.
+
+recordCampaignFinishObserved(creatorPkRoute, creatorMxAddr, campaignId)
+// T-REP2 — plants a zero-weight clock marker the first time this node
+// observes a campaign's on-chain status transition to 'finished' (same
+// trust preconditions as recordOnChainEscrowEvidence). Weight 0 by design:
+// never affects score directly, only lets sweepFinishedCampaignReputation
+// compute a grace deadline without adding a FINISHED_AT column to the
+// protected CAMPAIGNS table.
+
+sweepFinishedCampaignReputation()
+// T-REP2 — SW-only, NEWBLOCK-driven, time-gated (6h) like pruneReputationEvents.
+// For every campaign with an unresolved 'campaign_finished_observed' marker
+// older than LIMITS.SETTLEMENT_GRACE_DAYS: checks this node's OWN
+// CHANNEL_STATE for that campaign. An open/settling channel still owed money
+// (CUMULATIVE_EARNED > 0) → 'abandoned_channel' (negative); otherwise →
+// 'campaign_finished_clean' (positive).
+
 pruneReputationEvents()
 // SW-only, NEWBLOCK-driven, time-gated like pruneDedupLog. Deletes evidence
 // older than REPUTATION.RETENTION_MS (2× the score half-life).
 ```
+
+**T-REP2 negative-evidence hooks** — each records evidence about the real,
+transport-verified sender (`msg.data.from`), never a payload-claimed identity
+(rule 5.2: a single forged message must not be able to defame someone else's
+reputation): `creator_assert_failed` (`_assertCreatorThen` rejection,
+`campaign.handler.js`), `identity_pin_violation` (AUD-4 pinning branch,
+`handleCampaignAnnounce`), `frame_ownership_conflict` (frame-ownership check,
+`handleChannelOpenRequest`, `channel.handler.js`). `platform_key_mismatch`
+(PREVSTATE(5) fee-dodge detection) remains **deferred** — its rejection point
+in `_continueCampaignAnnounce` runs before a campaign row or an OPEN-4 anchor
+exists, so there is no trusted subject to attribute it to yet; revisit only
+with its own design pass, not as a quick add-on.
 
 **Scoring** (`_scoreFromEvidence`, pure function): each row's weight decays
 exponentially with `REPUTATION.HALFLIFE_MS`, sums are capped per `KIND`
@@ -1111,8 +1150,11 @@ so a fresh identity never renders as indistinguishable from a
 track-recorded one) → `new` (some evidence, not enough score/age yet) →
 `ok` (`score ≥ REPUTATION.TIER_OK_SCORE` and old enough) → `trusted`
 (`score ≥ REPUTATION.TIER_TRUSTED_SCORE`, enough distinct positive evidence,
-and old enough). No `flagged` tier yet — T-REP1 has no negative evidence
-kinds; that arrives with T-REP2's on-chain rejection-point hooks.
+and old enough) → **`flagged`** overrides every other tier: either a single
+occurrence of a `REPUTATION.HARD_NEGATIVE_KINDS` row (proof of an active
+spoofing/impersonation attempt — always the three sender-verified kinds
+above, never `abandoned_channel`, which is a purely economic negative and
+only affects the numeric score) or `score ≤ REPUTATION.TIER_FLAGGED_SCORE`.
 
 **Reputation is local and non-transferable**: node A and node B may score
 the same subject differently, and that is correct — each scores its own

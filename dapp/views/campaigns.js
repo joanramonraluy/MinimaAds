@@ -250,6 +250,21 @@ function _buildCampaignsRow(campaign) {
   var statusBadge = mkStatusBadge(campaign.STATUS);
   titleRow.appendChild(statusBadge);
 
+  // T-REP2 — creator reputation badge (MinimaAds.md §7.8). Async: getReputation
+  // reads a local cache, never blocks row rendering. Skipped for 'unknown'
+  // (mkReputationBadge's own contract) and for the viewer's own campaigns.
+  var creatorAddrForRep = (campaign.CREATOR_ADDRESS || '').toUpperCase();
+  if (creatorAddrForRep && (!MY_ADDRESS || creatorAddrForRep !== MY_ADDRESS.toUpperCase())
+      && typeof getReputation === 'function') {
+    var repBadgeSlot = document.createElement('span');
+    titleRow.appendChild(repBadgeSlot);
+    getReputation(creatorAddrForRep, 'creator', function(repErr, rep) {
+      if (!repErr && rep && rep.TIER && rep.TIER !== 'unknown') {
+        repBadgeSlot.appendChild(mkReputationBadge(rep.TIER));
+      }
+    });
+  }
+
   if (isViewer && campaign.USER_CHANNEL_STATUS) {
     var cStatus = campaign.USER_CHANNEL_STATUS || '';
     if (cStatus === 'open' || cStatus === 'pending') {

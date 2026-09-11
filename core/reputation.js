@@ -140,6 +140,7 @@ function _scoreFromEvidence(rows) {
   var evPositive = 0;
   var evNegative = 0;
   var firstSeenAt = null;
+  var hasHardNegative = false;
   var i, row, weight, kind, observedAt, age, decay;
 
   for (i = 0; i < rows.length; i++) {
@@ -156,6 +157,7 @@ function _scoreFromEvidence(rows) {
     if (!perKindSum.hasOwnProperty(kind)) { perKindSum[kind] = 0; }
     perKindSum[kind] += weight * decay;
     if (weight > 0) { evPositive++; } else if (weight < 0) { evNegative++; }
+    if (REPUTATION.HARD_NEGATIVE_KINDS.indexOf(kind) !== -1) { hasHardNegative = true; }
   }
 
   var total = 0;
@@ -183,7 +185,7 @@ function _scoreFromEvidence(rows) {
 
   return {
     score: total,
-    tier: _tierFromScore(total, evPositive, firstSeenAt),
+    tier: _tierFromScore(total, evPositive, evNegative, firstSeenAt, hasHardNegative),
     evPositive: evPositive,
     evNegative: evNegative,
     firstSeenAt: firstSeenAt
@@ -194,8 +196,13 @@ function _scoreFromEvidence(rows) {
 // from 'new' (some evidence, not enough score/age yet) per MinimaAds.md §7.8
 // — a fresh identity must never render as indistinguishable from a
 // track-recorded one just because its score also starts near zero.
-function _tierFromScore(score, evPositive, firstSeenAt) {
-  if (evPositive === 0) { return 'unknown'; }
+// 'flagged' overrides every other tier: either a single occurrence of a hard
+// negative kind (proof of an active spoofing/impersonation attempt, T-REP2),
+// or a score low enough that hard-negative status is irrelevant.
+function _tierFromScore(score, evPositive, evNegative, firstSeenAt, hasHardNegative) {
+  if (evPositive === 0 && evNegative === 0) { return 'unknown'; }
+  if (hasHardNegative || score <= REPUTATION.TIER_FLAGGED_SCORE) { return 'flagged'; }
+  if (evPositive === 0) { return 'new'; }
   var ageMs = Date.now() - firstSeenAt;
   if (score >= REPUTATION.TIER_TRUSTED_SCORE &&
       evPositive >= REPUTATION.TIER_TRUSTED_MIN_EVIDENCE &&
@@ -272,6 +279,129 @@ function recordSettlementReputationEvidence(creatorMx, role, frameId, campaignId
     }, function(err2) {
       if (err2) { MDS.log("[REPUTATION] publisher_settled record failed: " + err2); }
     });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// recordOnChainEscrowEvidence — T-REP2 on-chain evidence hook. Call only from
+// _applyTrustedEscrowCoin (campaign.handler.js) — i.e. only for a coin that
+// has already passed the OPEN-4 forward-lineage trust gate
+// (_resolveEscrowCoinTrust). Recording this from processEscrowCoin's
+// unverified path would reintroduce OPEN-4's forged-coin attack, just against
+// reputation instead of campaign state — never move this call earlier.
+//
+// creatorPkRoute/creatorMxAddr: the same two identity sources
+// _applyTrustedEscrowCoin already resolved from STATE(4); at least one must
+// be present to identify a subject.
+// ---------------------------------------------------------------------------
+function recordOnChainEscrowEvidence(creatorPkRoute, creatorMxAddr, campaignId) {
+  var creatorPk = creatorPkRoute ? creatorPkRoute.toUpperCase() : '';
+  if (!creatorPk) {
+    var route = parseMaximaRoute(creatorMxAddr || '');
+    creatorPk = route ? route.publickey.toUpperCase() : '';
+  }
+  if (!creatorPk || creatorPk === _myMaximaPk()) { return; } // never-self rule
+  recordReputationEvent({
+    subject_key:  creatorPk,
+    subject_role: 'creator',
+    kind:         'escrow_funded',
+    scope_id:     campaignId || '',
+    source:       'chain',
+    weight:       REPUTATION.WEIGHT_ESCROW_FUNDED
+  }, function(err) {
+    if (err) { MDS.log("[REPUTATION] escrow_funded record failed: " + err); }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// recordCampaignFinishObserved — plants a zero-weight clock marker the first
+// time this node observes a campaign's on-chain status transition to
+// 'finished' (same trust/never-self preconditions as recordOnChainEscrowEvidence
+// — call only from the trusted STATE(7) transition branch). Deliberately
+// weight 0: it never affects score directly, it only exists so
+// sweepFinishedCampaignReputation (below) can compute a grace deadline without
+// adding a FINISHED_AT column to the protected CAMPAIGNS table.
+// ---------------------------------------------------------------------------
+function recordCampaignFinishObserved(creatorPkRoute, creatorMxAddr, campaignId) {
+  var creatorPk = creatorPkRoute ? creatorPkRoute.toUpperCase() : '';
+  if (!creatorPk) {
+    var route = parseMaximaRoute(creatorMxAddr || '');
+    creatorPk = route ? route.publickey.toUpperCase() : '';
+  }
+  if (!creatorPk || creatorPk === _myMaximaPk()) { return; }
+  recordReputationEvent({
+    subject_key:  creatorPk,
+    subject_role: 'creator',
+    kind:         'campaign_finished_observed',
+    scope_id:     campaignId || '',
+    source:       'chain',
+    weight:       0
+  }, function(err) {
+    if (err) { MDS.log("[REPUTATION] campaign_finished_observed record failed: " + err); }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// sweepFinishedCampaignReputation — SW-only, NEWBLOCK-driven, time-gated like
+// pruneReputationEvents. For every campaign this node has seen finish
+// on-chain (a 'campaign_finished_observed' marker exists) and not yet
+// resolved (no 'campaign_finished_clean'/'abandoned_channel' row for the same
+// scope), once LIMITS.SETTLEMENT_GRACE_DAYS has elapsed since that marker:
+// checks this node's OWN CHANNEL_STATE for that campaign — an open/settling
+// channel with money still owed (CUMULATIVE_EARNED > 0) means the creator
+// never paid out within the grace window ('abandoned_channel', negative);
+// otherwise the campaign closed clean from this node's point of view
+// ('campaign_finished_clean', positive). Processes rows one at a time
+// (Rhino has no async/await) so a slow DB round-trip never overlaps itself.
+// ---------------------------------------------------------------------------
+var _lastReputationSweepAt = 0;
+function sweepFinishedCampaignReputation() {
+  var now = Date.now();
+  var SIX_HOURS_MS = 21600000;
+  if (now - _lastReputationSweepAt < SIX_HOURS_MS) { return; }
+  _lastReputationSweepAt = now;
+
+  var graceMs = (LIMITS.SETTLEMENT_GRACE_DAYS || 7) * 86400000;
+  var sql = "SELECT SUBJECT_KEY, SCOPE_ID FROM REPUTATION_EVENTS" +
+    " WHERE KIND = 'campaign_finished_observed'" +
+    " AND OBSERVED_AT <= " + (now - graceMs) +
+    " AND SCOPE_ID NOT IN (" +
+    "   SELECT SCOPE_ID FROM REPUTATION_EVENTS WHERE KIND IN ('campaign_finished_clean', 'abandoned_channel')" +
+    " )";
+  sqlQuery(sql, function(err, rows) {
+    if (err) { MDS.log("[REPUTATION] sweepFinishedCampaignReputation query failed: " + err); return; }
+    _sweepNext(rows || [], 0);
+  });
+}
+
+function _sweepNext(rows, i) {
+  if (i >= rows.length) { return; }
+  var row = rows[i];
+  var campaignId = row.SCOPE_ID || '';
+  var subjectKey = (row.SUBJECT_KEY || '').toUpperCase();
+  var chSql = "SELECT COUNT(*) AS CNT FROM CHANNEL_STATE" +
+    " WHERE UPPER(CAMPAIGN_ID) = UPPER('" + escapeSql(campaignId) + "')" +
+    " AND STATUS IN ('open', 'settling')" +
+    " AND CUMULATIVE_EARNED > 0";
+  sqlQuery(chSql, function(err, chRows) {
+    var owedCount = (!err && chRows && chRows.length > 0) ? (parseInt(chRows[0].CNT, 10) || 0) : 0;
+    if (owedCount > 0) {
+      recordReputationEvent({
+        subject_key: subjectKey, subject_role: 'creator', kind: 'abandoned_channel',
+        scope_id: campaignId, source: 'chain', weight: REPUTATION.WEIGHT_ABANDONED_CHANNEL
+      }, function(rErr) {
+        if (rErr) { MDS.log("[REPUTATION] abandoned_channel record failed: " + rErr); }
+        _sweepNext(rows, i + 1);
+      });
+    } else {
+      recordReputationEvent({
+        subject_key: subjectKey, subject_role: 'creator', kind: 'campaign_finished_clean',
+        scope_id: campaignId, source: 'chain', weight: REPUTATION.WEIGHT_CAMPAIGN_FINISHED_CLEAN
+      }, function(rErr) {
+        if (rErr) { MDS.log("[REPUTATION] campaign_finished_clean record failed: " + rErr); }
+        _sweepNext(rows, i + 1);
+      });
+    }
   });
 }
 

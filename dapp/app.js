@@ -22,25 +22,39 @@ var LIMITS = {
   SETTLEMENT_GRACE_DAYS:           7
 };
 
-// T-REP1 reputation scoring constants — mirrors service.js (AGENTS.md §12 #23).
-// MinimaAds.md §7.8.
+// T-REP1/T-REP2 reputation scoring constants — mirrors service.js (AGENTS.md
+// §12 #23). MinimaAds.md §7.8.
 var REPUTATION = {
   HALFLIFE_MS:               7776000000,
   RETENTION_MS:              15552000000,
-  WEIGHT_SETTLED_CHANNEL:    10,
-  WEIGHT_PUBLISHER_SETTLED:  10,
+  WEIGHT_SETTLED_CHANNEL:            10,
+  WEIGHT_PUBLISHER_SETTLED:          10,
+  WEIGHT_ESCROW_FUNDED:               5,
+  WEIGHT_CAMPAIGN_FINISHED_CLEAN:    15,
+  WEIGHT_ABANDONED_CHANNEL:         -25,
+  WEIGHT_CREATOR_ASSERT_FAILED:     -20,
+  WEIGHT_IDENTITY_PIN_VIOLATION:    -20,
+  WEIGHT_FRAME_OWNERSHIP_CONFLICT:  -15,
   WEIGHT_ACCOUNT_AGE_CAP:    5,
   ACCOUNT_AGE_FULL_MS:       2592000000,
   CAP_DEFAULT:               40,
   CAP_BY_KIND: {
-    settled_channel:   60,
-    publisher_settled: 60
+    settled_channel:          60,
+    publisher_settled:        60,
+    escrow_funded:            30,
+    campaign_finished_clean:  45,
+    abandoned_channel:        80,
+    creator_assert_failed:    60,
+    identity_pin_violation:   60,
+    frame_ownership_conflict: 45
   },
+  HARD_NEGATIVE_KINDS: ['creator_assert_failed', 'identity_pin_violation', 'frame_ownership_conflict'],
   TIER_OK_SCORE:              10,
   TIER_OK_MIN_AGE_MS:         604800000,
   TIER_TRUSTED_SCORE:         40,
   TIER_TRUSTED_MIN_EVIDENCE:  3,
-  TIER_TRUSTED_MIN_AGE_MS:    2592000000
+  TIER_TRUSTED_MIN_AGE_MS:    2592000000,
+  TIER_FLAGGED_SCORE:        -30
 };
 
 var MY_ADDRESS = '';

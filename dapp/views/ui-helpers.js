@@ -24,6 +24,29 @@ function mkStatusBadge(status) {
   return el;
 }
 
+// T-REP2 — reputation tier badge (MinimaAds.md §7.8). Never render for
+// 'unknown' — most subjects have no evidence yet in this MVP, and a grey
+// "Unknown" badge on every row would be noise, not signal. Call sites should
+// skip appending this element entirely when tier === 'unknown'.
+function mkReputationBadge(tier) {
+  var palette = {
+    new:     { bg: '#95a5a6', fg: '#fff' },
+    ok:      { bg: '#3498db', fg: '#fff' },
+    trusted: { bg: '#2ecc71', fg: '#fff' },
+    flagged: { bg: '#e74c3c', fg: '#fff' }
+  };
+  var labels = { new: 'New', ok: 'OK', trusted: 'Trusted', flagged: 'Flagged' };
+  var normalized = (tier || 'new').toLowerCase();
+  var c = palette[normalized] || palette['new'];
+  var el = document.createElement('mark');
+  el.style.cssText = 'background:' + c.bg + ';color:' + c.fg
+    + ';padding:.15rem .5rem;border-radius:.25rem;font-size:.7rem;'
+    + 'font-weight:600;white-space:nowrap;vertical-align:middle;';
+  el.title = 'Local reputation (this device only, not shared with the network): ' + (labels[normalized] || tier);
+  el.textContent = labels[normalized] || tier;
+  return el;
+}
+
 function mkStatCard(label, value, sub) {
   var card = document.createElement('div');
   card.style.cssText = 'display:flex;flex-direction:column;background:var(--pico-card-background-color,#fff);'

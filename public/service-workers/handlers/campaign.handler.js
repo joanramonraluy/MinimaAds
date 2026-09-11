@@ -97,6 +97,16 @@ function handleCampaignAnnounce(payload, senderPk) {
       payload.campaign.escrow_coinid = existing.ESCROW_COINID || '';
       payload.campaign.escrow_wallet_pk = existing.ESCROW_WALLET_PK || '';
       MDS.log("[CAMPAIGN] ANNOUNCE identity fields pinned (sender not strongly verified). campaign=" + campaignId);
+      // T-REP2 — negative evidence about the real sender attempting the
+      // rewrite, never the identity it was trying to claim (MinimaAds.md §7.8).
+      if (senderPk && typeof recordReputationEvent === 'function') {
+        recordReputationEvent({
+          subject_key: senderPk, subject_role: 'creator', kind: 'identity_pin_violation',
+          scope_id: campaignId, source: 'local', weight: REPUTATION.WEIGHT_IDENTITY_PIN_VIOLATION
+        }, function(rErr) {
+          if (rErr) { MDS.log("[REPUTATION] identity_pin_violation record failed: " + rErr); }
+        });
+      }
       _continueCampaignAnnounce(payload, campaignId);
     });
   });
@@ -329,6 +339,17 @@ function _assertCreatorThen(campaignId, senderPk, ok) {
       }
       MDS.log("[CAMPAIGN] status change rejected: sender is not the creator. campaign=" + campaignId
         + " sender=" + senderPk.substring(0, 16) + "...");
+      // T-REP2 — negative evidence about the real, transport-verified sender
+      // (never a payload-claimed creator key: MinimaAds.md §7.8 rule 5.2, so a
+      // single forged message can't defame the campaign's actual creator).
+      if (typeof recordReputationEvent === 'function') {
+        recordReputationEvent({
+          subject_key: senderPk, subject_role: 'creator', kind: 'creator_assert_failed',
+          scope_id: campaignId, source: 'local', weight: REPUTATION.WEIGHT_CREATOR_ASSERT_FAILED
+        }, function(rErr) {
+          if (rErr) { MDS.log("[REPUTATION] creator_assert_failed record failed: " + rErr); }
+        });
+      }
     });
   });
 }
@@ -657,6 +678,13 @@ function _applyTrustedEscrowCoin(coin, coinId, campaignId, states, campaign, cre
   // lineage.
   MDS.keypair.set("CREATOR_MX_" + campaignId, creatorMxAddr ? creatorMxAddr : creatorPkRoute, function() {});
 
+  // T-REP2 — on-chain reputation evidence. Only reachable through the OPEN-4
+  // trust gate above (never from processEscrowCoin's unverified branches) —
+  // MinimaAds.md §7.8.
+  if (typeof recordOnChainEscrowEvidence === 'function') {
+    recordOnChainEscrowEvidence(creatorPkRoute, creatorMxAddr, campaignId);
+  }
+
   // Log-only sanity check. Deliberately NOT a gate: escrow coins legitimately shrink
   // to sub-cent (and, per fragility #54, sub-micro) values as a campaign's budget is
   // consumed, so any amount floor would break real campaigns near exhaustion.
@@ -737,6 +765,12 @@ function _applyTrustedEscrowCoin(coin, coinId, campaignId, states, campaign, cre
           }
           signalFE("CAMPAIGN_UPDATED", { campaign_id: campaignId, status: onChainStatus });
         });
+        // T-REP2 — plant the zero-weight clock marker sweepFinishedCampaignReputation
+        // uses to compute the grace deadline (MinimaAds.md §7.8). Only a genuine
+        // active/paused -> finished transition, not every re-sync.
+        if (onChainStatus === 'finished' && typeof recordCampaignFinishObserved === 'function') {
+          recordCampaignFinishObserved(creatorPkRoute, creatorMxAddr, campaignId);
+        }
       }
     } else {
       MDS.log("[DISCOVERY] unknown on-chain status value '" + onChainStatus + "' for " + campaignId);

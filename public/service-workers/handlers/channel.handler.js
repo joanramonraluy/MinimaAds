@@ -75,6 +75,16 @@ function handleChannelOpenRequest(payload, senderPk) {
         getFrame(frameId, function(frErr, frame) {
           if (!frErr && frame && frame.PUBLISHER_KEY && frame.PUBLISHER_KEY.toUpperCase() !== sndrPk.toUpperCase()) {
             MDS.log("[CHANNEL] CHANNEL_OPEN_REQUEST (publisher): frame_id owned by a different publisher — dropping. frame: " + frameId);
+            // T-REP2 — negative evidence about the real sender, never the
+            // frame_id's legitimate owner (MinimaAds.md §7.8).
+            if (typeof recordReputationEvent === 'function') {
+              recordReputationEvent({
+                subject_key: sndrPk, subject_role: 'publisher', kind: 'frame_ownership_conflict',
+                scope_id: frameId, source: 'local', weight: REPUTATION.WEIGHT_FRAME_OWNERSHIP_CONFLICT
+              }, function(rErr) {
+                if (rErr) { MDS.log("[REPUTATION] frame_ownership_conflict record failed: " + rErr); }
+              });
+            }
             return;
           }
           _continuePublisherChannelOpenRequest(campaignId, viewerKey, viewerMx, maxAmount, viewerWalletAddr, viewerWalletPK, frameId, sndrPk);

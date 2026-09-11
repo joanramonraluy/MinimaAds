@@ -779,7 +779,7 @@ function _renderSettledChannelsTable(target, rows, contactsMap, campaignId) {
 
   var thead = document.createElement('thead');
   var headerRow = document.createElement('tr');
-  var headers = ['Type', 'Node', 'PK', 'Channels', 'Total', 'Last settled', ''];
+  var headers = ['Type', 'Node', 'PK', 'Channels', 'Total', 'Last settled', 'Reputation', ''];
   for (var h = 0; h < headers.length; h++) {
     var th = document.createElement('th');
     th.textContent = headers[h];
@@ -810,6 +810,22 @@ function _renderSettledChannelsTable(target, rows, contactsMap, campaignId) {
     tr.appendChild(_nodeTd(String(group.rows.length)));
     tr.appendChild(_nodeTd(fmtAmt(group.total, 6) + ' M'));
     tr.appendChild(_nodeTd(lastText));
+
+    // T-REP2 -- publisher reputation badge (MinimaAds.md §7.8). Viewer
+    // reputation is out of scope (a future "fraud detection" roadmap item,
+    // not this one), so viewer-role rows just show a dash. Async: never
+    // blocks table render.
+    var repTd = document.createElement('td');
+    if (role === 'publisher' && pk && typeof getReputation === 'function') {
+      getReputation(pk, 'publisher', function(repErr, rep) {
+        if (!repErr && rep && rep.TIER && rep.TIER !== 'unknown') {
+          repTd.appendChild(mkReputationBadge(rep.TIER));
+        }
+      });
+    } else {
+      repTd.textContent = '—';
+    }
+    tr.appendChild(repTd);
 
     var toggleTd = document.createElement('td');
     var toggleIcon = document.createElement('span');
@@ -1119,7 +1135,7 @@ function _renderRewardedNodesTable(target, rows, contactsMap) {
 
   var thead = document.createElement('thead');
   var headerRow = document.createElement('tr');
-  var headers = ['Type', 'Node', 'PK', 'Rewards', 'Total', 'Last rewarded', ''];
+  var headers = ['Type', 'Node', 'PK', 'Rewards', 'Total', 'Last rewarded', 'Reputation', ''];
   for (var h = 0; h < headers.length; h++) {
     var th = document.createElement('th');
     th.textContent = headers[h];
@@ -1150,6 +1166,22 @@ function _renderRewardedNodesTable(target, rows, contactsMap) {
     tr.appendChild(_nodeTd(String(group.rows.length)));
     tr.appendChild(_nodeTd(fmtAmt(group.total, 6) + ' M'));
     tr.appendChild(_nodeTd(lastText));
+
+    // T-REP2 -- publisher reputation badge (MinimaAds.md §7.8). Viewer
+    // reputation is out of scope (a future "fraud detection" roadmap item,
+    // not this one), so viewer-role rows just show a dash. Async: never
+    // blocks table render.
+    var repTd = document.createElement('td');
+    if (role === 'publisher' && pk && typeof getReputation === 'function') {
+      getReputation(pk, 'publisher', function(repErr, rep) {
+        if (!repErr && rep && rep.TIER && rep.TIER !== 'unknown') {
+          repTd.appendChild(mkReputationBadge(rep.TIER));
+        }
+      });
+    } else {
+      repTd.textContent = '—';
+    }
+    tr.appendChild(repTd);
 
     var toggleTd = document.createElement('td');
     var toggleIcon = document.createElement('span');

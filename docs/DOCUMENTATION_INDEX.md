@@ -19,6 +19,7 @@
 | **docs/PLATFORM_NOTES.md** | Minima platform details: H2, Rhino, MDS, Maxima, constraints |
 | **docs/PROJECT_NOTES_REFERENCE.md** | Protocol matrix, signals, handlers, source-of-truth rules |
 | **docs/TESTING_SETUP.md** | How to spin up N real nodes + browser control (MinimaNodeManager + Playwright MCP) for live end-to-end testing |
+| **docs/MASTER_TEST_PLAN.md** | Master test strategy: 6-node harness, MetaChain snippet on Node 3, lifecycle matrix, edge cases & adversarial probes |
 | **docs/archive/** | Historical docs: UI guides, audit reports, roadmaps, old task lists (see archive/README.md) |
 | **PROJECT_INDEX.md** | Structure, folder map, key decisions log (optional, orientation only) |
 

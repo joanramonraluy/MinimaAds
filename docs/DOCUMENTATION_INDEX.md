@@ -14,6 +14,7 @@
 | **AGENTS.md** | Key architectural decisions, project rules, canonical identities |
 | **MinimaAds.md** | Technical spec: data models, API contracts, system flows, limits, schema |
 | **docs/KNOWN_ISSUES.md** | Fragility points, platform gotchas, closed security findings |
+| **docs/ATTACK_SURFACE_AND_TRUST_BOUNDARIES.md** | Consolidated security spec: Maxima trust matrix (22 messages), identity hierarchy, on-chain lineage boundaries, audit checklist |
 | **docs/HISTORY.md** | Archived handoff notes, long-term project history, implementation details from past sessions |
 | **docs/PLATFORM_NOTES.md** | Minima platform details: H2, Rhino, MDS, Maxima, constraints |
 | **docs/PROJECT_NOTES_REFERENCE.md** | Protocol matrix, signals, handlers, source-of-truth rules |

@@ -24,6 +24,28 @@ var LIMITS = {
   SETTLEMENT_GRACE_DAYS:           7
 };
 
+// T-REP1 reputation scoring constants — MinimaAds.md §7.8. Separate from
+// LIMITS (a protocol contract) since these are pure local-scoring tuning,
+// never referenced by any Maxima schema or KissVM script.
+var REPUTATION = {
+  HALFLIFE_MS:               7776000000, // 90 days — evidence weight halves this often
+  RETENTION_MS:              15552000000, // 180 days — 2x halflife; older rows are pruned
+  WEIGHT_SETTLED_CHANNEL:    10,
+  WEIGHT_PUBLISHER_SETTLED:  10,
+  WEIGHT_ACCOUNT_AGE_CAP:    5,
+  ACCOUNT_AGE_FULL_MS:       2592000000, // 30 days to reach the full age bonus
+  CAP_DEFAULT:               40,
+  CAP_BY_KIND: {
+    settled_channel:   60,
+    publisher_settled: 60
+  },
+  TIER_OK_SCORE:              10,
+  TIER_OK_MIN_AGE_MS:         604800000, // 7 days
+  TIER_TRUSTED_SCORE:         40,
+  TIER_TRUSTED_MIN_EVIDENCE:  3,
+  TIER_TRUSTED_MIN_AGE_MS:    2592000000 // 30 days
+};
+
 // Node identity — set once in onInited after maxima action:info
 var MY_MAXIMA_PK   = '';
 var MY_MX_ADDRESS  = '';
@@ -135,6 +157,7 @@ function onInited() {
   MDS.load("core/rewards.js");
   MDS.load("core/channels.js");
   MDS.load("core/frames.js");
+  MDS.load("core/reputation.js");
   MDS.load("public/service-workers/db-init.js");
   MDS.load("public/service-workers/handlers/maxima.handler.js");
   MDS.load("public/service-workers/handlers/campaign.handler.js");
@@ -443,7 +466,7 @@ MDS.init(function(msg) {
     // NEWBLOCK data is the TxPoW of the new tip; height at header.block.
     var tipBlock = 0;
     try { tipBlock = parseInt(msg.data.txpow.header.block, 10); } catch (e) { tipBlock = 0; }
-    scanEscrowCoins(); checkPendingChannelOpens(); checkExpiredCampaigns(tipBlock); _checkChannelCoinsOnBlock(); pruneDedupLog();
+    scanEscrowCoins(); checkPendingChannelOpens(); checkExpiredCampaigns(tipBlock); _checkChannelCoinsOnBlock(); pruneDedupLog(); pruneReputationEvents();
     processMaximaOutbox();
     _livenessCheckBlock++;
     if (_livenessCheckBlock % 20 === 0) { checkCampaignStatuses(); }

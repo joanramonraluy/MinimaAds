@@ -101,7 +101,7 @@ Tags are created by the **maintainer**, not the agent. The agent's job is to not
 | **T-SC6** | **FE** | `dapp/app.js`, `dapp/views/mycampaigns.js` | ✅ Done |
 | **T-SC7** | **Docs** | `docs/KNOWN_ISSUES.md`, `docs/VERIFICATION.md`, `AGENTS.md` | ✅ Done |
 | **T-REP0** | **SW** | `maxima.handler.js`, `campaign.handler.js` | ✅ Done |
-| **T-REP1** | **DB + Core** | `db-init.js` (×2 runtimes), `core/reputation.js` (new) | ⬜ Pending |
+| **T-REP1** | **DB + Core** | `db-init.js` (×2 runtimes), `core/reputation.js` (new), `service.js`, `dapp/app.js`, `channel.handler.js` | ✅ Done |
 | **T-REP2** | **SW + FE** | `campaign.handler.js`, `channel.handler.js`, `dapp/views/*.js` | ⬜ Pending |
 | **T-REP3** | **Protocol** | `maxima.handler.js`, `campaign.handler.js`, `MinimaAds.md §8` | ⬜ Pending — **XHIGH, needs separate approval** |
 
@@ -109,7 +109,7 @@ Tags are created by the **maintainer**, not the agent. The agent's job is to not
 
 ## Next Task
 
-Auth/reputation (chosen 2026-09-11 as the roadmap item to prioritize) is staged into T-REP0–T-REP3 above per the Opus design proposal — see `docs/HISTORY.md §17`, session 2026-09-11 (AUD-6 / T-REP0), for the full design (data model, evidence sources, per-layer impact, abuse vectors). T-REP1 is the next task to pick up.
+Auth/reputation (chosen 2026-09-11 as the roadmap item to prioritize) is staged into T-REP0–T-REP3 above per the Opus design proposal — see `docs/HISTORY.md §17`, session 2026-09-11 (AUD-6 / T-REP0), for the full design (data model, evidence sources, per-layer impact, abuse vectors). T-REP0 and T-REP1 are both done (session 2026-09-11, `core/reputation.js`). T-REP2 (on-chain evidence + negative signals + UI badges) is the next task to pick up.
 
 The other three roadmap candidates remain unstarted:
 

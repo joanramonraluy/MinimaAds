@@ -22,6 +22,27 @@ var LIMITS = {
   SETTLEMENT_GRACE_DAYS:           7
 };
 
+// T-REP1 reputation scoring constants — mirrors service.js (AGENTS.md §12 #23).
+// MinimaAds.md §7.8.
+var REPUTATION = {
+  HALFLIFE_MS:               7776000000,
+  RETENTION_MS:              15552000000,
+  WEIGHT_SETTLED_CHANNEL:    10,
+  WEIGHT_PUBLISHER_SETTLED:  10,
+  WEIGHT_ACCOUNT_AGE_CAP:    5,
+  ACCOUNT_AGE_FULL_MS:       2592000000,
+  CAP_DEFAULT:               40,
+  CAP_BY_KIND: {
+    settled_channel:   60,
+    publisher_settled: 60
+  },
+  TIER_OK_SCORE:              10,
+  TIER_OK_MIN_AGE_MS:         604800000,
+  TIER_TRUSTED_SCORE:         40,
+  TIER_TRUSTED_MIN_EVIDENCE:  3,
+  TIER_TRUSTED_MIN_AGE_MS:    2592000000
+};
+
 var MY_ADDRESS = '';
 var MY_MX_ADDRESS = '';
 var MY_MX_NAME = '';
@@ -943,6 +964,13 @@ function handleFePending(msg) {
       if (typeof settleChannel === 'function') {
         settleChannel(ctx.campaignId, ctx.viewerKey, ctx.role || 'viewer', function(err) {
           if (err) { console.error('[CHANNEL] settleChannel error after settlement_post approval:', err); }
+          else if (typeof getChannelState === 'function' && typeof recordSettlementReputationEvidence === 'function') {
+            getChannelState(ctx.campaignId, ctx.viewerKey, ctx.role || 'viewer', function(chErr, ch) {
+              if (!chErr && ch) {
+                recordSettlementReputationEvidence(ch.CREATOR_MX, ch.ROLE, ch.FRAME_ID, ch.CAMPAIGN_ID);
+              }
+            });
+          }
           if (typeof _refreshChannelRewards === 'function') { _refreshChannelRewards(); }
         });
       }
@@ -1187,6 +1215,37 @@ function initFEChannelHistory(cb) {
   sqlQuery(sql, function() { if (cb) { cb(); } });
 }
 
+// T-REP1 — FE mirror of the SW's REPUTATION_EVENTS/PEER_REPUTATION tables
+// (public/service-workers/db-init.js). The FE writes evidence directly on
+// the settlement_post path (handleFePending), so it needs its own copy —
+// AGENTS.md §12 #11 (DB changes applied in both runtimes).
+function initFEReputation(cb) {
+  var sql1 = "CREATE TABLE IF NOT EXISTS REPUTATION_EVENTS ("
+    + "ID           VARCHAR(1024) PRIMARY KEY,"
+    + "SUBJECT_KEY  VARCHAR(512)  NOT NULL,"
+    + "SUBJECT_ROLE VARCHAR(16)   NOT NULL,"
+    + "KIND         VARCHAR(32)   NOT NULL,"
+    + "WEIGHT       DECIMAL(20,6) NOT NULL,"
+    + "SCOPE_ID     VARCHAR(256)  DEFAULT '',"
+    + "SOURCE       VARCHAR(16)   NOT NULL,"
+    + "OBSERVED_AT  BIGINT        NOT NULL"
+    + ")";
+  var sql2 = "CREATE TABLE IF NOT EXISTS PEER_REPUTATION ("
+    + "SUBJECT_KEY   VARCHAR(512)  NOT NULL,"
+    + "SUBJECT_ROLE  VARCHAR(16)   NOT NULL,"
+    + "SCORE         DECIMAL(20,6) NOT NULL DEFAULT 0,"
+    + "TIER          VARCHAR(16)   NOT NULL DEFAULT 'unknown',"
+    + "EV_POSITIVE   INT           NOT NULL DEFAULT 0,"
+    + "EV_NEGATIVE   INT           NOT NULL DEFAULT 0,"
+    + "FIRST_SEEN_AT BIGINT        NOT NULL,"
+    + "LAST_CALC_AT  BIGINT        NOT NULL,"
+    + "PRIMARY KEY (SUBJECT_KEY, SUBJECT_ROLE)"
+    + ")";
+  sqlQuery(sql1, function() {
+    sqlQuery(sql2, function() { if (cb) { cb(); } });
+  });
+}
+
 function _showWriteModeRequired() {
   var root = document.getElementById('app');
   if (!root) { return; }
@@ -1302,10 +1361,12 @@ function onInited() {
             initFEFrames(function() {
               initFEChannelState(function() {
                 initFEChannelHistory(function() {
-                  renderNav();
-                  probeDb();
-                  doRender();
-                  startNetworkStatusMonitoring();
+                  initFEReputation(function() {
+                    renderNav();
+                    probeDb();
+                    doRender();
+                    startNetworkStatusMonitoring();
+                  });
                 });
               });
             });

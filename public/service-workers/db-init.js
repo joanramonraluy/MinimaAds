@@ -106,6 +106,30 @@ function initDB(cb) {
     + "CREATED_AT      BIGINT        NOT NULL"
     + ")";
 
+  // T-REP1 — append-only evidence log + derived score cache. MinimaAds.md §3.5/§7.8.
+  var sql_reputation_events = "CREATE TABLE IF NOT EXISTS REPUTATION_EVENTS ("
+    + "ID           VARCHAR(1024) PRIMARY KEY,"
+    + "SUBJECT_KEY  VARCHAR(512)  NOT NULL,"
+    + "SUBJECT_ROLE VARCHAR(16)   NOT NULL,"
+    + "KIND         VARCHAR(32)   NOT NULL,"
+    + "WEIGHT       DECIMAL(20,6) NOT NULL,"
+    + "SCOPE_ID     VARCHAR(256)  DEFAULT '',"
+    + "SOURCE       VARCHAR(16)   NOT NULL,"
+    + "OBSERVED_AT  BIGINT        NOT NULL"
+    + ")";
+
+  var sql_peer_reputation = "CREATE TABLE IF NOT EXISTS PEER_REPUTATION ("
+    + "SUBJECT_KEY   VARCHAR(512)  NOT NULL,"
+    + "SUBJECT_ROLE  VARCHAR(16)   NOT NULL,"
+    + "SCORE         DECIMAL(20,6) NOT NULL DEFAULT 0,"
+    + "TIER          VARCHAR(16)   NOT NULL DEFAULT 'unknown',"
+    + "EV_POSITIVE   INT           NOT NULL DEFAULT 0,"
+    + "EV_NEGATIVE   INT           NOT NULL DEFAULT 0,"
+    + "FIRST_SEEN_AT BIGINT        NOT NULL,"
+    + "LAST_CALC_AT  BIGINT        NOT NULL,"
+    + "PRIMARY KEY (SUBJECT_KEY, SUBJECT_ROLE)"
+    + ")";
+
   var sql_channel_history = "CREATE TABLE IF NOT EXISTS CHANNEL_HISTORY ("
     + "CAMPAIGN_ID        VARCHAR(256)   NOT NULL,"
     + "VIEWER_KEY         VARCHAR(512)   NOT NULL,"
@@ -191,9 +215,15 @@ function initDB(cb) {
                     sqlQuery("UPDATE CAMPAIGNS SET MAX_PUBLISHER_BUDGET = PUBLISHER_REWARD_VIEW * 10 WHERE MAX_PUBLISHER_BUDGET <= 0 AND PUBLISHER_REWARD_VIEW > 0", function(patchErr) {
                       if (patchErr) { MDS.log("[DB] initDB: publisher budget patch failed — " + patchErr); }
                       else { MDS.log("[DB] initDB: stale MAX_PUBLISHER_BUDGET patched"); }
-                      MDS.log("[DB] initDB: all tables ready");
-                      signalFE("DB_READY", {});
-                      if (cb) { cb(); }
+                      sqlQuery(sql_reputation_events, function(repErr) {
+                        if (repErr) { MDS.log("[DB] initDB: failed to create REPUTATION_EVENTS — " + repErr); }
+                        sqlQuery(sql_peer_reputation, function(peerErr) {
+                          if (peerErr) { MDS.log("[DB] initDB: failed to create PEER_REPUTATION — " + peerErr); }
+                          MDS.log("[DB] initDB: all tables ready");
+                          signalFE("DB_READY", {});
+                          if (cb) { cb(); }
+                        }); // end PEER_REPUTATION creation
+                      }); // end REPUTATION_EVENTS creation
                     }); // end publisher budget data migration
                     }); // end VIEWER_BUDGET_SPENT migration
                     }); // end IMAGE_WIDTH_PCT migration

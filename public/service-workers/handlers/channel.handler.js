@@ -2674,7 +2674,7 @@ function swBuildAndPostChannelOpenTx(ctx) {
 // channelCoins: pre-fetched coin array from _checkChannelCoinsOnBlock (Change #1).
 // When provided, skips the individual coins address scan.
 function checkOpenChannelsSettled(channelCoins) {
-  var sql = "SELECT CAMPAIGN_ID, VIEWER_KEY, ROLE, CHANNEL_COINID, CREATED_AT, CUMULATIVE_EARNED FROM CHANNEL_STATE WHERE STATUS = 'open' OR STATUS = 'settling'";
+  var sql = "SELECT CAMPAIGN_ID, VIEWER_KEY, ROLE, CHANNEL_COINID, CREATED_AT, CUMULATIVE_EARNED, CREATOR_MX, FRAME_ID FROM CHANNEL_STATE WHERE STATUS = 'open' OR STATUS = 'settling'";
   sqlQuery(sql, function(err, rows) {
     if (err || !rows || rows.length === 0) { return; }
 
@@ -2725,6 +2725,9 @@ function _processSettledChannels(rows, coins) {
                 } else {
                   _signalCampaignUpdated(r.CAMPAIGN_ID);
                   signalFE("SETTLE_CONFIRMED", { campaign_id: r.CAMPAIGN_ID, amount: parseFloat(r.CUMULATIVE_EARNED || 0) });
+                  if (typeof recordSettlementReputationEvidence === 'function') {
+                    recordSettlementReputationEvidence(r.CREATOR_MX, r.ROLE, r.FRAME_ID, r.CAMPAIGN_ID);
+                  }
                 }
               });
             }

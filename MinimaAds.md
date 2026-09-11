@@ -286,6 +286,30 @@ CREATE TABLE IF NOT EXISTS CHANNEL_STATE (
   VIEWER_WALLET_ADDR VARCHAR(512)  DEFAULT '',  -- settlement output address (viewer wallet or publisher wallet)
   PRIMARY KEY (CAMPAIGN_ID, VIEWER_KEY, ROLE)
 );
+
+-- T-REP1 — first-party reputation. See §7.8 for the API and scoring rules.
+CREATE TABLE IF NOT EXISTS REPUTATION_EVENTS (
+  ID           VARCHAR(1024) PRIMARY KEY, -- deterministic: KIND:SUBJECT_ROLE:SUBJECT_KEY:SCOPE_ID (idempotent MERGE)
+  SUBJECT_KEY  VARCHAR(512)  NOT NULL,     -- Maxima public key of the scored party (0x...)
+  SUBJECT_ROLE VARCHAR(16)   NOT NULL,     -- 'creator' | 'publisher'
+  KIND         VARCHAR(32)   NOT NULL,     -- 'settled_channel' | 'publisher_settled' (T-REP1)
+  WEIGHT       DECIMAL(20,6) NOT NULL,     -- signed contribution before time-decay
+  SCOPE_ID     VARCHAR(256)  DEFAULT '',   -- usually CAMPAIGN_ID; caps double-counting of the same fact
+  SOURCE       VARCHAR(16)   NOT NULL,     -- 'local' (T-REP1) | 'chain' (T-REP2) — never 'peer' derived from a Maxima payload
+  OBSERVED_AT  BIGINT        NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS PEER_REPUTATION (
+  SUBJECT_KEY   VARCHAR(512)  NOT NULL,
+  SUBJECT_ROLE  VARCHAR(16)   NOT NULL,
+  SCORE         DECIMAL(20,6) NOT NULL DEFAULT 0,  -- clamped [-100, 100]; derived cache, safe to recompute from REPUTATION_EVENTS
+  TIER          VARCHAR(16)   NOT NULL DEFAULT 'unknown', -- 'unknown' | 'new' | 'ok' | 'trusted' (§7.8)
+  EV_POSITIVE   INT           NOT NULL DEFAULT 0,
+  EV_NEGATIVE   INT           NOT NULL DEFAULT 0,
+  FIRST_SEEN_AT BIGINT        NOT NULL,
+  LAST_CALC_AT  BIGINT        NOT NULL,
+  PRIMARY KEY (SUBJECT_KEY, SUBJECT_ROLE)
+);
 ```
 
 > `CHANNEL_STATE` exists on both creator and viewer nodes with different semantics:
@@ -1018,6 +1042,86 @@ signalFE(type, data)
 // MDS.comms.solo(JSON.stringify({ type, ...data }))
 // Fire-and-forget. No second argument.
 ```
+
+### 7.8 reputation.js (T-REP1)
+
+First-party reputation: an append-only evidence log (`REPUTATION_EVENTS`) plus
+a derived score cache (`PEER_REPUTATION`), §3.5. No UI yet, no on-chain
+evidence yet (T-REP2), no cross-node attestations (T-REP3, separate approval
+— a real new trust model, unlike this phase).
+
+**Invariant R1 (mandatory for every future extension of this module)**: a
+reputation weight can never derive from an inbound Maxima payload field.
+Every `recordReputationEvent` call must trace back to this node's own
+verified observation — never to something a remote peer merely claims. This
+is what makes "self-granted reputation" structurally impossible instead of
+something every caller has to remember to guard against.
+
+**Never-self rule**: a node must never record evidence about itself
+(compare against this node's own Maxima pk, `.toUpperCase()` both sides).
+`recordSettlementReputationEvidence` (below) is the reference implementation
+of this rule for settlement evidence — reuse its branching logic rather
+than re-deriving it if a future evidence source needs the same check.
+
+```javascript
+recordReputationEvent(evidence, cb)
+// evidence: { subject_key, subject_role, kind, scope_id, source, weight, observed_at }
+// scope_id/source/observed_at optional (default '', 'local', Date.now()).
+// MERGE INTO REPUTATION_EVENTS on a deterministic ID (KIND:ROLE:KEY:SCOPE_ID)
+// — recording the same observation twice is an idempotent no-op, not a
+// duplicate. Recomputes PEER_REPUTATION for the subject before returning.
+// Returns: callback(err, { score, tier, evPositive, evNegative, firstSeenAt })
+
+recomputeReputation(subjectKey, subjectRole, cb)
+// Rebuilds the PEER_REPUTATION row from full REPUTATION_EVENTS history.
+// Returns: callback(err, result)  // same shape as recordReputationEvent
+
+getReputation(subjectKey, subjectRole, cb)
+// Returns: callback(err, PeerReputation row). Never touches the DB for the
+// default 'unknown'/score-0 shape when nothing has been recorded yet.
+
+listReputationEvidence(subjectKey, subjectRole, cb)
+// Returns: callback(err, REPUTATION_EVENTS[])  // most recent first
+
+recordSettlementReputationEvidence(creatorMx, role, frameId, campaignId)
+// Shared hook — call only after settleChannel() has confirmed a channel
+// settled locally following a verified on-chain spend (never on any other
+// path). Subject selection follows the never-self rule: if this node is not
+// the campaign's creator, records 'settled_channel' evidence about the
+// creator; if this node IS the creator, a viewer-role settlement is self-
+// observation (skipped) and a publisher-role settlement records
+// 'publisher_settled' evidence about the frame's publisher instead.
+// Call sites: channel.handler.js _processSettledChannels (SW), dapp/app.js
+// handleFePending 'settlement_post' branch (FE) — both are the only places
+// in the codebase where a channel settlement is confirmed post-on-chain-spend.
+
+pruneReputationEvents()
+// SW-only, NEWBLOCK-driven, time-gated like pruneDedupLog. Deletes evidence
+// older than REPUTATION.RETENTION_MS (2× the score half-life).
+```
+
+**Scoring** (`_scoreFromEvidence`, pure function): each row's weight decays
+exponentially with `REPUTATION.HALFLIFE_MS`, sums are capped per `KIND`
+(`REPUTATION.CAP_BY_KIND`) before adding to the total — no single kind of
+evidence can dominate or be farmed by repeating cheap observations — plus a
+small capped bonus for account age. Clamped to `[-100, 100]`.
+
+**Tiers**: `unknown` (no evidence at all — deliberately distinct from `new`,
+so a fresh identity never renders as indistinguishable from a
+track-recorded one) → `new` (some evidence, not enough score/age yet) →
+`ok` (`score ≥ REPUTATION.TIER_OK_SCORE` and old enough) → `trusted`
+(`score ≥ REPUTATION.TIER_TRUSTED_SCORE`, enough distinct positive evidence,
+and old enough). No `flagged` tier yet — T-REP1 has no negative evidence
+kinds; that arrives with T-REP2's on-chain rejection-point hooks.
+
+**Reputation is local and non-transferable**: node A and node B may score
+the same subject differently, and that is correct — each scores its own
+experience, not a shared consensus value. Do not build any mechanism that
+tries to reconcile scores across nodes without a full T-REP3-style design
+review (signed attestations, Sybil-weighting, the works).
+
+`REPUTATION` constants live in `service.js`/`dapp/app.js` (mirrored, like
+`LIMITS`) — never hardcode a weight/cap/threshold inline.
 
 ---
 

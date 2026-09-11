@@ -128,6 +128,8 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 **Proposal — should publisher channels also auto-settle on campaign finish? ✅ Implemented and live-verified 2026-09-08** — see `docs/HISTORY.md §17`, session 2026-09-08 (publisher auto-settle). The `ROLE === 'publisher'` skip in `dapp/app.js` `_autoSettleOpenChannels` (Fix #12) has been removed: publisher channels now settle through the exact same `settling:true` gate and `_runSettlement` mechanics as viewer channels. `PUBLISHER_REWARD_NOTIFY` delivery — the open question this proposal was blocked on — was confirmed reliable first (3/3 real sends, ~25s each, on the live harness) before the code change. `MinimaAds.md §4.5` updated accordingly. See fragility #58 (§3, Closed/Fixed — fixed 2026-09-09) for a stale-voucher edge case found incidentally during this verification (pre-existing, not introduced by this change).
 
+**OPEN-6 — discovered 2026-09-11, not yet fixed — schema evolution is additive-only, no path for a destructive migration once real user data exists.** `db-init.js` (SW) and `dapp/app.js` (FE) evolve the schema exclusively via `ALTER TABLE ADD COLUMN IF NOT EXISTS ... DEFAULT ...` (used ~30 times across both runtimes) plus a few targeted `UPDATE` backfills — safe and idempotent for *adding* columns, and this is the correct, load-bearing pattern (see `CLAUDE.md §7`, corrected §4 above — it previously said the opposite). What's still missing: (1) no way to cleanly change an existing column's type/size, rename it, or drop it without a full reinstall (today's only fallback for a wrong `CREATE TABLE` definition), which wipes data — fine while nodes are test-only, not once real campaigns/wallets exist; (2) no schema-version tracking table — every boot just retries all `IF NOT EXISTS` migrations from scratch, which still works today but doesn't scale indefinitely. Needs a design pass before the first release with real user data. Not urgent pre-launch.
+
 ---
 
 ## 2) Pre-merge Checklist
@@ -204,4 +206,8 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 4) Development Workflow Rule
 
-**During development, never add `ALTER TABLE` migration statements** to `db-init.js`. The DB is reset with each MiniDapp reinstall. If a column type or size is wrong, fix the `CREATE TABLE` statement and reinstall — that is all that is needed. Migrations are a post-MVP concern for production upgrades.
+**Adding a new column to an existing table**: use `ALTER TABLE t ADD COLUMN IF NOT EXISTS col TYPE DEFAULT val` in both `db-init.js` (SW) and `dapp/app.js` (FE) init functions — this is the established pattern used for every column added since MVP (see either file's init functions), and it's what keeps already-running test nodes' data intact across a redeploy instead of forcing a full reinstall. See `CLAUDE.md §7`.
+
+**Fixing a column that's already wrong** (bad type/size on a column that shipped incorrectly, not a new addition): edit the `CREATE TABLE` statement directly — `CREATE TABLE IF NOT EXISTS` only runs once per table, so this only takes effect on a fresh reinstall (Delete Data / reinstall the MiniDapp). `ALTER TABLE` can't cleanly change an existing column's type/size in H2 for this case.
+
+**Corrected 2026-09-11**: this rule previously said "never add ALTER TABLE, always reinstall" — that was wrong and contradicted the actual, load-bearing pattern already used throughout `db-init.js`/`dapp/app.js`. Do not reintroduce that version of the rule.

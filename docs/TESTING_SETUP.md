@@ -548,6 +548,14 @@ After clicking "Zip & Install to Nodes", previously-open MinimaAds tabs may
 close on their own. Reopen them (via the MinimaOS launcher, per §11.1) before
 continuing any verification that depends on them.
 
+If a tab does *not* close itself, do not try to `browser_navigate` reload it
+in place to pick up the new version — the reloaded page runs under the old
+tab's permission/session context and the new build never finishes loading
+(hangs indefinitely, same symptom as forcing a fresh `uid` in §11.1). The fix
+is to **close every open MinimaAds tab first, then reopen each one fresh**
+via the MinimaOS launcher (per §11.1) — never just refresh an existing one
+after a redeploy.
+
 ### 11.3 `browser_evaluate` sending a Maxima payload can get silently declined
 
 If a `browser_evaluate` call that constructs/sends a Maxima payload directly

@@ -49,6 +49,8 @@ If you receive a new task within this session:
 
 ## 2) Model Selection
 
+**Scope**: this section applies to requests that involve writing or modifying code (or the docs-update workflow around a code change). It does not apply to pure Q&A, discussion, or environment actions with no code output (e.g. "launch a browser", "how do we work", explaining a concept) — proceed with those directly, no assessment/confirmation ritual needed.
+
 Before starting, assess task complexity and confirm you are the right model:
 
 | Model | Use for |
@@ -224,12 +226,13 @@ campaigns.js : getCampaigns(cb)
                updateBudget(campaignId, deductAmount, cb)
                setCampaignStatus(campaignId, status, cb)
 
-channels.js  : openChannel(campaignId, viewerKey, maxAmount, cb)
-               updateChannelVoucher(campaignId, viewerKey, cumulative, txHex, cb)
-               settleChannel(campaignId, viewerKey, cb)
+channels.js  : openChannel(campaignId, viewerKey, creatorMx, maxAmount, role, frameId, walletAddr, openerMxPk, cb)
+               updateChannelVoucher(campaignId, viewerKey, role, cumulativeEarned, latestTxHex, cb, rewardType)
+               settleChannel(campaignId, viewerKey, role, cb)
 
 frames.js    : getFrame(frameId, cb)
-               createFrame(label, publisherWallet, cb)
+               saveFrame(frame, cb)
+               ensureBuiltinFrame(maximaPk, walletAddr, cb)
                incrementFrameEarnings(frameId, amount, cb)
 
 selection.js : selectAd(userAddress, userInterests, campaigns)  ← synchronous
@@ -241,11 +244,14 @@ validation.js: validateView(campaignId, userAddress, cb)
 rewards.js   : createRewardEvent(params, cb)
                getUserRewards(userAddress, cb)
                getUserProfile(userAddress, cb)
+               updateUserProfile(userAddress, fields, cb)
 
 minima.js    : sqlQuery(query, cb)
                broadcastMaxima(payload, cb)
                signalFE(type, data)
 ```
+
+Kept in sync with `MinimaAds.md §7` (source of truth) — `channels.js` per T-PUB8 (`role` param added to every function), `frames.js` per the `saveFrame`/`ensureBuiltinFrame` replacement of the old `createFrame`, `rewards.js` per the addition of `updateUserProfile`.
 
 ---
 
@@ -307,7 +313,11 @@ Week of month: 1 = days 1–7, 2 = 8–14, 3 = 15–21, 4 = 22–28, 5 = 29–31
 ❌ No: INSERT ... ON CONFLICT → throws JdbcSQLSyntaxErrorException
 ✅ BOOLEAN columns return "true"/"false" strings → check all 4 variants
 ✅ String comparisons on IDs/addresses: WHERE UPPER(col) = UPPER(val)
-✅ Schema migrations: ALTER TABLE t ADD COLUMN IF NOT EXISTS ...
+✅ Schema migrations: `ALTER TABLE t ADD COLUMN IF NOT EXISTS col TYPE DEFAULT val` —
+   this is the established, load-bearing pattern (see `db-init.js` / `dapp/app.js`
+   init functions), applied in **both** SW and FE runtimes for every new column.
+   Idempotent and safe to run on every boot; never drop/recreate a table with
+   existing data in it.
 ```
 
 ### MDS API

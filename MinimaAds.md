@@ -1666,11 +1666,11 @@ The Minima blockchain is the **source of truth** for fund custody. Client-side H
 
 **Mitigations**:
 - `COOLDOWN_BETWEEN_REWARDS_MS = 30000` — enforced by DB (`USER_PROFILE.LAST_REWARD_AT`)
-- `MAX_VIEWS_PER_CAMPAIGN_PER_DAY = 1` — enforced by querying `REWARD_EVENTS` (last 24h)
+- `MAX_VIEWS_PER_CAMPAIGN_PER_DAY = 100` (default, overridable per-campaign via `CAMPAIGNS.MAX_DAILY_VIEWS`) — enforced by querying `REWARD_EVENTS` (last 24h)
 - `MIN_VIEW_DURATION_MS = 3000` — timer prevents instant event submission
 - UUID-based event deduplication blocks retransmitted events
 
-**MVP residual risk**: A malicious node that implements the protocol directly can earn up to 1 reward/day/campaign. Bounded by on-chain budget cap. Acceptable for MVP.
+**MVP residual risk**: A malicious node that implements the protocol directly can earn up to `MAX_VIEWS_PER_CAMPAIGN_PER_DAY` (or the campaign's own `MAX_DAILY_VIEWS` override) rewards/day/campaign. Bounded by on-chain budget cap. Acceptable for MVP.
 
 ### 10.2 Malicious Publisher
 

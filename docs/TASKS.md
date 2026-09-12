@@ -60,49 +60,20 @@ Tags are created by the **maintainer**, not the agent. The agent's job is to not
 
 ---
 
-## Task Status Table (Quick Reference)
+## Task Status
+
+Every individual task in every block above (T1–T12, T-CH1–9, T-PUB1–8,
+T-SC1–7, T-REP0–2) is `✅ Done` — see the block-level `Status Summary` table
+above. Per-task implementation detail (which files, what changed, what was
+verified) lives in `git log` and `docs/HISTORY.md §17`, not duplicated here —
+a task-by-task table became pure historical noise once every block finished
+and started drifting out of sync with the real detail. Follows the same
+archive-instead-of-duplicate precedent as `TASKS_SC.md` in `docs/archive/`.
+
+The one task not `✅ Done`:
 
 | Task | Layer | File(s) | Status |
 |---|---|---|---|
-| T1 | DB Schema | `public/service-workers/db-init.js` | ✅ Done |
-| T2 | Core | `core/minima.js` | ✅ Done |
-| T3 | Core | `core/campaigns.js` | ✅ Done |
-| T4 | Core | `core/selection.js` | ✅ Done |
-| T5 | Core | `core/validation.js` | ✅ Done |
-| T6 | Core | `core/rewards.js` | ✅ Done |
-| T7 | SW | `service.js` | ✅ Done |
-| T8 | SW | `public/service-workers/handlers/*.js` | ✅ Done |
-| T9 | SDK | `sdk/index.js` | ✅ Done |
-| T10 | UI | `dapp/app.js`, `dapp/views/*.js` | ✅ Done |
-| T11 | UI | `renderer/renderAd.js`, `public/index.html`, `public/dapp.conf` | ✅ Done |
-| T12 | SW + UI | `creator.js`, `service.js` | ✅ Done |
-| **T-CH1** | **DB** | `db-init.js` (×2 runtimes) | ✅ Done |
-| **T-CH2** | **Core** | `core/channels.js` | ✅ Done |
-| **T-CH3** | **SW** | `handlers/channel.handler.js`, `maxima.handler.js` | ✅ Done |
-| **T-CH4** | **FE** | `dapp/views/creator.js`, `dapp/app.js` | ✅ Done |
-| **T-CH5** | **SDK** | `sdk/index.js` | ✅ Done |
-| **T-CH6** | **UI** | `dapp/views/viewer.js` | ✅ Done |
-| **T-CH7** | **Multi-layer** | `db-init.js`, `campaigns.js`, `sdk/index.js`, `creator.js`, `channel.handler.js` | ✅ Done |
-| **T-CH8** | **SW** | `channel.handler.js`, `service.js` | ✅ Done |
-| **T-CH9** | **FE** | `dapp/app.js` | ✅ Done |
-| **T-PUB1** | **DB** | `db-init.js` (×2 runtimes) | ✅ Done |
-| **T-PUB2** | **Core** | `core/frames.js` | ✅ Done |
-| **T-PUB3** | **Config + SW** | `config.js`, `campaign.handler.js` | ✅ Done |
-| **T-PUB4** | **Contract + FE** | `dapp/views/creator.js`, `dapp/app.js` | ✅ Done |
-| **T-PUB5** | **SDK** | `sdk/index.js` | ✅ Done |
-| **T-PUB6** | **UI** | `dapp/views/creator.js` | ✅ Done |
-| **T-PUB7** | **UI + SW** | `dapp/views/frames.js`, `dapp/app.js`, `service.js` | ✅ Done |
-| **T-PUB8** | **SW + FE** | `channel.handler.js`, `core/channels.js`, `dapp/app.js` | ✅ Done |
-| **T-SC1** | **Spec** | `MinimaAds.md`, `AGENTS.md` | ✅ Done |
-| **T-SC2** | **SW** | `service.js` | ✅ Done |
-| **T-SC3** | **FE** | `dapp/views/creator.js`, `dapp/app.js` | ✅ Done |
-| **T-SC4** | **SW** | `campaign.handler.js` | ✅ Done |
-| **T-SC5** | **Core** | `core/campaigns.js` | ✅ Done |
-| **T-SC6** | **FE** | `dapp/app.js`, `dapp/views/mycampaigns.js` | ✅ Done |
-| **T-SC7** | **Docs** | `docs/KNOWN_ISSUES.md`, `docs/VERIFICATION.md`, `AGENTS.md` | ✅ Done |
-| **T-REP0** | **SW** | `maxima.handler.js`, `campaign.handler.js` | ✅ Done |
-| **T-REP1** | **DB + Core** | `db-init.js` (×2 runtimes), `core/reputation.js` (new), `service.js`, `dapp/app.js`, `channel.handler.js` | ✅ Done |
-| **T-REP2** | **SW + FE** | `campaign.handler.js`, `channel.handler.js`, `core/reputation.js`, `service.js`, `dapp/app.js`, `dapp/views/campaigns.js`, `dapp/views/mycampaigns.js`, `dapp/views/ui-helpers.js` | ✅ Done |
 | **T-REP3** | **Protocol** | `maxima.handler.js`, `campaign.handler.js`, `core/reputation.js`, `db-init.js` (×2 runtimes), `MinimaAds.md §8` | ⏸️ Parked (MVP scope decision) — **XHIGH, needs separate approval.** Signed peer attestations. Full design done 2026-09-12 (design only, no code) — see `docs/HISTORY.md §17`, session 2026-09-12. **Blocked on Q1 = "do we want this at all?" — parked, no concrete use case yet. Q2–Q9 decided 2026-09-12, see §12 of that entry.** |
 
 ---

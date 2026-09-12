@@ -3,6 +3,11 @@
 > Complete menu of available documentation.
 > Before any task, read this file and decide what you need to consult.
 > You are not required to read everything — choose what's relevant.
+> **Asking "where are we relative to v1.0" instead of "what do I need for my
+> task"?** Read `docs/ROADMAP_V1.md` first — it's the single place that ties
+> together `TASKS.md`, `MASTER_TEST_PLAN.md`, `REGRESSION_TEST_PLAN.md`, and
+> `KNOWN_ISSUES.md` into one release gate. Everything below this line is the
+> per-task menu, not the release picture.
 
 ---
 
@@ -10,6 +15,7 @@
 
 | Document | Best for |
 |---|---|
+| **docs/ROADMAP_V1.md** | The release picture: what `v1.0.0` requires, current status against each gate criterion, what's explicitly post-v1.0 |
 | **CLAUDE.md** | Mandatory once per session: workflow, model selection, validation, handoff format |
 | **AGENTS.md** | Key architectural decisions, project rules, canonical identities |
 | **MinimaAds.md** | Technical spec: data models, API contracts, system flows, limits, schema |

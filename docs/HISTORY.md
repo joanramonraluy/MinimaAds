@@ -46,6 +46,24 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-12 (ROADMAP-V1) — `docs/ROADMAP_V1.md` created; `docs/TASKS.md` cleanup
+
+**Source**: maintainer question, right after the MVP-DECISIONS + REGRESSION-PLAN session (below): "we have a regression plan, a master test plan, and other docs — isn't this all a bit mixed? Where's the general plan that ties it together toward v1.0.0?"
+**Task**: diagnose whether the doc set is genuinely inconsistent or just missing a top-level synthesis, then fix whichever it is.
+
+**Diagnosis**: the existing docs don't conflict or duplicate each other (`docs/MASTER_TEST_PLAN.md` = full functional coverage, `docs/REGRESSION_TEST_PLAN.md` = regression-only, `docs/KNOWN_ISSUES.md` = tech debt, `docs/TASKS.md` = build tasks) — each already says what it isn't in its own header. But none of them answers "what does `v1.0.0` require and where are we against that?" `docs/DOCUMENTATION_INDEX.md` is a per-task menu, not a release picture; `MinimaAds.md` Appendix A ("Open Items (Post-MVP)") is an old, vague status table that doesn't function as a real gate checklist. Confirmed via `AskUserQuestion`: no existing document was misdiagnosed as the fix — a new one was genuinely missing.
+
+**v1.0.0 gate criteria** (maintainer-selected, not agent-invented): (1) `PLATFORM_KEY` set to a real mainnet key — currently `null`, `feeflag=0` path only tested to date; (2) full regression coverage — currently 5/~20 `KNOWN_ISSUES.md §3` entries have a live Tier 2 guard; (3) `T-REP3` explicitly resolved for v1.0 scope, not just left `⏸️ Parked`; (4) external security audit — none of the OPEN-1..10 fixes have been reviewed outside this agent process. A 5th criterion (full functional coverage per `MASTER_TEST_PLAN.md §4`, currently 15/24 verified) was added by the agent from an existing self-declared tracker in that document, not maintainer-picked among the other 4 — explicitly flagged in the new doc for review rather than silently included.
+
+**Post-v1.0 roadmap clarification**: maintainer asked whether "Cross-dApp settlement" (a `docs/TASKS.md` roadmap candidate) was the same thing as the MetaChain integration tests (`docs/MASTER_TEST_PLAN.md` Suite C). Clarified they are different: Suite C is MetaChain acting as a *publisher/host* for the existing ad-serving + reward mechanism (already-built functionality, correctly covered by gate criterion #5); "Cross-dApp settlement" is a **new, unbuilt product surface** — other dApps using MinimaAds' channel/escrow mechanism for their own unrelated payments. This distinction is now explicit in `docs/ROADMAP_V1.md §3` so the two don't get conflated in a future session.
+
+**`docs/TASKS.md` cleanup**: the "Task Status Table (Quick Reference)" was a 33-row table, every row `✅ Done` except `T-REP3`, fully duplicating what `git log` and this very `§17` archive already record in far more detail — pure historical noise once every block finished, and the piece the maintainer was pointing at when asking whether old-work docs could be cleaned up. Trimmed to just the one non-Done task (`T-REP3`), with a pointer to `git log`/`docs/HISTORY.md §17` for per-task detail — following the same precedent already used for `TASKS_SC.md` in `docs/archive/`. Explicitly did **not** touch `docs/KNOWN_ISSUES.md §3` (Closed/Fixed) or `docs/MASTER_TEST_PLAN.md §4` (baseline matrix) despite both being similarly "full of old-but-done rows" — their function is to be a permanent audit trail / a source of truth actively cited by the new roadmap doc, not a duplicate of something else. 120 → 91 lines.
+
+**Files modified**: `docs/ROADMAP_V1.md` (new), `docs/DOCUMENTATION_INDEX.md` (points to the new doc first, before the per-task menu), `docs/TASKS.md`.
+**Open issues**: gate criterion #5 needs maintainer confirmation (see Diagnosis above). No code touched — pure documentation session.
+
+---
+
 ### Session: 2026-09-12 (MVP-DECISIONS + REGRESSION-PLAN) — MVP trade-off decisions, regression test plan, and full live verification
 
 **Source**: maintainer observation that the project has matured well past "MVP" (43/45 `docs/TASKS.md` tasks Done, OPEN-4 security fix live-verified), prompting a review of every "accepted/acceptable for MVP" phrase in `docs/KNOWN_ISSUES.md` and a request for a regression-test strategy against the ~20 already-closed bugs in `docs/KNOWN_ISSUES.md §3`.

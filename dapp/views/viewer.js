@@ -220,13 +220,25 @@ function _buildCampaignRow(campaign, contact) {
   var creatorAddrForRep = (campaign.CREATOR_ADDRESS || '').toUpperCase();
   if (creatorAddrForRep && (!MY_ADDRESS || creatorAddrForRep !== MY_ADDRESS.toUpperCase())) {
     var repBadgeSlot = document.createElement('span');
+    repBadgeSlot.style.cssText = 'display:inline-flex;align-items:center;gap:.25rem;';
     titleRow.appendChild(repBadgeSlot);
-    if (campaign.CREATOR_TIER && campaign.CREATOR_TIER !== 'unknown' && typeof mkReputationBadge === 'function') {
-      repBadgeSlot.appendChild(mkReputationBadge(campaign.CREATOR_TIER));
+
+    function _renderListRepBadge(tier) {
+      if (!tier || tier === 'unknown' || typeof mkReputationBadge !== 'function') { return; }
+      repBadgeSlot.innerHTML = '';
+      var repLbl = document.createElement('small');
+      repLbl.style.cssText = 'font-size:.75rem;color:var(--pico-muted-color,#6c757d);font-weight:500;';
+      repLbl.textContent = 'Reputation:';
+      repBadgeSlot.appendChild(repLbl);
+      repBadgeSlot.appendChild(mkReputationBadge(tier));
+    }
+
+    if (campaign.CREATOR_TIER && campaign.CREATOR_TIER !== 'unknown') {
+      _renderListRepBadge(campaign.CREATOR_TIER);
     } else if (typeof getReputation === 'function') {
       getReputation(creatorAddrForRep, 'creator', function(repErr, rep) {
-        if (!repErr && rep && rep.TIER && rep.TIER !== 'unknown' && typeof mkReputationBadge === 'function') {
-          repBadgeSlot.appendChild(mkReputationBadge(rep.TIER));
+        if (!repErr && rep && rep.TIER) {
+          _renderListRepBadge(rep.TIER);
         }
       });
     }
@@ -342,31 +354,73 @@ function _buildDetailShell(root) {
     rightActions.style.cssText = 'display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;';
 
     var repBadgeSlot = document.createElement('span');
+    repBadgeSlot.style.cssText = 'display:inline-flex;align-items:center;gap:.25rem;';
     rightActions.appendChild(repBadgeSlot);
-    if (campaign.CREATOR_TIER && campaign.CREATOR_TIER !== 'unknown' && typeof mkReputationBadge === 'function') {
-      repBadgeSlot.appendChild(mkReputationBadge(campaign.CREATOR_TIER));
+
+    function _renderDetailRepBadge(tier) {
+      if (!tier || tier === 'unknown' || typeof mkReputationBadge !== 'function') { return; }
+      repBadgeSlot.innerHTML = '';
+      var repLbl = document.createElement('small');
+      repLbl.style.cssText = 'font-size:.75rem;color:var(--pico-muted-color,#6c757d);font-weight:500;';
+      repLbl.textContent = 'Reputation:';
+      repBadgeSlot.appendChild(repLbl);
+      repBadgeSlot.appendChild(mkReputationBadge(tier));
+    }
+
+    if (campaign.CREATOR_TIER && campaign.CREATOR_TIER !== 'unknown') {
+      _renderDetailRepBadge(campaign.CREATOR_TIER);
     } else if (typeof getReputation === 'function') {
       getReputation(creatorPk, 'creator', function(repErr, rep) {
-        if (!repErr && rep && rep.TIER && rep.TIER !== 'unknown' && typeof mkReputationBadge === 'function') {
-          repBadgeSlot.appendChild(mkReputationBadge(rep.TIER));
+        if (!repErr && rep && rep.TIER) {
+          _renderDetailRepBadge(rep.TIER);
         }
       });
     }
 
     if (typeof blockCreator === 'function') {
+      var blockWrap = document.createElement('span');
+      blockWrap.style.cssText = 'display:inline-flex;align-items:center;gap:.35rem;';
+
       var blockBtn = document.createElement('button');
       blockBtn.type = 'button';
       blockBtn.className = 'outline secondary';
       blockBtn.style.cssText = 'width:auto;padding:.25rem .65rem;font-size:.78rem;color:var(--pico-del-color,#c0392b);border-color:var(--pico-del-color,#c0392b);margin:0;box-shadow:none;';
       blockBtn.textContent = 'Block Advertiser';
+
       blockBtn.addEventListener('click', function() {
-        if (confirm('Block this advertiser? You will no longer see ads from this creator.')) {
+        blockWrap.innerHTML = '';
+
+        var confirmBtn = document.createElement('button');
+        confirmBtn.type = 'button';
+        confirmBtn.className = 'secondary';
+        confirmBtn.style.cssText = 'width:auto;padding:.25rem .65rem;font-size:.78rem;background:var(--pico-del-color,#c0392b);color:#fff;border:none;margin:0;box-shadow:none;';
+        confirmBtn.textContent = 'Confirm Block';
+
+        var cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'outline secondary';
+        cancelBtn.style.cssText = 'width:auto;padding:.25rem .5rem;font-size:.78rem;margin:0;box-shadow:none;';
+        cancelBtn.textContent = 'Cancel';
+
+        confirmBtn.addEventListener('click', function() {
+          confirmBtn.disabled = true;
+          confirmBtn.textContent = 'Blocking…';
           blockCreator(creatorPk, function() {
             _goBackToList();
           });
-        }
+        });
+
+        cancelBtn.addEventListener('click', function() {
+          blockWrap.innerHTML = '';
+          blockWrap.appendChild(blockBtn);
+        });
+
+        blockWrap.appendChild(confirmBtn);
+        blockWrap.appendChild(cancelBtn);
       });
-      rightActions.appendChild(blockBtn);
+
+      blockWrap.appendChild(blockBtn);
+      rightActions.appendChild(blockWrap);
     }
     backRow.appendChild(rightActions);
   }

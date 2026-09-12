@@ -162,6 +162,27 @@ function renderHelp(root) {
   vSettleCard.appendChild(vSettleDesc);
   viewerPanel.appendChild(vSettleCard);
 
+  // Advertiser Reputation & Safety card
+  var vRepCard = createContentCard('#3498db', 'Advertiser Reputation & Safety');
+  var vRepList = document.createElement('ul');
+  vRepList.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;padding-left:1.5rem;';
+  vRepList.innerHTML =
+    '<li style="margin-bottom:.5rem;"><strong>Local Reputation Engine:</strong> Your node independently evaluates every campaign creator based on your past channel interactions, payment reliability, and settlement history. This evaluation happens entirely on your local device without any central authority, telemetry, or external tracking.</li>' +
+    '<li style="margin-bottom:.5rem;"><strong>Reputation Badges:</strong> Next to campaign titles, an inline tag indicates the creator\'s trust tier:' +
+      '<ul style="margin:.3rem 0 .4rem 1.2rem;padding-left:0;">' +
+        '<li style="margin-bottom:.25rem;"><strong>Trusted</strong> (green): The advertiser has an established history of reliable voucher issuance and successful channel settlements.</li>' +
+        '<li style="margin-bottom:.25rem;"><strong>OK</strong> (blue): Normal standing with consistent, valid interactions.</li>' +
+        '<li style="margin-bottom:.25rem;"><strong>New</strong> (gray): A newly discovered advertiser with minimal interaction history on your node.</li>' +
+        '<li style="margin-bottom:.25rem;"><strong>Flagged</strong> (red): An advertiser with failed payments, expired channels without settlement, or suspicious activity.</li>' +
+        '<li><em>No badge (Unknown):</em> If your node has had no past history with an advertiser yet, no badge is displayed to keep your view clean.</li>' +
+      '</ul>' +
+    '</li>' +
+    '<li style="margin-bottom:.5rem;"><strong>Blocking Advertisers:</strong> If you do not wish to see ads from a specific creator, open any of their ads in the Viewer and click <strong>Block Advertiser</strong>. After confirming inline, the creator is added to your local blocklist and all of their campaigns are immediately removed from your feed.</li>' +
+    '<li style="margin-bottom:.5rem;"><strong>Managing Blocked Advertisers:</strong> You can view and manage all blocked creators in <strong>Settings</strong>, where you can unblock any creator at any time with a single click.</li>' +
+    '<li style="margin-bottom:.5rem;"><strong>Automatic Flagged Ad Protection:</strong> In <strong>Settings</strong>, the option <em>"Automatically hide ads from Flagged creators"</em> is enabled by default to protect your feed from untrustworthy advertisers.</li>';
+  vRepCard.appendChild(vRepList);
+  viewerPanel.appendChild(vRepCard);
+
   root.appendChild(viewerPanel);
 
   // --- 2. CREATOR PANEL ---
@@ -513,17 +534,32 @@ function renderHelp(root) {
 
   // FAQ Item 10
   var faq10 = createContentCard('#2ecc71', 'What is the difference between Viewer and Publisher rewards?');
-  var faq7p1 = document.createElement('p');
-  faq7p1.style.cssText = 'font-size:0.9rem;margin:.35rem 0 .5rem;';
-  faq7p1.innerHTML = 'Creators allocate their budget into two pools:';
-  faq7.appendChild(faq7p1);
-  var faq7List = document.createElement('ul');
-  faq7List.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;padding-left:1.5rem;';
-  faq7List.innerHTML = '<li style="margin-bottom:.3rem;"><strong>Viewer Rewards:</strong> Paid to users who view and click your ads.</li>' +
+  var faq10p1 = document.createElement('p');
+  faq10p1.style.cssText = 'font-size:0.9rem;margin:.35rem 0 .5rem;';
+  faq10p1.innerHTML = 'Creators allocate their budget into two pools:';
+  faq10.appendChild(faq10p1);
+  var faq10List = document.createElement('ul');
+  faq10List.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;padding-left:1.5rem;';
+  faq10List.innerHTML = '<li style="margin-bottom:.3rem;"><strong>Viewer Rewards:</strong> Paid to users who view and click your ads.</li>' +
     '<li style="margin-bottom:.3rem;"><strong>Publisher Rewards:</strong> Paid to publishers who distribute your campaign in their dApps.</li>' +
     '<li>Both use the same Layer 2 channel infrastructure and are fully transparent in your campaign budget breakdown.</li>';
-  faq7.appendChild(faq7List);
-  faqPanel.appendChild(faq7);
+  faq10.appendChild(faq10List);
+  faqPanel.appendChild(faq10);
+
+  // FAQ Item 11
+  var faq11 = createContentCard('#9b59b6', 'How does Advertiser Reputation and Blocking work?');
+  var faq11p1 = document.createElement('p');
+  faq11p1.style.cssText = 'font-size:0.9rem;margin:.35rem 0 .5rem;';
+  faq11p1.innerHTML = 'MinimaAds includes a privacy-preserving, decentralized reputation and safety system:';
+  faq11.appendChild(faq11p1);
+  var faq11List = document.createElement('ul');
+  faq11List.style.cssText = 'font-size:0.9rem;margin:.35rem 0 0;padding-left:1.5rem;';
+  faq11List.innerHTML = '<li style="margin-bottom:.3rem;"><strong>100% Local & Private:</strong> Reputation scores are computed exclusively on your own node based on your channel settlement history. No personal data, click logs, or ratings are shared with other nodes or servers.</li>' +
+    '<li style="margin-bottom:.3rem;"><strong>Reputation Tiers:</strong> When an advertiser has interaction history, an inline tag appears next to their campaign (<em>Trusted</em>, <em>OK</em>, <em>New</em>, or <em>Flagged</em>). If an advertiser is unknown, no tag is displayed.</li>' +
+    '<li style="margin-bottom:.3rem;"><strong>Blocklist:</strong> You can block any advertiser from the ad detail screen. Once blocked, their campaigns never appear in your ad feeds. You can review and unblock creators at any time in <strong>Settings</strong>.</li>' +
+    '<li><strong>Auto-Protection:</strong> Under <strong>Settings</strong>, you can enable or disable <em>"Automatically hide ads from Flagged creators"</em> (active by default) so you don\'t waste time with unreliable campaigns.</li>';
+  faq11.appendChild(faq11List);
+  faqPanel.appendChild(faq11);
 
   root.appendChild(faqPanel);
 

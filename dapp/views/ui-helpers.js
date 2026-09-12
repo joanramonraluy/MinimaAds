@@ -40,7 +40,7 @@ function mkReputationBadge(tier) {
   var c = palette[normalized] || palette['new'];
   var el = document.createElement('mark');
   el.style.cssText = 'background:' + c.bg + ';color:' + c.fg
-    + ';padding:.15rem .5rem;border-radius:.25rem;font-size:.7rem;'
+    + ';padding:.15rem .5rem;border-radius:.25rem;font-size:.75rem;'
     + 'font-weight:600;white-space:nowrap;vertical-align:middle;';
   el.title = 'Local reputation (this device only, not shared with the network): ' + (labels[normalized] || tier);
   el.textContent = labels[normalized] || tier;

@@ -268,7 +268,7 @@ CREATE TABLE IF NOT EXISTS FRAMES (
   -- platform creator (MINIMAADS_CREATOR_PK in config.js) — see §6.9.
   PUBLISHER_KEY    VARCHAR(512)  NOT NULL,           -- Maxima public key of the publisher node (0x...)
   PUBLISHER_WALLET VARCHAR(512)  DEFAULT '',         -- Wallet address for publisher reward settlement
-  PUBLISHER_MX     VARCHAR(512)  DEFAULT '',         -- Maxima contact/route string of publisher node
+  PUBLISHER_MX     VARCHAR(1024) DEFAULT '',         -- Maxima contact/route string of publisher node (widened 512→1024 by migration 2026-09-12-001)
   LABEL            VARCHAR(256)  DEFAULT '',         -- Human-readable name
   IS_BUILTIN       BOOLEAN       NOT NULL DEFAULT FALSE,
   CREATED_AT       BIGINT        NOT NULL,
@@ -345,6 +345,15 @@ CREATE TABLE IF NOT EXISTS PEER_REPUTATION (
   LAST_CALC_AT  BIGINT        NOT NULL,
   PRIMARY KEY (SUBJECT_KEY, SUBJECT_ROLE)
 );
+
+-- OPEN-6 — migration bookkeeping. Created and owned by core/schema.js (not by
+-- db-init.js / dapp/app.js) by whichever runtime boots first. Seeded empty: there
+-- is deliberately no backfill of historical migration ids.
+CREATE TABLE IF NOT EXISTS SCHEMA_MIGRATIONS (
+  MIGRATION_ID VARCHAR(128) PRIMARY KEY,       -- '<date>-<seq>-<slug>'; lexicographic order = chronological order
+  APPLIED_AT   BIGINT       NOT NULL,          -- unix ms
+  APPLIED_BY   VARCHAR(8)   NOT NULL DEFAULT ''-- 'SW' | 'FE' — audit only, never branched on
+);
 ```
 
 > `CHANNEL_STATE` exists on both creator and viewer nodes with different semantics:
@@ -359,6 +368,16 @@ CREATE TABLE IF NOT EXISTS PEER_REPUTATION (
 - Upserts via `MERGE INTO ... KEY(id)` — never `ON CONFLICT`
 - String comparisons via `UPPER()` — never raw equality on IDs or addresses
 - BOOLEAN columns return strings `"true"`/`"false"` — check all four variants
+
+**Schema evolution** (OPEN-6): `core/schema.js` holds `SCHEMA_MIGRATIONS_LIST` (an ordered, append-only data array) and `runSchemaMigrations(runtimeTag, done)`. Both runtimes load that one file and run that one list — SW from `initDB` (`db-init.js`), FE from the `onInited` chain (`dapp/app.js`) — so both converge on an identical schema regardless of boot order. Migrations are classified:
+
+| Class | What | Version table? |
+|---|---|---|
+| **A** — additive | `ALTER TABLE t ADD COLUMN IF NOT EXISTS c T DEFAULT d` | No — idempotent by construction. **Stays in `db-init.js` / `dapp/app.js` as today; not declared in the list.** |
+| **B** — idempotent destructive DDL | `ALTER TABLE IF EXISTS t ALTER COLUMN IF EXISTS c SET DATA TYPE T` / `… RENAME TO new` / `ALTER TABLE IF EXISTS t DROP COLUMN IF EXISTS c` — the only three guarded forms H2 2.1.214 + `MODE=MySQL` accepts (AGENTS.md §4.1) | No — runs every boot, verified no-op when already applied or not applicable |
+| **C** — not idempotent | Data backfills (`UPDATE`/`INSERT … SELECT`) and multi-step table rewrites | **Yes** — the only reason `SCHEMA_MIGRATIONS` exists. C migrations must *also* be written so a re-run is harmless (self-limiting `WHERE`): no transactions exist in this runtime, so the version row is the second line of defence, not the first. |
+
+`CREATE TABLE IF NOT EXISTS` definitions are kept at the **current** schema, and Class B is what makes that safe: a fresh node creates the column at its final shape, and re-asserting that shape is a no-op. Therefore **a destructive migration is always a paired change** — update the `CREATE TABLE` in both runtimes *and* append the list entry. A failed migration is non-fatal (the DB is intact, a failed destructive migration is a clean no-op): the runner stops the chain, logs `[SCHEMA] MIGRATION FAILED`, boot continues, and the SW surfaces it to the FE via the `SCHEMA_MIGRATION_FAILED` signal (§8.15).
 
 ---
 
@@ -1656,6 +1675,7 @@ Sent when a viewer or publisher's `#mycampaigns`/`#frames` view wants live escro
 | `CREATOR_LIVENESS_PONG` | `{ campaign_id, status }` | `campaign.handler.js` (SW) | CREATOR_LIVENESS_PONG received — SDK resolves pending liveness check (`status`: '' \| active \| paused \| finished) |
 | `STATUS_TX_PENDING` | `{ campaign_id, status, pending_uid }` | `dapp/views/mycampaigns.js` (FE) | Status-change tx awaiting Hub approval — UI shows "awaiting confirmation" until the V3 change coin is confirmed on-chain |
 | `PROFILE_RECEIVED` | `{ publickey, name, icon }` | `campaign.handler.js` (SW) | PROFILE_RESPONSE received — viewer FE updates creator avatar/name in campaign list |
+| `SCHEMA_MIGRATION_FAILED` | `{ error, runtime }` | `db-init.js` (SW) | A Class B/C migration in `core/schema.js` failed (§3.5). **Non-fatal** — the DB is intact and boot continues on the old schema; the FE logs it to the console so it is visible rather than buried in the SW log |
 
 ---
 

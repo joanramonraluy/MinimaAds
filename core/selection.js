@@ -5,11 +5,24 @@
 
 var _seenCampaignIds = {};
 
-function selectAd(userAddress, userInterests, campaigns) {
+function selectAd(userAddress, userInterests, campaigns, blockedCreators) {
+  var blockedMap = {};
+  if (Array.isArray(blockedCreators)) {
+    for (var bi = 0; bi < blockedCreators.length; bi++) {
+      if (blockedCreators[bi]) {
+        blockedMap[(blockedCreators[bi] + '').toUpperCase()] = true;
+      }
+    }
+  } else if (blockedCreators && typeof blockedCreators === 'object') {
+    blockedMap = blockedCreators;
+  }
+
   var eligible = campaigns.filter(function(c) {
+    var cPk = (c.CREATOR_ADDRESS || '').toUpperCase();
+    if (blockedMap[cPk]) { return false; }
     return c.STATUS === "active"
       && parseFloat(c.BUDGET_REMAINING) >= parseFloat(c.REWARD_VIEW)
-      && c.CREATOR_ADDRESS.toUpperCase() !== userAddress.toUpperCase()
+      && cPk !== userAddress.toUpperCase()
       && (!c.EXPIRES_AT || parseInt(c.EXPIRES_AT, 10) > Date.now());
   });
 

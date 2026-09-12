@@ -424,3 +424,103 @@ function pruneReputationEvents() {
     MDS.log("[REPUTATION] pruneReputationEvents: pruned rows older than retention window");
   });
 }
+
+// ---------------------------------------------------------------------------
+// Local Creator Blocklist & Ad Filtering Preferences (MDS.keypair backed)
+// Pure local node storage — 100% private, never shared across the network.
+// ---------------------------------------------------------------------------
+
+function getBlockedCreators(cb) {
+  if (typeof MDS === 'undefined' || !MDS.keypair) {
+    if (cb) { cb(null, []); }
+    return;
+  }
+  MDS.keypair.get('BLOCKED_CREATORS', function(res) {
+    var raw = (res && res.status && res.value) ? res.value : '';
+    var list = [];
+    if (raw) {
+      try { list = JSON.parse(raw); } catch (e) { list = []; }
+    }
+    if (!Array.isArray(list)) { list = []; }
+    if (cb) { cb(null, list); }
+  });
+}
+
+function isCreatorBlocked(creatorPk, cb) {
+  if (!creatorPk) { if (cb) { cb(null, false); } return; }
+  var target = (creatorPk + '').toUpperCase();
+  getBlockedCreators(function(err, list) {
+    if (err) { if (cb) { cb(err, false); } return; }
+    var found = false;
+    for (var i = 0; i < list.length; i++) {
+      if (((list[i] || '') + '').toUpperCase() === target) {
+        found = true;
+        break;
+      }
+    }
+    if (cb) { cb(null, found); }
+  });
+}
+
+function blockCreator(creatorPk, cb) {
+  if (!creatorPk) { if (cb) { cb("Missing creatorPk"); } return; }
+  var target = (creatorPk + '').toUpperCase();
+  getBlockedCreators(function(err, list) {
+    if (err) { if (cb) { cb(err); } return; }
+    var exists = false;
+    for (var i = 0; i < list.length; i++) {
+      if (((list[i] || '') + '').toUpperCase() === target) {
+        exists = true;
+        break;
+      }
+    }
+    if (!exists) {
+      list.push(target);
+      MDS.keypair.set('BLOCKED_CREATORS', JSON.stringify(list), function() {
+        if (cb) { cb(null, list); }
+      });
+    } else {
+      if (cb) { cb(null, list); }
+    }
+  });
+}
+
+function unblockCreator(creatorPk, cb) {
+  if (!creatorPk) { if (cb) { cb("Missing creatorPk"); } return; }
+  var target = (creatorPk + '').toUpperCase();
+  getBlockedCreators(function(err, list) {
+    if (err) { if (cb) { cb(err); } return; }
+    var updated = [];
+    for (var i = 0; i < list.length; i++) {
+      if (((list[i] || '') + '').toUpperCase() !== target) {
+        updated.push(list[i]);
+      }
+    }
+    MDS.keypair.set('BLOCKED_CREATORS', JSON.stringify(updated), function() {
+      if (cb) { cb(null, updated); }
+    });
+  });
+}
+
+function getHideFlaggedPreference(cb) {
+  if (typeof MDS === 'undefined' || !MDS.keypair) {
+    if (cb) { cb(null, true); }
+    return;
+  }
+  MDS.keypair.get('HIDE_FLAGGED_ADS', function(res) {
+    var raw = (res && res.status && res.value) ? res.value : '';
+    // Defaults to true (opt-out protection against flagged creators)
+    if (cb) { cb(null, raw !== 'false'); }
+  });
+}
+
+function setHideFlaggedPreference(enabled, cb) {
+  if (typeof MDS === 'undefined' || !MDS.keypair) {
+    if (cb) { cb(null); }
+    return;
+  }
+  MDS.keypair.set('HIDE_FLAGGED_ADS', enabled ? 'true' : 'false', function() {
+    if (cb) { cb(null); }
+  });
+}
+

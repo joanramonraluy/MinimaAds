@@ -99,56 +99,72 @@ function _loadAndRenderList() {
       + "a.CTA_LABEL AS AD_CTA_LABEL, a.CTA_URL AS AD_CTA_URL, "
       + "a.IMAGE_DATA, a.SHOW_TITLE, a.SHOW_BODY, a.SHOW_CTA, "
       + "a.BG_COLOR, a.TEXT_COLOR, a.IMAGE_POSITION, a.IMAGE_ZOOM, a.IMAGE_WIDTH_PCT, "
-      + "cs.CUMULATIVE_EARNED AS USER_CUMULATIVE, cs.MAX_AMOUNT AS USER_MAX_AMOUNT, cs.STATUS AS USER_CHANNEL_STATUS "
+      + "cs.CUMULATIVE_EARNED AS USER_CUMULATIVE, cs.MAX_AMOUNT AS USER_MAX_AMOUNT, cs.STATUS AS USER_CHANNEL_STATUS, "
+      + "pr.TIER AS CREATOR_TIER "
       + "FROM CAMPAIGNS c LEFT JOIN ADS a ON UPPER(a.CAMPAIGN_ID) = UPPER(c.ID) "
       + "LEFT JOIN CHANNEL_STATE cs ON UPPER(cs.CAMPAIGN_ID) = UPPER(c.ID) AND UPPER(cs.VIEWER_KEY) = UPPER('" + escapeSql(MY_ADDRESS || '') + "') AND cs.ROLE = 'viewer' "
+      + "LEFT JOIN PEER_REPUTATION pr ON UPPER(pr.SUBJECT_KEY) = UPPER(c.CREATOR_ADDRESS) AND pr.SUBJECT_ROLE = 'creator' "
       + "WHERE UPPER(c.STATUS) = 'ACTIVE'";
 
-    sqlQuery(sql, function(err, rows) {
-      var listEl = document.getElementById('ma-campaign-list');
-      if (!listEl) {
-        _viewerState.listRendering = false;
-        return;
+    var getBlocked = (typeof getBlockedCreators === 'function') ? getBlockedCreators : function(cb) { cb(null, []); };
+    var getHideFlagged = (typeof getHideFlaggedPreference === 'function') ? getHideFlaggedPreference : function(cb) { cb(null, true); };
+
+    getBlocked(function(bErr, blockedList) {
+      var blockedMap = {};
+      for (var bi = 0; bi < (blockedList || []).length; bi++) {
+        if (blockedList[bi]) { blockedMap[(blockedList[bi] + '').toUpperCase()] = true; }
       }
+      getHideFlagged(function(hErr, hideFlagged) {
+        sqlQuery(sql, function(err, rows) {
+          var listEl = document.getElementById('ma-campaign-list');
+          if (!listEl) {
+            _viewerState.listRendering = false;
+            return;
+          }
 
-      listEl.innerHTML = '';
+          listEl.innerHTML = '';
 
-      if (err) {
-        _viewerState.listRendering = false;
-        listEl.innerHTML = '';
-        listEl.style.border = 'none';
-        listEl.style.boxShadow = 'none';
-        var errP = document.createElement('p');
-        errP.style.cssText = 'color:var(--pico-del-color,#c0392b);padding:1rem;margin:0;text-align:center;';
-        errP.textContent = 'Error loading campaigns.';
-        listEl.appendChild(errP);
-        return;
-      }
+          if (err) {
+            _viewerState.listRendering = false;
+            listEl.innerHTML = '';
+            listEl.style.border = 'none';
+            listEl.style.boxShadow = 'none';
+            var errP = document.createElement('p');
+            errP.style.cssText = 'color:var(--pico-del-color,#c0392b);padding:1rem;margin:0;text-align:center;';
+            errP.textContent = 'Error loading campaigns.';
+            listEl.appendChild(errP);
+            return;
+          }
 
-      var addr = MY_ADDRESS ? MY_ADDRESS.toUpperCase() : '';
-      var campaigns = (rows || []).filter(function(r) {
-        if (addr && r.CREATOR_ADDRESS && r.CREATOR_ADDRESS.toUpperCase() === addr) { return false; }
-        if (parseFloat(r.BUDGET_REMAINING) < parseFloat(r.REWARD_VIEW)) { return false; }
-        return true;
+          var addr = MY_ADDRESS ? MY_ADDRESS.toUpperCase() : '';
+          var campaigns = (rows || []).filter(function(r) {
+            var cPk = (r.CREATOR_ADDRESS || '').toUpperCase();
+            if (addr && cPk === addr) { return false; }
+            if (blockedMap[cPk]) { return false; }
+            if (hideFlagged && (r.CREATOR_TIER || '').toLowerCase() === 'flagged') { return false; }
+            if (parseFloat(r.BUDGET_REMAINING) < parseFloat(r.REWARD_VIEW)) { return false; }
+            return true;
+          });
+
+          if (campaigns.length === 0) {
+            _viewerState.listRendering = false;
+            listEl.innerHTML = '';
+            listEl.style.border = 'none';
+            listEl.style.boxShadow = 'none';
+            var emptyState = mkEmptyState('No ads available right now.', null, null);
+            emptyState.style.cssText = 'padding:3rem 1rem;';
+            listEl.appendChild(emptyState);
+            return;
+          }
+
+          for (var i = 0; i < campaigns.length; i++) {
+            var contact = contactsMap[(campaigns[i].CREATOR_ADDRESS || '').toUpperCase()] || null;
+            listEl.appendChild(_buildCampaignRow(campaigns[i], contact));
+          }
+          _fetchNonContactProfiles(campaigns, contactsMap);
+          _viewerState.listRendering = false;
+        });
       });
-
-      if (campaigns.length === 0) {
-        _viewerState.listRendering = false;
-        listEl.innerHTML = '';
-        listEl.style.border = 'none';
-        listEl.style.boxShadow = 'none';
-        var emptyState = mkEmptyState('No ads available right now.', null, null);
-        emptyState.style.cssText = 'padding:3rem 1rem;';
-        listEl.appendChild(emptyState);
-        return;
-      }
-
-      for (var i = 0; i < campaigns.length; i++) {
-        var contact = contactsMap[(campaigns[i].CREATOR_ADDRESS || '').toUpperCase()] || null;
-        listEl.appendChild(_buildCampaignRow(campaigns[i], contact));
-      }
-      _fetchNonContactProfiles(campaigns, contactsMap);
-      _viewerState.listRendering = false;
     });
   });
 }
@@ -199,6 +215,22 @@ function _buildCampaignRow(campaign, contact) {
   titleEl.style.cssText = 'font-weight:600;font-size:.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
   titleEl.textContent = DOMPurify.sanitize(campaign.AD_TITLE || campaign.TITLE || 'Untitled');
   titleRow.appendChild(titleEl);
+
+  // Creator reputation badge (MinimaAds.md §7.8)
+  var creatorAddrForRep = (campaign.CREATOR_ADDRESS || '').toUpperCase();
+  if (creatorAddrForRep && (!MY_ADDRESS || creatorAddrForRep !== MY_ADDRESS.toUpperCase())) {
+    var repBadgeSlot = document.createElement('span');
+    titleRow.appendChild(repBadgeSlot);
+    if (campaign.CREATOR_TIER && campaign.CREATOR_TIER !== 'unknown' && typeof mkReputationBadge === 'function') {
+      repBadgeSlot.appendChild(mkReputationBadge(campaign.CREATOR_TIER));
+    } else if (typeof getReputation === 'function') {
+      getReputation(creatorAddrForRep, 'creator', function(repErr, rep) {
+        if (!repErr && rep && rep.TIER && rep.TIER !== 'unknown' && typeof mkReputationBadge === 'function') {
+          repBadgeSlot.appendChild(mkReputationBadge(rep.TIER));
+        }
+      });
+    }
+  }
 
   if (campaign.USER_CHANNEL_STATUS) {
     var cStatus = campaign.USER_CHANNEL_STATUS || '';
@@ -291,7 +323,7 @@ function _openCampaign(campaign) {
 
 function _buildDetailShell(root) {
   var backRow = document.createElement('div');
-  backRow.style.cssText = 'margin-bottom:1rem;';
+  backRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin-bottom:1rem;flex-wrap:wrap;';
   var backBtn = document.createElement('button');
   backBtn.type = 'button';
   backBtn.className = 'outline secondary';
@@ -299,6 +331,46 @@ function _buildDetailShell(root) {
   backBtn.textContent = '← Back';
   backBtn.addEventListener('click', _goBackToList);
   backRow.appendChild(backBtn);
+
+  var campaign = _viewerState.campaign || {};
+  var creatorPk = (campaign.CREATOR_ADDRESS || '').toUpperCase();
+  var myPk = (MY_ADDRESS || '').toUpperCase();
+  var isOtherCreator = creatorPk && (!myPk || creatorPk !== myPk);
+
+  if (isOtherCreator) {
+    var rightActions = document.createElement('div');
+    rightActions.style.cssText = 'display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;';
+
+    var repBadgeSlot = document.createElement('span');
+    rightActions.appendChild(repBadgeSlot);
+    if (campaign.CREATOR_TIER && campaign.CREATOR_TIER !== 'unknown' && typeof mkReputationBadge === 'function') {
+      repBadgeSlot.appendChild(mkReputationBadge(campaign.CREATOR_TIER));
+    } else if (typeof getReputation === 'function') {
+      getReputation(creatorPk, 'creator', function(repErr, rep) {
+        if (!repErr && rep && rep.TIER && rep.TIER !== 'unknown' && typeof mkReputationBadge === 'function') {
+          repBadgeSlot.appendChild(mkReputationBadge(rep.TIER));
+        }
+      });
+    }
+
+    if (typeof blockCreator === 'function') {
+      var blockBtn = document.createElement('button');
+      blockBtn.type = 'button';
+      blockBtn.className = 'outline secondary';
+      blockBtn.style.cssText = 'width:auto;padding:.25rem .65rem;font-size:.78rem;color:var(--pico-del-color,#c0392b);border-color:var(--pico-del-color,#c0392b);margin:0;box-shadow:none;';
+      blockBtn.textContent = 'Block Advertiser';
+      blockBtn.addEventListener('click', function() {
+        if (confirm('Block this advertiser? You will no longer see ads from this creator.')) {
+          blockCreator(creatorPk, function() {
+            _goBackToList();
+          });
+        }
+      });
+      rightActions.appendChild(blockBtn);
+    }
+    backRow.appendChild(rightActions);
+  }
+
   root.appendChild(backRow);
 
   var summarySection = document.createElement('section');
@@ -757,9 +829,11 @@ function renderCampaignDetail(root) {
     + "a.CTA_LABEL AS AD_CTA_LABEL, a.CTA_URL AS AD_CTA_URL, "
     + "a.IMAGE_DATA, a.SHOW_TITLE, a.SHOW_BODY, a.SHOW_CTA, "
     + "a.BG_COLOR, a.TEXT_COLOR, a.IMAGE_POSITION, a.IMAGE_ZOOM, a.IMAGE_WIDTH_PCT, "
-    + "cs.CUMULATIVE_EARNED AS USER_CUMULATIVE, cs.MAX_AMOUNT AS USER_MAX_AMOUNT, cs.STATUS AS USER_CHANNEL_STATUS "
+    + "cs.CUMULATIVE_EARNED AS USER_CUMULATIVE, cs.MAX_AMOUNT AS USER_MAX_AMOUNT, cs.STATUS AS USER_CHANNEL_STATUS, "
+    + "pr.TIER AS CREATOR_TIER "
     + "FROM CAMPAIGNS c LEFT JOIN ADS a ON UPPER(a.CAMPAIGN_ID) = UPPER(c.ID) "
     + "LEFT JOIN CHANNEL_STATE cs ON UPPER(cs.CAMPAIGN_ID) = UPPER(c.ID) AND UPPER(cs.VIEWER_KEY) = UPPER('" + escapeSql(MY_ADDRESS || '') + "') AND cs.ROLE = 'viewer' "
+    + "LEFT JOIN PEER_REPUTATION pr ON UPPER(pr.SUBJECT_KEY) = UPPER(c.CREATOR_ADDRESS) AND pr.SUBJECT_ROLE = 'creator' "
     + "WHERE UPPER(c.ID) = UPPER('" + escapeSql(id) + "')";
 
   sqlQuery(detailSql, function(err, rows) {

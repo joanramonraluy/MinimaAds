@@ -313,15 +313,28 @@ sequenceDiagram
     * Forward-lineage check `_resolveEscrowCoinTrust` fails (coin is not genesis anchor and not a hash-derived child).
     * **Coin ignored**. Campaign remains active.
 
-* **Test F.5: Reputation Slashing & UI Flagged Tier (T-REP1, T-REP2)**
-  * **Role / Node**: Node 6 (Attacker)
+* **Test F.5: Reputation Slashing, Creator Blocking & Viewer Filtering (T-REP1, T-REP2, REP-FILTER)**
+  * **Role / Node**: Node 6 (Attacker / Rogue Creator) vs. Node 3 (Viewer)
+  * **Preconditions**: Node 6 has an active campaign propagated to Node 3; Node 3 is in Viewer mode.
   * **Steps**:
-    1. Execute adversarial probes F.1 through F.3 from Node 6.
-    2. Check Node 6 reputation score in `#profile` or SQL.
+    1. Node 3 navigates to `#viewer` and verifies Node 6's campaign appears in the list with its initial reputation tier badge (`New` or `OK`).
+    2. Node 6 executes an adversarial probe against Node 3 (e.g., F.1 forged status change or F.2 profile spoof).
+    3. Node 3 Service Worker detects the violation and immediately records negative evidence (`creator_assert_failed` or `identity_pin_violation`).
+    4. Verify Node 3 local database: `PEER_REPUTATION` row for Node 6 drops score and transitions to `TIER='flagged'`.
+    5. In Node 3 `#viewer`:
+       - Default mode: Node 6's campaign row immediately displays the prominent red `[Flagged]` badge next to the ad title.
+       - Clicking the campaign opens detail view: verify the red `[Flagged]` badge is displayed in the header row alongside a `"Block Advertiser"` button.
+       - Navigate to `#settings` $\to$ *Ad Preferences & Blocklist*: toggle on *"Automatically hide ads from Flagged creators"*.
+       - Return to `#viewer`: verify Node 6's campaign is completely hidden from the available ad list.
+       - Return to `#settings` and disable *"Automatically hide ads from Flagged creators"*.
+       - Return to `#viewer`, open Node 6's campaign, click *"Block Advertiser"*, and accept the confirmation prompt.
+       - Confirm Node 6 is added to the local blocklist in `MDS.keypair`:
+         - Campaign is hidden from `#viewer` list.
+         - Excluded from `selectAd()` pool for local frames.
+         - Displayed under `#settings` $\to$ *Blocked Advertisers* with an *"Unblock"* action.
+       - Click *"Unblock"* under `#settings`: confirm Node 6's campaign reappears in `#viewer` (with its red `[Flagged]` badge intact).
   * **Expected Results**:
-    * Weight penalties accumulate.
-    * Node 6 transitions to `Tier: Flagged`.
-    * UI displays warning badges next to Node 6's campaigns/ads.
+    * Full end-to-end local reputation containment: attack detection $\to$ local tier transition $\to$ UI warning $\to$ automated & manual filtering $\to$ blocklist management.
 
 ---
 
@@ -354,7 +367,7 @@ The table below documents which tests have **already been verified live** during
 | **F** | **F.2** | Adversarial Profile Spoof (AUD-6) | ✅ **Verified** | `docs/HISTORY.md §17 (2026-09-11 AUD-6 / T-REP0)` — forged response dropped on PK mismatch | Regression |
 | **F** | **F.3** | Adversarial Opener Hijack (N2-4) | ⬜ **Pending** | Dedicated attacker script claiming another viewer's channel ID pending live probe | **High Priority** |
 | **F** | **F.4** | Adversarial Dust Coin Injection (OPEN-4)| ✅ **Verified** | `docs/HISTORY.md §17 (2026-09-09 OPEN-4)` — forward-lineage anchor check verified live | Regression |
-| **F** | **F.5** | Reputation Slashing & UI Flagged Badge | ✅ **Verified** | `docs/HISTORY.md §17 (2026-09-11 T-REP2 / commit 1f96716)` — negative signals & UI badges live | Regression |
+| **F** | **F.5** | Reputation Slashing, Creator Blocking & Viewer Filtering | ⚠️ **Code-Verified** | UI badges, local blocklist & flagged auto-hide verified; live multi-node harness test pending | **High Priority** |
 
 ---
 
@@ -392,6 +405,6 @@ When executing a new test cycle (e.g. for Minima v1.0.49 validation), copy this 
 | F | F.2 | Adversarial Profile Spoof (AUD-6) | ✅ Prior | ⬜ | |
 | F | F.3 | Adversarial Opener Hijack (N2-4) | ⬜ New | ⬜ | |
 | F | F.4 | Adversarial Dust Coin Injection (OPEN-4)| ✅ Prior | ⬜ | |
-| F | F.5 | Reputation Slashing & UI Flagged Badge | ✅ Prior | ⬜ | |
+| F | F.5 | Reputation Slashing, Creator Blocking & Viewer Filtering | ⚠️ Code-Verified | ⬜ | |
 ```
 

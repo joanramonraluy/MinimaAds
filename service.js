@@ -178,6 +178,7 @@ function onInited() {
   MDS.load("core/channels.js");
   MDS.load("core/frames.js");
   MDS.load("core/reputation.js");
+  MDS.load("core/schema.js");
   MDS.load("public/service-workers/db-init.js");
   MDS.load("public/service-workers/handlers/maxima.handler.js");
   MDS.load("public/service-workers/handlers/campaign.handler.js");

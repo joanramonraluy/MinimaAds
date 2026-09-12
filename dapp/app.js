@@ -460,6 +460,12 @@ function handleMdsComms(parsed) {
     if (typeof onRewardValidation === 'function') { onRewardValidation(parsed); }
     return;
   }
+  if (parsed.type === 'SCHEMA_MIGRATION_FAILED') {
+    // OPEN-6 — non-fatal: the SW finished booting on the old schema. Surfaced here
+    // so it is visible in the FE console rather than buried in the SW log.
+    console.error('[SCHEMA] migrations failed (' + (parsed.runtime || 'SW') + ') — ' + (parsed.error || 'unknown error'));
+    return;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1170,7 +1176,7 @@ function initFEFrames(cb) {
     + "FRAME_ID         VARCHAR(512)  PRIMARY KEY,"
     + "PUBLISHER_KEY    VARCHAR(512)  NOT NULL,"
     + "PUBLISHER_WALLET VARCHAR(512)  DEFAULT '',"
-    + "PUBLISHER_MX     VARCHAR(512)  DEFAULT '',"
+    + "PUBLISHER_MX     VARCHAR(1024) DEFAULT '',"
     + "LABEL            VARCHAR(256)  DEFAULT '',"
     + "IS_BUILTIN       BOOLEAN       NOT NULL DEFAULT FALSE,"
     + "CREATED_AT       BIGINT        NOT NULL,"
@@ -1378,10 +1384,18 @@ function onInited() {
               initFEChannelState(function() {
                 initFEChannelHistory(function() {
                   initFEReputation(function() {
-                    renderNav();
-                    probeDb();
-                    doRender();
-                    startNetworkStatusMonitoring();
+                    // OPEN-6 — same migration list, same order, both runtimes
+                    // (core/schema.js). Runs last, once every FE-mirrored table
+                    // exists. Non-fatal: boot continues, failure is surfaced.
+                    runSchemaMigrations('FE', function(migErr) {
+                      if (migErr) {
+                        console.error('[SCHEMA] migrations failed (FE) — ' + migErr);
+                      }
+                      renderNav();
+                      probeDb();
+                      doRender();
+                      startNetworkStatusMonitoring();
+                    });
                   });
                 });
               });

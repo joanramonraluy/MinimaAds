@@ -72,7 +72,7 @@ function initDB(cb) {
     + "FRAME_ID         VARCHAR(512)  PRIMARY KEY,"
     + "PUBLISHER_KEY    VARCHAR(512)  NOT NULL,"
     + "PUBLISHER_WALLET VARCHAR(512)  DEFAULT '',"
-    + "PUBLISHER_MX     VARCHAR(512)  DEFAULT '',"
+    + "PUBLISHER_MX     VARCHAR(1024) DEFAULT '',"
     + "LABEL            VARCHAR(256)  DEFAULT '',"
     + "IS_BUILTIN       BOOLEAN       NOT NULL DEFAULT FALSE,"
     + "CREATED_AT       BIGINT        NOT NULL,"
@@ -219,9 +219,20 @@ function initDB(cb) {
                         if (repErr) { MDS.log("[DB] initDB: failed to create REPUTATION_EVENTS — " + repErr); }
                         sqlQuery(sql_peer_reputation, function(peerErr) {
                           if (peerErr) { MDS.log("[DB] initDB: failed to create PEER_REPUTATION — " + peerErr); }
-                          MDS.log("[DB] initDB: all tables ready");
-                          signalFE("DB_READY", {});
-                          if (cb) { cb(); }
+                          // OPEN-6 — Class B/C migrations run last, once every table and
+                          // every Class A column exists. A failure is non-fatal: the DB is
+                          // intact (a failed destructive migration is a verified no-op), so
+                          // boot continues, but it is surfaced to the FE rather than buried
+                          // in the SW log. See core/schema.js, MinimaAds.md §3.5.
+                          runSchemaMigrations("SW", function(migErr) {
+                            if (migErr) {
+                              MDS.log("[DB] initDB: schema migrations failed — " + migErr);
+                              signalFE("SCHEMA_MIGRATION_FAILED", { error: String(migErr), runtime: "SW" });
+                            }
+                            MDS.log("[DB] initDB: all tables ready");
+                            signalFE("DB_READY", {});
+                            if (cb) { cb(); }
+                          }); // end schema migrations
                         }); // end PEER_REPUTATION creation
                       }); // end REPUTATION_EVENTS creation
                     }); // end publisher budget data migration

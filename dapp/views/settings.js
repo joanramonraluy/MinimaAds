@@ -191,6 +191,120 @@ function renderSettings(root) {
   privacyDetails.appendChild(privacyContent);
   root.appendChild(privacyDetails);
 
+  // ── Accordion 4: Ad Preferences & Blocklist ────────────────────────────────
+  var adPrefDetails = document.createElement('details');
+  adPrefDetails.style.cssText = 'margin-bottom:1.5rem;padding:0.75rem 1rem;border:1px solid var(--pico-border-color);border-radius:var(--pico-border-radius);background-color:var(--pico-card-background-color);box-shadow:var(--pico-card-box-shadow,0 1px 3px rgba(0,0,0,0.05));border-left:3px solid #9b59b6;';
+
+  var adPrefSummary = document.createElement('summary');
+  adPrefSummary.style.cssText = 'font-weight:700;font-size:1.1rem;cursor:pointer;margin:-0.75rem -1rem 0.5rem;padding:0.75rem 1rem;display:block;';
+  adPrefSummary.textContent = 'Ad Preferences & Blocklist';
+  adPrefDetails.appendChild(adPrefSummary);
+
+  var adPrefContent = document.createElement('div');
+  adPrefContent.style.cssText = 'padding-top:0.5rem;';
+
+  // Toggle: Hide Flagged Ads
+  var toggleLabel = document.createElement('label');
+  toggleLabel.style.cssText = 'display:flex;align-items:center;gap:.6rem;cursor:pointer;margin-bottom:1.25rem;';
+
+  var toggleInput = document.createElement('input');
+  toggleInput.type = 'checkbox';
+  toggleInput.id = 'ma-settings-hide-flagged';
+  toggleInput.checked = true;
+  toggleInput.style.cssText = 'margin:0;';
+
+  if (typeof getHideFlaggedPreference === 'function') {
+    getHideFlaggedPreference(function(err, enabled) {
+      toggleInput.checked = (enabled !== false);
+    });
+  }
+
+  toggleInput.addEventListener('change', function() {
+    if (typeof setHideFlaggedPreference === 'function') {
+      setHideFlaggedPreference(toggleInput.checked);
+    }
+  });
+
+  var toggleTextSpan = document.createElement('span');
+  toggleTextSpan.style.cssText = 'font-size:.9rem;font-weight:600;';
+  toggleTextSpan.textContent = 'Automatically hide ads from Flagged creators';
+
+  toggleLabel.appendChild(toggleInput);
+  toggleLabel.appendChild(toggleTextSpan);
+  adPrefContent.appendChild(toggleLabel);
+
+  var toggleDesc = document.createElement('small');
+  toggleDesc.style.cssText = 'display:block;margin-top:-.85rem;margin-bottom:1.5rem;margin-left:1.8rem;color:var(--pico-muted-color,#6c757d);font-size:.78rem;';
+  toggleDesc.textContent = 'When enabled, campaigns from creators with a "Flagged" local reputation tier will not be shown in the Viewer.';
+  adPrefContent.appendChild(toggleDesc);
+
+  // Sub-section: Blocked Advertisers
+  var blockedHeading = document.createElement('h6');
+  blockedHeading.style.cssText = 'margin:0 0 .5rem 0;font-size:.95rem;font-weight:700;';
+  blockedHeading.textContent = 'Blocked Advertisers';
+  adPrefContent.appendChild(blockedHeading);
+
+  var blockedListContainer = document.createElement('div');
+  blockedListContainer.id = 'ma-settings-blocked-list';
+  blockedListContainer.style.cssText = 'margin-bottom:1rem;';
+  adPrefContent.appendChild(blockedListContainer);
+
+  function _renderBlockedList() {
+    blockedListContainer.innerHTML = '';
+    if (typeof getBlockedCreators !== 'function') {
+      var errTxt = document.createElement('small');
+      errTxt.style.color = 'var(--pico-muted-color,#6c757d)';
+      errTxt.textContent = 'Blocklist service not available.';
+      blockedListContainer.appendChild(errTxt);
+      return;
+    }
+    getBlockedCreators(function(bErr, list) {
+      if (bErr || !list || list.length === 0) {
+        var emptyTxt = document.createElement('small');
+        emptyTxt.style.cssText = 'display:block;color:var(--pico-muted-color,#6c757d);font-style:italic;';
+        emptyTxt.textContent = 'No advertisers currently blocked.';
+        blockedListContainer.appendChild(emptyTxt);
+        return;
+      }
+      var ul = document.createElement('ul');
+      ul.style.cssText = 'list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.5rem;';
+      for (var bi = 0; bi < list.length; bi++) {
+        (function(pk) {
+          var li = document.createElement('li');
+          li.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:.5rem .75rem;background:rgba(0,0,0,0.02);border:1px solid var(--pico-muted-border-color,#ddd);border-radius:.35rem;gap:.5rem;flex-wrap:wrap;';
+
+          var pkSpan = document.createElement('code');
+          pkSpan.style.cssText = 'font-size:.8rem;word-break:break-all;';
+          var displayPk = pk.length > 28 ? (pk.substring(0, 16) + '…' + pk.substring(pk.length - 8)) : pk;
+          pkSpan.textContent = displayPk;
+          pkSpan.title = pk;
+          li.appendChild(pkSpan);
+
+          var unblockBtn = document.createElement('button');
+          unblockBtn.type = 'button';
+          unblockBtn.className = 'outline secondary';
+          unblockBtn.style.cssText = 'width:auto;padding:.2rem .6rem;font-size:.75rem;margin:0;box-shadow:none;';
+          unblockBtn.textContent = 'Unblock';
+          unblockBtn.addEventListener('click', function() {
+            if (typeof unblockCreator === 'function') {
+              unblockCreator(pk, function() {
+                _renderBlockedList();
+              });
+            }
+          });
+          li.appendChild(unblockBtn);
+          ul.appendChild(li);
+        })(list[bi]);
+      }
+      blockedListContainer.appendChild(ul);
+    });
+  }
+
+  _renderBlockedList();
+
+  adPrefDetails.appendChild(adPrefContent);
+  root.appendChild(adPrefDetails);
+
   // Sync active states
   _updateSettingsUI();
 

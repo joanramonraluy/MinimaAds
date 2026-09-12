@@ -151,6 +151,37 @@ Important files:
 
 ---
 
+### 4.1) H2 DDL Syntax — measured capability matrix
+
+Minima opens its H2 as `jdbc:h2:<path>;MODE=MySQL;DB_CLOSE_ON_EXIT=FALSE` with `autoCommit = true` (`SqlDB.java:66`, which `MiniDAPPDB` extends). **`MODE=MySQL` changes which DDL spellings parse**, so H2 documentation and answers written for default-mode H2 (or for H2 2.2/2.3, where this syntax moved again) are not evidence about this project. The table below was executed against the project's own bundled jar (`refs/Minima-1.0.45/lib/h2-2.1.214.jar`) using those exact settings — do not "correct" it from memory.
+
+| Statement | Result |
+|---|---|
+| `ALTER TABLE t ADD COLUMN IF NOT EXISTS c T DEFAULT d` | ✅ idempotent — **the only way to add a column** |
+| `ALTER TABLE t ALTER COLUMN IF EXISTS c SET DATA TYPE T` | ✅ **idempotent retype primitive** — applies when present, no-ops when absent |
+| `ALTER TABLE t ALTER COLUMN IF EXISTS old RENAME TO new` | ✅ **idempotent rename primitive** — silently no-ops when `old` is absent |
+| `ALTER TABLE t DROP COLUMN IF EXISTS c` | ✅ idempotent |
+| `ALTER TABLE IF EXISTS t …` | ✅ no-ops on a missing table, and **composes** with `ALTER COLUMN IF EXISTS` |
+| `ALTER TABLE t RENAME COLUMN old TO new` | ⚠️ works once, then **errors** on re-run (`Column "OLD" not found`). `RENAME COLUMN IF EXISTS` is a ❌ syntax error. Unusable. |
+| `ALTER TABLE t MODIFY COLUMN c T` | ⚠️ works, but `MODIFY COLUMN IF EXISTS` is a ❌ syntax error. Unusable. |
+| `ALTER TABLE t CHANGE COLUMN old new T` | ⚠️ works, but `CHANGE COLUMN IF EXISTS` is a ❌ syntax error. Unusable. |
+| `RENAME TABLE a TO b` (MySQL spelling) | ❌ syntax error even in `MODE=MySQL` — use `ALTER TABLE IF EXISTS a RENAME TO b` ✅ |
+| `DROP COLUMN c` unguarded, when absent | ❌ `Column "C" not found [42122-214]` |
+| `CREATE TABLE IF NOT EXISTS x AS SELECT …` / `CREATE INDEX IF NOT EXISTS` / `DROP INDEX IF EXISTS` | ✅ all idempotent |
+| `MERGE INTO t (cols) KEY (id) VALUES (…)` | ✅ the upsert form — `INSERT … ON CONFLICT` still ❌ does not exist |
+| `SELECT … FROM INFORMATION_SCHEMA.COLUMNS / .TABLES` | ✅ feature detection by name, declared type, `CHARACTER_MAXIMUM_LENGTH` |
+
+**Only the ✅-idempotent forms may be used in a migration.** Four semantics worth knowing before writing one:
+
+- **No transactions exist.** `autoCommit = true` and H2 auto-commits DDL regardless — a `CREATE TABLE` survives an explicit `rollback()`. Multi-statement atomicity is **not available**; no design may assume it. Several `;`-separated statements in one `MDS.sql` string buys ordering, not atomicity — statements before a failure persist.
+- **A failed type change is a clean no-op**, not a corruption: no leftover `_COPY_` table, original type unchanged, all rows intact. (A type change is internally a full table rewrite via `T_COPY_<n>_<m>`.) Widening preserves data, PK and named indexes.
+- **Errors are returned, never thrown** — `sqlQuery` surfaces them as `cb(err)`, so a callback written `function() { … }` with no `err` parameter silently ignores a failed migration. Migration callbacks must inspect `err`.
+- **Two sharp edges**: `DROP COLUMN IF EXISTS <primary key column>` **succeeds** without complaint — review is the only guard. And `ALTER COLUMN IF EXISTS old RENAME TO new` fails with `Duplicate column name` if both names exist, so **never add a column with the same name a pending rename targets**.
+
+Full measurement detail: `docs/HISTORY.md §17`, session 2026-09-12 (OPEN-6). Mechanism and migration classes: `MinimaAds.md §3.5`, `core/schema.js`.
+
+---
+
 ## 5) Validation Checklist
 
 Before final handoff:
@@ -159,6 +190,7 @@ Before final handoff:
 - Maxima message schemas still match `MinimaAds.md §8`.
 - Outbound Maxima sends use `poll:false`, or documented `sendall`.
 - DB schema changes are applied in both runtimes (SW for all tables; FE for tables touched by FE).
+- **A destructive migration is always a paired change**: update the `CREATE TABLE` definition in *both* `public/service-workers/db-init.js` and `dapp/app.js` **and** append the Class B/C entry to `SCHEMA_MIGRATIONS_LIST` in `core/schema.js`. Doing only the first breaks upgrades; doing only the second leaves fresh installs on the old shape. Both, always — and the list is append-only (never reorder, never edit a shipped entry, never reuse an id). Only the ✅-idempotent DDL forms in §4.1 are permitted.
 - SQL string inputs are escaped.
 - Public key comparisons normalize case.
 - `LIMITS` values are not duplicated inline.
@@ -174,6 +206,12 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent sessions here, as **short pointers only** — one-line summary + files touched + open issues, ending with a reference to the full narrative in `docs/HISTORY.md §17`. The full problem/fix/verification write-up is written **once**, directly into `docs/HISTORY.md §17`, never duplicated here. When adding a new entry pushes this past 3, just **delete** the oldest pointer — nothing to move, its full content already lives permanently in `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-09-12 (OPEN-6-IMPL) — H2 schema migration mechanism implemented (`core/schema.js`)
+
+Implemented the OPEN-6 design: new shared `core/schema.js` (`SCHEMA_MIGRATIONS_LIST` + `runSchemaMigrations(runtimeTag, done)`) loaded and run by **both** runtimes, `SCHEMA_MIGRATIONS` bookkeeping table (Class C only), first real migration `2026-09-12-001` widening `FRAMES.PUBLISHER_MX` 512→1024 in both `CREATE TABLE`s, failed migrations non-fatal and surfaced via new `SCHEMA_MIGRATION_FAILED` signal; added AGENTS.md §4.1 measured H2 DDL capability matrix. The ~30 existing `ADD COLUMN IF NOT EXISTS` statements are deliberately untouched. Files: `core/schema.js` (new), `service.js`, `public/service-workers/db-init.js`, `public/index.html`, `dapp/app.js`, `MinimaAds.md`, `AGENTS.md`, `docs/KNOWN_ISSUES.md`, `docs/HISTORY.md`. Open issues: OPEN-10 (unmeasured — whether real Maxima routes ever exceeded 512 chars); two `MinimaAds.md §3.5` drift mismatches from the OPEN-6 §11 side findings were already closed by OPEN-8. Full detail: `docs/HISTORY.md §17`, session 2026-09-12 (OPEN-6-IMPL).
+
+---
+
 ### Session: 2026-09-12 (OPEN-9) — Checklist qualification for shared-DB table mirroring
 
 Resolved documentation-precision gap in pre-merge checklists: qualified that SW initializes all tables while FE initializes only the 5 tables it touches directly (`FRAMES`, `CHANNEL_STATE`, `CHANNEL_HISTORY`, `REPUTATION_EVENTS`, `PEER_REPUTATION`) over the shared H2 database file. Files: `docs/KNOWN_ISSUES.md`, `CLAUDE.md`, `MinimaAds.md`, `AGENTS.md`, `docs/HISTORY.md`. Open issues: none (OPEN-9 closed). Full detail: `docs/HISTORY.md §17`, session 2026-09-12 (OPEN-9).
@@ -186,11 +224,5 @@ Eliminated schema drift between SW and FE: added `ALTER TABLE CHANNEL_STATE ADD 
 
 ---
 
-### Session: 2026-09-12 (OPEN-8) — `MinimaAds.md §3.5` schema alignment with shipped code
-
-Resolved schema drift between `MinimaAds.md §3.5` and shipped H2 definitions in `db-init.js`/`app.js`: updated `CHANNEL_STATE.VIEWER_KEY` to `VARCHAR(512)`, `CHANNEL_STATE.CREATOR_MX` to `VARCHAR(1024)`, and added `FRAMES.PUBLISHER_MX VARCHAR(512)`. Also consolidated remaining migrated columns in `CHANNEL_STATE`, updated `REWARD_EVENTS.PUBLISHER_ID` to 512, and documented auxiliary tables. Files: `MinimaAds.md`, `docs/KNOWN_ISSUES.md`, `AGENTS.md`, `docs/HISTORY.md`. Open issues: none (OPEN-8 closed). Full detail: `docs/HISTORY.md §17`, session 2026-09-12 (OPEN-8).
-
----
-
-> Previous handoff notes (2026-09-11 T-REP1, 2026-09-10 Fragility #61, 2026-09-11 AUD-6/T-REP0, 2026-09-10 OPEN-3 adversarial regression probe, 2026-09-09 Fragility #60, 2026-09-09 OPEN-5, 2026-09-09 Fragility #58, 2026-09-07 OPEN-3, AUD-1, patches 15–25, Security Audit 2, and all earlier) are archived in `docs/HISTORY.md §17`.
+> Previous handoff notes (2026-09-12 REP-VIEWER — creator reputation badge, local blocklist & flagged-ad filtering in Viewer; 2026-09-12 OPEN-8, 2026-09-11 T-REP1, 2026-09-10 Fragility #61, 2026-09-11 AUD-6/T-REP0, 2026-09-10 OPEN-3 adversarial regression probe, 2026-09-09 Fragility #60, 2026-09-09 OPEN-5, 2026-09-09 Fragility #58, 2026-09-07 OPEN-3, AUD-1, patches 15–25, Security Audit 2, and all earlier) are archived in `docs/HISTORY.md §17`.
 

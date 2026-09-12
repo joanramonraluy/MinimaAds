@@ -46,6 +46,64 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-12 (OPEN-6-IMPL) — H2 schema migration mechanism: implemented
+
+**Source**: `docs/KNOWN_ISSUES.md` §1b, **OPEN-6**, and the **design-only** entry below in this same section (session 2026-09-12 (OPEN-6)). That entry stays as the historical design record — measured H2 capability matrix, failure/durability semantics, the three migration classes, the fresh-install convergence argument and the worked example. This entry is the implementation record; it does not restate the design's reasoning.
+**Task**: build what that design specifies. All six of its §10 open questions were decided by the maintainer up front (see below).
+**Complexity**: HIGH per `CLAUDE.md §2` — DB schema + Core + SW + FE. Maintainer confirmed Opus explicitly, so the model-confirmation ritual was not re-run.
+
+**Decisions taken on the design's six open questions** (Q1–Q6 of the OPEN-6 entry):
+
+1. **Q1 — ship the mechanism now**, with §8's `FRAMES.PUBLISHER_MX` widening as its first real migration. Done.
+2. **Q2 — include `SCHEMA_MIGRATIONS`.** Done. It is created and owned by the runner itself, not by `db-init.js` / `dapp/app.js`, so adding a migration never touches either runtime's control flow.
+3. **Q3 — widen `FRAMES.PUBLISHER_MX` regardless of measurement.** Done. The design recommended measuring a live route first; that needs a running node and was not possible from this environment. The *fix* is unaffected (widening is safe in all node states), but the question it would have answered — whether real `MAX#<pk>#<mls>` routes were being silently truncated at 512, i.e. whether this was a live data-loss bug or a tidy-up — is now **unanswered rather than answered**, so it was filed as **OPEN-10** rather than dropped.
+4. **Q4 — do NOT fold the existing ~30-statement `db-init.js` callback pyramid into the list.** Every `ADD COLUMN IF NOT EXISTS` statement is byte-for-byte unchanged, in both runtimes, per `CLAUDE.md §8`. Class A deliberately remains a second, separate mechanism.
+5. **Q5 — a failed migration continues boot but is surfaced.** Implemented on the existing precedent rather than with new machinery: the SW already emits `signalFE("DB_READY", {})` from `initDB`, and `handleMdsComms` in `dapp/app.js` already dispatches such signals, so a new `SCHEMA_MIGRATION_FAILED` signal follows the identical path and the FE handler does one `console.error`. No new UI. The FE's own run logs directly, with no self-signal round-trip.
+6. **Q6 — `AGENTS.md` gains the H2 syntax rules.** Added as `AGENTS.md §4.1` in this session, alongside the code that relies on it.
+
+**Changes**:
+
+1. **`core/schema.js` (new)** — `SCHEMA_MIGRATIONS_LIST` (ordered, append-only data array) + `runSchemaMigrations(runtimeTag, done)` + `_runOneMigration(...)`. Implemented as the design's §5 code specifies. The recursive step is a named function defined inside the file and the only thing crossing the file boundary is a plain completion callback (the Rhino cross-file closure constraint of design §2.2). Rhino-safe throughout: `var` only, no arrow functions, no template literals, no trailing commas, `MDS.log` not `console.log`. `m.id` and `runtimeTag` go through `escapeSql()` even though they are developer-authored, per `CLAUDE.md §6`. Every `sqlQuery` callback inspects `err` — the specific discipline the existing Class A pyramid lacks, and the reason a failure is visible at all. On failure the runner **stops the chain** (later migrations may depend on earlier ones) and reports to its caller. Only Class C consults the version table; Class B re-runs every boot by design. The private helper is named `_runOneMigration` rather than the design's `_runOne` — both runtimes share one flat global scope, so the generic name was too collision-prone; behaviour is identical.
+2. **First migration** — `2026-09-12-001-frames-publisher-mx-1024`, Class B: `ALTER TABLE IF EXISTS FRAMES ALTER COLUMN IF EXISTS PUBLISHER_MX SET DATA TYPE VARCHAR(1024)`. This is the paired half; the other half is items 4 and 6 below.
+3. **SW load** — `MDS.load("core/schema.js")` added to `service.js` after `core/reputation.js` and **before** `public/service-workers/db-init.js`, which calls into it.
+4. **SW schema** — `public/service-workers/db-init.js`: `sql_frames`'s `PUBLISHER_MX` is now `VARCHAR(1024)`. The existing `ALTER TABLE FRAMES ADD COLUMN IF NOT EXISTS PUBLISHER_MX VARCHAR(512) DEFAULT ''` line is deliberately **untouched** (design §8 step 2): on a node that has the column it is a no-op, and on one that does not it creates it at 512, which the Class B migration then widens in the same boot.
+5. **SW call site** — `runSchemaMigrations("SW", …)` runs at the very end of `initDB`'s chain, after `PEER_REPUTATION` and therefore after every `CREATE TABLE` and every Class A `ADD COLUMN`, so the migration list can never run against a table or column that does not exist yet. On error it logs and emits `SCHEMA_MIGRATION_FAILED`; either way it then logs "all tables ready", signals `DB_READY` and calls `cb()` — boot is never blocked.
+6. **FE** — `<script src="core/schema.js">` added to `public/index.html` after `core/reputation.js`; `initFEFrames`'s `CREATE TABLE IF NOT EXISTS FRAMES` widened to `VARCHAR(1024)` with its own `ADD COLUMN` line likewise untouched; `runSchemaMigrations('FE', …)` added to the `onInited` → `proceedBootFE` chain immediately after `initFEReputation`, before `renderNav`/`probeDb`/`doRender`. Same list, same order, same resulting schema, whichever runtime boots first.
+7. **FE signal handling** — `handleMdsComms` gained a `SCHEMA_MIGRATION_FAILED` branch (one `console.error`, matching the existing bar for non-fatal SW conditions).
+
+**Why running the list last is safe, and why it does not defeat the point**: Class B is idempotent by construction, so the migration is equally correct before or after the Class A statements; running it last is simply the ordering under which a future migration can assume a complete base schema. On a fresh install the `CREATE TABLE` already produces the final shape and the migration re-asserts it as a verified no-op — the §6 convergence property, which is exactly what lets the `CREATE TABLE` definitions stay at the current schema rather than being frozen at v1.
+
+**Docs**: `MinimaAds.md §3.5` now carries the `SCHEMA_MIGRATIONS` DDL, a migration-class table (A/B/C with where each lives and which consults the version table), the paired-change rule and the failure semantics; `FRAMES.PUBLISHER_MX` is corrected to `VARCHAR(1024)` there. `MinimaAds.md §8.15` gains the `SCHEMA_MIGRATION_FAILED` signal row. `AGENTS.md §4.1` is new — the measured H2 2.1.214 + `MODE=MySQL` DDL capability matrix, with an explicit warning that default-mode/H2-2.2+ documentation is not evidence about this project, plus the four semantics that decide how a migration must be written (no transactions, failed type change is a clean no-op, errors are returned not thrown, and the two sharp edges). `AGENTS.md §5` gains the paired-change rule. `docs/TASKS.md` is unchanged — OPEN-6 was never a task there (verified).
+
+**Files modified**: `core/schema.js` (new), `service.js`, `public/service-workers/db-init.js`, `public/index.html`, `dapp/app.js`, `MinimaAds.md`, `AGENTS.md`, `docs/KNOWN_ISSUES.md`, `docs/HISTORY.md`.
+
+**Verification performed**: `node --check` passes on `core/schema.js`, `public/service-workers/db-init.js`, `dapp/app.js` and `service.js`. `core/schema.js` scanned clean for arrow functions, `let`/`const`, template literals, `console.log` and trailing commas. Confirmed `MDS.log` exists in the FE runtime (`refs/Minima-1.0.45/mds/mds.js:117`) since `core/schema.js` runs in both. Confirmed no pre-existing global named `runSchemaMigrations`, `_runOne` or `SCHEMA_MIGRATIONS` anywhere in the codebase. Confirmed both `ADD COLUMN IF NOT EXISTS PUBLISHER_MX` lines are unchanged and that only the two `CREATE TABLE` definitions moved to 1024. **Not verified: anything requiring a running node** — no live boot, no real H2 database, no observation of the migration actually applying to a populated `FRAMES` table. The runtime behaviour below is what the maintainer needs to confirm.
+
+**Open issues**: **OPEN-10** (new, low priority) — the Q3 measurement that was never taken. The two remaining `MinimaAds.md §3.5` drift mismatches from the design's §11 side findings needed no action: side findings 1, 2 and 3 were already closed by OPEN-9, OPEN-7 and OPEN-8 respectively, and this session's `FRAMES.PUBLISHER_MX` spec correction is a follow-on from OPEN-8's own addition of that column to the spec.
+
+---
+
+### Session: 2026-09-12 (REP-VIEWER) — Creator reputation badge, local blocklist & flagged ad filtering in Viewer
+
+**Source**: User request for Creator Reputation Badge surfacing in Viewer (`#viewer`), creator blocking, and live verification plan alignment.
+**Task**: Surface creator reputation tiers (`Trusted`, `OK`, `New`, `Flagged`) before viewing ads; implement local advertiser blocklist (persisted in `MDS.keypair`); add automatic filter for `Flagged` creators; update `selectAd` to support blocked creator exclusions; expand `docs/MASTER_TEST_PLAN.md` Test F.5 with multi-node live verification procedure.
+**Complexity**: MEDIUM per `CLAUDE.md §2`.
+
+**Changes**:
+1. `core/reputation.js`: added local blocklist and preference helpers backed by `MDS.keypair`: `getBlockedCreators`, `isCreatorBlocked`, `blockCreator`, `unblockCreator`, `getHideFlaggedPreference`, `setHideFlaggedPreference`.
+2. `core/selection.js`: updated `selectAd(userAddress, userInterests, campaigns, blockedCreators)` to exclude campaigns from blocked creators (backwards-compatible).
+3. `dapp/views/viewer.js`:
+   - List view (`_renderCampaignList`): joined `PEER_REPUTATION pr` to fetch `pr.TIER AS CREATOR_TIER`; filtered out blocked creators and, if configured, flagged creators.
+   - List row (`_buildCampaignRow`): added reputation badge slot in `titleRow`, rendering `mkReputationBadge` for non-self campaigns (skips `unknown`).
+   - Detail view (`_buildDetailShell`): added creator reputation badge and "Block Advertiser" button (with confirmation modal) in the top navigation row; updated `detailSql` query with `PEER_REPUTATION` join.
+4. `dapp/views/settings.js`: added Accordion 4 ("Ad Preferences & Blocklist") with toggle to automatically hide ads from Flagged creators, plus a list of blocked advertiser public keys with individual "Unblock" actions.
+5. `docs/MASTER_TEST_PLAN.md`: updated Test F.5 to cover the complete multi-node live test scenario: Node 6 attack → Node 3 local reputation drop to `Flagged` → red badge in `#viewer` → automatic/manual filtering verification.
+
+**Files modified**: `core/reputation.js`, `core/selection.js`, `dapp/views/viewer.js`, `dapp/views/settings.js`, `docs/MASTER_TEST_PLAN.md`, `docs/HISTORY.md`, `AGENTS.md`.
+**Verification**: Syntax verified via `node --check` across all modified JS files; clean git diff; Rhino compatibility preserved.
+
+---
+
 ### Session: 2026-09-12 (OPEN-9) — Checklist qualification for shared-DB table mirroring
 
 **Source**: `docs/KNOWN_ISSUES.md` §1b, **OPEN-9** (discovered 2026-09-12 as side finding 1 during OPEN-6 design).

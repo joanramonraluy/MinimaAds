@@ -46,6 +46,320 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-12 (OPEN-6) — H2 schema versioning + destructive-migration mechanism: **DESIGN ONLY — not implemented, pending review**
+
+> **Status: DESIGN ONLY.** No `.js` or `.html` file was written, edited or deleted. No table was created, no column altered, no migration run. `MinimaAds.md` was deliberately **not** touched — §3.5 keeps describing only the schema that actually ships (following the same precedent as the T-REP3 entry below and the 2026-09-07 OPEN-3 one: a proposal gets no provisional spec entry; the spec is written when the thing is built). `AGENTS.md`'s H2-syntax-rules section was **not** edited either, even though §1 below contains material that belongs there eventually — that edit is a separate, deliberate step for whoever implements this. `docs/KNOWN_ISSUES.md` OPEN-6 stays **open**. No governance gate is implied here — this is ordinary infrastructure work, it just needs a review before it lands.
+
+**Source**: `docs/KNOWN_ISSUES.md` §1b, **OPEN-6** (discovered 2026-09-11). The gap as filed: schema evolution is additive-only (`ALTER TABLE ... ADD COLUMN IF NOT EXISTS ... DEFAULT ...`, ~30 uses across the two runtimes, plus a couple of `UPDATE` backfills), so (1) there is no clean way to change an existing column's type/size, rename it, or drop it short of a full reinstall — which wipes data, acceptable only while every node is a test node; and (2) there is no schema-version tracking, so every boot re-attempts every migration from scratch. Complexity HIGH per `CLAUDE.md §2`; maintainer confirmed Opus + plan-mode-equivalent design work up front, so the model-confirmation ritual was not re-run. Read before designing: `CLAUDE.md` (full), `docs/DOCUMENTATION_INDEX.md`, `MinimaAds.md §3.5`, `AGENTS.md`, `public/service-workers/db-init.js` (full), `dapp/app.js` DB-init functions, `docs/KNOWN_ISSUES.md` §1b, and — for the process shape of a design-only deliverable — the T-REP3 entry immediately below.
+
+---
+
+#### 1. Step 0: what H2 2.1.214 *actually* does (measured, not assumed)
+
+Everything in this section was executed against a real H2 database using the project's own bundled jar (`refs/Minima-1.0.45/lib/h2-2.1.214.jar`, reports itself as `2.1.214 (2022-06-13)`), through JDBC, using **the exact connection settings Minima uses**. No project `.db` file was touched — throwaway `jdbc:h2:mem:` and `/tmp` databases only.
+
+**The connection settings matter, and they were read from source first** (`refs/Minima-1.0.45/src/org/minima/utils/SqlDB.java:66`, which `MiniDAPPDB` extends):
+
+```
+jdbc:h2:<path>;MODE=MySQL;DB_CLOSE_ON_EXIT=FALSE      autoCommit = true
+```
+
+`MODE=MySQL` is not incidental — it changes which DDL spellings parse. Any capability check done against default-mode H2 (or against H2 2.2/2.3 docs, where this syntax moved again) is not evidence about this project. That is why this was measured rather than looked up.
+
+##### 1.1 Capability matrix
+
+| Statement | Result under `MODE=MySQL`, H2 2.1.214 |
+|---|---|
+| `ALTER TABLE t ADD COLUMN IF NOT EXISTS c T DEFAULT d` | ✅ works, idempotent — **the existing pattern, confirmed correct** |
+| `ALTER TABLE t RENAME COLUMN old TO new` | ✅ works, data preserved — but **errors** on re-run: `Column "OLD" not found [42122-214]` |
+| `ALTER TABLE t RENAME COLUMN IF EXISTS old TO new` | ❌ **syntax error** — `IF EXISTS` is not accepted in this position |
+| `ALTER TABLE t ALTER COLUMN IF EXISTS old RENAME TO new` | ✅ **works, and silently no-ops when `old` is absent** — the idempotent rename primitive |
+| `ALTER TABLE t ALTER COLUMN c SET DATA TYPE T` | ✅ works — errors if `c` absent |
+| `ALTER TABLE t ALTER COLUMN IF EXISTS c SET DATA TYPE T` | ✅ **works, applies when present, no-ops when absent, safe to repeat** — the idempotent retype primitive |
+| `ALTER TABLE t ALTER COLUMN c T` (bare, no `SET DATA TYPE`) | ✅ parses — but prefer the explicit form, it is the one with a confirmed `IF EXISTS` variant |
+| `ALTER TABLE t MODIFY COLUMN c T` (MySQL spelling) | ✅ works — but `MODIFY COLUMN IF EXISTS` is a ❌ **syntax error**. Unusable for our purposes. |
+| `ALTER TABLE t CHANGE COLUMN old new T` (rename + retype in one) | ✅ works — but `CHANGE COLUMN IF EXISTS` is a ❌ **syntax error**. Unusable. |
+| `ALTER TABLE t DROP COLUMN IF EXISTS c` | ✅ works, idempotent |
+| `ALTER TABLE t DROP COLUMN c` (unguarded, absent) | ❌ `Column "C" not found [42122-214]` |
+| `ALTER TABLE IF EXISTS t ...` | ✅ no-ops on a missing table, and **composes** with `ALTER COLUMN IF EXISTS` |
+| `CREATE TABLE IF NOT EXISTS x AS SELECT ...` | ✅ works, idempotent |
+| `CREATE TABLE x (...)` + `INSERT INTO x SELECT ...` | ✅ works (the controlled-schema variant of CTAS) |
+| `ALTER TABLE IF EXISTS a RENAME TO b` | ✅ works |
+| `RENAME TABLE a TO b` (MySQL spelling) | ❌ **syntax error**, even in `MODE=MySQL` |
+| `CREATE INDEX IF NOT EXISTS` / `DROP INDEX IF EXISTS` | ✅ both idempotent |
+| `MERGE INTO t (cols) KEY (id) VALUES (...)` | ✅ works — the version-table upsert |
+| `SELECT ... FROM INFORMATION_SCHEMA.COLUMNS / .TABLES` | ✅ works — feature detection by column name, declared type and `CHARACTER_MAXIMUM_LENGTH` |
+
+**The headline result, and it reframes the whole ticket:** H2 2.1.214 already provides *natively idempotent* destructive DDL. `ALTER TABLE IF EXISTS t ALTER COLUMN IF EXISTS c …` covers rename and retype; `DROP COLUMN IF EXISTS` covers drop. All three can be written in a form that is safe to re-run on **every** boot and safe on a **fresh** install where the old column never existed — exactly the property that makes the existing `ADD COLUMN IF NOT EXISTS` pattern work. That means the destructive case needs **no version table at all**. See §3.
+
+##### 1.2 Failure and durability semantics (the part that decides §7)
+
+- **A type change is internally a full table rewrite.** H2 creates `T_COPY_<n>_<m>`, does `INSERT … SELECT`, then swaps. Confirmed by reading the error text of a deliberately failing shrink, which names the copy table.
+- **A failed type change rolls back cleanly.** Forced two distinct failures — `VARCHAR(200)→VARCHAR(2)` with a 5-char value (`Value too long for column …`) and `VARCHAR→DECIMAL` on non-numeric data (`Data conversion error …`). After each: no leftover `_COPY_` table, original column type unchanged, all rows intact. Verified by re-listing `INFORMATION_SCHEMA.TABLES` and re-selecting the data. **A destructive migration that fails is a no-op, not a corruption.** This is the single most reassuring finding in this section.
+- **Widening preserves everything.** `VARCHAR(20)→VARCHAR(4000)` on a table with a PRIMARY KEY and a secondary index: data intact, `PRIMARY KEY` constraint intact, named index intact.
+- **There are no usable transactions.** `SqlDB` sets `autoCommit = true`, and H2 auto-commits DDL regardless — verified directly: with `autoCommit=false`, a `CREATE TABLE` **survived an explicit `rollback()`**. A MiniDapp therefore cannot wrap a multi-step migration in a transaction. Multi-statement atomicity is simply not available and no design may assume it.
+- **One `MDS.sql` string may hold several `;`-separated statements — but that buys ordering, not atomicity.** Verified: `CREATE A; ALTER <missing table>; CREATE B` left A created, B not created, and surfaced only the middle statement's error. Statements before a failure persist.
+- **Errors are returned, never thrown.** `MiniDAPPDB.executeSQL` catches and returns `{status:false, error:"…"}`; `core/minima.js` `sqlQuery` turns that into `cb(res.error)`. A failed migration is a callback argument and a log line — it will not crash the runtime, and it will be **silently ignored by any callback that doesn't inspect `err`**. Most of the ~30 existing `ALTER` callbacks in `db-init.js` are `function() { … }` with no `err` parameter at all. The runner in §5 must check.
+- **Committed DDL is crash-durable.** Applied an `ADD COLUMN`, closed the connection abruptly without a clean shutdown, reopened the file database: the column was there. MVStore commits per statement, so a crash mid-migration leaves the before-state or the after-state of an individual statement, never a torn column.
+- **Two sharp edges worth writing down:**
+  1. `ALTER TABLE t DROP COLUMN IF EXISTS <primary key column>` **succeeds**. H2 drops the PK column without complaint. There is no guard; the only guard is review.
+  2. `ALTER COLUMN IF EXISTS old RENAME TO new` fails with `Duplicate column name "NEW" [42121-214]` if **both** names exist. That is the one partial-state a rename can land in, and §7 handles it.
+
+---
+
+#### 2. Two facts about this codebase that change the shape of the problem
+
+Both were verified from source before designing, and both make the eventual answer smaller than the ticket implies.
+
+**2.1 There is one database, not two.** `MDSManager.getSQLDB` keys the `MiniDAPPDB` by **MiniDapp UID** and opens it at `<minidapp data folder>/sql/sqldb.mv.db` (`MDSManager.java:518-541`, `:241`). The Service Worker and the front end of the same MiniDapp share that one UID, therefore **one H2 file**. Access is serialised twice over — `synchronized (mSQLSyncObject)` around DB acquisition, and `public synchronized JSONObject executeSQL` on the DB itself.
+
+This reframes "apply DB changes in both runtimes" (`CLAUDE.md §4` Step 3, `AGENTS.md §5`). That rule is **not** about keeping two databases in sync — it is about **boot-order independence**: either runtime may start first, so whichever gets there first must be able to bring the schema up on its own. The rule is correct and stays; the reason for it is just narrower than "two runtimes, two schemas." No cross-runtime write race can tear a statement, because Java serialises them.
+
+**2.2 `core/*.js` is already the established SW↔FE shared-code channel.** The SW loads each core file with `MDS.load("core/x.js")` (`service.js:172-180`) and the FE loads the same files with `<script src="core/x.js">` (`public/index.html:579-589`). Same nine files, both runtimes. Every `core/*.js` is therefore **already Rhino-safe by construction** — it has to be, the SW executes it.
+
+So the "define migrations once, or deliberately twice?" question in the brief has an answer that is already project convention: **once, in a new `core/schema.js`**. No new mechanism is invented, no duplication is introduced, and the file automatically inherits the `var` / no-arrow / no-template-literal / no-trailing-comma discipline the SW needs.
+
+One constraint on how that file is written, from the memory note on the Rhino cross-file closure bug: *closures created in `service.js` and passed into an `MDS.load`-ed function silently fail inside `MDS.sql` callback chains.* The runner's recursion must therefore be a **named function defined inside `core/schema.js`**, self-contained, with only a plain completion callback crossing the file boundary. This is a real constraint that has already bitten this project once.
+
+---
+
+#### 3. The proposal: three migration classes, and only one of them needs a version table
+
+The brief asked, correctly, that version tracking be justified rather than assumed. Given §1.1, here is the honest split. Every migration is labelled with exactly one class.
+
+**Class A — additive.** `ALTER TABLE t ADD COLUMN IF NOT EXISTS c T DEFAULT d`.
+Idempotent by construction. Runs on every boot. **No version-table consult.** This is the ~30 statements that exist today and **they do not change** (see §9).
+
+**Class B — idempotent destructive DDL.** The new capability. Written exclusively in the guarded forms confirmed in §1.1:
+
+```
+rename : ALTER TABLE IF EXISTS t ALTER COLUMN IF EXISTS old RENAME TO new
+retype : ALTER TABLE IF EXISTS t ALTER COLUMN IF EXISTS c SET DATA TYPE T
+drop   : ALTER TABLE IF EXISTS t DROP COLUMN IF EXISTS c
+```
+
+Each is a no-op on a fresh install (column absent), a no-op on a second boot (already applied, or old name gone), and a clean no-op on failure (§1.2). Runs on every boot. **No version-table consult.** This class alone closes OPEN-6's problem (1) — rename, resize and drop without a reinstall — and it closes it without any new state.
+
+**Class C — not idempotent.** Two sub-kinds, and these are the *only* reason a version table exists:
+
+- **C1 — data transforms.** `UPDATE`/`INSERT … SELECT` that computes a new value from the old one. Re-running corrupts. Demonstrated concretely: an `AMT = AMT * 2` backfill run twice took `100 → 200 → 400`. The existing `UPDATE CAMPAIGNS SET MAX_PUBLISHER_BUDGET = PUBLISHER_REWARD_VIEW * 10 WHERE MAX_PUBLISHER_BUDGET <= 0 AND PUBLISHER_REWARD_VIEW > 0` (`db-init.js:215`) is safe *only* because its `WHERE` clause excludes already-patched rows. That guard was discipline, not mechanism — and it is not always expressible.
+- **C2 — table rewrites.** The `CREATE new / INSERT … SELECT / DROP old / RENAME new` sequence, for the changes Class B cannot express (changing a primary key, reordering/merging/splitting columns, a type change H2 refuses to convert in place). Multi-statement and, per §1.2, **not** wrappable in a transaction.
+
+**So: version tracking is justified for Class C and nothing else.** Concretely it buys three things, none of which Class A/B need:
+
+1. **One-shot execution** for statements that are genuinely unsafe to re-run — the thing `IF NOT EXISTS` cannot give you, because there is no `IF NOT ALREADY_BACKFILLED`.
+2. **Resume position for C2**, so a multi-step rewrite interrupted at step 3 of 4 does not restart at step 1 against a half-migrated table.
+3. **An audit trail** — "which schema is this node actually on?" is currently unanswerable except by dumping `INFORMATION_SCHEMA`, which makes a support conversation about a misbehaving node much harder than it needs to be.
+
+**What version tracking explicitly does *not* buy, and must not be sold as:** it does not make Class A or B safer (they are already safe), and — the brief's "O(n) checks growing forever" concern — it does not meaningfully help performance. These are local `ALTER`s against an embedded database with no network hop. Thirty of them is not a measurable boot cost, and three hundred would still not be. **Skipping them to save time is not a justification for this design and should not be used as one.** If boot latency ever does become the motivation, measure it first.
+
+---
+
+#### 4. `SCHEMA_MIGRATIONS`
+
+```sql
+CREATE TABLE IF NOT EXISTS SCHEMA_MIGRATIONS (
+  MIGRATION_ID VARCHAR(128) PRIMARY KEY,  -- '2026-09-12-001-frames-publisher-mx-1024'
+  APPLIED_AT   BIGINT       NOT NULL,     -- unix ms
+  APPLIED_BY   VARCHAR(8)   NOT NULL DEFAULT ''  -- 'SW' | 'FE' — audit only, never branched on
+);
+```
+
+- **Created first**, before anything else, by whichever runtime boots first. `CREATE TABLE IF NOT EXISTS` makes that race harmless.
+- **Seeded empty.** An existing node has no rows, which is correct: every migration that predates this mechanism is Class A and idempotent, so "not recorded" and "safe to re-run" agree. There is deliberately **no backfill** of historical migration ids — inventing a fake history would be the only way to get one, and it would be a lie the first time someone read it.
+- **Read once per boot** into an in-memory set, not once per migration. One `SELECT MIGRATION_ID FROM SCHEMA_MIGRATIONS`.
+- **Written with `MERGE INTO … KEY (MIGRATION_ID)`** (verified §1.1), so a double-write from the two runtimes collapses to one row instead of a PK violation.
+- `APPLIED_BY` records which runtime got there first. It is an audit field. Nothing branches on it — if it ever does, that is a bug, because the two runtimes must reach the same schema regardless of boot order.
+- `MIGRATION_ID` is `<date>-<seq>-<slug>`. Lexicographic sort equals chronological order, which is what gives the ordering guarantee of §5.
+
+---
+
+#### 5. `core/schema.js` — one list, one runner, both runtimes
+
+The migration set becomes **data**, declared once:
+
+```javascript
+// core/schema.js — Rhino-safe: var only, no arrow functions, no template literals,
+// no trailing commas. Loaded by service.js (MDS.load) and index.html (<script>).
+
+var SCHEMA_MIGRATIONS_LIST = [
+  { id: "2026-09-12-001-frames-publisher-mx-1024",
+    cls: "B",
+    sql: "ALTER TABLE IF EXISTS FRAMES ALTER COLUMN IF EXISTS PUBLISHER_MX SET DATA TYPE VARCHAR(1024)" }
+];
+```
+
+and the runner walks it in array order, self-contained per §2.2:
+
+```javascript
+function runSchemaMigrations(runtimeTag, done) {
+  sqlQuery("CREATE TABLE IF NOT EXISTS SCHEMA_MIGRATIONS ("
+    + "MIGRATION_ID VARCHAR(128) PRIMARY KEY,"
+    + "APPLIED_AT   BIGINT       NOT NULL,"
+    + "APPLIED_BY   VARCHAR(8)   NOT NULL DEFAULT ''"
+    + ")", function(errCreate) {
+    if (errCreate) { MDS.log("[SCHEMA] cannot create SCHEMA_MIGRATIONS - " + errCreate); if (done) { done(errCreate); } return; }
+
+    sqlQuery("SELECT MIGRATION_ID FROM SCHEMA_MIGRATIONS", function(errSel, rows) {
+      var applied = {};
+      var i;
+      if (!errSel && rows) {
+        for (i = 0; i < rows.length; i++) { applied[rows[i].MIGRATION_ID] = true; }
+      }
+      _runOne(0, applied, runtimeTag, done);
+    });
+  });
+}
+
+function _runOne(idx, applied, runtimeTag, done) {
+  if (idx >= SCHEMA_MIGRATIONS_LIST.length) {
+    MDS.log("[SCHEMA] migrations complete (" + SCHEMA_MIGRATIONS_LIST.length + " declared)");
+    if (done) { done(null); }
+    return;
+  }
+  var m = SCHEMA_MIGRATIONS_LIST[idx];
+
+  // Class C is the only class that consults the version table.
+  if (m.cls === "C" && applied[m.id]) {
+    _runOne(idx + 1, applied, runtimeTag, done);
+    return;
+  }
+
+  sqlQuery(m.sql, function(err) {
+    if (err) {
+      // Never silently swallow: a failed destructive migration is a no-op (§1.2),
+      // so the DB is intact, but the node is now behind and must say so.
+      MDS.log("[SCHEMA] MIGRATION FAILED id=" + m.id + " cls=" + m.cls + " err=" + err);
+      if (done) { done(err); }
+      return;
+    }
+    if (m.cls === "C") {
+      sqlQuery("MERGE INTO SCHEMA_MIGRATIONS (MIGRATION_ID, APPLIED_AT, APPLIED_BY) KEY (MIGRATION_ID) VALUES ("
+        + "'" + escapeSql(m.id) + "', " + Date.now() + ", '" + escapeSql(runtimeTag) + "')", function(errMark) {
+        if (errMark) { MDS.log("[SCHEMA] applied but could not record id=" + m.id + " - " + errMark); }
+        _runOne(idx + 1, applied, runtimeTag, done);
+      });
+      return;
+    }
+    _runOne(idx + 1, applied, runtimeTag, done);
+  });
+}
+```
+
+Notes on the above, each one load-bearing:
+
+- **`m.id` and `runtimeTag` go through `escapeSql()`.** They are developer-authored, not user input, so this is belt-and-braces — but `CLAUDE.md §6` says *all* strings interpolated into SQL, and carving out an exception is how the rule erodes.
+- **Every `sqlQuery` callback inspects `err`.** This is the specific discipline the existing pyramid does not have (§1.2), and it is the whole reason a failure is visible at all.
+- **On failure the runner stops** rather than continuing. Later migrations may depend on earlier ones; running them against a schema that did not advance is how one failure becomes several. Stop, log loudly, let the next boot retry.
+- **Ordering is the array's order**, which is the ordering guarantee §3 claimed. Migrations are append-only — never reorder, never edit a shipped entry, never reuse an id.
+- **Both runtimes call the identical function over the identical array**, so "identical migration set, identical order, identical resulting schema" is true by construction rather than by two files being kept in step by hand. SW: `runSchemaMigrations("SW", cb)` from `initDB` in `db-init.js`. FE: `runSchemaMigrations("FE", cb)` from the FE init chain in `dapp/app.js`.
+- **The 30-deep callback pyramid in `db-init.js` is not part of this change.** Folding the existing Class A statements into the array is an obvious follow-up and would delete a lot of `}); // end … migration`, but it is a refactor of working code and `CLAUDE.md §6`/§8 say not to merge that into this patch. Open question Q4.
+
+---
+
+#### 6. Fresh install: `CREATE TABLE` stays current, and Class B is why that is safe
+
+**A brand-new node does not replay history.** `CREATE TABLE IF NOT EXISTS` statements in `db-init.js` / `dapp/app.js` are kept **at the current, final schema** — exactly as they are today — and the migration list then runs and no-ops.
+
+This is the classic drift trap, so it is worth being precise about why it does not bite here. There are two schools: (a) `CREATE TABLE` frozen at v1 and every node replays the full migration history, or (b) `CREATE TABLE` always current and migrations only matter for upgrades. School (a) is the "safer" textbook answer, and it is **wrong for this codebase** — the `CREATE TABLE` statements are already maintained at current (`CAMPAIGNS` already declares `PUBLISHER_REWARD_VIEW`, `COOLDOWN_MS`, `CREATOR_MX` etc. *and* re-adds them via `ADD COLUMN IF NOT EXISTS`), so switching to (a) would mean rewriting all twelve to a historical state nobody has a record of.
+
+School (b)'s usual failure is the two definitions drifting apart. Class B is precisely what makes that failure benign: a fresh node creates the column at its final width, and `ALTER COLUMN IF EXISTS c SET DATA TYPE <same type>` is a **verified successful no-op** (§1.1). The migration and the `CREATE TABLE` converge on the same answer whether the column was born right or got there by migration.
+
+This yields one rule, and it should go in the pre-merge checklist when this is implemented:
+
+> **A destructive migration is always a paired change.** Update the `CREATE TABLE` definition in *both* `db-init.js` and `dapp/app.js` **and** append the Class B/C entry to `SCHEMA_MIGRATIONS_LIST`. Doing only the first breaks upgrades. Doing only the second leaves fresh installs on the old shape until they happen to run a migration. Both, always.
+
+(The existing additive pattern has followed this convention all along — every `ADD COLUMN IF NOT EXISTS` in `db-init.js` has a matching column in the `CREATE TABLE` above it. This just names the rule.)
+
+---
+
+#### 7. Failure and recovery
+
+No transactions exist (§1.2), so recovery is per-class and is designed in, not bolted on.
+
+- **Class A and B — fully self-healing.** Each is one atomic, individually-committed statement. A crash leaves either the before-state or the after-state. Next boot re-runs; idempotent; converges. A *failed* (as opposed to interrupted) Class B migration is a verified no-op — no `_COPY_` leak, no data loss, original type intact — so the node simply stays on the old schema and logs `[SCHEMA] MIGRATION FAILED`. That is a visible, diagnosable, non-destructive state, and it is the best available outcome.
+- **Class C1 — the version row is the second line of defence, not the first.** A crash between the `UPDATE` and the `MERGE` that records it means the transform re-runs next boot. Therefore: **every C1 migration must be written with a self-limiting `WHERE` clause that makes a re-run a no-op**, exactly as `db-init.js:215` already does. The version row then prevents the *needless* re-run; the `WHERE` clause prevents the *harmful* one. A C1 migration whose re-run cannot be made harmless by a `WHERE` clause must be restructured as C2 (write into a new column, then swap) — it must not be shipped relying on the version row alone.
+- **Class C2 — recover from the schema, not from the bookkeeping.** A four-step rewrite interrupted at any point is recoverable because each step is individually idempotent (`CREATE TABLE IF NOT EXISTS`, `DROP TABLE IF EXISTS`, `ALTER TABLE IF EXISTS … RENAME TO`) and because the runner can ask `INFORMATION_SCHEMA` which step it is on rather than trusting a row that may not have been written. The copy step is the one that needs care: it must be `INSERT … SELECT … WHERE NOT EXISTS (SELECT 1 FROM new WHERE new.id = old.id)`, or the target must be truncated first. **`INFORMATION_SCHEMA` is the ground truth for C2 resume; `SCHEMA_MIGRATIONS` is the optimisation and the audit trail.**
+- **The one unrecoverable shape, stated plainly.** A rename interrupted such that both old and new column names exist cannot be auto-resolved — a re-run hits `Duplicate column name` (§1.2) and the runner stops. Per §1.2 this cannot arise from a crash (the rename is a single atomic statement), only from a **badly authored pair of migrations** — e.g. a Class A `ADD COLUMN IF NOT EXISTS new` shipped alongside a Class B `RENAME old TO new`. The mitigation is review, not code: **never add a column with the same name a pending rename targets.** Worth a line in the pre-merge checklist.
+
+---
+
+#### 8. Worked example, end to end: `FRAMES.PUBLISHER_MX` `VARCHAR(512)` → `VARCHAR(1024)`
+
+A real column in the current schema, chosen because it is a genuine latent inconsistency rather than a hypothetical. The three columns that hold a Maxima route disagree with each other today:
+
+| Column | Declared width | Where |
+|---|---|---|
+| `CHANNEL_STATE.CREATOR_MX` | `VARCHAR(1024)` | `db-init.js:87` |
+| `DEFERRED_PUB_REWARDS.PUBLISHER_MX` | `VARCHAR(1024)` | `db-init.js:105` |
+| **`FRAMES.PUBLISHER_MX`** | **`VARCHAR(512)`** | `db-init.js:75`, `dapp/app.js:1173` |
+
+All three store the same kind of value — a `MAX#<publickey>#<staticMLS>` permanent route (`MinimaAds.md §3.6`). Two are 1024, one is 512. This is exactly the class of mistake OPEN-6 says there is currently no way to correct: today the only fix is a reinstall. (**Not yet measured:** whether a real route actually exceeds 512 chars on this network. Do that before implementing — it decides whether this is an urgent fix or a tidy-up. Either way it works as the worked example.)
+
+Widening is the safe direction: no value can fail to fit, so the internal rewrite cannot hit the `Value too long` failure of §1.2.
+
+**Step 1 — `core/schema.js`, append to the list** (append-only; never inserted mid-array):
+
+```javascript
+{ id: "2026-09-12-001-frames-publisher-mx-1024",
+  cls: "B",
+  sql: "ALTER TABLE IF EXISTS FRAMES ALTER COLUMN IF EXISTS PUBLISHER_MX SET DATA TYPE VARCHAR(1024)" }
+```
+
+**Step 2 — SW, `public/service-workers/db-init.js`.** In `sql_frames`, `PUBLISHER_MX VARCHAR(512)` → `VARCHAR(1024)`. The existing Class A line at `db-init.js:182` (`ADD COLUMN IF NOT EXISTS PUBLISHER_MX VARCHAR(512) DEFAULT ''`) is left **exactly as it is** — on a node that already has the column it is a no-op, and on one that does not it creates the column at 512 which the Class B migration then immediately widens. Rewriting it to 1024 would be harmless but pointless; leaving it alone keeps the diff minimal and the append-only discipline intact.
+
+**Step 3 — FE, `dapp/app.js`.** Same one-word change in `initFEFrames`'s `CREATE TABLE IF NOT EXISTS FRAMES` (`:1173`). Same reasoning for the `ALTER` at `:1180`.
+
+**Step 4 — nothing else.** Both runtimes already call `runSchemaMigrations` from their init chains, so neither needs a new statement for this or any future migration. That is the point of §5: **adding a migration touches one array and the two `CREATE TABLE` definitions — never the two runtimes' control flow.**
+
+**What actually happens, by node state:**
+
+| Node state | Sequence | Result |
+|---|---|---|
+| Existing node, `PUBLISHER_MX VARCHAR(512)` with rows | `ALTER … SET DATA TYPE VARCHAR(1024)` → H2 rewrites the table internally | Column is 1024. **All `FRAMES` rows, the `FRAME_ID` PK and every index preserved** (verified §1.2). |
+| Same node, next boot | Class B → no version check → statement re-runs, type already matches | Verified no-op. |
+| Fresh install | `CREATE TABLE` makes it 1024 directly; migration re-asserts 1024 | Verified no-op. **Identical schema to the upgraded node** — the §6 convergence property. |
+| Node that somehow lacks `FRAMES` entirely | `ALTER TABLE IF EXISTS` | Silent no-op, no error, boot continues. |
+| SW boots first / FE boots first | Java-serialised (§2.1); whichever runs it second sees the type already matching | No-op. Order-independent. |
+
+No version-table row is written, because this is Class B. Nothing needs to be — that is the design working as intended, and it is why the answer to OPEN-6's problem (1) turned out to be much smaller than the answer to its problem (2).
+
+---
+
+#### 9. What does NOT change
+
+Stated explicitly because the existing pattern is load-bearing and a future reader should not mistake this design for a replacement:
+
+- **`ALTER TABLE t ADD COLUMN IF NOT EXISTS c T DEFAULT d` remains the correct and only way to add a column.** All ~30 existing uses stay exactly as they are. `CLAUDE.md §7`'s H2 rule stays exactly as it is. This design **adds a path for the destructive case**; it does not touch the additive one.
+- **`CREATE TABLE IF NOT EXISTS` definitions stay maintained at the current schema** (§6).
+- **"DB changes applied in both runtimes"** (`CLAUDE.md §4` Step 3, `AGENTS.md §5`) stays a hard rule — §2.1 only refines *why* it exists.
+- **`MERGE INTO … KEY (…)`** stays the upsert form; `INSERT … ON CONFLICT` still does not exist in H2.
+- **No table with data in it is ever dropped and recreated.** Class C2 is a copy-then-swap under review, not a licence to `DROP TABLE`.
+- **Nothing here changes any Core API signature, Maxima schema, or `LIMITS` value.** This is strictly a DB-layer mechanism.
+
+---
+
+#### 10. Open questions for the maintainer
+
+1. **Ship the mechanism now, or only when a real destructive migration is needed?** / Options: land `core/schema.js` + `SCHEMA_MIGRATIONS` now as infrastructure, or leave OPEN-6 open until a migration actually needs it. / **Recommendation: land it now, and use §8 as its first real migration** — an empty mechanism is untested, and `FRAMES.PUBLISHER_MX` gives it a genuine, low-risk exercise.
+2. **Is the `SCHEMA_MIGRATIONS` table wanted at all, given §3 shows Class A and B do not need it?** / Options: include it (buys one-shot C1, C2 resume, audit trail), or defer it until the first Class C migration exists. / **Recommendation: include it** — it is ~10 lines, and the alternative is that the first person who needs a backfill invents it under time pressure.
+3. **`FRAMES.PUBLISHER_MX` 512 → 1024 — fix it, or first measure whether a real route exceeds 512?** / **Recommendation: measure first** (one `maxima` call on a live node), then fix regardless; if routes do exceed 512 this is a live truncation bug and stops being a tidy-up.
+4. **Migrate the existing 30-statement callback pyramid in `db-init.js` into `SCHEMA_MIGRATIONS_LIST`?** / Options: leave it (zero risk, two mechanisms coexist), or fold it in (one mechanism, large diff in working boot-critical code). / **Recommendation: leave it for now, fold it in as a separate reviewed task** — `CLAUDE.md §8` is explicit about not merging unrelated refactors, and this is the most boot-critical file in the project.
+5. **Should a failed migration block boot, or log and continue degraded?** / The §5 runner stops the *migration chain* but the caller decides what to do next. Options: fail the whole init (safe, node unusable), or continue and let features break unpredictably. / **Recommendation: continue but surface it** — signal the FE so it is visible rather than buried in an SW log. Needs a decision because it affects `initDB`'s contract.
+6. **Should `AGENTS.md` gain an H2-syntax-rules subsection with §1.1's matrix?** / It is genuinely new, measured platform knowledge and `AGENTS.md` is where H2 syntax rules live. / **Recommendation: yes, but as part of the implementation session, not this one** — the brief scoped this session to design, and the matrix should land alongside the code that relies on it.
+
+---
+
+#### 11. Side findings (out of scope — not fixed, flagged for a decision)
+
+Found while reading; per `CLAUDE.md §8` they are recorded, not fixed. **None were ticketed in `docs/KNOWN_ISSUES.md`** — adding new tickets was outside this task's file scope, so the maintainer should decide whether they warrant entries.
+
+1. **The FE mirrors only 5 of the 12 tables.** `dapp/app.js` creates `FRAMES`, `CHANNEL_STATE`, `CHANNEL_HISTORY`, `REPUTATION_EVENTS`, `PEER_REPUTATION`. It does **not** create `CAMPAIGNS`, `ADS`, `REWARD_EVENTS`, `USER_PROFILE`, `DEDUP_LOG` or `DEFERRED_PUB_REWARDS` — instead `probeDb()` polls `SELECT 1 FROM CAMPAIGNS` and waits for the SW. Given §2.1 (one shared DB) this is coherent and works, but it means "applied in both runtimes" is in practice "applied in both runtimes *for the subset the FE writes directly*". Worth stating somewhere, because the checklist reads as though it is absolute.
+2. **A real instance of the drift the §6 rule is meant to prevent:** the SW adds `CHANNEL_STATE.SPLIT_COINID` (`db-init.js:188`) but `dapp/app.js`'s `initFEChannelState` does **not**. Harmless today — one shared DB, and the SW almost always boots first — but it is exactly the asymmetry that becomes a real bug the moment the FE boots first on a fresh node and writes a `CHANNEL_STATE` row before the SW has run.
+3. **`MinimaAds.md §3.5` has drifted from the shipped schema.** Three concrete mismatches: `CHANNEL_STATE.VIEWER_KEY` is `VARCHAR(66)` in the spec but `VARCHAR(512)` in both runtimes; `CHANNEL_STATE.CREATOR_MX` is `VARCHAR(512)` in the spec but `VARCHAR(1024)` in code; and `FRAMES.PUBLISHER_MX` is **absent from the spec entirely** despite existing in both runtimes. Per `CLAUDE.md §3` `MinimaAds.md` is the highest authority, so this is not something to resolve unilaterally — and it is a direct argument for §10 Q1, since a spec/code mismatch about column widths is precisely what a destructive-migration mechanism exists to let you correct.
+
+---
+
 ### Session: 2026-09-12 (T-REP3) — signed peer attestations: **DESIGN ONLY — not implemented, pending governance approval**
 
 > **Status: DESIGN ONLY.** No `.js` file was written, edited or deleted. No schema was created. No Maxima message type exists. `MinimaAds.md` was deliberately **not** touched — §3.5/§7.8/§8 stay describing only what is actually shipped (T-REP0–T-REP2). `docs/TASKS.md` T-REP3 stays `⬜ Pending`. Everything below is a proposal awaiting the governance decisions listed in §9. Do **not** treat any schema, constant or message shape here as a contract — the contract only exists once it lands in `MinimaAds.md`, and it should only land there when Phase 3 is approved *and* implemented.

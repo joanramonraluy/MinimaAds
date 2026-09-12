@@ -46,6 +46,27 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-12 (TIER1-GROWTH) — Two new Tier 1 regression tests
+
+**Source**: maintainer, after a concurrent agent session's UI work landed and was confirmed committed/pushed with no conflicts: "continue wherever you want."
+**Task**: agent-selected next step from `docs/ROADMAP_V1.md`'s menu. Picked criterion #2 (Tier 1 offline regression coverage) over the others because it's the only one fully executable without a maintainer judgment call (#1 `PLATFORM_KEY`, #3 `T-REP3`) or an external party (#4 audit) or a live-node harness that might collide with concurrent agent activity (#5).
+
+**Candidates scanned**: reviewed every `docs/KNOWN_ISSUES.md §3` entry for ones whose fix is expressible as pure logic and not yet covered by an existing Tier 1 test. Picked two with real security/business-logic weight:
+1. `core/validation.js` `validateView()`/`validateClick()` — the actual point where "a creator must never earn from their own campaign" (`CLAUDE.md §6`) is enforced against a real reward request. `selectAd.test.js` already covered this rule for *ad selection*, but the reward-request path is a separate enforcement point and had zero coverage. Also covers VAL-1 (per-campaign, not global, cooldown).
+2. `core/campaigns.js` `escrowDescendantSet()` — the breadth-first traversal that `escrowChildCoinId.test.js` (2026-09-12, earlier session) didn't reach; together they now cover both halves of the OPEN-4 lineage gate (hash-input construction *and* the depth-limited closure search built on top of it).
+
+**`validation.test.js`**: stubs `getCampaign`/`sqlQuery` around `validateView`/`validateClick`. One real authoring snag: `minima.js` is loaded for its pure `escapeSql()`, but it also declares its own `sqlQuery()` — passing a stub `sqlQuery` into `loadCore`'s initial `globals` gets silently clobbered by that later `function sqlQuery(){}` declaration in the same vm scope (function declarations win). Fixed by reassigning `ctx.sqlQuery`/`ctx.getCampaign` on the *returned* context object, after `loadCore` finishes loading both files — free-variable lookups inside `validation.js` resolve at call time, not load time, so this works. 12 assertions: self-reward (case-insensitive), inactive campaign, insufficient budget for view vs. click (not conflated), channel `MAX_AMOUNT` cap (only while `open`/`pending`, ignored once `settled`), daily limit, cooldown `remainingMs` math, and the valid-passthrough case for both functions.
+
+**`escrowDescendantSet.test.js`**: stubs `MDS.cmd` with a deterministic fake hash (`sha256(parent + ':' + branch)`, not real SHA3 — that's `escrowChildCoinId.test.js`'s job) so the traversal/depth/dedup logic runs against known inputs. Two authoring bugs found and fixed while writing it, both worth recording since they'd bite the same way again:
+- The stub's fake `response.hash` must **include** a leading `0x`, mirroring the real MDS `hash` command's response shape — `escrowChildCoinId` unconditionally does `res.response.hash.substring(2)` to strip a "0x" prefix before re-adding one. Passing a stub hash *without* the prefix silently truncates every generated id by 2 characters, which then fails the next depth's `/^0[xX][0-9A-Fa-f]{64}$/` format check and looks exactly like "the traversal just stops after depth 1" — cost the most debugging time in this session.
+- Comparing the vm-internal `out` map (created inside the sandboxed realm) against a Node-realm `{}` literal via `assert.deepEqual` fails on prototype identity alone, even when both are genuinely empty — use `Object.keys(out).length === 0` instead for any vm-returned object in these tests.
+- 6 assertions: depth-1 yields exactly 2 nodes, depth-2 yields 6 total (matching the function's own "6 hash calls" doc comment), `maxDepth` clamps to `[1,4]` on both ends, malformed anchor short-circuits to empty, and all map keys are uppercased.
+
+**Files modified**: `tests/regression/validation.test.js` (new), `tests/regression/escrowDescendantSet.test.js` (new), `docs/REGRESSION_TEST_PLAN.md` (Tier 1 table + count), `docs/ROADMAP_V1.md` (criterion #2 count and description).
+**Open issues**: none. `node tests/regression/run-all.js` → `6/6 passed`.
+
+---
+
 ### Session: 2026-09-12 (REGRESSION-DEDUP) — Removed duplicate live-node regression table
 
 **Source**: maintainer question right after the ROADMAP-V1 session (below): "could there be tests in the regression plan and the master test plan that overlap or are duplicated? Should there be one plan, or should they cross-reference?"

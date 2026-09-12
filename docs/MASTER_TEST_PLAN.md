@@ -327,14 +327,29 @@ sequenceDiagram
        - Navigate to `#settings` $\to$ *Ad Preferences & Blocklist*: toggle on *"Automatically hide ads from Flagged creators"*.
        - Return to `#viewer`: verify Node 6's campaign is completely hidden from the available ad list.
        - Return to `#settings` and disable *"Automatically hide ads from Flagged creators"*.
-       - Return to `#viewer`, open Node 6's campaign, click *"Block Advertiser"*, and accept the confirmation prompt.
+       - Return to `#viewer`, open Node 6's campaign, click *"Block Advertiser"*, and click the inline *"Confirm Block"* button (no popup dialog).
        - Confirm Node 6 is added to the local blocklist in `MDS.keypair`:
          - Campaign is hidden from `#viewer` list.
          - Excluded from `selectAd()` pool for local frames.
          - Displayed under `#settings` $\to$ *Blocked Advertisers* with an *"Unblock"* action.
        - Click *"Unblock"* under `#settings`: confirm Node 6's campaign reappears in `#viewer` (with its red `[Flagged]` badge intact).
+    6. **`#campaigns` Blocked filter** (BLOCKED-FILTER):
+       - Block Node 6's creator again via `#viewer`.
+       - Navigate to `#campaigns` → click `[ Active ]`: confirm Node 6's campaign does **not** appear.
+       - Click `[ Blocked ]`: confirm Node 6's campaign **does** appear here (blocklist review panel).
+       - Click `[ All ]`: confirm Node 6's campaign appears (no filter applied).
+       - Unblock via `#settings`; refresh `#campaigns` → Node 6's campaign reappears in Active.
+    7. **MetaChain / external snippet — `handleGetAd` blocklist enforcement** (BLOCKED-FILTER):
+       - Block Node 6's creator on Node 3.
+       - In MetaChain's MinimaAds panel, execute the ad snippet (sends `MA_GET_AD` to Node 3's SW).
+       - Confirm `MA_AD_RESPONSE` comes back `found: false` (or serves a *different* campaign — never Node 6's).
+       - Check Node 3 SW console: `[COMMS] MA_GET_AD — no eligible ad` (or shows a non-Node-6 campaign ID).
+    8. **Unblock & re-verify MetaChain** (BLOCKED-FILTER):
+       - Unblock Node 6 on Node 3 via `#settings`.
+       - Re-run the MetaChain snippet: `MA_AD_RESPONSE` should now return `found: true` with Node 6's campaign (assuming it is still active and budget remains).
   * **Expected Results**:
     * Full end-to-end local reputation containment: attack detection $\to$ local tier transition $\to$ UI warning $\to$ automated & manual filtering $\to$ blocklist management.
+    * Blocklist respected in **all** ad delivery paths: built-in `#viewer`, `#campaigns` Blocked filter, and external snippet/MetaChain via `handleGetAd`.
 
 ---
 
@@ -369,7 +384,7 @@ The table below documents which tests have **already been verified live** during
 | **F** | **F.2** | Adversarial Profile Spoof (AUD-6) | ✅ **Verified** | `docs/HISTORY.md §17 (2026-09-11 AUD-6 / T-REP0)` — forged response dropped on PK mismatch | Regression |
 | **F** | **F.3** | Adversarial Opener Hijack (N2-4) | ⬜ **Pending** | Dedicated attacker script claiming another viewer's channel ID pending live probe | **High Priority** |
 | **F** | **F.4** | Adversarial Dust Coin Injection (OPEN-4)| ✅ **Verified** | `docs/HISTORY.md §17 (2026-09-09 OPEN-4)` — forward-lineage anchor check verified live. Re-verified 2026-09-12 (`docs/HISTORY.md §17`, MVP-DECISIONS + REGRESSION-PLAN) — a real forged coin (30 MINIMA, fabricated `campaign_id`+`finished` state ports) posted to the live `ESCROW_ADDRESS` from a non-creator node; `CAMPAIGNS.STATUS`/`ESCROW_COINID` unchanged on all 3 nodes checked | Regression |
-| **F** | **F.5** | Reputation Slashing, Creator Blocking & Viewer Filtering | ⚠️ **Code-Verified** | UI badges, local blocklist & flagged auto-hide verified; live multi-node harness test pending | **High Priority** |
+| **F** | **F.5** | Reputation Slashing, Creator Blocking & Viewer Filtering | ⚠️ **Code-Verified** | UI badges, local blocklist & flagged auto-hide verified (2026-09-12 REP-VIEWER). Steps 6–8 added 2026-09-12 (BLOCKED-FILTER): `#campaigns` Blocked filter pill, `handleGetAd` & `sdk/index.js` `getAd` now read `getBlockedCreators` before `selectAd` — snippets in MetaChain & external hosts also never serve blocked creators. Live multi-node harness test (steps 5–8) pending | **High Priority** |
 
 ---
 

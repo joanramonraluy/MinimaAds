@@ -196,7 +196,7 @@ the word "Regression" as a Target-column tag for exactly this purpose).
 ### Session: 2026-09-12 (REP-VIEWER) — Creator reputation badge, local blocklist & flagged ad filtering in Viewer
 
 **Source**: User request for Creator Reputation Badge surfacing in Viewer (`#viewer`), creator blocking, and live verification plan alignment.
-**Task**: Surface creator reputation tiers (`Trusted`, `OK`, `New`, `Flagged`) before viewing ads; implement local advertiser blocklist (persisted in `MDS.keypair`); add automatic filter for `Flagged` creators; update `selectAd` to support blocked creator exclusions; expand `docs/MASTER_TEST_PLAN.md` Test F.5 with multi-node live verification procedure.
+**Task**: Surface creator reputation tiers (`Trusted`, `OK`, `New`, `Flagged`) before viewing ads; implement local advertiser blocklist (persisted in `MDS.keypair`); add automatic filter for `Flagged` creators; update `selectAd` to support blocked creator exclusions; expand `docs/MASTER_TEST_PLAN.md` Test F.5 with multi-node live verification procedure; refine UI tags and document system in Help.
 **Complexity**: MEDIUM per `CLAUDE.md §2`.
 
 **Changes**:
@@ -204,13 +204,23 @@ the word "Regression" as a Target-column tag for exactly this purpose).
 2. `core/selection.js`: updated `selectAd(userAddress, userInterests, campaigns, blockedCreators)` to exclude campaigns from blocked creators (backwards-compatible).
 3. `dapp/views/viewer.js`:
    - List view (`_renderCampaignList`): joined `PEER_REPUTATION pr` to fetch `pr.TIER AS CREATOR_TIER`; filtered out blocked creators and, if configured, flagged creators.
-   - List row (`_buildCampaignRow`): added reputation badge slot in `titleRow`, rendering `mkReputationBadge` for non-self campaigns (skips `unknown`).
-   - Detail view (`_buildDetailShell`): added creator reputation badge and "Block Advertiser" button (with confirmation modal) in the top navigation row; updated `detailSql` query with `PEER_REPUTATION` join.
-4. `dapp/views/settings.js`: added Accordion 4 ("Ad Preferences & Blocklist") with toggle to automatically hide ads from Flagged creators, plus a list of blocked advertiser public keys with individual "Unblock" actions.
-5. `docs/MASTER_TEST_PLAN.md`: updated Test F.5 to cover the complete multi-node live test scenario: Node 6 attack → Node 3 local reputation drop to `Flagged` → red badge in `#viewer` → automatic/manual filtering verification.
+   - List row (`_buildCampaignRow`): added reputation badge slot in `titleRow`, prepending category label `Reputation:` before `mkReputationBadge` for non-self campaigns (skips `unknown`).
+   - Detail view (`_buildDetailShell`): added creator reputation badge with `Reputation:` label and "Block Advertiser" button (with inline two-step confirmation, eliminating browser `confirm()` popup dialogs) in the top navigation row; updated `detailSql` query with `PEER_REPUTATION` join.
+4. `dapp/views/campaigns.js`: added category label `Reputation:` before `mkReputationBadge` in campaign list rows for consistency.
+5. `dapp/views/ui-helpers.js`: updated `mkReputationBadge` font size from `.7rem` to `.75rem`, matching the exact dimensions of `mkStatusBadge` (`.75rem`, padding `.15rem .5rem`).
+6. `dapp/views/settings.js`: added Accordion 4 ("Ad Preferences & Blocklist") with toggle to automatically hide ads from Flagged creators (defaulting to enabled), plus a list of blocked advertiser public keys with individual "Unblock" actions.
+7. `dapp/views/help.js`:
+   - Viewer Guide: added "Advertiser Reputation & Safety" card explaining the node-local reputation calculation, badge tiers (`Trusted`, `OK`, `New`, `Flagged`, `Unknown`), inline advertiser blocking, and the auto-protection toggle.
+   - FAQ: added "How does Advertiser Reputation and Blocking work?" card. Fixed pre-existing bug where `faq10` appended to `faq7`.
+8. `docs/MASTER_TEST_PLAN.md`: updated Test F.5 to cover the complete multi-node live test scenario: Node 6 attack → Node 3 local reputation drop to `Flagged` → red badge in `#viewer` → automatic/manual filtering verification.
 
-**Files modified**: `core/reputation.js`, `core/selection.js`, `dapp/views/viewer.js`, `dapp/views/settings.js`, `docs/MASTER_TEST_PLAN.md`, `docs/HISTORY.md`, `AGENTS.md`.
-**Verification**: Syntax verified via `node --check` across all modified JS files; clean git diff; Rhino compatibility preserved.
+**Files modified**: `core/reputation.js`, `core/selection.js`, `dapp/views/viewer.js`, `dapp/views/campaigns.js`, `dapp/views/ui-helpers.js`, `dapp/views/settings.js`, `dapp/views/help.js`, `public/service-workers/handlers/comms.handler.js`, `sdk/index.js`, `docs/MASTER_TEST_PLAN.md`, `docs/HISTORY.md`, `AGENTS.md`.
+**Verification**: Syntax verified via `node --check` across all modified JS files; test suite clean (`tests/regression/run-all.js` 4/4 passed); Rhino/Vanilla JS compatibility preserved (ES5, no popups).
+
+**Additional changes (same session — BLOCKED-FILTER)**:
+9. `dapp/views/campaigns.js`: added `Blocked` filter pill alongside `Active`/`All`. Active filter now excludes campaigns from blocked creators in JS post-query (blocklist is keyed at read time from `getBlockedCreators`). Blocked filter shows only campaigns whose `CREATOR_ADDRESS` is in the local blocklist, enabling review and unblock workflows. Summary cards reflect the active filter's campaign count.
+10. `public/service-workers/handlers/comms.handler.js` (`handleGetAd`): reads `getBlockedCreators` before calling `selectAd`, so the MDS.comms snippet path (used by MetaChain and other external host dApps) also never serves ads from blocked creators.
+11. `sdk/index.js` (`getAd`): same fix for the SDK-direct path (host MiniDapps that embed `sdk/index.js` and call `getAd` directly), ensuring the blocklist is respected across all ad delivery surfaces.
 
 ---
 

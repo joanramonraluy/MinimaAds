@@ -222,8 +222,12 @@
       });
       _enrichWithAds(visible, function(err2, enriched) {
         if (err2) { cb(err2, null); return; }
-        var ad = selectAd(userAddress, interests, enriched);
-        cb(null, ad);
+        // Respect the local blocklist: fetch blocked creators from keypair before selection.
+        var _getBlocked = (typeof getBlockedCreators === 'function') ? getBlockedCreators : function(cbB) { cbB(null, []); };
+        _getBlocked(function(bErr, blockedList) {
+          var ad = selectAd(userAddress, interests, enriched, blockedList || []);
+          cb(null, ad);
+        });
       });
     });
   }

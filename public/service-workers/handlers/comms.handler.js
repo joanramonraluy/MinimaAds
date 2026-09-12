@@ -81,34 +81,37 @@ function handleGetAd(payload) {
             c.AD_IMAGE_WIDTH_PCT = (adData.IMAGE_WIDTH_PCT !== null && adData.IMAGE_WIDTH_PCT !== undefined) ? parseInt(adData.IMAGE_WIDTH_PCT, 10) : 40;
           }
         }
-        var selected = selectAd(userAddress, interests, campaigns);
-        if (!selected) {
-          MDS.log("[COMMS] MA_GET_AD — no eligible ad for " + userAddress.substring(0, 10) + "...");
-          MDS.comms.broadcast(JSON.stringify({type: "MA_AD_RESPONSE", found: false}), function() {});
-          return;
-        }
-        MDS.log("[COMMS] MA_GET_AD → serving campaign:" + selected.ID);
-        MDS.comms.broadcast(JSON.stringify({
-          type: "MA_AD_RESPONSE",
-          found: true,
-          ad: {
-            campaign_id:  selected.ID,
-            title:        selected.AD_TITLE || "",
-            body:         selected.AD_BODY || "",
-            cta_label:    selected.AD_CTA_LABEL || "",
-            cta_url:      selected.AD_CTA_URL || "",
-            image_data:   selected.AD_IMAGE_DATA || null,
-            show_title:   (selected.AD_SHOW_TITLE !== undefined && selected.AD_SHOW_TITLE !== null) ? selected.AD_SHOW_TITLE : 1,
-            show_body:    (selected.AD_SHOW_BODY !== undefined && selected.AD_SHOW_BODY !== null) ? selected.AD_SHOW_BODY : 1,
-            show_cta:     (selected.AD_SHOW_CTA !== undefined && selected.AD_SHOW_CTA !== null) ? selected.AD_SHOW_CTA : 1,
-            bg_color:       selected.AD_BG_COLOR       || '#ffffff',
-            text_color:     selected.AD_TEXT_COLOR     || '#111111',
-            image_position:  selected.AD_IMAGE_POSITION || 'center',
-            image_zoom:      selected.AD_IMAGE_ZOOM !== undefined ? selected.AD_IMAGE_ZOOM : 1.0,
-            image_width_pct: selected.AD_IMAGE_WIDTH_PCT !== undefined ? selected.AD_IMAGE_WIDTH_PCT : 40,
-            reward_view:  selected.REWARD_VIEW || 0
+        var _getBlocked = (typeof getBlockedCreators === 'function') ? getBlockedCreators : function(cb) { cb(null, []); };
+        _getBlocked(function(bErr, blockedList) {
+          var selected = selectAd(userAddress, interests, campaigns, blockedList || []);
+          if (!selected) {
+            MDS.log("[COMMS] MA_GET_AD — no eligible ad for " + userAddress.substring(0, 10) + "...");
+            MDS.comms.broadcast(JSON.stringify({type: "MA_AD_RESPONSE", found: false}), function() {});
+            return;
           }
-        }), function() {});
+          MDS.log("[COMMS] MA_GET_AD → serving campaign:" + selected.ID);
+          MDS.comms.broadcast(JSON.stringify({
+            type: "MA_AD_RESPONSE",
+            found: true,
+            ad: {
+              campaign_id:  selected.ID,
+              title:        selected.AD_TITLE || "",
+              body:         selected.AD_BODY || "",
+              cta_label:    selected.AD_CTA_LABEL || "",
+              cta_url:      selected.AD_CTA_URL || "",
+              image_data:   selected.AD_IMAGE_DATA || null,
+              show_title:   (selected.AD_SHOW_TITLE !== undefined && selected.AD_SHOW_TITLE !== null) ? selected.AD_SHOW_TITLE : 1,
+              show_body:    (selected.AD_SHOW_BODY !== undefined && selected.AD_SHOW_BODY !== null) ? selected.AD_SHOW_BODY : 1,
+              show_cta:     (selected.AD_SHOW_CTA !== undefined && selected.AD_SHOW_CTA !== null) ? selected.AD_SHOW_CTA : 1,
+              bg_color:       selected.AD_BG_COLOR       || '#ffffff',
+              text_color:     selected.AD_TEXT_COLOR     || '#111111',
+              image_position:  selected.AD_IMAGE_POSITION || 'center',
+              image_zoom:      selected.AD_IMAGE_ZOOM !== undefined ? selected.AD_IMAGE_ZOOM : 1.0,
+              image_width_pct: selected.AD_IMAGE_WIDTH_PCT !== undefined ? selected.AD_IMAGE_WIDTH_PCT : 40,
+              reward_view:  selected.REWARD_VIEW || 0
+            }
+          }), function() {});
+        });
       }
     );
   });

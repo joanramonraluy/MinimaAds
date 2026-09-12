@@ -8,7 +8,7 @@
 // Per-campaign publisher count from PREVSTATE(2) of channel coins.
 // Accessible from all modes (viewer, creator, publisher).
 
-var _campaignsFilter = 'active'; // 'active' | 'all'
+var _campaignsFilter = 'active'; // 'active' | 'all' | 'blocked'
 
 function renderCampaigns(root) {
   root.innerHTML = '';
@@ -42,8 +42,9 @@ function _renderCampaignsFilter() {
   filterRow.innerHTML = '';
 
   var filters = [
-    { key: 'active', label: 'Active' },
-    { key: 'all',    label: 'All' }
+    { key: 'active',  label: 'Active' },
+    { key: 'all',     label: 'All' },
+    { key: 'blocked', label: 'Blocked' }
   ];
   for (var i = 0; i < filters.length; i++) {
     (function(f) {
@@ -77,7 +78,7 @@ function _loadCampaigns() {
   loading.textContent = 'Loading campaigns…';
   listEl.appendChild(loading);
 
-  var sql = 'SELECT c.ID, c.TITLE, c.CREATOR_ADDRESS, c.BUDGET_TOTAL, c.BUDGET_REMAINING, c.REWARD_VIEW, '
+  var baseSql = 'SELECT c.ID, c.TITLE, c.CREATOR_ADDRESS, c.BUDGET_TOTAL, c.BUDGET_REMAINING, c.REWARD_VIEW, '
     + 'c.REWARD_CLICK, c.STATUS, c.MAX_VIEWER_REWARD, c.EXPIRES_AT, c.PUBLISHER_REWARD_VIEW, c.CREATOR_MX, c.MAX_PUBLISHER_BUDGET, c.PUBLISHER_BUDGET_SPENT, c.VIEWER_BUDGET_SPENT, c.PUBLISHER_BUDGET_EARNED, '
     + 'a.ID AS AD_ID, a.TITLE AS AD_TITLE, a.BODY AS AD_BODY, '
     + 'a.CTA_LABEL AS AD_CTA_LABEL, a.CTA_URL AS AD_CTA_URL, '
@@ -87,33 +88,62 @@ function _loadCampaigns() {
     + 'FROM CAMPAIGNS c '
     + 'LEFT JOIN ADS a ON UPPER(a.CAMPAIGN_ID) = UPPER(c.ID) '
     + "LEFT JOIN CHANNEL_STATE cs ON UPPER(cs.CAMPAIGN_ID) = UPPER(c.ID) AND UPPER(cs.VIEWER_KEY) = UPPER('" + escapeSql(MY_ADDRESS || '') + "') AND cs.ROLE = 'viewer'";
-  if (_campaignsFilter === 'active') {
-    sql += " WHERE UPPER(c.STATUS) = 'ACTIVE'";
-  }
-  sql += ' ORDER BY c.STATUS ASC, c.TITLE ASC';
 
-  sqlQuery(sql, function(err, rows) {
-    if (err) {
-      listEl.innerHTML = '';
-      var errP = document.createElement('p');
-      errP.style.cssText = 'color:var(--pico-del-color,#c0392b);padding:1rem;margin:0;';
-      errP.textContent = 'Error loading campaigns.';
-      listEl.appendChild(errP);
-      return;
+  var getBlocked = (typeof getBlockedCreators === 'function') ? getBlockedCreators : function(cb) { cb(null, []); };
+  getBlocked(function(bErr, blockedList) {
+    var blockedMap = {};
+    for (var bi = 0; bi < (blockedList || []).length; bi++) {
+      if (blockedList[bi]) { blockedMap[((blockedList[bi] + '').toUpperCase())] = true; }
     }
 
-    var campaigns = rows || [];
-    _updateCampaignsSummary(campaigns);
-
-    if (campaigns.length === 0) {
-      listEl.innerHTML = '';
-      var empty = mkEmptyState('No campaigns found.', null, null);
-      listEl.appendChild(empty);
-      return;
+    var sql = baseSql;
+    if (_campaignsFilter === 'active') {
+      sql += " WHERE UPPER(c.STATUS) = 'ACTIVE'";
     }
+    sql += ' ORDER BY c.STATUS ASC, c.TITLE ASC';
 
-    _renderCampaignsList(listEl, campaigns);
-    _loadEscrowInfoForActiveCampaigns(campaigns);
+    sqlQuery(sql, function(err, rows) {
+      if (err) {
+        listEl.innerHTML = '';
+        var errP = document.createElement('p');
+        errP.style.cssText = 'color:var(--pico-del-color,#c0392b);padding:1rem;margin:0;';
+        errP.textContent = 'Error loading campaigns.';
+        listEl.appendChild(errP);
+        return;
+      }
+
+      var allRows = rows || [];
+
+      // Apply blocklist filter in JS (avoids complex dynamic SQL)
+      var campaigns;
+      if (_campaignsFilter === 'blocked') {
+        // Show only campaigns from blocked creators
+        campaigns = allRows.filter(function(c) {
+          return blockedMap[((c.CREATOR_ADDRESS || '') + '').toUpperCase()];
+        });
+      } else if (_campaignsFilter === 'active') {
+        // Active: exclude blocked creators
+        campaigns = allRows.filter(function(c) {
+          return !blockedMap[((c.CREATOR_ADDRESS || '') + '').toUpperCase()];
+        });
+      } else {
+        campaigns = allRows;
+      }
+
+      _updateCampaignsSummary(campaigns, blockedMap);
+
+      listEl.innerHTML = '';
+      if (campaigns.length === 0) {
+        var emptyMsg = _campaignsFilter === 'blocked'
+          ? 'No blocked advertisers.'
+          : 'No campaigns found.';
+        listEl.appendChild(mkEmptyState(emptyMsg, null, null));
+        return;
+      }
+
+      _renderCampaignsList(listEl, campaigns);
+      _loadEscrowInfoForActiveCampaigns(campaigns);
+    });
   });
 }
 
@@ -131,15 +161,14 @@ function _renderCampaignsList(listEl, campaigns) {
   listEl.appendChild(wrapper);
 }
 
-function _updateCampaignsSummary(campaigns) {
+function _updateCampaignsSummary(campaigns, blockedMap) {
   var summaryEl = document.getElementById('ma-campaigns-summary');
   if (!summaryEl) { return; }
   summaryEl.className = 'ma-stat-grid' + (_activeMode === 'viewer' ? ' cols-5' : ' cols-3');
   summaryEl.innerHTML = '';
 
-  var filtered = _campaignsFilter === 'active'
-    ? campaigns.filter(function(c) { return (c.STATUS || '').toUpperCase() === 'ACTIVE'; })
-    : campaigns;
+  // campaigns is already filtered by the caller; use as-is for counts
+  var filtered = campaigns;
 
   var count = filtered.length;
   var totalFunded = filtered.reduce(function(sum, c) { return sum + (parseFloat(c.BUDGET_TOTAL) || 0); }, 0);
@@ -257,9 +286,15 @@ function _buildCampaignsRow(campaign) {
   if (creatorAddrForRep && (!MY_ADDRESS || creatorAddrForRep !== MY_ADDRESS.toUpperCase())
       && typeof getReputation === 'function') {
     var repBadgeSlot = document.createElement('span');
+    repBadgeSlot.style.cssText = 'display:inline-flex;align-items:center;gap:.25rem;';
     titleRow.appendChild(repBadgeSlot);
     getReputation(creatorAddrForRep, 'creator', function(repErr, rep) {
       if (!repErr && rep && rep.TIER && rep.TIER !== 'unknown') {
+        repBadgeSlot.innerHTML = '';
+        var repLbl = document.createElement('small');
+        repLbl.style.cssText = 'font-size:.75rem;color:var(--pico-muted-color,#6c757d);font-weight:500;';
+        repLbl.textContent = 'Reputation:';
+        repBadgeSlot.appendChild(repLbl);
         repBadgeSlot.appendChild(mkReputationBadge(rep.TIER));
       }
     });

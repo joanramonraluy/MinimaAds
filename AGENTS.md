@@ -206,6 +206,12 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent sessions here, as **short pointers only** — one-line summary + files touched + open issues, ending with a reference to the full narrative in `docs/HISTORY.md §17`. The full problem/fix/verification write-up is written **once**, directly into `docs/HISTORY.md §17`, never duplicated here. When adding a new entry pushes this past 3, just **delete** the oldest pointer — nothing to move, its full content already lives permanently in `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-09-12 (REP-VIEWER-UI + BLOCKED-FILTER) — Reputation tag label & sizing, inline block confirm, Help documentation, Blocked filter & snippet enforcement
+
+Refined creator reputation tag display: prepended `Reputation:` category label before `mkReputationBadge` across `#viewer` (list and detail) and `#campaigns` (only when tier != 'unknown'); standardized `mkReputationBadge` font-size to `.75rem` to match sibling `mkStatusBadge` exactly; eliminated browser `confirm()` popup on "Block Advertiser" in favor of inline two-step confirmation; added comprehensive "Advertiser Reputation & Safety" cards in `#help` (Viewer Guide & FAQ) explaining node-local scoring, badge tiers, blocking, and auto-protection; fixed pre-existing `faq10` append bug in `help.js`. Added `Blocked` filter pill in `#campaigns` (Active now excludes blocked creators; Blocked shows only blocked-creator campaigns); patched `comms.handler.js` `handleGetAd` and `sdk/index.js` `getAd` to read `getBlockedCreators` before `selectAd`, so snippets in MetaChain and other external hosts also never serve ads from blocked creators. Files: `dapp/views/viewer.js`, `dapp/views/campaigns.js`, `dapp/views/ui-helpers.js`, `dapp/views/help.js`, `public/service-workers/handlers/comms.handler.js`, `sdk/index.js`, `docs/HISTORY.md`, `AGENTS.md`. Open issues: none. Full detail: `docs/HISTORY.md §17`, session 2026-09-12 (REP-VIEWER + BLOCKED-FILTER).
+
+---
+
 ### Session: 2026-09-12 (REGRESSION-DEDUP) — Removed duplicate live-node regression table
 
 Maintainer asked whether `REGRESSION_TEST_PLAN.md` Tier 2 and `MASTER_TEST_PLAN.md §4` could overlap. Confirmed row-by-row they did (Tier 2's fragility #40/#47, OPEN-3, OPEN-4, CH-5 entries were the same live-node checks as `§4`'s D.1, F.1, F.4, B.4). Removed Tier 2 entirely from `docs/REGRESSION_TEST_PLAN.md` (now Tier-1-only, offline); merged its 2026-09-12 evidence into the corresponding `MASTER_TEST_PLAN.md §4` rows instead of keeping it in two places. `docs/ROADMAP_V1.md` criteria #2/#5 updated to match (Tier 1 offline coverage vs. `§4`'s combined functional+regression tracking). Files: `docs/REGRESSION_TEST_PLAN.md`, `docs/MASTER_TEST_PLAN.md`, `docs/ROADMAP_V1.md`. Open issues: none. Full detail: `docs/HISTORY.md §17`, session 2026-09-12 (REGRESSION-DEDUP).
@@ -218,11 +224,5 @@ Maintainer flagged that no document tied `TASKS.md`/`MASTER_TEST_PLAN.md`/`REGRE
 
 ---
 
-### Session: 2026-09-12 (MVP-DECISIONS + REGRESSION-PLAN) — MVP trade-off decisions, regression test plan, and full live verification
-
-Closed the only two genuine "for MVP" behaviors in `docs/KNOWN_ISSUES.md §1` (fragility #24, #45) as permanent trade-offs by design, decided by the maintainer. Built `docs/REGRESSION_TEST_PLAN.md` (Tier 1: `tests/regression/*.test.js`, plain Node, 4 passing tests; Tier 2: 5-entry live-node checklist). Then live-verified all 5 Tier 2 entries in one session on the real 5-node harness, including two genuine adversarial attacks (a real forged Maxima `CAMPAIGN_FINISH` and a real forged on-chain coin at `ESCROW_ADDRESS`) — all 5 **PASS**. Side effect: fixed a real `selectAd()` signature drift (`blockedCreators` param missing from `CLAUDE.md §5` / `MinimaAds.md §6.4/§7.2`). Files: `docs/KNOWN_ISSUES.md`, `docs/REGRESSION_TEST_PLAN.md` (new), `docs/DOCUMENTATION_INDEX.md`, `tests/regression/*` (new), `MinimaAds.md`, `CLAUDE.md`. Open issues: harness now carries real test state (active campaign, settled channel) — `⚠ DELETE ALL DATA ⚠` before a clean-slate session. Full detail: `docs/HISTORY.md §17`, session 2026-09-12 (MVP-DECISIONS + REGRESSION-PLAN).
-
----
-
-> Previous handoff notes (2026-09-12 REP-VIEWER — creator reputation badge, local blocklist & flagged-ad filtering in Viewer; 2026-09-12 OPEN-8, 2026-09-11 T-REP1, 2026-09-10 Fragility #61, 2026-09-11 AUD-6/T-REP0, 2026-09-10 OPEN-3 adversarial regression probe, 2026-09-09 Fragility #60, 2026-09-09 OPEN-5, 2026-09-09 Fragility #58, 2026-09-07 OPEN-3, AUD-1, patches 15–25, Security Audit 2, and all earlier) are archived in `docs/HISTORY.md §17`.
+> Previous handoff notes (2026-09-12 MVP-DECISIONS + REGRESSION-PLAN, 2026-09-12 REP-VIEWER, 2026-09-12 OPEN-8, 2026-09-11 T-REP1, 2026-09-10 Fragility #61, 2026-09-11 AUD-6/T-REP0, 2026-09-10 OPEN-3 adversarial regression probe, 2026-09-09 Fragility #60, 2026-09-09 OPEN-5, 2026-09-09 Fragility #58, 2026-09-07 OPEN-3, AUD-1, patches 15–25, Security Audit 2, and all earlier) are archived in `docs/HISTORY.md §17`.
 

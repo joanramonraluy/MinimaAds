@@ -206,21 +206,21 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent sessions here, as **short pointers only** — one-line summary + files touched + open issues, ending with a reference to the full narrative in `docs/HISTORY.md §17`. The full problem/fix/verification write-up is written **once**, directly into `docs/HISTORY.md §17`, never duplicated here. When adding a new entry pushes this past 3, just **delete** the oldest pointer — nothing to move, its full content already lives permanently in `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-09-12 (MVP-DECISIONS + REGRESSION-PLAN) — MVP trade-off decisions, regression test plan, and full live verification
+
+Closed the only two genuine "for MVP" behaviors in `docs/KNOWN_ISSUES.md §1` (fragility #24, #45) as permanent trade-offs by design, decided by the maintainer. Built `docs/REGRESSION_TEST_PLAN.md` (Tier 1: `tests/regression/*.test.js`, plain Node, 4 passing tests; Tier 2: 5-entry live-node checklist). Then live-verified all 5 Tier 2 entries in one session on the real 5-node harness, including two genuine adversarial attacks (a real forged Maxima `CAMPAIGN_FINISH` and a real forged on-chain coin at `ESCROW_ADDRESS`) — all 5 **PASS**. Side effect: fixed a real `selectAd()` signature drift (`blockedCreators` param missing from `CLAUDE.md §5` / `MinimaAds.md §6.4/§7.2`). Files: `docs/KNOWN_ISSUES.md`, `docs/REGRESSION_TEST_PLAN.md` (new), `docs/DOCUMENTATION_INDEX.md`, `tests/regression/*` (new), `MinimaAds.md`, `CLAUDE.md`. Open issues: harness now carries real test state (active campaign, settled channel) — `⚠ DELETE ALL DATA ⚠` before a clean-slate session. Full detail: `docs/HISTORY.md §17`, session 2026-09-12 (MVP-DECISIONS + REGRESSION-PLAN).
+
+---
+
+### Session: 2026-09-12 (KNOWN-ISSUES-AUDIT) — Comprehensive audit and cleanup of `docs/KNOWN_ISSUES.md`
+
+Audited `docs/KNOWN_ISSUES.md`: verified 0 active bugs in §1b; added rows for Proposal, OPEN-6, OPEN-7, OPEN-8, OPEN-9, OPEN-10 to §3 Closed/Fixed table; updated §4 Development Workflow Rule to reflect OPEN-6 schema migration mechanism (`core/schema.js`). Files: `docs/KNOWN_ISSUES.md`, `AGENTS.md`, `docs/HISTORY.md`. Open issues: none. Full detail: `docs/HISTORY.md §17`, session 2026-09-12 (KNOWN-ISSUES-AUDIT).
+
+---
+
 ### Session: 2026-09-12 (OPEN-6-IMPL) — H2 schema migration mechanism implemented (`core/schema.js`)
 
 Implemented the OPEN-6 design: new shared `core/schema.js` (`SCHEMA_MIGRATIONS_LIST` + `runSchemaMigrations(runtimeTag, done)`) loaded and run by **both** runtimes, `SCHEMA_MIGRATIONS` bookkeeping table (Class C only), first real migration `2026-09-12-001` widening `FRAMES.PUBLISHER_MX` 512→1024 in both `CREATE TABLE`s, failed migrations non-fatal and surfaced via new `SCHEMA_MIGRATION_FAILED` signal; added AGENTS.md §4.1 measured H2 DDL capability matrix. The ~30 existing `ADD COLUMN IF NOT EXISTS` statements are deliberately untouched. Files: `core/schema.js` (new), `service.js`, `public/service-workers/db-init.js`, `public/index.html`, `dapp/app.js`, `MinimaAds.md`, `AGENTS.md`, `docs/KNOWN_ISSUES.md`, `docs/HISTORY.md`. Open issues: OPEN-10 (unmeasured — whether real Maxima routes ever exceeded 512 chars); two `MinimaAds.md §3.5` drift mismatches from the OPEN-6 §11 side findings were already closed by OPEN-8. Full detail: `docs/HISTORY.md §17`, session 2026-09-12 (OPEN-6-IMPL).
-
----
-
-### Session: 2026-09-12 (OPEN-9) — Checklist qualification for shared-DB table mirroring
-
-Resolved documentation-precision gap in pre-merge checklists: qualified that SW initializes all tables while FE initializes only the 5 tables it touches directly (`FRAMES`, `CHANNEL_STATE`, `CHANNEL_HISTORY`, `REPUTATION_EVENTS`, `PEER_REPUTATION`) over the shared H2 database file. Files: `docs/KNOWN_ISSUES.md`, `CLAUDE.md`, `MinimaAds.md`, `AGENTS.md`, `docs/HISTORY.md`. Open issues: none (OPEN-9 closed). Full detail: `docs/HISTORY.md §17`, session 2026-09-12 (OPEN-9).
-
----
-
-### Session: 2026-09-12 (OPEN-7) — `CHANNEL_STATE.SPLIT_COINID` added to FE schema init
-
-Eliminated schema drift between SW and FE: added `ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS SPLIT_COINID VARCHAR(66) DEFAULT ''` to `initFEChannelState` in `dapp/app.js:1207`, mirroring `db-init.js:188` to guarantee boot-order independence. Files: `dapp/app.js`, `docs/KNOWN_ISSUES.md`, `AGENTS.md`, `docs/HISTORY.md`. Open issues: none (OPEN-7 closed). Full detail: `docs/HISTORY.md §17`, session 2026-09-12 (OPEN-7).
 
 ---
 

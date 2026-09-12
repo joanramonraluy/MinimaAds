@@ -915,11 +915,25 @@ Triggered when the creator changes a campaign's status (Pause / Resume / Finish)
 
 ```javascript
 // core/selection.js
-function selectAd(userAddress, userInterests, campaigns) {
+function selectAd(userAddress, userInterests, campaigns, blockedCreators) {
+  var blockedMap = {};
+  if (Array.isArray(blockedCreators)) {
+    for (var bi = 0; bi < blockedCreators.length; bi++) {
+      if (blockedCreators[bi]) {
+        blockedMap[(blockedCreators[bi] + '').toUpperCase()] = true;
+      }
+    }
+  } else if (blockedCreators && typeof blockedCreators === 'object') {
+    blockedMap = blockedCreators;
+  }
+
   var eligible = campaigns.filter(function(c) {
+    var cPk = (c.CREATOR_ADDRESS || '').toUpperCase();
+    if (blockedMap[cPk]) return false;
     return c.STATUS === 'active'
       && parseFloat(c.BUDGET_REMAINING) >= parseFloat(c.REWARD_VIEW)
-      && c.CREATOR_ADDRESS.toUpperCase() !== userAddress.toUpperCase();
+      && cPk !== userAddress.toUpperCase()
+      && (!c.EXPIRES_AT || parseInt(c.EXPIRES_AT, 10) > Date.now());
   });
 
   var matched = eligible.filter(function(c) {
@@ -932,7 +946,15 @@ function selectAd(userAddress, userInterests, campaigns) {
 
   var pool = matched.length > 0 ? matched : eligible;
   if (pool.length === 0) return null;
-  return pool[Math.floor(Math.random() * pool.length)];
+
+  // Prefer unseen campaigns; fall back to already-seen ones only when all have been shown.
+  var unseen = pool.filter(function(c) { return !_seenCampaignIds[c.ID]; });
+  var pickFrom = unseen.length > 0 ? unseen : pool;
+
+  var selected = pickFrom[Math.floor(Math.random() * pickFrom.length)];
+  selected.ALREADY_SEEN = !!_seenCampaignIds[selected.ID];
+  _seenCampaignIds[selected.ID] = true;
+  return selected;
 }
 ```
 
@@ -981,8 +1003,10 @@ escrowDescendantSet(anchorCoinId, maxDepth, callback)
 ### 7.2 selection.js
 
 ```javascript
-selectAd(userAddress, userInterests, campaigns)
+selectAd(userAddress, userInterests, campaigns, blockedCreators)
 // Synchronous — operates on an already-loaded Campaign array.
+// blockedCreators: Array of blocked CREATOR_ADDRESS strings, or a
+// pre-built { UPPERCASE_ADDRESS: true } map. Optional.
 // Returns: Campaign | null
 ```
 

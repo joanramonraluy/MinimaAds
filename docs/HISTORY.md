@@ -46,6 +46,51 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-12 (MVP-DECISIONS + REGRESSION-PLAN) — MVP trade-off decisions, regression test plan, and full live verification
+
+**Source**: maintainer observation that the project has matured well past "MVP" (43/45 `docs/TASKS.md` tasks Done, OPEN-4 security fix live-verified), prompting a review of every "accepted/acceptable for MVP" phrase in `docs/KNOWN_ISSUES.md` and a request for a regression-test strategy against the ~20 already-closed bugs in `docs/KNOWN_ISSUES.md §3`.
+**Complexity**: MEDIUM (docs restructuring + new test harness) escalating to hands-on live verification; model Sonnet confirmed with maintainer at each step.
+
+**Part 1 — MVP Decision Log**: added `docs/KNOWN_ISSUES.md §1c` listing the only two behaviors in §1 actually labeled "for MVP" (fragility #24 — budget not refunded on an orphaned channel; fragility #45 — one-block stale-status race). Maintainer decided both as **permanent trade-offs by design**, not MVP-only shortcuts: #24 because the escrow coin is fund-safe (`SIGNEDBY(creatorkey)` only — never a security issue, only a conservative local-ledger undercount) and a real auto-refund risks a worse double-credit bug; #45 because the window is bounded by Minima's own block time, not a code deficiency. Both fragilities' text was reworded in place with the decision date; `§1c` left empty as a reusable template. (`MinimaAds.md Appendix A: Open Items (Post-MVP)` already covers MVP scope at the spec level and was left alone.)
+
+**Part 2 — `docs/REGRESSION_TEST_PLAN.md` (new)**: two-tier regression strategy, complementary to `docs/MASTER_TEST_PLAN.md` (full functional/lifecycle coverage) — this document exists specifically to stop already-fixed bugs from silently regressing.
+- **Tier 1** (`tests/regression/*.test.js`, plain Node, no framework — repo has no `package.json`): `tests/regression/_lib/loadCore.js` loads unmodified `core/*.js` files into a `vm` context (mirrors the SW's `load()` composition, never touches `core/*.js` itself). Four tests written and passing: `selectAd.test.js` (eligibility/interest-match/self-view/blocklist), `statusEncoding.test.js` (fragility #47 round-trip), `statusUpdatePorts.test.js` (fragility #53/#56 port presence), `escrowChildCoinId.test.js` (fragility #59/OPEN-4 hash-input construction, `MDS.cmd` stubbed). Run via `node tests/regression/run-all.js`.
+- **Tier 2**: live-node checklist reusing the `docs/TESTING_SETUP.md` harness, seeded with 5 representative entries (CH-5, fragility #40, fragility #47, OPEN-4, OPEN-3) rather than all ~20 at once.
+- **Side effect**: while building the Tier 1 `selectAd` test, found `core/selection.js`'s real signature (`selectAd(userAddress, userInterests, campaigns, blockedCreators)`) had drifted from both `CLAUDE.md §5` and `MinimaAds.md §6.4/§7.2`, which were missing the `blockedCreators` param entirely (`MinimaAds.md §6.4`'s code sample was stale in several other ways too — no expiry check, no unseen-preference logic). Corrected both spec documents to match the shipped code.
+
+**Part 3 — Full live verification (all 5 Tier 2 entries, same session)**: brought up the 5-node harness (`docs/TESTING_SETUP.md`), confirmed via `git log -p dapp.conf` that the on-node version label (`0.26.6.3`) was stale from a ~2.5-month gap in version bumps (2026-06-19 → 2026-09-03) — not stale code; confirmed the actually-served code was current by fetching `campaign.handler.js`/`core/reputation.js` from the live node and finding `_resolveEscrowCoinTrust` and the flagged-tier logic both present. Then, against that confirmed-current deployment:
+- Created a real campaign (1000 MINIMA budget) on Node 1, paused and resumed it — **fragility #40** (no `PREVSTATE Missing` exception) and **fragility #47** (`STATE(7)` hex round-trip, `active`→`0x616374697665`, `paused`→`0x706175736564`) both confirmed via `coins coinid:` ground truth. **PASS**.
+- From Node 3 (non-creator), added Node 2 as a Maxima contact and sent a forged `CAMPAIGN_FINISH` Maxima message for the real campaign — **OPEN-3**: Node 2's `CAMPAIGNS.STATUS` stayed `paused`, never flipped. **PASS**.
+- From Node 5 (non-creator, held real MINIMA from the campaign's foundation fee), built and posted a real `txncreate`→`txninput`→`txnoutput`→`txnstate`→`txnsign`→`txnpost` transaction sending 30 MINIMA to the live `ESCROW_ADDRESS` with forged `state` ports (`port:3`=campaign_id, `port:7`='finished') — **OPEN-4**: `CAMPAIGNS.STATUS`/`ESCROW_COINID` unchanged on all 3 nodes checked (creator, a synced peer, the attacker's own node); the lineage gate rejected the forged coin outright. **PASS**.
+- Resumed the campaign, opened a real viewer channel from Node 3 against `#viewer`, let a real view reward (0.1 MINIMA) accrue, settled it via `#earnings` → Settle — **CH-5**: the resulting coin confirmed `sendable:"0.1"` after one block, not locked. **PASS**.
+- `docs/REGRESSION_TEST_PLAN.md` Tier 2 table updated in place with date and evidence for all 5 entries; a closing status note records that this was a genuine live-attack verification, not a re-read of prior results.
+
+**Files modified**: `docs/KNOWN_ISSUES.md` (§1c decision log added then closed, fragilities #24/#45 reworded), `docs/REGRESSION_TEST_PLAN.md` (new), `docs/DOCUMENTATION_INDEX.md` (references the new doc), `tests/regression/_lib/loadCore.js` + 4 `*.test.js` + `run-all.js` (new), `MinimaAds.md` (§6.4/§7.2 `selectAd` signature sync), `CLAUDE.md` (§5 Stable Core API sync).
+**Open issues**: none — the harness now carries real state (an active campaign, a settled channel) from this verification run; a future session doing a clean-slate test should `⚠ DELETE ALL DATA ⚠` first via the Node Manager. Tier 2 currently covers 5 of the ~20 `§3` entries by design — grows opportunistically.
+
+---
+
+### Session: 2026-09-12 (KNOWN-ISSUES-AUDIT) — Comprehensive audit and cleanup of `docs/KNOWN_ISSUES.md`
+
+**Source**: user request to review `docs/KNOWN_ISSUES.md` entirely for pending items.
+**Task**: audit all sections of `docs/KNOWN_ISSUES.md` (fragility points, open issues, pre-merge checklist, closed/fixed table, development workflow rules) against shipped codebase, recent sessions (OPEN-6 through OPEN-10, T-REP3), and documentation.
+**Complexity**: LOW per `CLAUDE.md §2` — documentation audit and cleanup only, no code logic touched. Model assessment confirmed with maintainer.
+
+**Audit findings**:
+1. **Zero active bugs or open code issues**: All tickets in §1b (OPEN-1 through OPEN-10, and Proposal) were confirmed resolved, live-verified, or measured.
+2. **Table drift in §3 (`Closed / Fixed Issues`)**: OPEN-6, OPEN-7, OPEN-8, OPEN-9, OPEN-10, and Proposal had been marked resolved in §1b but were missing corresponding entries in the §3 table.
+3. **Outdated rule in §4 (`Development Workflow Rule`)**: §4 still stated that `ALTER TABLE` cannot cleanly change an existing column's type/size in H2 and instructed to edit `CREATE TABLE` and do a fresh reinstall only. This directly contradicted the OPEN-6 implementation (`core/schema.js`, `SCHEMA_MIGRATIONS_LIST`, and `AGENTS.md §4.1/§5` measured H2 DDL capability matrix).
+
+**Changes applied**:
+1. Updated `docs/KNOWN_ISSUES.md §1b` with an explicit clarification header (*"None currently open. All discovered OPEN-X issues (OPEN-1 through OPEN-10) and proposals have been resolved or measured."*) and updated ticket pointers to §3.
+2. Added rows for `Proposal`, `OPEN-6`, `OPEN-7`, `OPEN-8`, `OPEN-9`, and `OPEN-10` into `docs/KNOWN_ISSUES.md §3` table.
+3. Updated `docs/KNOWN_ISSUES.md §4` to distinguish Class A (`ADD COLUMN IF NOT EXISTS`), Class B (paired `CREATE TABLE` + `ALTER TABLE ... ALTER COLUMN IF EXISTS ... SET DATA TYPE ...` in `SCHEMA_MIGRATIONS_LIST` via `core/schema.js`), and Class C (destructive / backfill via `SCHEMA_MIGRATIONS`), removing the obsolete "reinstall only" instruction.
+
+**Files modified**: `docs/KNOWN_ISSUES.md`, `AGENTS.md`, `docs/HISTORY.md`.
+**Open issues**: none.
+
+---
+
 ### Session: 2026-09-12 (OPEN-6-IMPL) — H2 schema migration mechanism: implemented
 
 **Source**: `docs/KNOWN_ISSUES.md` §1b, **OPEN-6**, and the **design-only** entry below in this same section (session 2026-09-12 (OPEN-6)). That entry stays as the historical design record — measured H2 capability matrix, failure/durability semantics, the three migration classes, the fresh-install convergence argument and the worked example. This entry is the implementation record; it does not restate the design's reasoning.

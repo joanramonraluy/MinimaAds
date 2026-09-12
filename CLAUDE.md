@@ -235,7 +235,7 @@ frames.js    : getFrame(frameId, cb)
                ensureBuiltinFrame(maximaPk, walletAddr, cb)
                incrementFrameEarnings(frameId, amount, cb)
 
-selection.js : selectAd(userAddress, userInterests, campaigns)  ← synchronous
+selection.js : selectAd(userAddress, userInterests, campaigns, blockedCreators)  ← synchronous
 
 validation.js: validateView(campaignId, userAddress, cb)
                validateClick(campaignId, userAddress, cb)
@@ -251,7 +251,7 @@ minima.js    : sqlQuery(query, cb)
                signalFE(type, data)
 ```
 
-Kept in sync with `MinimaAds.md §7` (source of truth) — `channels.js` per T-PUB8 (`role` param added to every function), `frames.js` per the `saveFrame`/`ensureBuiltinFrame` replacement of the old `createFrame`, `rewards.js` per the addition of `updateUserProfile`.
+Kept in sync with `MinimaAds.md §7` (source of truth) — `channels.js` per T-PUB8 (`role` param added to every function), `frames.js` per the `saveFrame`/`ensureBuiltinFrame` replacement of the old `createFrame`, `rewards.js` per the addition of `updateUserProfile`, `selection.js` per the addition of the `blockedCreators` param (drift found and fixed 2026-09-12 — the running code already had it, both spec docs didn't).
 
 ---
 

@@ -19,7 +19,8 @@
 | **docs/PLATFORM_NOTES.md** | Minima platform details: H2, Rhino, MDS, Maxima, constraints |
 | **docs/PROJECT_NOTES_REFERENCE.md** | Protocol matrix, signals, handlers, source-of-truth rules |
 | **docs/TESTING_SETUP.md** | How to spin up N real nodes + browser control (MinimaNodeManager + Playwright MCP) for live end-to-end testing |
-| **docs/MASTER_TEST_PLAN.md** | Master test strategy: 6-node harness, MetaChain snippet on Node 3, lifecycle matrix, edge cases & adversarial probes |
+| **docs/MASTER_TEST_PLAN.md** | Master test strategy: 6-node harness, MetaChain snippet on Node 3, lifecycle matrix, edge cases & adversarial probes — **full functional/lifecycle coverage**, not regression-focused |
+| **docs/REGRESSION_TEST_PLAN.md** | Regression coverage for bugs already fixed in `docs/KNOWN_ISSUES.md §3` — Tier 1 (`node tests/regression/run-all.js`, no live node needed) + Tier 2 (live-node checklist, reuses the `TESTING_SETUP.md` harness) |
 | **docs/archive/** | Historical docs: UI guides, audit reports, roadmaps, old task lists (see archive/README.md) |
 | **PROJECT_INDEX.md** | Structure, folder map, key decisions log (optional, orientation only) |
 
@@ -105,6 +106,7 @@ Then consult PROJECT_INDEX.md §5 (Key Decisions) to understand why the system i
 
 **"I'm fixing a bug in a specific area"**
 → Read docs/KNOWN_ISSUES.md for your area, then consult the minimal set above.
+→ Check docs/REGRESSION_TEST_PLAN.md for an existing guard over that area; if the bug is now fixed and none exists, add one (Tier 1 if the fix is pure logic, Tier 2 if it needs a live node).
 
 **"I don't know if I need plan mode"**
 → See CLAUDE.md §4 (Task Execution Workflow, Step 3). Use `/assess-task` skill if available.

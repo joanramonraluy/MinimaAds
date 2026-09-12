@@ -471,8 +471,8 @@ var LIMITS = {
 
 | Constant | Value | Enforcement point |
 |---|---|---|
-| `MAX_VIEWS_PER_CAMPAIGN_PER_DAY` | 100 | `validation.js` → query `REWARD_EVENTS` (last 24h, same user+campaign+type=view) |
-| `MAX_CLICKS_PER_CAMPAIGN_PER_DAY` | 100 | `validation.js` → same query for `type='click'` |
+| `MAX_VIEWS_PER_CAMPAIGN_PER_DAY` | 100 (default) | `validation.js` → query `REWARD_EVENTS` (last 24h, same user+campaign+type=view). Overridable per-campaign via `CAMPAIGNS.MAX_DAILY_VIEWS` when set (see §10.1). |
+| `MAX_CLICKS_PER_CAMPAIGN_PER_DAY` | 100 (default) | `validation.js` → same query for `type='click'`. Overridable per-campaign via `CAMPAIGNS.MAX_DAILY_CLICKS` when set (see §10.1). |
 | `COOLDOWN_BETWEEN_REWARDS_MS` | 30 s | `validation.js` fallback only — overridden by `CAMPAIGNS.COOLDOWN_MS` when set |
 | `MIN_VIEW_DURATION_MS` | 3 s | SDK client-side timer — must complete before view event is emitted |
 | `MAX_CAMPAIGNS_PER_SESSION` | 10 | **DEPRECATED** — not currently enforced (rotated via `_seenCampaignIds` only, see SEL-1); kept in `LIMITS` for future use |
@@ -976,11 +976,14 @@ updateUserProfile(userAddress, fields, callback)
 > **Note**: T-PUB8 extended all functions with a `role` parameter (`'viewer'` | `'publisher'`). The signatures below reflect the post-T-PUB8 state.
 
 ```javascript
-openChannel(campaignId, viewerKey, creatorMx, maxAmount, role, frameId, walletAddr, cb)
-// Inserts CHANNEL_STATE (status='pending', role, frame_id, viewer_wallet_addr).
+openChannel(campaignId, viewerKey, creatorMx, maxAmount, role, frameId, walletAddr, openerMxPk, cb)
+// Inserts CHANNEL_STATE (status='pending', role, frame_id, viewer_wallet_addr, opener_mx_pk).
 // For role='viewer': calls updateBudget(deduct maxAmount). frameId=''.
 // For role='publisher': skips updateBudget; caller increments PUBLISHER_BUDGET_SPENT.
 // walletAddr: viewer wallet addr for viewer channels; publisher wallet addr for publisher channels.
+// openerMxPk: Maxima pk of the node that opened the channel, stored as CHANNEL_STATE.OPENER_MX_PK —
+//   gates sender-authenticated responses to this channel to the actual counterparty who opened it
+//   (see §8's "Sender authentication" notes, Fix #10 / N2-4).
 // Returns: callback(err)
 
 activateChannel(campaignId, viewerKey, role, channelCoinId, cb)
@@ -1655,6 +1658,14 @@ The client is **semi-trusted**. A malicious publisher can bypass SDK-level check
 **Note**: Per-reward on-chain deduction is not enforced — rewards accumulate off-chain and are settled in one transaction per channel. The channel coin's fixed `MAX_AMOUNT` is the on-chain cap. See Appendix B (global escrow) and Appendix C (channel contract).
 
 The Minima blockchain is the **source of truth** for fund custody. Client-side H2 is authoritative for reward accounting between settlements.
+
+### 9.3 Reputation (informational only, not part of trust enforcement)
+
+Reputation scores (`PEER_REPUTATION`, T-REP1/T-REP2) are **not** a trust
+enforcement mechanism — they inform UI badges only and are never checked by
+any table above. Local and non-transferable by design; see `§7.8` for the
+full model, invariants, and why cross-node score reconciliation requires its
+own design review (T-REP3).
 
 ---
 

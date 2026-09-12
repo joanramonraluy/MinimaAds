@@ -46,6 +46,394 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-12 (T-REP3) — signed peer attestations: **DESIGN ONLY — not implemented, pending governance approval**
+
+> **Status: DESIGN ONLY.** No `.js` file was written, edited or deleted. No schema was created. No Maxima message type exists. `MinimaAds.md` was deliberately **not** touched — §3.5/§7.8/§8 stay describing only what is actually shipped (T-REP0–T-REP2). `docs/TASKS.md` T-REP3 stays `⬜ Pending`. Everything below is a proposal awaiting the governance decisions listed in §9. Do **not** treat any schema, constant or message shape here as a contract — the contract only exists once it lands in `MinimaAds.md`, and it should only land there when Phase 3 is approved *and* implemented.
+
+**Source**: the auth/reputation roadmap item's last remaining piece. T-REP0 (2026-09-11, `PROFILE_RESPONSE` sender auth), T-REP1 (2026-09-11, `REPUTATION_EVENTS`/`PEER_REPUTATION` + `core/reputation.js` + settlement hooks) and T-REP2 (2026-09-11, on-chain evidence through the OPEN-4 gate, negative sender-verified signals, `flagged` tier, UI badges — all six hooks live-verified 2026-09-11) are done and shipped. T-REP3 was staged out of every one of those sessions on the same grounds: it is the only part of the roadmap item that is a genuinely *new trust model* (network effects, Sybil weighting, cross-node score transfer), so it needs its own approval gate. Complexity XHIGH per `CLAUDE.md §2`; maintainer confirmed Opus + plan-mode-equivalent design work up front, so the model-confirmation ritual was not re-run. Read before designing: this section's 2026-09-11 T-REP0/T-REP1/T-REP2 entries, `MinimaAds.md` §3.5/§7.8/§8/§8.15/§9, `AGENTS.md`, `docs/KNOWN_ISSUES.md` §1b/§4, `docs/TASKS.md`, and the actual Minima sources for `maxsign`/`maxverify` (below) rather than assuming their syntax.
+
+---
+
+#### 1. What the original proposal actually said, and two corrections to the brief
+
+The brief for this session pointed at "docs/HISTORY.md §17, session 2026-09-10, §8 *Fase 3 (optional, aprovació separada): atestacions signades*". That text **does not exist in this repository**. What exists:
+
+- The 2026-09-10 sessions in this archive are OPEN-3's adversarial regression probe and fragility #61 — unrelated to reputation.
+- The Opus reputation design proposal was *delivered* on 2026-09-10 but was **summarised**, not archived verbatim, and it was written up under the **2026-09-11 (AUD-6 / T-REP0)** entry below. Its own memory note (`project_reputation_roadmap_paused.md`, 2026-09-10) says explicitly: *"full text lives in this conversation's transcript, not re-saved here"*. That transcript is gone.
+- Everything that survives of the original Phase 3 scope is four lines: *"T-REP3 (XHIGH, ~600+ lines, not started, needs its own separate approval) — signed peer attestations (`maxsign`/`maxverify`), a genuine new trust model with network effects and Sybil-weighting concerns; deliberately left out of this roadmap pass."*
+
+So this document is **not** a refinement of a pre-existing detailed Phase 3 spec — it is the first actual Phase 3 spec. Recorded here so a future session does not go looking for a richer original that was never written down. *(Lesson worth carrying: the T-REP1/T-REP2 designs survived because they were paraphrased into `MinimaAds.md §7.8` as they shipped; the Phase 3 design had no such anchor and was lost with the transcript.)*
+
+**Second correction — "OPEN-4"**. The brief asked whether OPEN-4 was left unresolved. It was not: **OPEN-4 is fully specified, implemented and live-verified** (`docs/KNOWN_ISSUES.md` §3, session 2026-09-09 below). It is the **forward-lineage escrow trust gate**: a coin found at the public `ESCROW_ADDRESS` is acted on only if it equals the campaign's stored `ESCROW_COINID` anchor or is a hash-derivable descendant of it within 2 generations (`_resolveEscrowCoinTrust` → `_applyTrustedEscrowCoin` in `campaign.handler.js`, `escrowChildCoinId`/`escrowDescendantSet` in `core/campaigns.js`). Fragility #59 records why it can only ever be a *forward* closure from a stored anchor and never a backward ancestry walk. That is the gate this design reuses in §4.1 — with one deliberate inversion: the *receiver* re-runs the gate against its own state, it never trusts an attester's claim that a lineage check passed.
+
+---
+
+#### 2. Verified platform primitives (read from source, not assumed)
+
+`refs/Minima-1.0.45/src/org/minima/system/commands/maxima/maxsign.java` and `maxverify.java`:
+
+```
+maxsign   data:0xHEX [privatekey:0xHEX]     → { response: { signature: "0x..." } }
+maxverify data:0xHEX publickey:0x... signature:0x...  → { response: { valid: true|false } }
+```
+
+- `data:` accepts either `0x`-prefixed hex (used as raw bytes) or a plain string (used as its UTF-8 bytes). **Always pass `0x` hex** — a plain string goes through `MiniString` and through MDS's own command-line parser, and any space/colon in it is a parsing hazard.
+- With no `privatekey:`, `maxsign` uses `MaximaManager.getPrivateKey()`. `MaximaManager` line 367 sets `maxima.mFrom = getPublicKey()` from the *same* keypair. **Therefore a default `maxsign` signature verifies against exactly the value the recipient sees as `msg.data.from`** — the Maxima transport identity this codebase already treats as authoritative everywhere (AUD-1/AUD-3/AUD-4/AUD-6). This is the single fact the whole design rests on, and it is confirmed in source, not inferred.
+- Reference usage in shipped Minima MiniDapps: `refs/Minima-1.0.45/mds/code/shoutout/txn.js` (sign/verify a hash of a canonical string) and `mds/code/chatter/chatter.js:313/369`. Both sign a **digest of a canonical string**, never a JSON object — the pattern this design follows, for the reason in §3.2.
+
+**Pre-implementation check that is NOT yet done** (cheap, do it first): confirm `MDS.cmd("maxsign data:0x...", cb)` actually succeeds from the **SW (Rhino)** runtime at MinimaAds' MiniDapp permission level. Both reference usages above are FE-side. No per-command permission gate was found in `CommandRunner.java`/`MDSJS.java`, and MinimaAds already issues `maxima action:send` from the SW, so this is expected to work — but "expected to work" is exactly the class of assumption `CLAUDE.md §9` exists to stop. One `MDS.cmd` call from a node console in SW context settles it.
+
+---
+
+#### 3. Proposed Maxima message pair
+
+Both messages are **unicast, `publickey:` routed, `poll:false`**, `application:` = `APP_NAME` (`'minima-ads'`) — same as every other unicast type in `MinimaAds.md §8`. Neither is ever broadcast; `sendall` is explicitly wrong here (it would leak a reputation query to every contact). Provisional numbering §8.21/§8.22 — **not** written into `MinimaAds.md` (see §10).
+
+##### 3.1 `REPUTATION_REQUEST` (requester → potential attester)
+
+```json
+{
+  "type": "REPUTATION_REQUEST",
+  "version": 1,
+  "subject_key": "0x...",
+  "subject_role": "creator",
+  "nonce": "0x<16 random bytes, uppercase>"
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `version` | int | `1`. Any other value → drop silently. Lets a later shape change coexist. |
+| `subject_key` | string | Maxima public key of the party being asked about, uppercase. |
+| `subject_role` | string | `'creator'` \| `'publisher'` — same domain as `REPUTATION_EVENTS.SUBJECT_ROLE`. |
+| `nonce` | string | Fresh per request; echoed in the response and covered by the signature, so a response cannot be replayed against a different request. Stored by the requester with a short TTL. |
+
+No `campaign_id`, no free text. The requester does not say *why* it is asking.
+
+**Attester-side gating, before any work is done** (drop silently on any failure — never answer "no", per the §8.19/§8.20 precedent that a requester should not be able to distinguish "refused" from "offline"):
+1. `ATT.MODE !== 'on-request'` → drop. **Default is `'off'`** (§9 Q2).
+2. `subject_key` equals this node's own Maxima pk → drop. *(Never attest about yourself — the §6.3 rule.)*
+3. `msg.data.from` equals `subject_key` → drop. *(A subject must not be able to farm an attestation about itself by asking directly.)*
+4. Requester authorisation, per §9 Q3 — the default proposal is the **§8.19 `ESCROW_INFO_REQUEST` model**: answer only a requester who is either the subject itself (excluded by 3, so: never) or a node with a currently-`'open'` `CHANNEL_STATE` row naming `msg.data.from` as `OPENER_MX_PK`. An open-to-anyone variant is the alternative.
+5. Rate limit: at most one response per `(msg.data.from, subject_key, subject_role)` per `ATT.REQUEST_MIN_INTERVAL_MS` (proposed 24 h). Needs a small throttle table or a keypair entry; reuse `DEDUP_LOG`'s prune pattern so it self-cleans.
+6. Local evidence for the subject is empty → drop. Nothing to say.
+
+##### 3.2 `REPUTATION_ATTESTATION` (attester → requester)
+
+```json
+{
+  "type": "REPUTATION_ATTESTATION",
+  "version": 1,
+  "attester_key": "0x...",
+  "subject_key": "0x...",
+  "subject_role": "creator",
+  "nonce": "0x...",
+  "issued_at": 1757635200000,
+  "expires_at": 1760227200000,
+  "claim": {
+    "settled_count": 4,
+    "first_seen_day": 20310,
+    "last_evidence_day": 20342
+  },
+  "lineage": { "mode": "anchors", "anchors": ["0xC8E4...", "0x9B12..."] },
+  "signature": "0x..."
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `attester_key` | string | The signer. **Must equal `msg.data.from`, uppercase both sides, or the message is dropped before the signature is even checked** (§6.2). |
+| `nonce` | string | Echo of the request's nonce. Unmatched/expired → drop. |
+| `issued_at` / `expires_at` | int (ms) | `expires_at - issued_at` must be within `ATT.MAX_VALIDITY_MS` (proposed 30 days). An expired attestation contributes 0 and is pruned. |
+| `claim.settled_count` | int | Count of **distinct campaigns** for which this attester holds a positive `settled_channel`/`publisher_settled` evidence row about the subject. Distinct *campaigns*, not distinct rows — otherwise repeat settlements on one campaign inflate it. |
+| `claim.first_seen_day` / `last_evidence_day` | int | **Days since epoch**, not ms. Deliberate coarsening (§8). |
+| `lineage` | object | See §4.1. `mode` is `'anchors'` or `'none'`. |
+| `signature` | string | `maxsign` output over the §3.3 preimage. |
+
+**Positive-only, by construction.** There is no field for a negative claim. This is the design's single most important anti-Sybil property and it is discussed in §4.4 — a cheap Sybil swarm must not be able to defame an honest node, and there is no weighting scheme that makes accepting cheap negative claims safe. Negative evidence in MinimaAds stays **strictly first-party**: T-REP2's `creator_assert_failed` / `identity_pin_violation` / `frame_ownership_conflict` / `abandoned_channel`, all derived from this node's own verified observation.
+
+##### 3.3 Canonical signing preimage
+
+JSON key order is not stable across runtimes, so the signature covers a **canonical pipe-joined string**, never `JSON.stringify(payload)`:
+
+```
+MINIMAADS_ATT_V1|<attester_key UPPER>|<subject_key UPPER>|<subject_role>|<nonce UPPER>
+                |<issued_at>|<expires_at>|<settled_count>|<first_seen_day>|<last_evidence_day>
+                |<lineage.mode>|<anchors UPPER, sorted ascending, joined by ",">
+```
+(single line, no whitespace; wrapped here only for readability)
+
+Then, using the existing `core/minima.js` helpers — no new primitive, no `TextEncoder` (absent in Rhino, `AGENTS.md §4`):
+
+```
+sigData = "0x" + utf8ToHex(preimage).toUpperCase()
+sign:    maxsign   data:<sigData>
+verify:  maxverify data:<sigData> publickey:<attester_key> signature:<signature>
+```
+
+Every field that affects scoring is inside the preimage. `type` and `version` are prefixed by the literal domain tag `MINIMAADS_ATT_V1`, which is also what stops a signature produced for some other MinimaAds purpose (or by another MiniDapp sharing the same Maxima identity) from being replayed as an attestation.
+
+---
+
+#### 4. Verification and anti-Sybil rules
+
+Order matters. Each step is cheap-before-expensive and drops silently.
+
+##### 4.0 Signature flow, and what a signature is actually worth here
+
+1. `attester_key.toUpperCase() === msg.data.from.toUpperCase()` — else drop.
+2. Rebuild the preimage **from the received fields**, recompute `sigData`, call `maxverify`. `response.valid !== true` → drop, and record nothing.
+3. On failure: **drop silently, record no reputation evidence about the sender.** Tempting to treat a bad signature as a `hard_negative` about the sender the way T-REP2 treats `creator_assert_failed` — do not. A malformed or version-skewed attestation is far more likely to be a bug or an upgrade mismatch than an attack, and `flagged` is a sticky, severe tier. Log it (`MDS.log("[ATT] signature invalid, dropping")`) and move on.
+
+**Honest note on what the signature buys.** Because `msg.data.from` is already transport-authenticated and step 1 pins `attester_key` to it, the signature adds **no authentication value on a direct unicast hop**. Its real value is (a) **non-repudiation** — a stored attestation is provable third-party evidence of what the attester asserted, which a transport-only claim is not, and (b) **future relayability** — a signed attestation could later be forwarded through a third node without the recipient having to trust the forwarder. If governance decides relay is never wanted (§9 Q6), the signature is close to pure overhead and Phase 3 collapses to a much simpler unsigned design. That is a legitimate outcome of the approval gate, and it should be decided *before* ~600 lines are written.
+
+##### 4.1 Evidence validation via the OPEN-4 lineage gate (`lineage.mode === 'anchors'`)
+
+The inversion that makes this safe: **the receiver validates against its own state; it never trusts the attester's word that a check passed.**
+
+For each anchor in `lineage.anchors`, the receiver:
+1. Looks up its own `CAMPAIGNS` rows for a campaign whose stored `ESCROW_COINID` anchor equals the value, **or** of which the value is a hash-derivable descendant within `ESCROW_LINEAGE_GENERATIONS` (2) — i.e. calls the existing `escrowChildCoinId`/`escrowDescendantSet` machinery, the same forward closure `_resolveEscrowCoinTrust` uses.
+2. Requires that campaign's `CREATOR_ADDRESS` to equal `subject_key` (uppercase both sides) when `subject_role === 'creator'`, or that campaign's frame's `PUBLISHER_KEY` to equal `subject_key` when `subject_role === 'publisher'`.
+3. Counts the anchor as **verified** only if both hold.
+
+Then `n_verified = min(claim.settled_count, count of verified anchors)`. **A claim is never counted above what the receiver can independently confirm.** An unverifiable anchor contributes **0** — explicitly *not* a negative, because the overwhelmingly common reason a receiver cannot verify an anchor is simply that it has never heard of that campaign (campaign announces are gossip, not consensus), not that anyone lied.
+
+Consequence worth stating plainly: **attestations only carry weight between nodes with overlapping campaign knowledge.** A node that has seen none of the subject's campaigns gets nothing from an attestation about that subject. This is a real limitation, not a bug — it is the same locality property that makes MinimaAds reputation local and non-transferable in the first place (`MinimaAds.md §7.8`), and it is precisely what prevents a "reputation" from being manufactured out of nothing between two colluding nodes in a corner of the network.
+
+`lineage.mode === 'none'` (the privacy-maximal variant, §9 Q4): no anchors are sent, so `n_verified = 0` and the attestation contributes **nothing to any score**. It can still be stored and displayed as an unweighted "peer reports N settlements" annotation if governance wants that. Stated bluntly: **`mode:'none'` is a display feature, not a trust feature.**
+
+##### 4.2 K-issuer cap
+
+An attacker can mint Maxima identities for free, so the number of attesters must be capped hard, not merely dampened.
+
+- **Per-issuer credit.** A single attester contributes at most 1 unit, with sublinear credit below that:
+
+  `u_i = min(1, sqrt(n_verified_i) / sqrt(ATT.ISSUER_FULL_CREDIT_N))`,  proposed `ISSUER_FULL_CREDIT_N = 4`
+
+  → `n=1 → 0.50`, `n=2 → 0.71`, `n=4 → 1.00`, `n=9 → 1.00` (capped), `n=100 → 1.00`.
+  One peer who settled 100 campaigns with the subject is worth exactly as much as one peer who settled 4. Volume from a single relationship is not a trust signal; *breadth of independent relationships* is.
+
+- **K cap.** Sort attesters by `u_i` descending, keep the top `K = ATT.MAX_ATTESTERS_COUNTED` (**proposed K = 5**), discard the rest entirely. `U = Σ_{i=1..K} u_i`, so `U ∈ [0, 5]`.
+
+Why K = 5 rather than 3 or 10: 3 makes the ceiling reachable by a modestly funded attacker and leaves no headroom to distinguish a genuinely well-connected creator; 10 is beyond the number of independent counterparties a real campaign accumulates at current network size, so the extra capacity would only ever be filled by Sybils. 5 is a judgement call, flagged as `§9 Q5`.
+
+##### 4.3 Marginal-value sublinearity
+
+```
+PEER_SCORE = clamp( round( ATT.SCALE * ln(1 + U) ), 0, ATT.MAX_PEER_SCORE )
+ATT.SCALE = 15,  ATT.MAX_PEER_SCORE = 40
+```
+
+Worked example — each attester assumed to have `n_verified = 4`, i.e. `u_i = 1.0`:
+
+| Independent attesters | U | `15 · ln(1+U)` | PEER_SCORE |
+|---|---|---|---|
+| 0 | 0 | 0 | **0** |
+| 1 | 1 | 10.40 | **10** |
+| 2 | 2 | 16.48 | **16** |
+| 3 | 3 | 20.79 | **21** |
+| 4 | 4 | 24.14 | **24** |
+| 5 | 5 | 26.89 | **27** |
+| 6 … 50 (K = 5 cap) | 5 | 26.89 | **27** |
+
+And with weaker per-attester evidence — 5 attesters each with only `n_verified = 1` (`u_i = 0.5`, `U = 2.5`): `15·ln(3.5) = 18.79` → **19**.
+
+Two properties this gives: the first honest attester is worth more than the fifth (10 → 3 marginal), and the hard ceiling of 27 is reached at 5 attesters and **cannot** be exceeded no matter how many identities are thrown at it. `MAX_PEER_SCORE = 40` sits above the reachable 27 purely as a clamp safety margin for a future `K`/`SCALE` retune.
+
+**Rhino note**: `Math.log`, `Math.sqrt`, `Math.min`, `Math.round` are all ES5 and safe. `Math.log1p`/`Math.hypot`/`Math.trunc` are ES6 — **do not use them in SW code**; write `Math.log(1 + U)` explicitly.
+
+##### 4.4 Sybil economics — why this is not free to attack
+
+To reach the 27 ceiling an attacker needs **5 distinct Maxima identities, each holding 4 receiver-verifiable settled-channel relationships with the subject**. Identities are free; the evidence is not:
+
+- Each verified anchor must resolve, *on the receiver's own node*, to a real campaign whose escrow coin the receiver already tracks (§4.1). The attacker cannot invent one — OPEN-4's forward-lineage gate is exactly the mechanism that blocks synthesising an escrow coin, and it is already live and adversarially tested (2026-09-09).
+- A creator self-boosting must therefore fund 4+ real campaigns *and* let 5 Sybil viewers settle real channels against them. The Sybils are its own identities, so the money returns to it — **minus** real L1 tx fees, the `PLATFORM_KEY` fee path, and the `MIN_BUDGET` (100 MINIMA) floor per campaign, and all of it takes real chain time.
+- The attack therefore costs real, non-recoverable value and buys a capped `PEER_SCORE` of 27 **on nodes that already happen to track those campaigns** — which, since those campaigns are the attacker's own, is a small and largely self-selected audience.
+- Verdict: not impossible, but the cost/benefit is poor and bounded. Combined with §5's rule that `PEER_SCORE` never touches `SCORE`/`TIER`/`selectAd`, a successful Sybil attack buys a number in a column nothing currently reads. **That is the actual safety margin, and it should be preserved: the moment `PEER_SCORE` gates money or ad selection, this cost analysis has to be redone at that stake.**
+
+The inverse attack — a Sybil swarm defaming an honest node — is eliminated structurally rather than priced, by §3.2's positive-only claim shape.
+
+---
+
+#### 5. Data model
+
+**Recommendation: two new tables. Do not add a column to `PEER_REPUTATION`.**
+
+```sql
+-- Verified inbound attestations. One row per (attester, subject, role).
+-- A fresh attestation from the same attester REPLACES the old one (MERGE on the PK).
+CREATE TABLE IF NOT EXISTS REPUTATION_ATTESTATIONS (
+  ID             VARCHAR(1024) PRIMARY KEY, -- ATTESTER_KEY:SUBJECT_ROLE:SUBJECT_KEY (deterministic, idempotent MERGE)
+  ATTESTER_KEY   VARCHAR(512)  NOT NULL,    -- == msg.data.from, transport-verified, uppercase
+  SUBJECT_KEY    VARCHAR(512)  NOT NULL,
+  SUBJECT_ROLE   VARCHAR(16)   NOT NULL,    -- 'creator' | 'publisher'
+  CLAIMED_COUNT  INT           NOT NULL,    -- as claimed by the attester (audit trail only, never scored)
+  VERIFIED_COUNT INT           NOT NULL,    -- what THIS node could independently confirm (§4.1) — this is what scores
+  LINEAGE_MODE   VARCHAR(16)   NOT NULL,    -- 'anchors' | 'none'
+  ISSUED_AT      BIGINT        NOT NULL,
+  EXPIRES_AT     BIGINT        NOT NULL,
+  SIGNATURE      VARCHAR(1024) NOT NULL,    -- retained: makes the row independently re-verifiable + non-repudiable
+  RECEIVED_AT    BIGINT        NOT NULL
+);
+
+-- Derived attestation score. Structurally separate from PEER_REPUTATION.
+CREATE TABLE IF NOT EXISTS PEER_ATTESTATION_SCORE (
+  SUBJECT_KEY   VARCHAR(512)  NOT NULL,
+  SUBJECT_ROLE  VARCHAR(16)   NOT NULL,
+  PEER_SCORE    DECIMAL(20,6) NOT NULL DEFAULT 0,  -- §4.3, clamped [0, ATT.MAX_PEER_SCORE]
+  ATTESTERS     INT           NOT NULL DEFAULT 0,  -- distinct attesters counted (≤ K)
+  LAST_CALC_AT  BIGINT        NOT NULL,
+  PRIMARY KEY (SUBJECT_KEY, SUBJECT_ROLE)
+);
+```
+
+Created in **both** runtimes (`public/service-workers/db-init.js` and `dapp/app.js`'s init) per `CLAUDE.md §7` / `AGENTS.md §5`. Both are pure `CREATE TABLE IF NOT EXISTS` additions — no `ALTER`, no touching a shipped table, so `docs/KNOWN_ISSUES.md` OPEN-6 (schema evolution is additive-only, no destructive-migration path, no schema-version table) is not aggravated. `PEER_ATTESTATION_SCORE` is a **pure derived cache**, fully recomputable from `REPUTATION_ATTESTATIONS`, exactly like `PEER_REPUTATION` is from `REPUTATION_EVENTS`.
+
+**Why a separate table rather than `ALTER TABLE PEER_REPUTATION ADD COLUMN IF NOT EXISTS PEER_SCORE …`** — the brief allowed either, and the `ADD COLUMN IF NOT EXISTS` route is the established pattern, so this needs a reason:
+
+`core/reputation.js:75` does `MERGE INTO PEER_REPUTATION (SUBJECT_KEY, SUBJECT_ROLE, SCORE, TIER, EV_POSITIVE, EV_NEGATIVE, FIRST_SEEN_AT, LAST_CALC_AT) KEY (SUBJECT_KEY, SUBJECT_ROLE) VALUES (…)` on **every** `recomputeReputation` call. H2's legacy `MERGE` is UPDATE-then-INSERT over the *listed* columns, so an unlisted `PEER_SCORE` would most likely survive — but "most likely" is doing load-bearing work in that sentence, it depends on H2 version behaviour nobody on this project has verified, and it silently breaks the instant someone adds `PEER_SCORE` to that column list for symmetry. A separate table makes "attestations never write `SCORE`" a **structural** property instead of a discipline every future contributor has to remember. Given that this invariant is the entire point of Phase 3's containment, structure wins over convention here. *(If governance later decides the two should merge, that is a deliberate migration, not an accident.)*
+
+**Also unchanged, deliberately**: attestations create **no** `REPUTATION_EVENTS` rows. That table's `SOURCE` column stays `'local' | 'chain'` — never `'peer'`. This keeps T-REP1/T-REP2's evidence log pure first-party/on-chain, which is what makes Invariant R1 checkable by reading one column.
+
+**Proposed `core/reputation.js` additions** (names only — no code written):
+`handleReputationRequest` / `buildAttestation` (attester side), `handleReputationAttestation` / `verifyAttestation` (receiver side), `recomputePeerAttestationScore(subjectKey, subjectRole, cb)`, `getPeerAttestationScore(subjectKey, subjectRole, cb)`, `pruneAttestations()` (NEWBLOCK-driven, 6 h-gated, same shape as the existing `pruneReputationEvents`/`sweepFinishedCampaignReputation`). **No existing signature changes** — `CLAUDE.md §5`'s Stable Core API and `MinimaAds.md §7.8`'s documented signatures are all untouched.
+
+**Constants**: a new `ATT` block in `service.js` + `dapp/app.js`, mirrored like `LIMITS`/`REPUTATION` — `MODE`, `MAX_ATTESTERS_COUNTED` (K), `ISSUER_FULL_CREDIT_N`, `SCALE`, `MAX_PEER_SCORE`, `MAX_VALIDITY_MS`, `REQUEST_MIN_INTERVAL_MS`, `NONCE_TTL_MS`, `LINEAGE_MODE`. Kept out of `LIMITS` for the same reason `REPUTATION` is (`service.js:27`): `LIMITS` is a protocol contract referenced by Maxima schemas and KissVM scripts; these are local tuning. Never hardcode any of them inline.
+
+---
+
+#### 6. Invariants carried forward, made explicit for Phase 3
+
+**6.1 — Invariant R1-A (the Phase 3 analog of `MinimaAds.md §7.8`'s Invariant R1).**
+`MinimaAds.md §7.8` R1 says: *a reputation weight can never derive from an inbound Maxima payload field*. Phase 3 is the first feature that deliberately lets a remote peer influence a stored number, so R1 is **not relaxed — it is split**:
+- **R1 stands unchanged for `PEER_REPUTATION.SCORE`, `TIER`, `EV_POSITIVE`, `EV_NEGATIVE` and every `REPUTATION_EVENTS` row.** No inbound payload field may ever write any of them. Not via an attestation, not via anything.
+- **R1-A governs `PEER_ATTESTATION_SCORE.PEER_SCORE`**: it may be influenced by an inbound payload, but only through the §4 pipeline in full — `attester_key === msg.data.from` → `maxverify` valid → nonce matches a live outbound request → not expired → never-self checks → **receiver-side** lineage verification (§4.1) → per-issuer cap → K cap → sublinear aggregation. `CLAIMED_COUNT` is stored for audit and is **never** an input to a score; only `VERIFIED_COUNT`, which is a number this node computed from its own state, ever is.
+- Corollary, worth writing in the eventual code as a comment: **no payload field is ever copied into a scoring path.** The payload's only job is to tell the receiver *what to go and check for itself*.
+
+**6.2 — Sender identity is always the transport, never the payload.**
+`msg.data.from` is the identity, in Phase 3 as everywhere else (AUD-1, AUD-3, AUD-4, AUD-6/T-REP0, and T-REP2's three negative hooks). `attester_key` exists in the payload only so it is covered by the signature preimage; it is validated *against* `msg.data.from` and is never itself a source of truth. All comparisons `.toUpperCase()` on both sides (`0x` vs `0X`), per `CLAUDE.md §6`. This is the exact rule whose violation AUD-6 fixed in `PROFILE_RESPONSE` — Phase 3 must not reintroduce it at a higher stake.
+
+**6.3 — The never-self rule extends to attestations.** Drop, in this order:
+- `subject_key` == my own pk, on an inbound *request* → I never attest about myself.
+- `attester_key` == `subject_key` → a self-attestation is meaningless by definition.
+- `attester_key` == my own pk on an inbound *attestation* → loopback; something is wrong.
+- `msg.data.from` == `subject_key` on an inbound *request* → a subject may not solicit an attestation about itself.
+- Resolve "my own pk" via the existing `_myMaximaPk()` helper in `core/reputation.js` (`MY_MAXIMA_PK` in SW vs `MY_ADDRESS` in FE — the runtime naming mismatch found and handled during T-REP1). Do not hardcode either global.
+
+**Stated honestly**: the fourth clause is only syntactic. A subject that controls a second identity can request an attestation about itself through it, and no identity check can detect that. **That case is not defended by the never-self rule at all — it is defended economically, by §4.1's receiver-side lineage requirement plus §4.2's caps.** Do not let a future session mistake the syntactic check for Sybil protection.
+
+**6.4 — Runtime constraints on anything implementing this** (`CLAUDE.md §6`/§7, restated because Phase 3 touches the SW): `poll:false` on both sends; `application:` = `APP_NAME` only; SW code in Rhino dialect (`var`, `function()`, string concat, `MDS.log`, no trailing commas in param lists, no ES modules); every interpolated value through `escapeSql()` before it reaches SQL — including `ATTESTER_KEY`, `SIGNATURE` and every count, since all of them originate in a remote payload; `MDS.sql` only via `core/minima.js`.
+
+---
+
+#### 7. Coexistence with Phase 1–2
+
+The design is **strictly additive and inert by default**. If Phase 3 shipped tomorrow with `ATT.MODE = 'off'`, a node's observable behaviour would be identical to today's.
+
+| Phase 1–2 surface | Phase 3 effect |
+|---|---|
+| `REPUTATION_EVENTS` rows and `SOURCE` domain | **None.** No attestation ever writes one; `SOURCE` stays `'local' \| 'chain'`. |
+| `PEER_REPUTATION.SCORE` | **None.** Separate table (§5). |
+| `PEER_REPUTATION.TIER` (`unknown`/`new`/`ok`/`trusted`/`flagged`) | **None.** `PEER_SCORE` is not an input to `_tierFromScore`. A peer-attested node cannot be lifted out of `flagged`, and an un-attested node is not pushed down. |
+| `_scoreFromEvidence`, `REPUTATION.*` constants, decay, per-kind caps | **None.** Untouched; new tuning lives in `ATT`. |
+| `getReputation` / `listReputationEvidence` return shapes | **None.** New data is read through new functions only. |
+| UI badges (`mkReputationBadge`, `campaigns.js`, `mycampaigns.js`) | **None.** `PEER_SCORE` renders nowhere until §9 Q7 is answered yes. |
+| `selectAd` ad selection | **None**, and this stays true past Phase 3 — the maintainer's 2026-09-11 decision that reputation stays purely informational (no `selectAd` weighting) is unchanged by this proposal. |
+| Existing rows on already-running nodes | **Untouched.** Two new empty tables; no `ALTER`, no backfill, no reinstall. |
+
+A node that never opts in, or whose peers never opt in, keeps exactly the local-only score it has today — which is the correct default given `MinimaAds.md §7.8`'s "reputation is local and non-transferable; node A and node B may score the same subject differently, and that is correct".
+
+---
+
+#### 8. Privacy implications
+
+**This is the part with no clean answer, and it deserves the maintainer's attention more than the maths does.** Emitting an attestation discloses this node's commercial history to a third party. It is disclosed *voluntarily*, but once signed it is permanent and provable.
+
+**What leaks, precisely, when this node answers a `REPUTATION_REQUEST`:**
+
+1. **Relationship existence** — "I have settled payment channels with subject X". Reveals that this node was a viewer or publisher of X's campaigns. Today that is known only to this node and to X.
+2. **Relationship volume** — `settled_count` reveals with how many distinct campaigns of X this node has done business. A coarse but real measure of commercial activity.
+3. **Activity window** — `first_seen_day` / `last_evidence_day` reveal when the relationship started and when it was last active. Across several attestations a requester can build an activity profile of the attester ("active since April, quiet for two months").
+4. **Exact campaign identity** — only when `lineage.mode === 'anchors'`. Mitigating factor: escrow coin IDs are public on-chain data and campaigns are already broadcast via `CAMPAIGN_ANNOUNCE`, so the *campaign* is not secret. What is newly disclosed is the **link between this node and that campaign** — which was previously private. **This is a genuine new leak, not merely a restatement of public data**, and it should not be waved away as "it's on-chain anyway".
+5. **Correlation across subjects** — a requester who asks about many subjects learns the attester's counterparty graph. Rate limiting slows this; it does not prevent it.
+6. **Permanence and portability** — the signature makes all of the above **non-repudiable and forwardable**. An unsigned claim is deniable; a signed one is evidence. The requester can store it forever and show it to anyone. *(This is the same property that makes the signature useful in §4.0 — the benefit and the privacy cost are the same mechanism, and they cannot be separated.)*
+
+**Who can obtain it**: under the default §3.1 gate (the §8.19 `ESCROW_INFO_REQUEST` model), only a current open-channel counterparty. Under the open variant, **anyone who knows this node's Maxima public key** — which, for any node that has ever created a campaign or opened a channel, is effectively public. The gating decision (§9 Q3) is therefore the single largest privacy lever in the design.
+
+**Mitigations included in the proposal:**
+- **Default `ATT.MODE = 'off'`** — opt-in, not opt-out. Nothing leaks from a node that never turns it on. Most important mitigation by a wide margin.
+- **Aggregate-only claims** — counts, never a per-campaign list or per-channel amounts. Reward amounts, channel sizes and settlement values are *never* disclosed.
+- **Day-granularity timestamps** — `first_seen_day` / `last_evidence_day` instead of ms, so an attestation cannot be used to fingerprint precise activity times.
+- **Requester authorisation + 24 h per-(requester, subject) rate limit** — bounds correlation-harvesting.
+- **Silent drops** — a refused request is indistinguishable from an offline node, matching §8.19/§8.20, so probing reveals nothing.
+- **No negative claims ever emitted** (§3.2) — this node never tells a third party it had a bad experience with someone. Anti-Sybil and privacy-protective for the same reason.
+- **`lineage.mode = 'none'`** available for nodes wanting attestation without campaign-level disclosure — at the documented price of contributing zero score (§4.1).
+
+**Mitigations considered and rejected**: (a) bucketed counts (`1` / `2–4` / `5–9` / `10+`) instead of exact — meaningfully better privacy, but it breaks the per-issuer `sqrt` credit's resolution at exactly the low end where it matters most (n=1 vs n=2 is the difference between 0.50 and 0.71); revisit if the exact count proves too revealing in practice. (b) Encrypting the attestation to the requester with `maxencrypt` — Maxima transport is already point-to-point encrypted, so this only guards against onward disclosure by the requester, who is the very party being trusted with the data; it buys little for real complexity.
+
+---
+
+#### 9. Governance questions — **all of these must be answered before any code is written**
+
+| # | Question | Default proposed here | Why it needs a decision |
+|---|---|---|---|
+| **Q1** | **Do we want Phase 3 at all?** | *No default — the real question.* | Everything above is buildable, but `PEER_SCORE` is inert by design (§7), so the immediate user-visible benefit is zero and the privacy cost (§8) is real and permanent. A legitimate outcome of this gate is "close T-REP3 as deliberately-not-doing", the way OPEN-3's Phase 3 escalation was closed. That would also be the cheapest way to keep `MinimaAds.md §7.8`'s "reputation is local and non-transferable" true without qualification. |
+| **Q2** | Opt-in or opt-out? | **Opt-in** (`ATT.MODE = 'off'` default) | Disclosing commercial history should never be a default-on behaviour of a redeploy. |
+| **Q3** | Who may request an attestation? | Open-channel counterparties only (§8.19 model) | The largest privacy lever in the design (§8). The open variant makes attestations far more useful and far more leaky. |
+| **Q4** | `lineage.mode` — `'anchors'` (verifiable, leaks the node↔campaign link) or `'none'` (private, contributes zero score)? | `'anchors'`, node-configurable | Determines whether Phase 3 is a trust feature or a display feature (§4.1). |
+| **Q5** | K, `ISSUER_FULL_CREDIT_N`, `SCALE`, `MAX_PEER_SCORE` | K=5, N=4, SCALE=15, MAX=40 | Judgement calls (§4.2). The worked table in §4.3 is the artefact to argue with. |
+| **Q6** | Is attestation **relay** (A forwards B's signed attestation to C) ever wanted? | Not in this design | If never, the signature loses most of its value (§4.0) and a much simpler unsigned design would do — a large scope reduction that must be decided *before* implementation, not after. |
+| **Q7** | Does `PEER_SCORE` ever surface in the UI? | **No**, not in this phase | The moment it is displayed it becomes worth attacking, and §4.4's cost analysis must be redone. Should be its own decision with its own gate. |
+| **Q8** | Does `PEER_SCORE` ever fold into `SCORE`/`TIER`/`selectAd`? | **Never without a further explicit decision** | §7 is the whole containment story. Folding it in makes every Phase 1–2 guarantee contingent on Phase 3's Sybil resistance holding. |
+| **Q9** | Provisional `MinimaAds.md §8.21/§8.22` addendum now, or only on implementation? | Only on implementation | See §10 — no precedent either way was found in this repo. |
+
+---
+
+#### 10. Documentation convention question (unresolved, not guessed)
+
+`CLAUDE.md §4` Step 4 and `AGENTS.md §5` both require `MinimaAds.md §8` to be updated *when a Maxima message type is added* — i.e. framed around shipped code. Nothing in `CLAUDE.md`, `AGENTS.md`, `MinimaAds.md` or `docs/DOCUMENTATION_INDEX.md` says whether a **design proposal** should get a provisional §8 entry. The only comparable precedent is the 2026-09-07 OPEN-3 session, which designed a Phase 3 escalation, did **not** implement it, and did **not** add anything provisional to `MinimaAds.md` — the design lived in `docs/HISTORY.md` and `docs/KNOWN_ISSUES.md` only. **This session followed that precedent: `MinimaAds.md` was not touched.** Flagged as Q9 rather than resolved unilaterally, per `CLAUDE.md §3`.
+
+Related, and still open from the 2026-09-11 design pass: the **three documentation conflicts** flagged then (`CLAUDE.md §5` Stable Core API vs `MinimaAds.md §7`; `docs/KNOWN_ISSUES.md §4` vs `AGENTS.md §2.2` on `ALTER TABLE` — note §4 has since been corrected, so this one now appears resolved; `MinimaAds.md §10.1` vs §5/§5.1 on `MAX_VIEWS_PER_CAMPAIGN_PER_DAY`). Two of the three still stand.
+
+One more, found while reading for this design: the brief asked to confirm the design does not contradict **`MinimaAds.md §9`'s "Reputation is NOT a hard trust limit"**. That phrase does not appear in §9 — §9 (Trust Model) does not mention reputation at all. The equivalent binding statements live in **§7.8**: *"Reputation is local and non-transferable… do not build any mechanism that tries to reconcile scores across nodes without a full T-REP3-style design review"*, plus the maintainer's 2026-09-11 decision that Phase 1 stays purely informational with no `selectAd` weighting. The principle is real and this design honours it (§7); only its location was misremembered. Worth a one-line pointer in §9 → §7.8 at some future docs pass, which this session did not make since `MinimaAds.md` was out of scope.
+
+---
+
+#### 11. Pre-implementation review checklist
+
+- ✅ **Does not contradict the "reputation is not a hard trust limit" principle.** `PEER_SCORE` lives in its own table, never feeds `SCORE`/`TIER`/badges/`selectAd`, and gates nothing (§5, §7). The principle's actual home is `MinimaAds.md §7.8`, not §9 (§10).
+- ✅ **Anti-Sybil rules make economic sense.** Per-issuer credit caps at 1 regardless of volume; K=5 caps breadth; `ln(1+U)` makes marginal attesters worth progressively less; the ceiling is 27/40 and unreachable beyond it. The binding cost is not identity creation (free) but receiver-verifiable on-chain evidence, gated by OPEN-4's already-live forward-lineage check, which costs real funded campaigns, real L1 fees and real chain time (§4.4). Negative claims are structurally absent, so the cheap direction of attack — defaming an honest node — does not exist.
+- ✅ **Privacy implications documented.** Six distinct leak categories enumerated, with who can obtain each, seven mitigations included and two considered-and-rejected (§8). The permanence/portability cost of signing is stated explicitly rather than buried.
+- ✅ **Backwards compatible with Phase 1–2.** Two new `CREATE TABLE IF NOT EXISTS` additions, zero `ALTER`, zero changes to any existing table, function signature, constant or UI surface; inert by default at `ATT.MODE = 'off'` (§7). A node that never opts in is byte-for-byte unchanged.
+
+**Additionally not yet verified, and the first thing to do if Q1 is "yes"**: confirm `maxsign` actually runs from the SW/Rhino runtime at this MiniDapp's permission level (§2).
+
+**Files modified**: `docs/HISTORY.md` (this entry), `AGENTS.md §6` (pointer), `docs/TASKS.md` (pointer on the existing `⬜ Pending` T-REP3 row). **No `.js` file was touched. No commit, no push. `MinimaAds.md` deliberately unchanged.**
+
+#### 12. Governance decisions (2026-09-12, maintainer)
+
+Discussed and decided the same session, after the design above was delivered:
+
+| # | Decision |
+|---|---|
+| **Q1** | **Parked, not approved.** No concrete use case for Phase 3 currently exists — the maintainer wants to keep the design on file (this entry) and revisit only if/when a real need for peer-verified reputation appears. Not a rejection, not an approval: implementation stays blocked until then. |
+| **Q2** | Agreed as proposed — opt-in, `ATT.MODE = 'off'` by default. |
+| **Q3** | Agreed as proposed — only current open-channel counterparties may request an attestation (§8.19 model). |
+| **Q4** | Agreed as proposed — `'anchors'` mode available, but `'none'` (zero score, no campaign-link disclosure) as the node's default configuration; a user must opt into `'anchors'` deliberately. |
+| **Q5** | Agreed as proposed — K=5, `ISSUER_FULL_CREDIT_N`=4, `SCALE`=15, `MAX_PEER_SCORE`=40, to be revisited only after real network usage data exists. |
+| **Q6** | **No.** Attestation relay is explicitly out of scope. Consequence: if Phase 3 is ever built, the `maxsign`/`maxverify` signature step may be dropped entirely in favour of trusting `msg.data.from` directly on the unicast hop, per §4.0's own observation that the signature adds no authentication value without relay. |
+| **Q7** | **No.** `PEER_SCORE` must never surface in the UI under this decision — it stays purely a background/internal value, with no user-facing badge. |
+| **Q8** | **Never without a separate, explicit design review at the time.** `PEER_SCORE` must not be folded into `SCORE`/`TIER`/`selectAd` on the strength of this design alone — §4.4's Sybil-cost analysis is only valid while `PEER_SCORE` gates nothing, and must be redone from scratch against real stakes before any such merge is considered. |
+| **Q9** | Agreed as proposed — no provisional `MinimaAds.md` addendum; it only gets updated if and when Phase 3 is actually implemented. |
+
+Net effect: Q1 is parked (no use case yet, design kept on file for later), Q2–Q5 and Q9 confirmed as proposed, Q6 and Q7 answered No, Q8 answered "never without separate review." **T-REP3 implementation is not authorized by this discussion** — Q1 remaining unresolved (parked, not approved) means the design stays `⬜ Pending` with no code to be written until a concrete need for Phase 3 emerges.
+
+---
+
+**Open issues**: Q2–Q9 all answered same-session (§12); Q1 remains parked (no concrete use case yet — see §12), so T-REP3 stays unimplemented pending a real need. The original Phase 3 design text referenced in the task brief does not exist and never did (§1). Two of the three 2026-09-11 documentation conflicts remain unresolved (§10). `MinimaAds.md §9` has no pointer to §7.8's reputation principles (§10).
+
+---
+
 ### Session: 2026-09-11 (live verification: T-REP2) — every hook exercised for real, no code changed
 
 **Source**: T-REP2's own open-issues list (below) named four hooks verified only by code review, not live: `escrow_funded`, `campaign_finished_observed` + the grace-period sweep's two outcomes, `identity_pin_violation`, `frame_ownership_conflict`. This session closed all four, plus re-confirmed `creator_assert_failed` end-to-end on a genuinely funded campaign rather than the synthetic DB row used in the original T-REP2 verification pass.

@@ -46,6 +46,51 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-12 (REGRESSION-DEDUP) — Removed duplicate live-node regression table
+
+**Source**: maintainer question right after the ROADMAP-V1 session (below): "could there be tests in the regression plan and the master test plan that overlap or are duplicated? Should there be one plan, or should they cross-reference?"
+**Task**: check whether `docs/REGRESSION_TEST_PLAN.md` Tier 2 (added earlier the same day) genuinely overlapped with `docs/MASTER_TEST_PLAN.md §4`'s existing baseline matrix, and fix whichever way the evidence pointed.
+
+**Finding — confirmed real duplication**, row by row:
+
+| `REGRESSION_TEST_PLAN.md` (old) Tier 2 entry | `MASTER_TEST_PLAN.md §4` row it duplicated |
+|---|---|
+| Fragility #40 + #47 (Pause/Resume, `STATE(7)` hex round-trip) | **D.1** — Manual Pause & Resume |
+| OPEN-3 (spoofed `CAMPAIGN_FINISH`) | **F.1** — Adversarial Forged Finish (already tagged `Regression` in `§4`'s own Target column) |
+| OPEN-4 (forged dust coin at `ESCROW_ADDRESS`) | **F.4** — Adversarial Dust Coin Injection (already tagged `Regression`) |
+| CH-5 (settlement coin spendability) | **B.4** — Manual Settlement via `#earnings` |
+
+The 2026-09-12 live verification session (MVP-DECISIONS + REGRESSION-PLAN,
+below) had, without realizing it, re-run D.1, F.1, F.4, and B.4 under
+different names — because `REGRESSION_TEST_PLAN.md`'s Tier 2 was built by
+picking representative bugs from `KNOWN_ISSUES.md §3` without cross-checking
+against `MASTER_TEST_PLAN.md §4`, which already tracked the same bugs with
+the same kind of per-row status/evidence/target structure (and already used
+the word "Regression" as a Target-column tag for exactly this purpose).
+
+**Fix — structural, not just today's data**:
+1. Removed the Tier 2 table entirely from `docs/REGRESSION_TEST_PLAN.md`.
+   The document is now Tier 1 only (offline pure-logic tests) — the one
+   capability `MASTER_TEST_PLAN.md` structurally cannot provide, since it's
+   100% live-node. Added an explicit "why there's no Tier 2 here" section
+   with the table above, so a future session doesn't reintroduce it.
+2. Merged the 2026-09-12 live-verification evidence into `MASTER_TEST_PLAN.md
+   §4`'s existing D.1, F.1, F.4, B.4 rows (appended, didn't replace their
+   prior evidence) instead of leaving it duplicated in the now-removed Tier 2
+   table.
+3. Added a note at the top of `MASTER_TEST_PLAN.md §4` stating it is now
+   *also* the live-node regression tracker, and that new live-node guards
+   should become rows there (tagged `Regression`), not a new table elsewhere.
+4. Updated `docs/ROADMAP_V1.md` criteria #2 and #5: #2 narrowed to "Tier 1
+   offline coverage" (its own thing, still meaningful), #5 broadened to
+   explicitly cover both general functional coverage and live-node
+   regression tracking together, since they now live in the same table.
+
+**Files modified**: `docs/REGRESSION_TEST_PLAN.md`, `docs/MASTER_TEST_PLAN.md`, `docs/ROADMAP_V1.md`.
+**Open issues**: none. `node tests/regression/run-all.js` re-run after the edit — still `4/4 passed` (Tier 1 untouched by this restructuring).
+
+---
+
 ### Session: 2026-09-12 (ROADMAP-V1) — `docs/ROADMAP_V1.md` created; `docs/TASKS.md` cleanup
 
 **Source**: maintainer question, right after the MVP-DECISIONS + REGRESSION-PLAN session (below): "we have a regression plan, a master test plan, and other docs — isn't this all a bit mixed? Where's the general plan that ties it together toward v1.0.0?"

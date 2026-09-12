@@ -4,12 +4,45 @@
 > Issues) from silently reappearing when future sessions touch the same shared
 > files (`service.js`, `campaign.handler.js`, `channel.handler.js`, `core/*.js`...).
 > **Not** the same job as `docs/MASTER_TEST_PLAN.md`, which covers full functional
-> / lifecycle coverage (Suites A–F) on the live 6-node harness. This document is
-> narrower and reactive: one entry per historical bug, added when it's fixed or
-> when a future session first extends this plan to cover it.
+> / lifecycle coverage (Suites A–F) on the live 6-node harness.
 > **Constraint**: no `package.json`, no test framework, no build step in this repo
-> (per `CLAUDE.md §6`). "Automated" here means plain `node` scripts (Tier 1) and
-> scripted checklists against the existing live-node harness (Tier 2) — not CI.
+> (per `CLAUDE.md §6`). "Automated" here means plain `node` scripts — not CI.
+
+---
+
+## Scope: this document owns Tier 1 only
+
+There is only one tier here: **pure-logic regression tests** — plain Node
+scripts that need no live Minima node at all. Anything that needs a live
+node belongs in `docs/MASTER_TEST_PLAN.md §4` (the "Current Baseline
+Verification Matrix"), not here — see the note below on why.
+
+### Why there's no live-node Tier 2 in this document
+
+An earlier version of this document had a second, live-node "Tier 2"
+checklist. On 2026-09-12 the maintainer asked whether it could overlap with
+`docs/MASTER_TEST_PLAN.md §4`, which already tracks per-bug live-node status
+with evidence pointers. Checking row by row confirmed it did — concretely:
+
+| This document's old Tier 2 entry | Was already `MASTER_TEST_PLAN.md §4` row |
+|---|---|
+| Fragility #40 + #47 (Pause/Resume, `STATE(7)` hex round-trip) | **D.1** — Manual Pause & Resume |
+| OPEN-3 (spoofed `CAMPAIGN_FINISH`) | **F.1** — Adversarial Forged Finish, already tagged `Regression` |
+| OPEN-4 (forged dust coin at `ESCROW_ADDRESS`) | **F.4** — Adversarial Dust Coin Injection, already tagged `Regression` |
+| CH-5 (settlement coin spendability) | **B.4** — Manual Settlement via `#earnings` |
+
+The 2026-09-12 live verification session (`docs/HISTORY.md §17`,
+MVP-DECISIONS + REGRESSION-PLAN) had — without realizing it — re-run D.1,
+F.1, F.4, and B.4 under different names. Rather than leave two tables that
+can silently drift out of sync, live-node regression tracking now lives
+**only** in `MASTER_TEST_PLAN.md §4`, which already had the right shape for
+it (per-bug row, status, evidence, `Regression`/`Smoke check` target). Its
+four rows above were updated with the 2026-09-12 evidence in place of
+duplicating it here.
+
+**If a future session fixes a bug that needs a live-node regression guard**:
+add or update a row in `docs/MASTER_TEST_PLAN.md §4` (tag it `Regression` in
+the Target column) — do not start a new live-node table in this document.
 
 ---
 
@@ -38,55 +71,13 @@ Exit code `1` if any test fails. Run a single file directly with
 
 **What Tier 1 deliberately does not cover**: anything that needs H2, the
 Rhino SW runtime, Maxima delivery, or an actual on-chain spend/confirmation —
-including the real SHA3 hash chain reproduction against live CoinIDs (already
-verified live per fragility #59; re-verifying that specific chain belongs to
-Tier 2 below, not here).
+including the real SHA3 hash chain reproduction against live CoinIDs (see
+`docs/KNOWN_ISSUES.md` fragility #59; that's live-node territory, tracked in
+`MASTER_TEST_PLAN.md §4`, not here).
 
 **Adding a new Tier 1 test**: when a future session fixes a bug in a pure
 function (no `MDS`/`sqlQuery`/DOM dependency at call time), add a
 `tests/regression/<name>.test.js` following the existing files' shape:
 `loadCore([...])`, plain `assert.equal`/`assert.ok` calls in IIFEs, a
 `console.log('<file>: all assertions passed')` at the end, and a comment
-citing the fragility/ticket ID it guards.
-
----
-
-## Tier 2 — Live-node checklist (6-node harness)
-
-No new infrastructure — reuses the cluster and roles already documented in
-`docs/TESTING_SETUP.md`. Each entry: a fixed bug, a minimal repro, the pass
-criterion, and the MDS/SQL command that gives ground truth (same pattern
-already used in `docs/E2E_LIVE_RUN_2026-09-07.md`). Seeded with a
-representative subset, not all ~20 `KNOWN_ISSUES.md §3` entries at once — grows
-whenever a future session touches code adjacent to one of these.
-
-| ID | Bug | Repro | Pass criterion | Ground truth | Last verified |
-|---|---|---|---|---|---|
-| CH-5 | Settlement coins unspendable (`sendable:0`) for both viewer and creator | Open a channel, accrue a reward, settle it (`#earnings` → Settle) | Settlement tx confirms and the resulting coin is spendable, not locked | `MDS.cmd('coins address:' + settlementAddress)` → `sendable:true` on the new coin | ✅ 2026-09-12 — real viewer channel opened against a live campaign, a real view reward (0.1 MINIMA) accrued and settled via `#earnings` → Settle; resulting coin confirmed `sendable:"0.1"` after 1 block |
-| Fragility #40 | `PREVSTATE(n)` throws if port `n` isn't stored in the spending coin, even inside an untaken `IF` branch | Spend a split/change coin through `ESCROW_SCRIPT_V2`/`V3`/`V4` that legitimately omits an optional port (e.g. a fee-disabled campaign) | Tx script check passes; no `PREVSTATE Missing` exception | `txnpost` returns `status:true` AND the coin is confirmed spent in a later block (not just locally accepted — see fragility #42's peer-rejection pattern) | ✅ 2026-09-12 — real Pause on a live PLATFORM_KEY=null campaign; new change coin confirmed unspent on-chain |
-| Fragility #47 | `PREVSTATE(7)` raw-string write instead of hex-encoded UTF-8 | Post a real status-update tx and read the resulting coin's `STATE(7)` back from a different node | `hexToUtf8(STATE(7))` decodes to the exact status string (`active`/`paused`/`finished`), not garbage | `MDS.cmd('coins coinid:' + coinId)` on a peer node, inspect `state` array port 7 | ✅ 2026-09-12 — live escrow coin, `active` (`0x616374697665`) then `paused` (`0x706175736564`), both round-tripped correctly |
-| OPEN-4 | Forged dust coin at the public `ESCROW_ADDRESS` could hijack any campaign with no authentication | Send a crafted coin to `ESCROW_ADDRESS` claiming an existing campaign's identity, from a non-creator node | `_resolveEscrowCoinTrust`'s lineage gate rejects it — no state change on the receiving node | Compare `CAMPAIGNS` row before/after on the receiving node via SQL console; must be identical | ✅ 2026-09-12 — real forged coin posted (campaign_id + `finished` state) to the live `ESCROW_ADDRESS` from a non-creator node; `CAMPAIGNS.STATUS`/`ESCROW_COINID` unchanged on all 3 nodes checked (creator, a synced peer, and the attacker's own node) |
-| OPEN-3 | Spoofed `CAMPAIGN_FINISH` / `CAMPAIGN_PAUSE` from a non-creator identity | Send a forged `CAMPAIGN_FINISH` and `CAMPAIGN_PAUSE` from a real but non-creator Maxima identity | `_assertCreatorThen` rejects both outright; no state change | Same SQL before/after comparison as OPEN-4 | ✅ 2026-09-12 — real forged `CAMPAIGN_FINISH` Maxima message sent from a non-creator node to a synced peer; `CAMPAIGNS.STATUS` stayed `paused`, never flipped to `finished` |
-
-**Status as of 2026-09-12**: 5/5 seeded entries verified in one live session
-on the real 5-node harness (redeployed, current code confirmed by content —
-`_resolveEscrowCoinTrust` and `core/reputation.js`'s flagged tier both present
-before testing began). OPEN-3 and OPEN-4 were exercised as genuine live
-attacks (a real forged Maxima message and a real forged on-chain coin), not
-just re-reads of prior results.
-
-**Executing a Tier 2 entry**: follow `docs/TESTING_SETUP.md` to bring up the
-harness and assign roles, then drive the repro via Playwright/`browser_evaluate`
-as described there — these are checklist items to work through manually
-(with agent assistance), not a script that runs unattended.
-
----
-
-## Growing this document
-
-- New Tier 1 test → add its row to the Tier 1 table above.
-- New Tier 2 checklist entry → add its row to the Tier 2 table above, citing
-  the fragility/ticket ID for full detail (never duplicate the narrative —
-  `docs/KNOWN_ISSUES.md` / `docs/HISTORY.md §17` remain the source of truth).
-- This document does not need updating for bugs with no live regression risk
-  (e.g. pure documentation/spec-drift fixes like OPEN-8).
+citing the fragility/ticket ID it guards. Add its row to the table above.

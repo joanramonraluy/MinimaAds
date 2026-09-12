@@ -342,6 +342,8 @@ sequenceDiagram
 
 The table below documents which tests have **already been verified live** during prior audit & development sessions (under Minima v1.0.45) versus the **pending edge cases and v1.0.49 regression targets**.
 
+**This is also the live-node regression tracker** — `docs/REGRESSION_TEST_PLAN.md` only owns Tier 1 (offline, no live node). When a fixed bug needs a live-node guard, add or update a row here (Target column: `Regression`) rather than a second table elsewhere — a duplicate Tier 2 table existed briefly on 2026-09-12 and was folded back into this one after re-verifying it had re-run D.1, F.1, and F.4 under different names. See `docs/REGRESSION_TEST_PLAN.md`'s own note for the full story.
+
 | Suite | Test ID | Description | Historical Status | Prior Evidence / Audit Session | Target for Next Run (v1.0.49) |
 |:---:|:---:|---|:---:|---|:---:|
 | **A** | **A.1** | Escrow Creation & 3-output fee split | ✅ **Verified** | `docs/E2E_LIVE_RUN_2026-09-07.md §2 (Flow 6.3)` — verified on-chain via `MDS.cmd('coins')` | Smoke check |
@@ -351,22 +353,22 @@ The table below documents which tests have **already been verified live** during
 | **B** | **B.1** | Channel Open (2-of-2 multisig) | ✅ **Verified** | `docs/E2E_LIVE_RUN_2026-09-07.md §2 (Flow 6.5)` — Node 3↔Node 1 channel coin confirmed | Smoke check |
 | **B** | **B.2** | 3s View countdown & voucher accrual | ✅ **Verified** | `docs/E2E_LIVE_RUN_2026-09-07.md §2 (Flow 6.1, 6.6)` — `CUMULATIVE_EARNED=0.100000` | Smoke check |
 | **B** | **B.3** | Click CTA accrual | ✅ **Verified** | `docs/E2E_LIVE_RUN_2026-09-07.md §2 (Flow 6.2)` — `cumulative:0.3` | Smoke check |
-| **B** | **B.4** | Manual Settlement via `#earnings` | ✅ **Verified** | `docs/E2E_LIVE_RUN_2026-09-07.md §2 (Flow 6.7)` — $0.3$ to viewer wallet, $0.7$ change to escrow | Smoke check |
+| **B** | **B.4** | Manual Settlement via `#earnings` | ✅ **Verified** | `docs/E2E_LIVE_RUN_2026-09-07.md §2 (Flow 6.7)` — $0.3$ to viewer wallet, $0.7$ change to escrow. Re-verified 2026-09-12 (`docs/HISTORY.md §17`, MVP-DECISIONS + REGRESSION-PLAN, as CH-5 regression guard) — settlement coin confirmed `sendable:"0.1"` after 1 block | Smoke check |
 | **C** | **C.1** | Custom Frame Creation (`#frames`) | ⬜ **Pending** | Built-in Frame tested; custom Frame creation flow needs dedicated pass | **Medium Priority** |
 | **C** | **C.2** | MetaChain Snippet Run on Node 3 | ✅ **Verified** | `docs/HISTORY.md §17 (2026-09-06 Audit #8, #9)` — executed live in MetaChain Help panel | Smoke check |
 | **C** | **C.3** | Publisher Payout & Attribution | ✅ **Verified** | `docs/HISTORY.md §17 (2026-09-06 Audit #7)` — publisher voucher accrual verified | Smoke check |
 | **C** | **C.4** | Publisher Manual Settlement | ✅ **Verified** | `MinimaAds.md §4.5` & `docs/HISTORY.md §17 (2026-09-08 OPEN-3)` — manual settlement confirmed | Smoke check |
-| **D** | **D.1** | Manual Pause & Resume | ✅ **Verified** | `docs/E2E_LIVE_RUN_2026-09-07.md §3 (7a, 7b)` — ground-truth coins `STATE(7)="paused"` / `"active"` | Smoke check |
+| **D** | **D.1** | Manual Pause & Resume | ✅ **Verified** | `docs/E2E_LIVE_RUN_2026-09-07.md §3 (7a, 7b)` — ground-truth coins `STATE(7)="paused"` / `"active"`. Re-verified 2026-09-12 (`docs/HISTORY.md §17`, MVP-DECISIONS + REGRESSION-PLAN, as fragility #40/#47 regression guard) — no `PREVSTATE Missing` on a `PLATFORM_KEY=null` campaign, hex round-trip confirmed both directions (`0x616374697665`/`0x706175736564`) | Smoke check |
 | **D** | **D.2** | Early Finish & Viewer Auto-Settle | ✅ **Verified** | `docs/HISTORY.md §17 (2026-09-08 OPEN-3)` — channel auto-settled in $\sim35$s post-Finish | Smoke check |
 | **D** | **D.3** | Block Height Expiry | ⬜ **Pending** | Automated expiry formula implemented (`port 2`); live block-mining test pending | **Medium Priority** |
 | **E** | **E.1** | Creator Offline during trackView | ⚠️ **Partial** | `docs/HISTORY.md §17 (2026-09-08)` — partial due to relay routing (#61); timeout needs re-test | **High Priority** |
 | **E** | **E.2** | Stale Voucher Recovery (OPEN-2 / #58) | ⚠️ **Code-Verified** | `docs/HISTORY.md §17 (2026-09-06 OPEN-2, Fragility #58)` — live spent-coin simulation pending | **High Priority** |
 | **E** | **E.3** | Channel Capacity Exhaustion (`MAX_AMOUNT`) | ⬜ **Pending** | Needs sequential views until `CUMULATIVE == MAX_AMOUNT` | **Medium Priority** |
 | **E** | **E.4** | Namespace Isolation / Reconnection | ⬜ **Pending** | Shell scripts (`disconnect_node.sh` / `reconnect_node.sh`) pending automated harness test | **Medium Priority** |
-| **F** | **F.1** | Adversarial Forged Finish (AUD-3/OPEN-3)| ✅ **Verified** | `docs/HISTORY.md §17 (2026-09-10 OPEN-3 Regression Probe)` — forged Finish/Pause dropped | Regression |
+| **F** | **F.1** | Adversarial Forged Finish (AUD-3/OPEN-3)| ✅ **Verified** | `docs/HISTORY.md §17 (2026-09-10 OPEN-3 Regression Probe)` — forged Finish/Pause dropped. Re-verified 2026-09-12 (`docs/HISTORY.md §17`, MVP-DECISIONS + REGRESSION-PLAN) — a real forged `CAMPAIGN_FINISH` Maxima message from a non-creator node left `CAMPAIGNS.STATUS` unchanged (`paused`) on the receiving node | Regression |
 | **F** | **F.2** | Adversarial Profile Spoof (AUD-6) | ✅ **Verified** | `docs/HISTORY.md §17 (2026-09-11 AUD-6 / T-REP0)` — forged response dropped on PK mismatch | Regression |
 | **F** | **F.3** | Adversarial Opener Hijack (N2-4) | ⬜ **Pending** | Dedicated attacker script claiming another viewer's channel ID pending live probe | **High Priority** |
-| **F** | **F.4** | Adversarial Dust Coin Injection (OPEN-4)| ✅ **Verified** | `docs/HISTORY.md §17 (2026-09-09 OPEN-4)` — forward-lineage anchor check verified live | Regression |
+| **F** | **F.4** | Adversarial Dust Coin Injection (OPEN-4)| ✅ **Verified** | `docs/HISTORY.md §17 (2026-09-09 OPEN-4)` — forward-lineage anchor check verified live. Re-verified 2026-09-12 (`docs/HISTORY.md §17`, MVP-DECISIONS + REGRESSION-PLAN) — a real forged coin (30 MINIMA, fabricated `campaign_id`+`finished` state ports) posted to the live `ESCROW_ADDRESS` from a non-creator node; `CAMPAIGNS.STATUS`/`ESCROW_COINID` unchanged on all 3 nodes checked | Regression |
 | **F** | **F.5** | Reputation Slashing, Creator Blocking & Viewer Filtering | ⚠️ **Code-Verified** | UI badges, local blocklist & flagged auto-hide verified; live multi-node harness test pending | **High Priority** |
 
 ---

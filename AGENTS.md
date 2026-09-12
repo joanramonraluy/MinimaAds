@@ -206,6 +206,12 @@ For verification procedures, see `docs/archive/VERIFICATION.md`.
 
 > **Rule**: keep the 3 most recent sessions here, as **short pointers only** — one-line summary + files touched + open issues, ending with a reference to the full narrative in `docs/HISTORY.md §17`. The full problem/fix/verification write-up is written **once**, directly into `docs/HISTORY.md §17`, never duplicated here. When adding a new entry pushes this past 3, just **delete** the oldest pointer — nothing to move, its full content already lives permanently in `docs/HISTORY.md §17`. This section is loaded every session — keep it short.
 
+### Session: 2026-09-12 (REGRESSION-DEDUP) — Removed duplicate live-node regression table
+
+Maintainer asked whether `REGRESSION_TEST_PLAN.md` Tier 2 and `MASTER_TEST_PLAN.md §4` could overlap. Confirmed row-by-row they did (Tier 2's fragility #40/#47, OPEN-3, OPEN-4, CH-5 entries were the same live-node checks as `§4`'s D.1, F.1, F.4, B.4). Removed Tier 2 entirely from `docs/REGRESSION_TEST_PLAN.md` (now Tier-1-only, offline); merged its 2026-09-12 evidence into the corresponding `MASTER_TEST_PLAN.md §4` rows instead of keeping it in two places. `docs/ROADMAP_V1.md` criteria #2/#5 updated to match (Tier 1 offline coverage vs. `§4`'s combined functional+regression tracking). Files: `docs/REGRESSION_TEST_PLAN.md`, `docs/MASTER_TEST_PLAN.md`, `docs/ROADMAP_V1.md`. Open issues: none. Full detail: `docs/HISTORY.md §17`, session 2026-09-12 (REGRESSION-DEDUP).
+
+---
+
 ### Session: 2026-09-12 (ROADMAP-V1) — `docs/ROADMAP_V1.md` created; `docs/TASKS.md` per-task table trimmed
 
 Maintainer flagged that no document tied `TASKS.md`/`MASTER_TEST_PLAN.md`/`REGRESSION_TEST_PLAN.md`/`KNOWN_ISSUES.md` together toward a release goal. Created `docs/ROADMAP_V1.md`: defines `v1.0.0` as 5 gate criteria (real `PLATFORM_KEY`, full regression coverage, `T-REP3` explicitly resolved, external security audit, full functional coverage per `MASTER_TEST_PLAN.md §4`) plus an explicit post-v1.0 section (analytics, cross-dApp settlement — clarified as distinct from the already-tracked MetaChain/Suite C tests, governance). Also trimmed `docs/TASKS.md`'s 33-row all-✅-Done per-task table (pure historical noise, fully duplicated by `git log`/`docs/HISTORY.md §17`) down to just the one non-Done task (`T-REP3`), following the same archive-instead-of-duplicate precedent already used for `TASKS_SC.md`. Files: `docs/ROADMAP_V1.md` (new), `docs/DOCUMENTATION_INDEX.md`, `docs/TASKS.md`. Open issues: gate criterion #5 (full functional coverage) was added by the agent, not explicitly picked by the maintainer among the other 4 — flagged in the doc itself for review. Full detail: `docs/HISTORY.md §17`, session 2026-09-12 (ROADMAP-V1).
@@ -215,12 +221,6 @@ Maintainer flagged that no document tied `TASKS.md`/`MASTER_TEST_PLAN.md`/`REGRE
 ### Session: 2026-09-12 (MVP-DECISIONS + REGRESSION-PLAN) — MVP trade-off decisions, regression test plan, and full live verification
 
 Closed the only two genuine "for MVP" behaviors in `docs/KNOWN_ISSUES.md §1` (fragility #24, #45) as permanent trade-offs by design, decided by the maintainer. Built `docs/REGRESSION_TEST_PLAN.md` (Tier 1: `tests/regression/*.test.js`, plain Node, 4 passing tests; Tier 2: 5-entry live-node checklist). Then live-verified all 5 Tier 2 entries in one session on the real 5-node harness, including two genuine adversarial attacks (a real forged Maxima `CAMPAIGN_FINISH` and a real forged on-chain coin at `ESCROW_ADDRESS`) — all 5 **PASS**. Side effect: fixed a real `selectAd()` signature drift (`blockedCreators` param missing from `CLAUDE.md §5` / `MinimaAds.md §6.4/§7.2`). Files: `docs/KNOWN_ISSUES.md`, `docs/REGRESSION_TEST_PLAN.md` (new), `docs/DOCUMENTATION_INDEX.md`, `tests/regression/*` (new), `MinimaAds.md`, `CLAUDE.md`. Open issues: harness now carries real test state (active campaign, settled channel) — `⚠ DELETE ALL DATA ⚠` before a clean-slate session. Full detail: `docs/HISTORY.md §17`, session 2026-09-12 (MVP-DECISIONS + REGRESSION-PLAN).
-
----
-
-### Session: 2026-09-12 (KNOWN-ISSUES-AUDIT) — Comprehensive audit and cleanup of `docs/KNOWN_ISSUES.md`
-
-Audited `docs/KNOWN_ISSUES.md`: verified 0 active bugs in §1b; added rows for Proposal, OPEN-6, OPEN-7, OPEN-8, OPEN-9, OPEN-10 to §3 Closed/Fixed table; updated §4 Development Workflow Rule to reflect OPEN-6 schema migration mechanism (`core/schema.js`). Files: `docs/KNOWN_ISSUES.md`, `AGENTS.md`, `docs/HISTORY.md`. Open issues: none. Full detail: `docs/HISTORY.md §17`, session 2026-09-12 (KNOWN-ISSUES-AUDIT).
 
 ---
 

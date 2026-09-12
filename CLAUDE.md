@@ -190,7 +190,7 @@ Never implement a layer before its dependencies are ready.
 - [ ] Maxima message schemas match MinimaAds.md §8 exactly
 - [ ] LIMITS values read from `LIMITS` constant — never hardcoded
 - [ ] `poll:false` on all outbound Maxima sends
-- [ ] DB changes applied in BOTH runtimes (SW + FE)
+- [ ] DB changes applied in BOTH runtimes (SW for all tables; FE for tables touched by FE)
 - [ ] `CREATOR_ADDRESS !== userAddress` check present where required
 - [ ] No `console.log` in SW (use `MDS.log("[PREFIX] ..."`)
 - [ ] No arrow functions, `let`/`const`, or template literals in SW code
@@ -315,7 +315,8 @@ Week of month: 1 = days 1–7, 2 = 8–14, 3 = 15–21, 4 = 22–28, 5 = 29–31
 ✅ String comparisons on IDs/addresses: WHERE UPPER(col) = UPPER(val)
 ✅ Schema migrations: `ALTER TABLE t ADD COLUMN IF NOT EXISTS col TYPE DEFAULT val` —
    this is the established, load-bearing pattern (see `db-init.js` / `dapp/app.js`
-   init functions), applied in **both** SW and FE runtimes for every new column.
+   init functions), applied in **both** SW and FE runtimes for every new column
+   on tables touched by both runtimes (SW for SW-only tables).
    Idempotent and safe to run on every boot; never drop/recreate a table with
    existing data in it.
 ```

@@ -190,7 +190,7 @@ Implementation: `selection.js` must filter out campaigns where `CREATOR_ADDRESS 
 ### 3.5 H2 Database Schema
 
 > All table and column names in UPPERCASE (H2 requirement — AGENTS.md §3.1).
-> Both SW and FE runtimes must initialize all tables independently.
+> SW and FE share a single physical H2 database file (keyed by MiniDapp UID). SW initializes all tables at boot; FE initializes the subset of tables it reads/writes directly (`FRAMES`, `CHANNEL_STATE`, `CHANNEL_HISTORY`, `REPUTATION_EVENTS`, `PEER_REPUTATION`) to guarantee boot-order independence.
 
 ```sql
 CREATE TABLE IF NOT EXISTS CAMPAIGNS (
@@ -212,7 +212,10 @@ CREATE TABLE IF NOT EXISTS CAMPAIGNS (
   MAX_VIEWER_REWARD      DECIMAL(20,6) DEFAULT NULL, -- optional per-viewer channel cap; if set overrides (view+click)×days formula
   MAX_DAILY_VIEWS        INT           DEFAULT 100,
   MAX_DAILY_CLICKS       INT           DEFAULT 100,
-  COOLDOWN_MS            BIGINT        DEFAULT 300000  -- ms between rewards for the same viewer; overrides LIMITS.COOLDOWN_BETWEEN_REWARDS_MS
+  COOLDOWN_MS            BIGINT        DEFAULT 300000, -- ms between rewards for the same viewer; overrides LIMITS.COOLDOWN_BETWEEN_REWARDS_MS
+  CREATOR_MX             VARCHAR(1024) DEFAULT '',
+  VIEWER_BUDGET_SPENT    DECIMAL(20,6) NOT NULL DEFAULT 0,
+  PUBLISHER_BUDGET_EARNED DECIMAL(20,6) NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS ADS (
@@ -242,7 +245,7 @@ CREATE TABLE IF NOT EXISTS REWARD_EVENTS (
   TYPE         VARCHAR(16)   NOT NULL,
   AMOUNT       DECIMAL(20,6) NOT NULL,
   TIMESTAMP    BIGINT        NOT NULL,
-  PUBLISHER_ID VARCHAR(256)  DEFAULT NULL
+  PUBLISHER_ID VARCHAR(512)  DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS USER_PROFILE (
@@ -265,6 +268,7 @@ CREATE TABLE IF NOT EXISTS FRAMES (
   -- platform creator (MINIMAADS_CREATOR_PK in config.js) — see §6.9.
   PUBLISHER_KEY    VARCHAR(512)  NOT NULL,           -- Maxima public key of the publisher node (0x...)
   PUBLISHER_WALLET VARCHAR(512)  DEFAULT '',         -- Wallet address for publisher reward settlement
+  PUBLISHER_MX     VARCHAR(512)  DEFAULT '',         -- Maxima contact/route string of publisher node
   LABEL            VARCHAR(256)  DEFAULT '',         -- Human-readable name
   IS_BUILTIN       BOOLEAN       NOT NULL DEFAULT FALSE,
   CREATED_AT       BIGINT        NOT NULL,
@@ -272,19 +276,48 @@ CREATE TABLE IF NOT EXISTS FRAMES (
 );
 
 CREATE TABLE IF NOT EXISTS CHANNEL_STATE (
-  CAMPAIGN_ID       VARCHAR(256)   NOT NULL,
-  VIEWER_KEY        VARCHAR(66)    NOT NULL,   -- per-channel wallet key (keys action:new); holds viewer or publisher key per ROLE
-  ROLE              VARCHAR(16)    NOT NULL DEFAULT 'viewer', -- 'viewer' | 'publisher'
-  FRAME_ID          VARCHAR(512)   DEFAULT '', -- non-empty when ROLE='publisher'
-  CREATOR_MX        VARCHAR(512)   NOT NULL,   -- creator Mx contact string (from escrow STATE(4))
-  CHANNEL_COINID    VARCHAR(66)    DEFAULT '',  -- set after creator opens channel on-chain
-  MAX_AMOUNT        DECIMAL(20,6)  NOT NULL,   -- (REWARD_VIEW + REWARD_CLICK) × campaign_days for viewer; MAX_PUBLISHER_BUDGET cap for publisher
-  CUMULATIVE_EARNED DECIMAL(20,6)  NOT NULL DEFAULT 0,
-  LATEST_TX_HEX     TEXT           DEFAULT '',  -- last partially-signed tx received from creator
-  STATUS            VARCHAR(16)    NOT NULL DEFAULT 'pending', -- pending|open|settled|expired
-  CREATED_AT        BIGINT         NOT NULL,
-  VIEWER_WALLET_ADDR VARCHAR(512)  DEFAULT '',  -- settlement output address (viewer wallet or publisher wallet)
+  CAMPAIGN_ID        VARCHAR(256)   NOT NULL,
+  VIEWER_KEY         VARCHAR(512)   NOT NULL,   -- per-channel wallet key (keys action:new); holds viewer or publisher key per ROLE
+  ROLE               VARCHAR(16)    NOT NULL DEFAULT 'viewer', -- 'viewer' | 'publisher'
+  FRAME_ID           VARCHAR(512)   DEFAULT '', -- non-empty when ROLE='publisher'
+  CREATOR_MX         VARCHAR(1024)  NOT NULL,   -- creator Mx contact string / permanent route (from escrow STATE(4))
+  CHANNEL_COINID     VARCHAR(66)    DEFAULT '',  -- set after creator opens channel on-chain
+  MAX_AMOUNT         DECIMAL(20,6)  NOT NULL,   -- (REWARD_VIEW + REWARD_CLICK) × campaign_days for viewer; MAX_PUBLISHER_BUDGET cap for publisher
+  CUMULATIVE_EARNED  DECIMAL(20,6)  NOT NULL DEFAULT 0,
+  LATEST_TX_HEX      TEXT           DEFAULT '',  -- last partially-signed tx received from creator
+  STATUS             VARCHAR(16)    NOT NULL DEFAULT 'pending', -- pending|open|settled|expired
+  CREATED_AT         BIGINT         NOT NULL,
+  VIEWER_WALLET_ADDR VARCHAR(512)   DEFAULT '',  -- settlement output address (viewer wallet or publisher wallet)
+  VIEWER_WALLET_PK   VARCHAR(512)   DEFAULT '',  -- viewer wallet public key for channel validation
+  SPLIT_COINID       VARCHAR(66)    DEFAULT '',  -- creator coinid when splitting/opening channel coin
+  LAST_VOUCHER_AT    BIGINT         DEFAULT 0,   -- unix ms timestamp of last received/sent voucher
+  LAST_CLICK_VOUCHER_AT BIGINT      DEFAULT 0,   -- unix ms timestamp of last click voucher
+  OPENER_MX_PK       VARCHAR(512)   DEFAULT '',  -- Maxima PK of the node that requested channel open
   PRIMARY KEY (CAMPAIGN_ID, VIEWER_KEY, ROLE)
+);
+
+CREATE TABLE IF NOT EXISTS DEFERRED_PUB_REWARDS (
+  ID              VARCHAR(96)   PRIMARY KEY,
+  CAMPAIGN_ID     VARCHAR(96)   NOT NULL,
+  FRAME_ID        VARCHAR(512)  NOT NULL,
+  VIEWER_EVENT_ID VARCHAR(64)   NOT NULL,
+  AMOUNT          DECIMAL(20,9) NOT NULL,
+  PUBLISHER_MX    VARCHAR(1024),
+  CREATED_AT      BIGINT        NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS CHANNEL_HISTORY (
+  CAMPAIGN_ID        VARCHAR(256)   NOT NULL,
+  VIEWER_KEY         VARCHAR(512)   NOT NULL,
+  ROLE               VARCHAR(16)    NOT NULL DEFAULT 'viewer',
+  CREATOR_MX         VARCHAR(1024)  NOT NULL DEFAULT '',
+  CHANNEL_COINID     VARCHAR(66)    DEFAULT '',
+  MAX_AMOUNT         DECIMAL(20,6)  NOT NULL,
+  CUMULATIVE_EARNED  DECIMAL(20,6)  NOT NULL DEFAULT 0,
+  STATUS             VARCHAR(16)    NOT NULL DEFAULT 'settled',
+  CREATED_AT         BIGINT         NOT NULL,
+  VIEWER_WALLET_ADDR VARCHAR(512)   DEFAULT '',
+  PRIMARY KEY (CAMPAIGN_ID, VIEWER_KEY, ROLE, CREATED_AT)
 );
 
 -- T-REP1/T-REP2 — first-party reputation. See §7.8 for the API and scoring rules.

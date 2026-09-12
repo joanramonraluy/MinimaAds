@@ -46,6 +46,56 @@ Extracted from AGENTS.md during documentation compaction on 2026-05-18. MinimaAd
 
 ## 17) UI and Core Session Archive
 
+### Session: 2026-09-12 (OPEN-9) — Checklist qualification for shared-DB table mirroring
+
+**Source**: `docs/KNOWN_ISSUES.md` §1b, **OPEN-9** (discovered 2026-09-12 as side finding 1 during OPEN-6 design).
+**Task**: Resolve the documentation-precision gap in pre-merge checklists and architecture notes where "DB changes applied in BOTH runtimes" read as an absolute mandate to mirror all 11+ tables in the FE.
+**Complexity**: LOW per `CLAUDE.md §2`.
+
+**Fix & Clarifications**:
+1. Qualified `MinimaAds.md §3.5` header note to document that SW and FE share a single physical H2 file (keyed by MiniDapp UID): the SW initializes all tables at boot, while the FE initializes only the 5 tables it reads/writes directly (`FRAMES`, `CHANNEL_STATE`, `CHANNEL_HISTORY`, `REPUTATION_EVENTS`, `PEER_REPUTATION`) to guarantee boot-order independence.
+2. Qualified pre-merge checklists in `docs/KNOWN_ISSUES.md §2`, `CLAUDE.md §4` Step 3, `CLAUDE.md §7` H2 notes, and `AGENTS.md` (§3, §5) to specify: "applied in both runtimes (SW for all tables; FE for tables touched by FE)".
+
+**Files touched**: `docs/KNOWN_ISSUES.md`, `CLAUDE.md`, `MinimaAds.md`, `AGENTS.md`, `docs/HISTORY.md`.
+**Verification**: Documentation-only alignment; verified text consistency across all five documents.
+
+---
+
+### Session: 2026-09-12 (OPEN-7) — `CHANNEL_STATE.SPLIT_COINID` added to FE schema init
+
+**Source**: `docs/KNOWN_ISSUES.md` §1b, **OPEN-7** (discovered 2026-09-12 as side finding 2 during OPEN-6 design).
+**Task**: Eliminate schema asymmetry between SW and FE where `CHANNEL_STATE.SPLIT_COINID` was migrated in SW (`db-init.js:188`) but omitted in FE (`dapp/app.js`).
+**Complexity**: LOW per `CLAUDE.md §2`.
+
+**Fix**:
+Added `sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS SPLIT_COINID VARCHAR(66) DEFAULT ''", ...)` to `initFEChannelState` in `dapp/app.js:1207`, mirroring `public/service-workers/db-init.js:188` in the SW. This ensures full boot-order independence: if the FE ever initializes first on a fresh node before the SW, `CHANNEL_STATE` has `SPLIT_COINID` present.
+
+**Files touched**: `dapp/app.js`, `docs/KNOWN_ISSUES.md`, `AGENTS.md`, `docs/HISTORY.md`.
+**Verification**: Verified JavaScript syntax via `node --check dapp/app.js` (clean). Parity verified against `db-init.js:188`.
+
+---
+
+### Session: 2026-09-12 (OPEN-8) — `MinimaAds.md §3.5` schema alignment with shipped code
+
+**Source**: `docs/KNOWN_ISSUES.md` §1b, **OPEN-8** (discovered 2026-09-12 as side finding 3 during OPEN-6 design).
+**Task**: Resolve the schema drift between `MinimaAds.md §3.5` and the shipped H2 database schemas in `public/service-workers/db-init.js` and `dapp/app.js`.
+**Complexity**: LOW per `CLAUDE.md §2`.
+
+**Analysis & Maintainer Decisions**:
+1. `CHANNEL_STATE.VIEWER_KEY`: Spec had `VARCHAR(66)` based on an early assumption of 32-byte hex keys. Deployed code in both SW (`db-init.js:84`) and FE (`app.js:1189`) uses `VARCHAR(512)` to accommodate arbitrary Minima signing keys, Maxima keys, and publisher keys (`ROLE='publisher'`). Shortening to 66 in code would be a destructive migration risking `Value too long` JDBC exceptions. Decision: updated spec to `VARCHAR(512)`.
+2. `CHANNEL_STATE.CREATOR_MX`: Spec had `VARCHAR(512)`. Deployed code in SW (`db-init.js:87`) and FE (`app.js:1192`) uses `VARCHAR(1024)`. Per `MinimaAds.md §3.6`, permanent routes follow `MAX#<publickey>#<staticMLS>`, which routinely exceeds 512 characters. The codebase already standardizes permanent route fields at 1024 (`CAMPAIGNS.CREATOR_MX`, `CHANNEL_HISTORY.CREATOR_MX`, `DEFERRED_PUB_REWARDS.PUBLISHER_MX`). Shortening to 512 would break MLS permanent routes. Decision: updated spec to `VARCHAR(1024)`.
+3. `FRAMES.PUBLISHER_MX`: Spec omitted this column entirely. Deployed code in both SW (`db-init.js:75`) and FE (`app.js:1173`) creates `PUBLISHER_MX VARCHAR(512) DEFAULT ''`, and `core/frames.js` (`listFrames`, `saveFrame`) and `channel.handler.js` actively use it to route rewards and notifications to publishers. Decision: added `PUBLISHER_MX VARCHAR(512) DEFAULT ''` to `FRAMES` in §3.5.
+4. Additional schema consolidation in §3.5:
+   - Added migrated columns to `CHANNEL_STATE`: `VIEWER_WALLET_PK VARCHAR(512)`, `SPLIT_COINID VARCHAR(66)`, `LAST_VOUCHER_AT BIGINT`, `LAST_CLICK_VOUCHER_AT BIGINT`, and `OPENER_MX_PK VARCHAR(512)`.
+   - Updated `REWARD_EVENTS.PUBLISHER_ID` from `VARCHAR(256)` to `VARCHAR(512)` to match `db-init.js:56`.
+   - Added `CREATOR_MX VARCHAR(1024)`, `VIEWER_BUDGET_SPENT DECIMAL(20,6)`, and `PUBLISHER_BUDGET_EARNED DECIMAL(20,6)` to `CAMPAIGNS`.
+   - Documented auxiliary tables `DEFERRED_PUB_REWARDS` and `CHANNEL_HISTORY`.
+
+**Files touched**: `MinimaAds.md`, `docs/KNOWN_ISSUES.md`, `AGENTS.md`, `docs/HISTORY.md`.
+**Verification**: Verified diff against code definitions in `db-init.js` and `dapp/app.js`. No code logic changed; no runtime disruption.
+
+---
+
 ### Session: 2026-09-12 (OPEN-6) — H2 schema versioning + destructive-migration mechanism: **DESIGN ONLY — not implemented, pending review**
 
 > **Status: DESIGN ONLY.** No `.js` or `.html` file was written, edited or deleted. No table was created, no column altered, no migration run. `MinimaAds.md` was deliberately **not** touched — §3.5 keeps describing only the schema that actually ships (following the same precedent as the T-REP3 entry below and the 2026-09-07 OPEN-3 one: a proposal gets no provisional spec entry; the spec is written when the thing is built). `AGENTS.md`'s H2-syntax-rules section was **not** edited either, even though §1 below contains material that belongs there eventually — that edit is a separate, deliberate step for whoever implements this. `docs/KNOWN_ISSUES.md` OPEN-6 stays **open**. No governance gate is implied here — this is ordinary infrastructure work, it just needs a review before it lands.

@@ -1204,7 +1204,9 @@ function initFEChannelState(cb) {
     sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS LAST_VOUCHER_AT BIGINT DEFAULT 0", function() {
     sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS LAST_CLICK_VOUCHER_AT BIGINT DEFAULT 0", function() {
     sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS OPENER_MX_PK VARCHAR(512) DEFAULT ''", function() {
+    sqlQuery("ALTER TABLE CHANNEL_STATE ADD COLUMN IF NOT EXISTS SPLIT_COINID VARCHAR(66) DEFAULT ''", function() {
       if (cb) { cb(); }
+    }); // end SPLIT_COINID migration
     }); // end OPENER_MX_PK migration
     }); // end LAST_CLICK_VOUCHER_AT migration
     }); // end LAST_VOUCHER_AT migration
